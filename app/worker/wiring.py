@@ -6,12 +6,25 @@ construction (per-channel secrets) is isolated here so the task bodies stay pure
 orchestration and the wiring can be swapped/faked in one place."""
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels import REGISTRY
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Outbox
-from app.domain.enums import BOT_SILENT_STAGES
+from app.adapters.channels.instagram import InstagramAdapter
+from app.adapters.channels.transports import InstagrapiTransport
+from app.adapters.crypto import decrypt
+from app.adapters.db.models import (
+    Branch,
+    Channel,
+    ChannelSession,
+    ChannelThread,
+    Lead,
+    Outbox,
+)
+from app.config import settings
+from app.domain.enums import BOT_SILENT_STAGES, ChannelKind, SessionStatus
 from app.ports.channel import ChannelPort
 
 
@@ -55,15 +68,34 @@ async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> 
     return list(rows.scalars().all())
 
 
-def build_channel_port(channel: Channel) -> ChannelPort:
-    """Resolve a live ChannelPort for a channel.
+async def _active_session_settings(session: AsyncSession, channel_id: int) -> dict | None:
+    """Decrypt the channel's active session secret (instagrapi dump) — or None."""
+    rows = await session.exec(
+        select(ChannelSession).where(
+            ChannelSession.channel_id == channel_id,
+            ChannelSession.status == SessionStatus.ACTIVE,
+        )
+    )
+    row = rows.scalars().first()
+    return json.loads(decrypt(row.secret_enc)) if row else None
 
-    Transport credentials live in ChannelSession (Fernet-encrypted) and their per-kind
-    shape is defined when a channel is connected via the admin UI — not at import time.
-    Until that wiring exists the registry class is known but cannot be instantiated, so
-    callers must guard with a try/except and skip the channel (logged, never crash)."""
+
+async def build_channel_port(session: AsyncSession, channel: Channel) -> ChannelPort:
+    """Resolve a live ChannelPort from the channel's Fernet-encrypted ChannelSession.
+
+    Instagram is wired (instagrapi via the stored session dump + geo-matched proxy);
+    WhatsApp/MetaBusiness raise NotImplementedError until their sessions are connected.
+    Callers guard with try/except and skip a channel that isn't ready (logged)."""
     if channel.kind not in REGISTRY:
         raise KeyError(f"no adapter for channel kind {channel.kind}")
+    if channel.kind == ChannelKind.INSTAGRAM:
+        dump = await _active_session_settings(session, channel.id or 0)
+        if dump is None:
+            raise RuntimeError(f"no active session for channel {channel.id}")
+        transport = InstagrapiTransport(
+            username=channel.handle or "", session_settings=dump,
+            proxy=settings().ig_proxy)
+        return InstagramAdapter(transport, handle=channel.handle or "")
     raise NotImplementedError(
         f"transport wiring for {channel.kind} channel {channel.id} is not configured yet"
     )

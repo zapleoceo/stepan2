@@ -11,9 +11,11 @@ from typing import Any
 class InstagrapiTransport:
     """Implements channels.instagram.IGTransport by wrapping a logged-in instagrapi client."""
 
-    def __init__(self, *, username: str, session_settings: dict[str, Any]) -> None:
+    def __init__(self, *, username: str, session_settings: dict[str, Any],
+                 proxy: str = "") -> None:
         self._username = username
         self._session_settings = session_settings
+        self._proxy = proxy
         self._client: Any | None = None
 
     def _ensure_client(self) -> Any:
@@ -21,6 +23,8 @@ class InstagrapiTransport:
             from instagrapi import Client  # lazy: keep instagrapi out of import path/tests
 
             client = Client()
+            if self._proxy:
+                client.set_proxy(self._proxy)  # та же гео, что при логине — иначе checkpoint
             client.set_settings(self._session_settings)
             self._client = client
         return self._client

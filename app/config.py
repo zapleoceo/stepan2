@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Fernet key for encrypting channel session secrets at rest
     secret_key: str = Field(default="", description="Fernet key for session/secret encryption")
 
+    # Instagram private-API proxy (same geo as login — avoids checkpoint). Empty = none.
+    ig_proxy: str = Field(default="", description="proxy URL for instagrapi transport")
+
     # Admin/super-admin bootstrap (Telegram id of the first super_admin)
     bootstrap_super_admin: int = Field(default=0)
 

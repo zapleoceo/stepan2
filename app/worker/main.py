@@ -38,9 +38,9 @@ async def ingest_active_channels(ctx: dict[str, Any]) -> int:
             for channel in await wiring.active_channels(session, branch.id):
                 assert channel.id is not None
                 try:
-                    port = wiring.build_channel_port(channel)
+                    port = await wiring.build_channel_port(session, channel)
                     inbound = await port.fetch_inbound()
-                except (NotImplementedError, KeyError) as exc:
+                except (NotImplementedError, KeyError, RuntimeError) as exc:
                     logger.warning("skip ingest channel %s: %s", channel.id, exc)
                     continue
                 stored += len(await ingest.ingest(channel.id, inbound))
@@ -91,8 +91,8 @@ async def _send_thread(
     if channel is None:
         return 0
     try:
-        port = wiring.build_channel_port(channel)
-    except (NotImplementedError, KeyError) as exc:
+        port = await wiring.build_channel_port(session, channel)
+    except (NotImplementedError, KeyError, RuntimeError) as exc:
         logger.warning("skip send thread %s: %s", thread_id, exc)
         return 0
     sender = OutboxSender(session, branch_id, port)

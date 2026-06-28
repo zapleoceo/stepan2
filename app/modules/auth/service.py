@@ -27,7 +27,7 @@ class AuthService:
         """True iff the user may perform action on branch_id — super_admin spans all
         branches; scoped roles only count within their own branch_id."""
         memberships = await self.memberships.memberships_for_user(user_id)
-        if any(m.role is Role.SUPER_ADMIN for m in memberships):
+        if any(m.role == Role.SUPER_ADMIN for m in memberships):  # == не is: String-storage
             return True
         role = next(
             (m.role for m in memberships if m.branch_id == branch_id), None

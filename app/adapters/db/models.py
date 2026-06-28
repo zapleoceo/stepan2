@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import ChannelKind, Role, SessionStatus, Stage
@@ -36,7 +36,7 @@ class Channel(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     branch_id: int = Field(foreign_key="branch.id", index=True)
-    kind: ChannelKind
+    kind: ChannelKind = Field(sa_type=String)  # хранится как VARCHAR (StrEnum value)
     handle: str | None = Field(default=None, description="username / номер / page handle")
     account_id: str | None = Field(default=None, description="внешний id аккаунта")
     is_active: bool = Field(default=True)
@@ -50,7 +50,7 @@ class ChannelSession(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     channel_id: int = Field(foreign_key="channel.id", index=True)
     secret_enc: str
-    status: SessionStatus = Field(default=SessionStatus.ACTIVE)
+    status: SessionStatus = Field(default=SessionStatus.ACTIVE, sa_type=String)
     expires_at: datetime | None = Field(default=None, description="окно/сессия (напр. MBS 24ч)")
     last_ok_at: datetime | None = Field(default=None)
 
@@ -64,7 +64,7 @@ class Lead(SQLModel, table=True):
     display_name: str | None = Field(default=None)
     phone_e164: str | None = Field(default=None, index=True, description="ключ сопоставления")
     email: str | None = Field(default=None)
-    stage: Stage = Field(default=Stage.NEW)
+    stage: Stage = Field(default=Stage.NEW, sa_type=String)
     ready_subtype: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
@@ -102,7 +102,7 @@ class Membership(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="app_user.id", index=True)
     branch_id: int | None = Field(default=None, foreign_key="branch.id", index=True)
-    role: Role
+    role: Role = Field(sa_type=String)
 
 
 # ─── доменные таблицы филиала (все несут branch_id; изоляция — в репозитории) ───
