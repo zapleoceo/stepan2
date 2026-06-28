@@ -11,13 +11,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from sqlalchemy import func
-from sqlalchemy.sql.expression import Select, select
 from sqladmin import Admin, ModelView
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.sql.expression import Select, select
 from starlette.applications import Starlette
 from starlette.requests import Request
 from wtforms import TextAreaField
+from wtforms.widgets.core import Input as _WFInput
 
 from app.adapters.db.models import (
     Branch,
@@ -32,6 +33,12 @@ from app.adapters.db.models import (
 )
 
 from ._branch import branch_id_from_request
+
+# WTForms ≥3.2 added validation_attrs on specific Input subclasses but not on
+# the base Input class, while Input.__call__ references self.validation_attrs.
+# sqladmin's BooleanInputWidget(Input) hits AttributeError on any boolean field.
+if not hasattr(_WFInput, "validation_attrs"):
+    _WFInput.validation_attrs = []  # type: ignore[attr-defined]
 
 _TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 

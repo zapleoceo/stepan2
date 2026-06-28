@@ -24,7 +24,7 @@ class BranchScoped[T: SQLModel]:
         if model is not None:
             self.model = model
 
-    def _q(self):
+    def _q(self) -> select:  # type: ignore[type-arg]
         return select(self.model).where(self.model.branch_id == self.branch_id)  # type: ignore[attr-defined]
 
     async def list(self) -> list[T]:

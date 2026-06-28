@@ -41,7 +41,7 @@
         fetch('/_admin/branches')
           .then(function (r) { return r.json(); })
           .then(function (d) {
-            if (d.branches.length < 2) return;
+            if (!d.branches.length) return;
             d.branches.forEach(function (b) {
               var o = document.createElement('option');
               o.value = b.id;
