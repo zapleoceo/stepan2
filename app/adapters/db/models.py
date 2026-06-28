@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import String, UniqueConstraint
+from sqlalchemy import BigInteger, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import ChannelKind, Role, SessionStatus, Stage
@@ -90,7 +90,8 @@ class User(SQLModel, table=True):
     __tablename__ = "app_user"
 
     id: int | None = Field(default=None, primary_key=True)
-    telegram_id: int = Field(unique=True, index=True)
+    # Telegram IDs exceed int32 range — must be BIGINT
+    telegram_id: int = Field(unique=True, index=True, sa_type=BigInteger)
     name: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
