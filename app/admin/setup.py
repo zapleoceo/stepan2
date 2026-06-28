@@ -24,6 +24,7 @@ from app.adapters.db.models import (
     AppSetting,
     Branch,
     Channel,
+    CoachingNote,
     KnowledgeDoc,
     Lead,
     ManagerAlert,
@@ -257,6 +258,32 @@ class OutboxAdmin(BranchScopedModelView, model=Outbox):
     page_size = 50
 
 
+class CoachingNoteAdmin(BranchScopedModelView, model=CoachingNote):
+    """Bot coaching directives — active manager notes are injected into the prompt."""
+    name = "Coaching Note"
+    name_plural = "Coaching Notes"
+    icon = "fa-solid fa-chalkboard-user"
+    column_list = [
+        CoachingNote.id, CoachingNote.branch_id, CoachingNote.role,
+        CoachingNote.active, CoachingNote.text, CoachingNote.added_by, CoachingNote.created_at,
+    ]
+    column_details_list = [
+        CoachingNote.id, CoachingNote.branch_id, CoachingNote.role,
+        CoachingNote.active, CoachingNote.text, CoachingNote.added_by, CoachingNote.created_at,
+    ]
+    column_searchable_list = [CoachingNote.text]
+    column_sortable_list = [CoachingNote.id, CoachingNote.branch_id, CoachingNote.active]
+    column_labels = {
+        "id": "ID", "branch_id": "Branch", "role": "Role (manager|stepan)",
+        "active": "Active", "text": "Text", "added_by": "Added by", "created_at": "Created",
+    }
+    column_formatters = {CoachingNote.text: lambda m, a: _trunc(m.text)}
+    form_overrides = {"text": TextAreaField}
+    form_widget_args = {"text": {**_TEXTAREA, "rows": 6}}
+    form_columns = ["branch_id", "role", "text", "active", "added_by"]
+    page_size = 50
+
+
 class AppSettingAdmin(ModelView, model=AppSetting):
     """Runtime settings — branch_id=NULL means platform-wide."""
     name = "Setting"
@@ -303,6 +330,7 @@ _VIEWS: list[type[ModelView]] = [
     LeadAdmin,
     UserAdmin,
     MembershipAdmin,
+    CoachingNoteAdmin,
     AppSettingAdmin,
     OutboxAdmin,
     ManagerAlertAdmin,

@@ -191,3 +191,20 @@ class ManagerAlert(SQLModel, table=True):
     summary_ru: str = Field(default="")
     synced_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class CoachingNote(SQLModel, table=True):
+    """Директива для бота: менеджер в чате задаёт правила/советы.
+
+    role=manager + active=True инжектируются в промпт как обязательные правила.
+    role=stepan — реплики-подтверждения (только для истории, не в промпте).
+    """
+    __tablename__ = "coaching_note"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    role: str = Field(description="manager|stepan")
+    text: str
+    active: bool = Field(default=True)
+    added_by: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
