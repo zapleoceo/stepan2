@@ -38,6 +38,7 @@ services:
       STEPAN2_BROKER_PROJECT_KEY: ${BROKER_PROJECT_KEY:-}
       STEPAN2_SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       STEPAN2_BOOTSTRAP_SUPER_ADMIN: ${BOOTSTRAP_SUPER_ADMIN:-0}
+      STEPAN2_IG_PROXY: ${IG_PROXY:-}
     ports:
       - "127.0.0.1:8020:8000"
     restart: unless-stopped
@@ -57,6 +58,7 @@ services:
       STEPAN2_BROKER_URL: ${BROKER_URL:-}
       STEPAN2_BROKER_PROJECT_KEY: ${BROKER_PROJECT_KEY:-}
       STEPAN2_SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
+      STEPAN2_IG_PROXY: ${IG_PROXY:-}
     restart: unless-stopped
 
 volumes:
