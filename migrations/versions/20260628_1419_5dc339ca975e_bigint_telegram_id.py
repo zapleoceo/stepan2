@@ -21,18 +21,21 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.alter_column(
-        'app_user', 'telegram_id',
-        existing_type=sa.Integer(),
-        type_=sa.BigInteger(),
-        existing_nullable=False,
-    )
+    # batch_alter_table is portable: recreates table on SQLite, ALTER COLUMN on Postgres
+    with op.batch_alter_table('app_user') as batch_op:
+        batch_op.alter_column(
+            'telegram_id',
+            existing_type=sa.Integer(),
+            type_=sa.BigInteger(),
+            existing_nullable=False,
+        )
 
 
 def downgrade() -> None:
-    op.alter_column(
-        'app_user', 'telegram_id',
-        existing_type=sa.BigInteger(),
-        type_=sa.Integer(),
-        existing_nullable=False,
-    )
+    with op.batch_alter_table('app_user') as batch_op:
+        batch_op.alter_column(
+            'telegram_id',
+            existing_type=sa.BigInteger(),
+            type_=sa.Integer(),
+            existing_nullable=False,
+        )
