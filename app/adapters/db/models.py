@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import ChannelKind, Role, SessionStatus, Stage
@@ -101,3 +102,90 @@ class Membership(SQLModel, table=True):
     user_id: int = Field(foreign_key="app_user.id", index=True)
     branch_id: int | None = Field(default=None, foreign_key="branch.id", index=True)
     role: Role
+
+
+# ─── доменные таблицы филиала (все несут branch_id; изоляция — в репозитории) ───
+
+class KnowledgeDoc(SQLModel, table=True):
+    """Документ базы знаний филиала (persona / faq / market_facts / stories)."""
+    __tablename__ = "knowledge_doc"
+    __table_args__ = (UniqueConstraint("branch_id", "slug", name="uq_kdoc_branch_slug"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    slug: str
+    title: str | None = Field(default=None)
+    content: str = Field(default="")
+
+
+class Product(SQLModel, table=True):
+    """Карточка продукта/курса филиала — единственный источник цены/деталей в ответах."""
+    __tablename__ = "product"
+    __table_args__ = (UniqueConstraint("branch_id", "slug", name="uq_product_branch_slug"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    slug: str
+    title: str
+    content: str = Field(default="")
+    is_active: bool = Field(default=True)
+    sort_order: int = Field(default=0)
+
+
+class AppSetting(SQLModel, table=True):
+    """Настройка. branch_id=NULL → платформенная; иначе настройка филиала."""
+    __tablename__ = "app_setting"
+    __table_args__ = (UniqueConstraint("branch_id", "key", name="uq_setting_branch_key"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int | None = Field(default=None, foreign_key="branch.id", index=True)
+    key: str
+    value: str = Field(default="")
+
+
+class Message(SQLModel, table=True):
+    """Сообщение в треде. branch_id денормализован для быстрых выборок воркера."""
+    __tablename__ = "message"
+    __table_args__ = (UniqueConstraint("channel_id", "external_id", name="uq_msg_ext"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    thread_id: int = Field(foreign_key="channel_thread.id", index=True)
+    channel_id: int = Field(foreign_key="channel.id")
+    external_id: str
+    direction: str = Field(description="in|out")
+    sent_by: str = Field(default="lead", description="lead|agent|manager")
+    text: str = Field(default="")
+    occurred_at: datetime = Field(default_factory=_utcnow)
+
+
+class Outbox(SQLModel, table=True):
+    """Единственный исходящий путь — очередь на отправку (caps/окна применяются раз)."""
+    __tablename__ = "outbox"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    thread_id: int = Field(foreign_key="channel_thread.id", index=True)
+    text: str
+    source: str = Field(default="agent", description="agent|manager|followup")
+    status: str = Field(default="pending", index=True, description="pending|sent|failed")
+    scheduled_at: datetime = Field(default_factory=_utcnow)
+    sent_at: datetime | None = Field(default=None)
+    error: str | None = Field(default=None)
+
+
+class ManagerAlert(SQLModel, table=True):
+    """Событие передачи лида менеджеру — источник для уведомления и CRM."""
+    __tablename__ = "manager_alert"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    lead_id: int = Field(foreign_key="lead.id", index=True)
+    thread_id: int | None = Field(default=None, foreign_key="channel_thread.id")
+    kind: str = Field(description="ready_deal|ready_openhouse|needs_manager")
+    actor: str = Field(default="auto")
+    lead_phone: str | None = Field(default=None)
+    summary_en: str = Field(default="")
+    summary_ru: str = Field(default="")
+    synced_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
