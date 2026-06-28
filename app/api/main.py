@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from app.adapters.db.session import engine
 from app.admin.setup import mount_admin
@@ -24,6 +25,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Build the HTTP app: health probe, webhook router, admin dashboard."""
     app = FastAPI(title="stepan2", lifespan=_lifespan)
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/admin/", status_code=302)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
