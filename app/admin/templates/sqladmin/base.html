@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  {% block head_meta %}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  {% endblock %}
+  {% block head_css %}
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/tabler-icons.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/fontawesome.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/select2.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/flatpickr.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('admin:statics', path='css/main.css') }}">
+  {% endblock %}
+  {% if admin.favicon_url %}
+  <link rel="icon" href="{{ admin.favicon_url }}">
+  {% endif %}
+  <title>{{ admin.title }}</title>
+
+  {% block head %}
+  <style>
+    /* ── Stepan2 UI enhancements ─────────────────────────────── */
+
+    /* Comfortable textareas for KB/product editing */
+    textarea.form-control {
+      min-height: 260px !important;
+      resize: vertical;
+      line-height: 1.75;
+      font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+      font-size: .875rem;
+    }
+
+    /* Prevent table cells from blowing up on long strings */
+    .table.text-nowrap td {
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Monospace code-like display for slugs */
+    td code, .font-monospace {
+      background: rgba(0, 0, 0, .04);
+      border-radius: 4px;
+      padding: 1px 4px;
+      font-size: .82em;
+    }
+
+    /* Card polish */
+    .card {
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0, 0, 0, .06);
+    }
+    .card-header { padding: 1rem 1.25rem; border-bottom-color: rgba(0,0,0,.07); }
+
+    /* Sidebar brand */
+    .navbar-brand h3 {
+      font-size: 1.05rem !important;
+      letter-spacing: -.5px;
+      font-weight: 700;
+    }
+
+    /* Focus rings */
+    .form-control:focus, .form-select:focus {
+      border-color: #206bc4;
+      box-shadow: 0 0 0 3px rgba(32, 107, 196, .15);
+    }
+
+    /* Row hover */
+    .table tbody tr:hover > td { background: rgba(32, 107, 196, .04); }
+
+    /* Actions column tighter */
+    .table th:nth-child(2), .table td:nth-child(2) { width: 80px; min-width: 80px; }
+
+    /* Mobile: stack sidebar above content */
+    @media (max-width: 991px) {
+      .navbar-vertical { position: relative !important; }
+      .page-wrapper { padding-top: 0 !important; }
+    }
+  </style>
+  {% endblock %}
+
+  {% block head_tail %}
+  {% endblock %}
+</head>
+
+<body>
+  {% block body %}
+  <main>
+    {% block main %}
+    {% endblock %}
+  </main>
+  {% endblock %}
+  {% block tail_js %}
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/jquery.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/tabler.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/select2.full.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/flatpickr.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('admin:statics', path='js/main.js') }}"></script>
+  {% endblock %}
+  {% block tail %}
+  {% endblock %}
+</body>
+
+</html>
