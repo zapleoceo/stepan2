@@ -42,7 +42,7 @@ _HQ_SUPER_ADMINS: list[tuple[int, str]] = [
 async def _upsert_user(s, tg_id: int, name: str) -> User:
     user = (
         await s.exec(select(User).where(User.telegram_id == tg_id))
-    ).scalar_one_or_none()
+    ).one_or_none()
     if not user:
         user = User(telegram_id=tg_id, name=name)
         s.add(user)
@@ -61,7 +61,7 @@ async def _ensure_membership(
                 Membership.branch_id == branch_id,
             )
         )
-    ).scalar_one_or_none()
+    ).one_or_none()
     if exists:
         return
     s.add(Membership(user_id=user_id, branch_id=branch_id, role=role))
@@ -76,7 +76,7 @@ async def main() -> None:
     async with session_scope() as s:
         indonesia = (
             await s.exec(select(Branch).where(Branch.name == "Indonesia"))
-        ).scalar_one_or_none()
+        ).one_or_none()
         if not indonesia:
             log.error("Indonesia branch not found — run seed first (see docs/deploy.md)")
             return
