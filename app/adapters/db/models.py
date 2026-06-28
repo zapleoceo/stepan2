@@ -14,7 +14,8 @@ from app.domain.enums import ChannelKind, Role, SessionStatus, Stage
 
 
 def _utcnow() -> datetime:
-    return datetime.now(UTC)
+    # naive UTC — совпадает с колонками TIMESTAMP WITHOUT TIME ZONE (Postgres строг к этому)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Branch(SQLModel, table=True):

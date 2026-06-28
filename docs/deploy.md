@@ -21,7 +21,25 @@
 - Секреты — только в `/var/www/stepan2/infra/.env` (не в VCS).
 - LLM только через AIbroker (свой `BROKER_PROJECT_KEY` для Stepan-2).
 
+## Состояние (развёрнуто)
+
+- Стек поднят: `stepan2-postgres` (healthy), `stepan2-redis`, `stepan2-api` (Up).
+  Воркер НЕ запущен (profile `worker`).
+- Postgres/Redis **без внешних портов** — доступны контейнерам по сети
+  (`postgres:5432` / `redis:6379`); конфликтов портов нет.
+- Схема создана: `alembic upgrade head` (init 13 таблиц).
+- Филиал **Indonesia** (id=1) засеян знаниями из Stepan-1: 5 docs + 13 products.
+- nginx (host): `stepan2.zapleo.com` (listen 80) → `127.0.0.1:8020`. Origin отвечает
+  `{"ok":true,"service":"stepan2"}`.
+
+### Cloudflare — действие на стороне владельца
+
+Публичный `https://stepan2.zapleo.com` не отвечает, пока в Cloudflare SSL/TLS режим не
+выставлен в **Flexible** (origin слушает только 80) — либо на origin не добавлен
+Cloudflare Origin Certificate и `listen 443 ssl`. Origin (nginx→api) уже работает.
+
 ## CI/CD
 
-GitHub Actions (`.github/workflows/`): CI (ruff + pytest) на каждый push; деплой
-(rsync + docker compose) на `main` — настраивается в Фазе 5.
+GitHub Actions: CI (ruff + pytest) на каждый push. Деплой (`deploy.yml`, rsync + docker
+compose + alembic) на `main` требует secrets `HETZNER_HOST` / `HETZNER_PORT` /
+`HETZNER_SSH_KEY` в репозитории stepan2.
