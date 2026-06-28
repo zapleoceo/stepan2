@@ -71,11 +71,13 @@ def test_set_branch_validates_ids() -> None:
 
 def test_branch_scoped_views_inherit_base() -> None:
     from app.admin.setup import (
+        AppSettingAdmin,
         BranchScopedModelView,
         ChannelAdmin,
         KnowledgeDocAdmin,
         LeadAdmin,
         ManagerAlertAdmin,
+        ModelView,
         OutboxAdmin,
         ProductAdmin,
     )
@@ -91,3 +93,6 @@ def test_branch_scoped_views_inherit_base() -> None:
         assert issubclass(cls, BranchScopedModelView), (
             f"{cls.__name__} must inherit BranchScopedModelView"
         )
+
+    # AppSetting has nullable branch_id, not branch-scoped — just a plain ModelView
+    assert issubclass(AppSettingAdmin, ModelView)

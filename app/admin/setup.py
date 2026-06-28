@@ -21,6 +21,7 @@ from wtforms import TextAreaField
 from wtforms.widgets.core import Input as _WFInput
 
 from app.adapters.db.models import (
+    AppSetting,
     Branch,
     Channel,
     KnowledgeDoc,
@@ -256,6 +257,22 @@ class OutboxAdmin(BranchScopedModelView, model=Outbox):
     page_size = 50
 
 
+class AppSettingAdmin(ModelView, model=AppSetting):
+    """Runtime settings — branch_id=NULL means platform-wide."""
+    name = "Setting"
+    name_plural = "Settings"
+    icon = "fa-solid fa-sliders"
+    column_list = [AppSetting.id, AppSetting.branch_id, AppSetting.key, AppSetting.value]
+    column_details_list = [AppSetting.id, AppSetting.branch_id, AppSetting.key, AppSetting.value]
+    column_searchable_list = [AppSetting.key]
+    column_sortable_list = [AppSetting.id, AppSetting.branch_id, AppSetting.key]
+    column_labels = {
+        "id": "ID", "branch_id": "Branch (NULL=platform)", "key": "Key", "value": "Value",
+    }
+    form_columns = ["branch_id", "key", "value"]
+    page_size = 50
+
+
 class ManagerAlertAdmin(BranchScopedModelView, model=ManagerAlert):
     """Read-only handoff alert monitor."""
     name = "Manager Alert"
@@ -286,6 +303,7 @@ _VIEWS: list[type[ModelView]] = [
     LeadAdmin,
     UserAdmin,
     MembershipAdmin,
+    AppSettingAdmin,
     OutboxAdmin,
     ManagerAlertAdmin,
 ]
