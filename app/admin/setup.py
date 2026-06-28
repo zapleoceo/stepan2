@@ -15,7 +15,6 @@ from app.adapters.db.models import (
     Product,
     User,
 )
-from app.config import settings
 
 
 class BranchAdmin(ModelView, model=Branch):
@@ -113,7 +112,7 @@ _VIEWS: list[type[ModelView]] = [
 
 def mount_admin(app: Starlette, engine: AsyncEngine) -> Admin:
     """Register the SQLAdmin dashboard and its views on the app. No DB I/O here."""
-    admin = Admin(app, engine=engine, title="Stepan2 Admin", secret_key=settings().secret_key)
+    admin = Admin(app, engine=engine, title="Stepan2 Admin")
     for view in _VIEWS:
         admin.add_view(view)
     return admin
