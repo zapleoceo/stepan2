@@ -1,0 +1,234 @@
+"""Channel adapters mapped against FAKE transports — no httpx/instagrapi needed.
+
+Proves the hexagonal seam: each adapter turns raw transport dicts into InboundMessage /
+SendResult / SessionStatus, so swapping the real transport never touches the adapter."""
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+
+from app.adapters.channels import (
+    REGISTRY,
+    InstagramAdapter,
+    MetaBusinessAdapter,
+    WhatsAppAdapter,
+)
+from app.domain.enums import ChannelKind, SessionStatus
+from app.ports.channel import InboundMessage, SendResult
+
+
+class _Boom(Exception):
+    """Transport-layer failure used to assert send_text degrades to SendResult(ok=False)."""
+
+
+class FakeIGTransport:
+    def __init__(self, *, health: str = "ok", raise_on_send: bool = False) -> None:
+        self._health = health
+        self._raise = raise_on_send
+
+    async def fetch_threads(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "thread_id": 111,
+                "sender_id": 42,
+                "text": "hi from ig",
+                "timestamp": datetime(2026, 6, 1, tzinfo=UTC),
+                "ad_product": "vibe_coding",
+            }
+        ]
+
+    async def send_direct(self, thread_id: str, text: str) -> dict[str, Any]:
+        if self._raise:
+            raise _Boom("ig down")
+        return {"item_id": "ig_item_9"}
+
+    async def account_health(self) -> str:
+        return self._health
+
+
+class FakeWATransport:
+    def __init__(self, *, state: str = "open", raise_on_send: bool = False) -> None:
+        self._state = state
+        self._raise = raise_on_send
+
+    async def fetch_messages(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "remote_jid": "628@s.whatsapp.net",
+                "sender_id": "628@s.whatsapp.net",
+                "text": "hi from wa",
+                "message_timestamp": 1_750_000_000,
+            }
+        ]
+
+    async def send_message(self, remote_jid: str, text: str) -> dict[str, Any]:
+        if self._raise:
+            raise _Boom("evolution down")
+        return {"key": {"id": "wa_msg_7"}}
+
+    async def connection_state(self) -> str:
+        return self._state
+
+
+class FakeGraphTransport:
+    def __init__(self, *, valid: bool = True, raise_on_send: bool = False) -> None:
+        self._valid = valid
+        self._raise = raise_on_send
+
+    async def fetch_conversations(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "thread_id": "t_55",
+                "from_id": "user_88",
+                "message": "hi from mbs",
+                "created_time": "2026-06-01T10:00:00+0000",
+                "referral_product": "data_science",
+            }
+        ]
+
+    async def send_message(self, recipient_id: str, text: str) -> dict[str, Any]:
+        if self._raise:
+            raise _Boom("graph down")
+        return {"message_id": "mbs_msg_3"}
+
+    async def token_debug(self) -> dict[str, Any]:
+        return {"is_valid": self._valid, "window_open": True}
+
+
+# --- Instagram -------------------------------------------------------------
+
+async def test_instagram_fetch_maps_to_inbound() -> None:
+    adapter = InstagramAdapter(FakeIGTransport(), handle="@itstep")
+    msgs = await adapter.fetch_inbound()
+    assert msgs == [
+        InboundMessage(
+            external_thread_id="111",
+            sender_id="42",
+            text="hi from ig",
+            occurred_at=datetime(2026, 6, 1, tzinfo=UTC),
+            product_hint="vibe_coding",
+        )
+    ]
+
+
+async def test_instagram_send_maps_to_send_result() -> None:
+    adapter = InstagramAdapter(FakeIGTransport(), handle="@itstep")
+    assert await adapter.send_text("111", "yo") == SendResult(
+        ok=True, external_message_id="ig_item_9"
+    )
+
+
+async def test_instagram_send_failure_is_not_ok() -> None:
+    adapter = InstagramAdapter(FakeIGTransport(raise_on_send=True), handle="@itstep")
+    res = await adapter.send_text("111", "yo")
+    assert res.ok is False
+    assert res.external_message_id is None
+    assert "ig down" in (res.error or "")
+
+
+@pytest.mark.parametrize(
+    ("health", "expected"),
+    [
+        ("ok", SessionStatus.ACTIVE),
+        ("challenge", SessionStatus.CHALLENGE),
+        ("dead", SessionStatus.EXPIRED),
+    ],
+)
+async def test_instagram_session_status(health: str, expected: SessionStatus) -> None:
+    adapter = InstagramAdapter(FakeIGTransport(health=health), handle="@itstep")
+    assert await adapter.session_status() is expected
+
+
+# --- WhatsApp --------------------------------------------------------------
+
+async def test_whatsapp_fetch_maps_to_inbound() -> None:
+    adapter = WhatsAppAdapter(FakeWATransport(), instance="id_branch")
+    msgs = await adapter.fetch_inbound()
+    assert len(msgs) == 1
+    m = msgs[0]
+    assert m.external_thread_id == "628@s.whatsapp.net"
+    assert m.text == "hi from wa"
+    assert m.occurred_at == datetime.fromtimestamp(1_750_000_000, tz=UTC)
+
+
+async def test_whatsapp_send_maps_to_send_result() -> None:
+    adapter = WhatsAppAdapter(FakeWATransport(), instance="id_branch")
+    assert await adapter.send_text("628@s.whatsapp.net", "yo") == SendResult(
+        ok=True, external_message_id="wa_msg_7"
+    )
+
+
+async def test_whatsapp_send_failure_is_not_ok() -> None:
+    adapter = WhatsAppAdapter(FakeWATransport(raise_on_send=True), instance="id_branch")
+    res = await adapter.send_text("628@s.whatsapp.net", "yo")
+    assert res.ok is False
+    assert "evolution down" in (res.error or "")
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ("open", SessionStatus.ACTIVE),
+        ("connecting", SessionStatus.CHALLENGE),
+        ("close", SessionStatus.EXPIRED),
+    ],
+)
+async def test_whatsapp_session_status(state: str, expected: SessionStatus) -> None:
+    adapter = WhatsAppAdapter(FakeWATransport(state=state), instance="id_branch")
+    assert await adapter.session_status() is expected
+
+
+# --- Meta Business ---------------------------------------------------------
+
+async def test_meta_business_fetch_maps_to_inbound() -> None:
+    adapter = MetaBusinessAdapter(FakeGraphTransport(), account_id="page_1")
+    msgs = await adapter.fetch_inbound()
+    assert msgs == [
+        InboundMessage(
+            external_thread_id="t_55",
+            sender_id="user_88",
+            text="hi from mbs",
+            occurred_at=datetime(2026, 6, 1, 10, 0, tzinfo=UTC),
+            product_hint="data_science",
+        )
+    ]
+
+
+async def test_meta_business_send_maps_to_send_result() -> None:
+    adapter = MetaBusinessAdapter(FakeGraphTransport(), account_id="page_1")
+    assert await adapter.send_text("user_88", "yo") == SendResult(
+        ok=True, external_message_id="mbs_msg_3"
+    )
+
+
+async def test_meta_business_send_failure_is_not_ok() -> None:
+    adapter = MetaBusinessAdapter(FakeGraphTransport(raise_on_send=True), account_id="page_1")
+    res = await adapter.send_text("user_88", "yo")
+    assert res.ok is False
+    assert "graph down" in (res.error or "")
+
+
+@pytest.mark.parametrize(
+    ("valid", "expected"),
+    [
+        (True, SessionStatus.ACTIVE),
+        (False, SessionStatus.CHALLENGE),
+    ],
+)
+async def test_meta_business_session_status(valid: bool, expected: SessionStatus) -> None:
+    adapter = MetaBusinessAdapter(FakeGraphTransport(valid=valid), account_id="page_1")
+    assert await adapter.session_status() is expected
+
+
+# --- Registry --------------------------------------------------------------
+
+def test_registry_maps_every_kind_to_its_adapter() -> None:
+    assert REGISTRY == {
+        ChannelKind.INSTAGRAM: InstagramAdapter,
+        ChannelKind.WHATSAPP: WhatsAppAdapter,
+        ChannelKind.META_BUSINESS: MetaBusinessAdapter,
+    }
+    for kind, cls in REGISTRY.items():
+        assert cls.kind is kind  # class advertises the kind it is registered under
