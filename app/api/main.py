@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
 from app.adapters.db.session import engine
+from app.admin.api import router as admin_meta_router
 from app.admin.setup import mount_admin
 from app.api.webhooks import router as webhooks_router
 
@@ -36,6 +37,7 @@ def create_app() -> FastAPI:
         return {"ok": True, "service": "stepan2"}
 
     app.include_router(webhooks_router)
+    app.include_router(admin_meta_router)
     _try_mount_admin(app)
     return app
 

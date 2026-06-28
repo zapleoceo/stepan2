@@ -1,17 +1,22 @@
 """SQLAdmin ModelViews + mount helper.
 
+BranchScopedModelView is the DRY base for every model that carries branch_id:
+  - list_query / count_query filter by the branch cookie when one is selected
+  - no branch selected → super-admin sees all data across branches
+
 ChannelSession (holds secret_enc) is intentionally absent.
-Every view has: sensible column_list, formatters for long text in list,
-TextAreaField for multi-line content, explicit form field order.
 """
 from __future__ import annotations
 
 import os
 from typing import Any
 
+from sqlalchemy import func
+from sqlalchemy.sql.expression import Select, select
 from sqladmin import Admin, ModelView
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.applications import Starlette
+from starlette.requests import Request
 from wtforms import TextAreaField
 
 from app.adapters.db.models import (
@@ -26,8 +31,12 @@ from app.adapters.db.models import (
     User,
 )
 
+from ._branch import branch_id_from_request
+
 _TEMPLATES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
+
+# ── shared helpers ────────────────────────────────────────────────────────────
 
 def _trunc(text: str | None, n: int = 70) -> str:
     if not text:
@@ -45,7 +54,35 @@ _TEXTAREA: dict[str, Any] = {
 }
 
 
+# ── base class: branch-scoped list / count ────────────────────────────────────
+
+class BranchScopedModelView(ModelView):
+    """DRY base for models with a branch_id FK.
+
+    When the sidebar branch filter cookie is set, list and count queries
+    automatically scope to that branch. No branch selected = show all.
+    Subclasses only need to set model/column/form config; no per-class filtering.
+    """
+
+    def list_query(self, request: Request) -> Select:
+        stmt = select(self.model)
+        bid = branch_id_from_request(request)
+        if bid is not None:
+            stmt = stmt.where(self.model.branch_id == bid)
+        return stmt
+
+    def count_query(self, request: Request) -> Select:
+        stmt = select(func.count(self.pk_columns[0])).select_from(self.model)
+        bid = branch_id_from_request(request)
+        if bid is not None:
+            stmt = stmt.where(self.model.branch_id == bid)
+        return stmt
+
+
+# ── model views ───────────────────────────────────────────────────────────────
+
 class BranchAdmin(ModelView, model=Branch):
+    """Branches are the root; no branch_id — plain ModelView."""
     name = "Branch"
     name_plural = "Branches"
     icon = "fa-solid fa-building"
@@ -57,14 +94,14 @@ class BranchAdmin(ModelView, model=Branch):
     column_searchable_list = [Branch.name]
     column_sortable_list = [Branch.id, Branch.name]
     column_labels = {
-        "id": "ID", "name": "Name", "lang": "Lang",
+        "id": "ID", "name": "Name", "lang": "Language code",
         "tz_offset_h": "UTC offset (h)", "is_active": "Active", "created_at": "Created",
     }
     form_columns = ["name", "lang", "tz_offset_h", "is_active"]
     page_size = 25
 
 
-class ChannelAdmin(ModelView, model=Channel):
+class ChannelAdmin(BranchScopedModelView, model=Channel):
     name = "Channel"
     name_plural = "Channels"
     icon = "fa-solid fa-tower-broadcast"
@@ -81,7 +118,7 @@ class ChannelAdmin(ModelView, model=Channel):
     page_size = 25
 
 
-class KnowledgeDocAdmin(ModelView, model=KnowledgeDoc):
+class KnowledgeDocAdmin(BranchScopedModelView, model=KnowledgeDoc):
     name = "Knowledge Doc"
     name_plural = "Knowledge Docs"
     icon = "fa-solid fa-book-open"
@@ -107,7 +144,7 @@ class KnowledgeDocAdmin(ModelView, model=KnowledgeDoc):
     can_export = True
 
 
-class ProductAdmin(ModelView, model=Product):
+class ProductAdmin(BranchScopedModelView, model=Product):
     name = "Product"
     name_plural = "Products"
     icon = "fa-solid fa-tag"
@@ -133,7 +170,7 @@ class ProductAdmin(ModelView, model=Product):
     can_export = True
 
 
-class LeadAdmin(ModelView, model=Lead):
+class LeadAdmin(BranchScopedModelView, model=Lead):
     name = "Lead"
     name_plural = "Leads"
     icon = "fa-solid fa-user-tag"
@@ -158,6 +195,7 @@ class LeadAdmin(ModelView, model=Lead):
 
 
 class UserAdmin(ModelView, model=User):
+    """Users are platform-wide — no branch_id, plain ModelView."""
     name = "User"
     name_plural = "Users"
     icon = "fa-solid fa-users"
@@ -172,6 +210,8 @@ class UserAdmin(ModelView, model=User):
 
 
 class MembershipAdmin(ModelView, model=Membership):
+    """Memberships bridge users ↔ branches. branch_id is nullable (NULL = platform).
+    Plain ModelView: the branch filter cookie doesn't apply here."""
     name = "Membership"
     name_plural = "Memberships"
     icon = "fa-solid fa-id-badge"
@@ -185,8 +225,8 @@ class MembershipAdmin(ModelView, model=Membership):
     page_size = 50
 
 
-class OutboxAdmin(ModelView, model=Outbox):
-    """Read-only view for monitoring the outgoing message queue."""
+class OutboxAdmin(BranchScopedModelView, model=Outbox):
+    """Read-only queue monitor."""
     name = "Outbox"
     name_plural = "Outbox"
     icon = "fa-solid fa-paper-plane"
@@ -209,8 +249,8 @@ class OutboxAdmin(ModelView, model=Outbox):
     page_size = 50
 
 
-class ManagerAlertAdmin(ModelView, model=ManagerAlert):
-    """Read-only view for monitoring manager handoff alerts."""
+class ManagerAlertAdmin(BranchScopedModelView, model=ManagerAlert):
+    """Read-only handoff alert monitor."""
     name = "Manager Alert"
     name_plural = "Manager Alerts"
     icon = "fa-solid fa-bell"

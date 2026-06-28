@@ -1,0 +1,100 @@
+{% extends "sqladmin/base.html" %}
+{% from 'sqladmin/_macros.html' import display_menu %}
+{% block body %}
+<div class="wrapper">
+  <aside class="navbar navbar-expand-lg navbar-vertical navbar-expand-md navbar-dark" data-bs-theme="dark">
+    <div class="container-fluid">
+      <h1 class="navbar-brand navbar-brand-autodark">
+        <a href="{{ url_for('admin:index') }}">
+          {% if admin.logo_url %}
+          <img src="{{ admin.logo_url }}" width="{{ admin.logo_width }}" height="{{ admin.logo_height }}" alt="{{ admin.title }}" class="navbar-brand-logo" />
+          {% else %}
+          <h3>{{ admin.title }}</h3>
+          {% endif %}
+        </a>
+      </h1>
+      <nav class="navbar navbar-expand-sm shadow-none" id="navbar-menu">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"
+          aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+          {{ display_menu(admin._menu, request) }}
+        </div>
+      </nav>
+
+      {# Branch filter — hidden when there is only one branch (single-tenant setups). #}
+      <div id="branch-filter-widget" style="display:none;padding:.5rem .75rem .25rem">
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.45);margin-bottom:.35rem">
+          Branch filter
+        </div>
+        <select id="branch-select"
+          class="form-select form-select-sm"
+          style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff">
+          <option value="">All branches</option>
+        </select>
+      </div>
+      <script>
+      (function () {
+        var sel = document.getElementById('branch-select');
+        var widget = document.getElementById('branch-filter-widget');
+        fetch('/_admin/branches')
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.branches.length < 2) return;
+            d.branches.forEach(function (b) {
+              var o = document.createElement('option');
+              o.value = b.id;
+              o.textContent = b.name;
+              if (String(b.id) === String(d.current)) o.selected = true;
+              sel.appendChild(o);
+            });
+            widget.style.display = '';
+          })
+          .catch(function () {});
+        sel.addEventListener('change', function () {
+          var fd = new FormData();
+          fd.append('branch_id', sel.value);
+          fetch('/_admin/set-branch', { method: 'POST', body: fd })
+            .then(function () { location.reload(); });
+        });
+      }());
+      </script>
+
+      {% if admin.authentication_backend %}
+      <a href="{{ request.url_for('admin:logout') }}" class="btn btn-secondary btn-icon m-2 px-2">
+        <span class="me-2">Logout</span>
+        <i class="fa fa-sign-out"></i>
+      </a>
+      {% endif %}
+    </div>
+  </aside>
+  <div class="page-wrapper">
+    <div class="container-fluid">
+      <div class="page-header d-print-none">
+        {% block content_header %}
+        <div class="row align-items-center">
+          <div class="col">
+            <h2 class="page-title">{{ title }}</h2>
+            <div class="page-pretitle">{{ subtitle }}</div>
+          </div>
+        </div>
+        {% endblock %}
+      </div>
+    </div>
+    <div class="page-body flex-grow-1">
+      <div class="container-fluid">
+        <div class="row row-deck row-cards">
+          {% block content %} {% endblock %}
+          {% block flash %}
+          {% include 'sqladmin/flash.html' %}
+          {% endblock %}
+          {% block secret_modal %}
+          {% include 'sqladmin/secret_modal.html' %}
+          {% endblock %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
