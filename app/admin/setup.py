@@ -32,7 +32,7 @@ from app.adapters.db.models import (
     User,
 )
 
-from ._branch import branch_id_from_request
+from ._branch import branch_ids_from_request
 
 # WTForms ≥3.2 added validation_attrs on specific Input subclasses but not on
 # the base Input class, while Input.__call__ references self.validation_attrs.
@@ -73,16 +73,16 @@ class BranchScopedModelView(ModelView):
 
     def list_query(self, request: Request) -> Select:
         stmt = select(self.model)
-        bid = branch_id_from_request(request)
-        if bid is not None:
-            stmt = stmt.where(self.model.branch_id == bid)
+        bids = branch_ids_from_request(request)
+        if bids is not None:
+            stmt = stmt.where(self.model.branch_id.in_(bids))  # type: ignore[attr-defined]
         return stmt
 
     def count_query(self, request: Request) -> Select:
         stmt = select(func.count(self.pk_columns[0])).select_from(self.model)
-        bid = branch_id_from_request(request)
-        if bid is not None:
-            stmt = stmt.where(self.model.branch_id == bid)
+        bids = branch_ids_from_request(request)
+        if bids is not None:
+            stmt = stmt.where(self.model.branch_id.in_(bids))  # type: ignore[attr-defined]
         return stmt
 
 

@@ -1,7 +1,8 @@
 """Branch cookie helper — single source of truth for branch filter state.
 
-The selected branch is stored in a plain (non-httponly) cookie so the JS
-sidebar widget can read it. The value is an integer branch_id (not sensitive).
+Cookie value: comma-separated integer branch_ids, e.g. "1,3".
+Empty / missing cookie means "show all" (no WHERE clause).
+Not httponly so the JS widget can read the current selection without an API call.
 """
 from __future__ import annotations
 
@@ -10,10 +11,10 @@ from starlette.requests import Request
 BRANCH_COOKIE = "stepan2_branch"
 
 
-def branch_id_from_request(request: Request) -> int | None:
-    """Return the branch_id from the filter cookie, or None (= show all)."""
-    val = request.cookies.get(BRANCH_COOKIE)
-    try:
-        return int(val) if val else None
-    except (ValueError, TypeError):
+def branch_ids_from_request(request: Request) -> list[int] | None:
+    """Return selected branch_ids from cookie, or None (= show all)."""
+    raw = (request.cookies.get(BRANCH_COOKIE) or "").strip()
+    if not raw:
         return None
+    ids = [int(p) for p in raw.split(",") if p.strip().isdigit()]
+    return ids if ids else None

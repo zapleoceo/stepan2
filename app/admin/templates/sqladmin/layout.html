@@ -23,40 +23,198 @@
         </div>
       </nav>
 
-      {# Branch filter — hidden when there is only one branch (single-tenant setups). #}
-      <div id="branch-filter-widget" style="display:none;padding:.5rem .75rem .25rem">
-        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:rgba(255,255,255,.45);margin-bottom:.35rem">
+      {# ── Branch multi-filter ───────────────────────────────────────────────
+         Hidden until JS loads branch list from /_admin/branches.
+         Stores selection as cookie stepan2_branch="1,3" (comma-separated ints).
+         Clicking outside the panel or the button applies the filter + reloads.
+      #}
+      <div id="bf" style="display:none;padding:.25rem .75rem .75rem">
+
+        <div style="font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;
+                    color:rgba(255,255,255,.4);margin-bottom:.4rem;padding-left:2px">
           Branch filter
         </div>
-        <select id="branch-select"
-          class="form-select form-select-sm"
-          style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#fff">
-          <option value="">All branches</option>
-        </select>
-      </div>
+
+        {# Trigger button #}
+        <button id="bf-btn" type="button" style="
+          width:100%;padding:.38rem .65rem;
+          background:rgba(255,255,255,.1);
+          border:1px solid rgba(255,255,255,.2);
+          border-radius:5px;
+          color:#e8eef4;font-size:.82rem;font-weight:400;
+          display:flex;align-items:center;justify-content:space-between;
+          gap:6px;cursor:pointer;outline:none;
+          transition:background .15s,border-color .15s
+        "
+        onmouseover="this.style.background='rgba(255,255,255,.16)'"
+        onmouseout="this.style.background='rgba(255,255,255,.1)'"
+        >
+          <span id="bf-lbl" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:left">
+            All branches
+          </span>
+          <svg id="bf-chevron" width="10" height="6" viewBox="0 0 10 6" fill="none"
+               style="flex-shrink:0;transition:transform .18s">
+            <path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.6"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+
+        {# Dropdown panel #}
+        <div id="bf-panel" style="
+          display:none;
+          position:absolute;left:.6rem;right:.6rem;
+          background:#1a2840;
+          border:1px solid rgba(255,255,255,.18);
+          border-radius:5px;
+          box-shadow:0 6px 24px rgba(0,0,0,.55);
+          z-index:9999;
+          overflow:hidden;
+          margin-top:3px;
+          animation:bfFadeIn .12s ease
+        "></div>
+
+      </div>{# /bf #}
+
+      <style>
+        @keyframes bfFadeIn { from { opacity:0; transform:translateY(-4px) } to { opacity:1; transform:none } }
+        #bf-panel::-webkit-scrollbar { width:4px }
+        #bf-panel::-webkit-scrollbar-track { background:transparent }
+        #bf-panel::-webkit-scrollbar-thumb { background:rgba(255,255,255,.2);border-radius:2px }
+        #bf-panel .bf-item { display:flex;align-items:center;gap:.55rem;padding:.42rem .75rem;
+          cursor:pointer;color:#cdd9e5;font-size:.82rem;border-left:2px solid transparent;
+          transition:background .1s,border-color .1s }
+        #bf-panel .bf-item:hover { background:rgba(32,107,196,.22);border-left-color:#206bc4 }
+        #bf-panel .bf-item input[type=checkbox] {
+          flex-shrink:0;width:14px;height:14px;
+          accent-color:#206bc4;cursor:pointer }
+        #bf-panel .bf-sep { height:1px;background:rgba(255,255,255,.1);margin:.15rem 0 }
+      </style>
+
       <script>
       (function () {
-        var sel = document.getElementById('branch-select');
-        var widget = document.getElementById('branch-filter-widget');
+        var sel   = {};          // {branchId: true}
+        var initKey = '';        // serialised state at open — compare on close
+        var allBranches = [];
+
+        var widget  = document.getElementById('bf');
+        var btn     = document.getElementById('bf-btn');
+        var panel   = document.getElementById('bf-panel');
+        var lbl     = document.getElementById('bf-lbl');
+        var chevron = document.getElementById('bf-chevron');
+
+        // ── fetch branches ──────────────────────────────────────────────────
         fetch('/_admin/branches')
           .then(function (r) { return r.json(); })
           .then(function (d) {
-            if (!d.branches.length) return;
-            d.branches.forEach(function (b) {
-              var o = document.createElement('option');
-              o.value = b.id;
-              o.textContent = b.name;
-              if (String(b.id) === String(d.current)) o.selected = true;
-              sel.appendChild(o);
-            });
+            allBranches = d.branches;
+            if (!allBranches.length) return;
+
+            // init selected from cookie via API response
+            (d.current || []).forEach(function (id) { sel[id] = true; });
+            initKey = cookieKey();
+
+            // "All branches" row
+            panel.appendChild(makeRow(null, 'All branches'));
+            // separator
+            var sep = document.createElement('div');
+            sep.className = 'bf-sep';
+            panel.appendChild(sep);
+            // individual branch rows
+            allBranches.forEach(function (b) { panel.appendChild(makeRow(b.id, b.name)); });
+
+            syncChecks();
+            syncLabel();
             widget.style.display = '';
           })
           .catch(function () {});
-        sel.addEventListener('change', function () {
+
+        // ── build one row ───────────────────────────────────────────────────
+        function makeRow(id, name) {
+          var row = document.createElement('div');
+          row.className = 'bf-item';
+
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.dataset.id = (id === null ? '' : String(id));
+
+          var span = document.createElement('span');
+          span.textContent = name;
+
+          row.appendChild(cb);
+          row.appendChild(span);
+
+          row.addEventListener('click', function (e) {
+            if (e.target !== cb) cb.checked = !cb.checked;
+            if (id === null) {
+              sel = {};                         // "All" → clear
+            } else {
+              if (cb.checked) sel[id] = true;
+              else delete sel[id];
+            }
+            syncChecks();
+            syncLabel();
+            e.stopPropagation();
+          });
+
+          return row;
+        }
+
+        // ── sync checkbox states to sel ─────────────────────────────────────
+        function syncChecks() {
+          var noneSelected = !Object.keys(sel).length;
+          panel.querySelectorAll('input[type=checkbox]').forEach(function (cb) {
+            if (cb.dataset.id === '')  cb.checked = noneSelected;
+            else                       cb.checked = !!sel[Number(cb.dataset.id)];
+          });
+        }
+
+        // ── update button label ─────────────────────────────────────────────
+        function syncLabel() {
+          var ids = Object.keys(sel);
+          if (!ids.length) {
+            lbl.textContent = 'All branches';
+          } else if (ids.length === 1) {
+            var b = allBranches.find(function (x) { return String(x.id) === ids[0]; });
+            lbl.textContent = b ? b.name : '1 branch';
+          } else {
+            lbl.textContent = ids.length + ' branches';
+          }
+        }
+
+        // ── serialise selection for comparison / cookie ─────────────────────
+        function cookieKey() {
+          return Object.keys(sel).map(Number).sort(function (a, b) { return a - b; }).join(',');
+        }
+
+        // ── open / close ────────────────────────────────────────────────────
+        function open() {
+          initKey = cookieKey();
+          panel.style.display = '';
+          chevron.style.transform = 'rotate(180deg)';
+        }
+
+        function close(apply) {
+          panel.style.display = 'none';
+          chevron.style.transform = '';
+          if (!apply) return;
+          var key = cookieKey();
+          if (key === initKey) return;           // no change — skip reload
           var fd = new FormData();
-          fd.append('branch_id', sel.value);
+          fd.append('branch_ids', key);
           fetch('/_admin/set-branch', { method: 'POST', body: fd })
             .then(function () { location.reload(); });
+        }
+
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (panel.style.display !== 'none') close(true);
+          else open();
+        });
+
+        document.addEventListener('click', function (e) {
+          if (panel.style.display !== 'none' && !widget.contains(e.target)) {
+            close(true);
+          }
         });
       }());
       </script>

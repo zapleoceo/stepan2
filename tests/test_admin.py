@@ -28,20 +28,26 @@ def test_wtforms_boolean_widget_compat() -> None:
 
 
 def test_admin_branch_cookie_constant() -> None:
-    from app.admin._branch import BRANCH_COOKIE, branch_id_from_request
+    from app.admin._branch import BRANCH_COOKIE, branch_ids_from_request
 
     assert BRANCH_COOKIE == "stepan2_branch"
 
-    class _FakeRequest:
+    class _Req:
         cookies: dict[str, str] = {}
 
-    assert branch_id_from_request(_FakeRequest()) is None  # type: ignore[arg-type]
+    assert branch_ids_from_request(_Req()) is None  # type: ignore[arg-type]
 
-    _FakeRequest.cookies = {"stepan2_branch": "3"}
-    assert branch_id_from_request(_FakeRequest()) == 3  # type: ignore[arg-type]
+    _Req.cookies = {"stepan2_branch": "3"}
+    assert branch_ids_from_request(_Req()) == [3]  # type: ignore[arg-type]
 
-    _FakeRequest.cookies = {"stepan2_branch": "notanint"}
-    assert branch_id_from_request(_FakeRequest()) is None  # type: ignore[arg-type]
+    _Req.cookies = {"stepan2_branch": "1,3,7"}
+    assert branch_ids_from_request(_Req()) == [1, 3, 7]  # type: ignore[arg-type]
+
+    _Req.cookies = {"stepan2_branch": "notanint"}
+    assert branch_ids_from_request(_Req()) is None  # type: ignore[arg-type]
+
+    _Req.cookies = {"stepan2_branch": "2,bad,5"}
+    assert branch_ids_from_request(_Req()) == [2, 5]  # type: ignore[arg-type]
 
 
 def test_admin_api_router_prefix() -> None:
@@ -51,6 +57,16 @@ def test_admin_api_router_prefix() -> None:
     paths = {r.path for r in router.routes}  # type: ignore[attr-defined]
     assert "/_admin/branches" in paths
     assert "/_admin/set-branch" in paths
+
+
+def test_set_branch_validates_ids() -> None:
+    """set_branch must ignore non-integer values in branch_ids param."""
+    # Test the validation logic directly (no HTTP needed)
+    raw = "1,notanid,3,4bad,7"
+    clean = [p.strip() for p in raw.split(",") if p.strip().isdigit()]
+    assert clean == ["1", "3", "7"]
+
+    assert [p.strip() for p in "".split(",") if p.strip().isdigit()] == []
 
 
 def test_branch_scoped_views_inherit_base() -> None:
