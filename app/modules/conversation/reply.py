@@ -82,7 +82,7 @@ class ReplyService:
         """Return send time: now + random delay from settings (or immediate if none)."""
         if self.settings is None:
             return datetime.now(UTC).replace(tzinfo=None)
-        delay_s = random.randint(
+        delay_s = random.randint(  # noqa: S311 — jitter, not crypto
             self.settings.reply_delay_min_s,
             max(self.settings.reply_delay_min_s, self.settings.reply_delay_max_s),
         )

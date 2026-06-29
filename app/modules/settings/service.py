@@ -27,7 +27,7 @@ _DEFAULTS: dict[str, str] = {
 }
 
 _TTL = 30.0
-_cache: dict[int, tuple["BranchSettings", float]] = {}
+_cache: dict[int, tuple[BranchSettings, float]] = {}
 _lock = asyncio.Lock()
 
 
