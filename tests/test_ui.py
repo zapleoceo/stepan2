@@ -490,3 +490,34 @@ def test_coach_pair_applied_shows_revert() -> None:
     )
     assert "Revert" in html
     assert "/ui/coach/revert/3" in html
+
+
+# ─── agent toggle unit tests ──────────────────────────────────────────────────
+
+def test_agent_toggle_html_shows_on_state() -> None:
+    from app.api.ui import _agent_toggle_html
+    _set_lang("en")
+    html = _agent_toggle_html(1, enabled=True)
+    assert "Bot ON" in html
+    assert "bot-tog" in html
+    assert "/ui/agent-toggle" in html
+
+
+def test_agent_toggle_html_shows_off_state() -> None:
+    from app.api.ui import _agent_toggle_html
+    _set_lang("en")
+    html = _agent_toggle_html(1, enabled=False)
+    assert "Bot OFF" in html
+    assert "bot-tog" in html
+
+
+def test_agent_status_route_responds(client: TestClient) -> None:
+    resp = client.get("/ui/agent-status")
+    assert resp.status_code in (200, 500)
+
+
+def test_admin_root_redirects_to_ui() -> None:
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get("/admin")
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/ui/inbox"

@@ -719,6 +719,71 @@ async def coach_revert(edit_id: int, request: Request) -> RedirectResponse:
     return RedirectResponse("/ui/coach", status_code=303)
 
 
+# ─── agent toggle ─────────────────────────────────────────────────────────────
+
+@router.get("/agent-status", response_class=HTMLResponse)
+async def agent_status(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT value FROM app_setting"
+                    " WHERE branch_id=:bid AND key='agent_enabled_global'"
+                ),
+                {"bid": branch_id},
+            )
+        ).first()
+    enabled = (row[0].lower() in ("true", "1", "yes")) if row else True
+    return HTMLResponse(_agent_toggle_html(branch_id, enabled))
+
+
+@router.post("/agent-toggle", response_class=HTMLResponse)
+async def agent_toggle(
+    request: Request, branch_id: int = Form(default=1),
+) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT value FROM app_setting"
+                    " WHERE branch_id=:bid AND key='agent_enabled_global'"
+                ),
+                {"bid": branch_id},
+            )
+        ).first()
+        enabled = (row[0].lower() in ("true", "1", "yes")) if row else True
+        new_val = "false" if enabled else "true"
+        await session.execute(
+            text(
+                "INSERT INTO app_setting (branch_id, key, value)"
+                " VALUES (:bid, 'agent_enabled_global', :v)"
+                " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"
+            ),
+            {"bid": branch_id, "v": new_val},
+        )
+    return HTMLResponse(_agent_toggle_html(branch_id, not enabled))
+
+
+def _agent_toggle_html(branch_id: int, enabled: bool) -> str:
+    lbl = _h.escape(t("bot.on" if enabled else "bot.off"))
+    color = "#51cf66" if enabled else "#ff6b6b"
+    bg = "rgba(31,58,31,.9)" if enabled else "rgba(58,31,31,.9)"
+    return (
+        f'<form id="bot-tog" hx-post="/ui/agent-toggle" hx-target="#bot-tog"'
+        f' hx-swap="outerHTML" style="margin-top:.35rem">'
+        f'<input type="hidden" name="branch_id" value="{branch_id}">'
+        f'<button type="submit" style="width:100%;padding:.28rem .5rem;'
+        f'background:{bg};border:1px solid {color};border-radius:5px;'
+        f'color:{color};font-size:.72rem;font-weight:700;cursor:pointer;'
+        f'text-align:center">{lbl}</button>'
+        f'</form>'
+    )
+
+
 # ─── language switcher ────────────────────────────────────────────────────────
 
 @router.get("/lang/{code}")

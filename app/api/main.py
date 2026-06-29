@@ -32,6 +32,10 @@ def create_app() -> FastAPI:
     async def root() -> RedirectResponse:
         return RedirectResponse(url="/ui/inbox", status_code=302)
 
+    @app.get("/admin", include_in_schema=False)
+    async def admin_root() -> RedirectResponse:
+        return RedirectResponse(url="/ui/inbox", status_code=302)
+
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
         """Liveness probe — no dependencies touched."""

@@ -384,7 +384,6 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
         + '<div class="nav-sep"></div>'
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox")
-        + _na("nav.tables", "/admin/", "fa-solid fa-table", "tables")
     )
 
     def _lb(code: str) -> str:
@@ -445,6 +444,10 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         f'<div class="bft-lbl">{_h.escape(t("branch.filter"))}</div>'
         f'<div id="branch-sel"'
         f' hx-get="/ui/branches/widget"'
+        f' hx-trigger="load"'
+        f' hx-swap="innerHTML"></div>'
+        f'<div id="bot-tog-wrap"'
+        f' hx-get="/ui/agent-status"'
         f' hx-trigger="load"'
         f' hx-swap="innerHTML"></div>'
         f'<div style="margin-top:.45rem">'

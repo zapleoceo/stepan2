@@ -225,6 +225,9 @@ _TR: dict[str, dict[str, str]] = {
     # branch selector
     "branch.filter": {"ru": "Филиал", "en": "Branch", "id": "Cabang"},
     "branch.all":    {"ru": "Все филиалы", "en": "All branches", "id": "Semua cabang"},
+    # agent toggle
+    "bot.on":        {"ru": "Бот ON",  "en": "Bot ON",  "id": "Bot ON"},
+    "bot.off":       {"ru": "Бот OFF", "en": "Bot OFF", "id": "Bot OFF"},
     # stages
     "stage.new":        {"ru": "новый",     "en": "new",          "id": "baru"},
     "stage.qualifying": {"ru": "квалиф.",   "en": "qualifying",   "id": "kualifikasi"},

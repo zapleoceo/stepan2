@@ -52,7 +52,9 @@ class ReplyService:
         context = await self.knowledge.knowledge_context(thread.product_slug)
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(context, dialog, await self._lang(), coaching_notes=notes)
-        raw, _meta = await self.llm.chat(messages, require_json_schema=True)
+        raw, _meta = await self.llm.chat(
+            messages, capability="chat:smart", require_json_schema=True
+        )
         return parse_decision(raw)
 
     async def _lang(self) -> str:

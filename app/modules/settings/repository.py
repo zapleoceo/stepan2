@@ -13,14 +13,14 @@ class SettingRepo:
 
     async def load_all(self, branch_id: int) -> dict[str, str]:
         """Load settings for branch; branch-specific values override platform-wide (NULL)."""
-        rows = await self._s.exec(
+        result = await self._s.execute(
             select(AppSetting).where(
                 or_(AppSetting.branch_id == branch_id, AppSetting.branch_id.is_(None))
             )
         )
         platform: dict[str, str] = {}
         branch: dict[str, str] = {}
-        for row in rows.all():
+        for row in result.scalars().all():
             if row.branch_id is None:
                 platform[row.key] = row.value
             else:
