@@ -29,8 +29,10 @@ class OutboxSender:
         self.outbox = OutboxRepo(session, branch_id)
 
     async def send_next(self, thread_id: int) -> Outbox | None:
-        """Pick the oldest pending line, send it, flip status, record on success."""
+        """Pick the oldest pending line that is due (scheduled_at ≤ now), send it."""
         row = await self.outbox.oldest_pending(thread_id)
+        if row is not None and row.scheduled_at > datetime.now(UTC).replace(tzinfo=None):
+            return None  # not due yet — respect reply delay
         if row is None:
             return None
         thread = await self.threads.by_id(thread_id)

@@ -5,9 +5,10 @@ lives in leads.repository; we only add the conversation-specific reads (dialog, 
 oldest_pending) on top, keeping a single isolation primitive."""
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import ChannelThread, Message, Outbox
+from app.adapters.db.models import ChannelThread, CoachingNote, Message, Outbox
 from app.adapters.db.repository import BranchScoped
 from app.modules.leads.repository import MessageRepo as _LeadMessageRepo
 from app.modules.leads.repository import ThreadRepo as _LeadThreadRepo
@@ -31,6 +32,25 @@ class MessageRepo(_LeadMessageRepo):
             Message.occurred_at, Message.id
         )
         return list((await self.session.exec(q)).all())
+
+
+class CoachingNoteRepo:
+    """Read active coaching directives for a branch — injected into the system prompt."""
+
+    def __init__(self, session: AsyncSession, branch_id: int) -> None:
+        self._s = session
+        self._branch_id = branch_id
+
+    async def active_manager_notes(self) -> list[str]:
+        """Texts of active manager-role notes — the bot's mandatory rules."""
+        rows = await self._s.exec(
+            select(CoachingNote).where(
+                CoachingNote.branch_id == self._branch_id,
+                CoachingNote.role == "manager",
+                CoachingNote.active.is_(True),
+            )
+        )
+        return [r.text for r in rows.all()]
 
 
 class OutboxRepo(BranchScoped[Outbox]):

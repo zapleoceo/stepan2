@@ -22,6 +22,7 @@ from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import ThreadRepo
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.leads.ingest import IngestService
+from app.modules.settings.service import get_settings
 
 from . import wiring
 
@@ -54,8 +55,18 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
     async with session_scope() as session:
         for branch in await wiring.active_branches(session):
             assert branch.id is not None
+            branch_cfg = await get_settings(session, branch.id)
+
+            if not branch_cfg.agent_enabled:
+                logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
+                continue
+
+            if branch_cfg.is_quiet_hour():
+                logger.info("branch %s: quiet hours — skip reply_pending", branch.id)
+                continue
+
             knowledge = KnowledgeService(session, branch.id)
-            reply = ReplyService(session, branch.id, llm, knowledge)
+            reply = ReplyService(session, branch.id, llm, knowledge, branch_settings=branch_cfg)
             for thread_id in await wiring.threads_awaiting_reply(session, branch.id):
                 decision = await reply.decide(thread_id)
                 if decision is None:
@@ -83,7 +94,7 @@ async def _send_thread(
     thread_id: int,
     channels: dict[int | None, Channel],
 ) -> int:
-    """Send the next line of one thread via its channel; skip when wiring is absent."""
+    """Send the next due line of one thread via its channel; skip when wiring is absent."""
     thread = await ThreadRepo(session, branch_id).by_id(thread_id)
     if thread is None:
         return 0
