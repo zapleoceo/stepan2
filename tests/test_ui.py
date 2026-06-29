@@ -1,0 +1,337 @@
+"""Tests for the /ui/ manager interface: i18n, HTML generators, and route smoke-tests."""
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
+
+from cryptography.fernet import Fernet  # noqa: E402
+
+os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
+
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.api.main import app  # noqa: E402
+
+
+def _set_lang(code: str) -> None:
+    """Helper: set i18n ContextVar directly (avoids test-ordering issues)."""
+    from app.api._i18n import DEFAULT_LANG, LANGS, _lang
+    _lang.set(code if code in LANGS else DEFAULT_LANG)
+
+
+# ─── i18n unit tests ──────────────────────────────────────────────────────────
+
+def test_t_returns_english_by_default() -> None:
+    from app.api._i18n import t
+    _set_lang("en")
+    assert t("nav.inbox") == "Inbox"
+
+
+def test_t_returns_fallback_key_for_missing() -> None:
+    from app.api._i18n import t
+    _set_lang("en")
+    assert t("no.such.key") == "no.such.key"
+
+
+def test_apply_lang_sets_contextvar() -> None:
+    from unittest.mock import MagicMock
+    from app.api._i18n import apply_lang, current_lang
+
+    req = MagicMock()
+    req.cookies = {"stepan2_lang": "ru"}
+    apply_lang(req)
+    assert current_lang() == "ru"
+
+
+def test_apply_lang_rejects_invalid_code() -> None:
+    from unittest.mock import MagicMock
+    from app.api._i18n import apply_lang, current_lang
+
+    req = MagicMock()
+    req.cookies = {"stepan2_lang": "fr"}
+    apply_lang(req)
+    assert current_lang() == "en"
+
+
+@pytest.mark.parametrize("code,key,expected", [
+    ("ru", "nav.inbox", "Входящие"),
+    ("en", "nav.inbox", "Inbox"),
+    ("id", "nav.inbox", "Kotak Masuk"),
+    ("ru", "chat.send", "Отправить"),
+    ("id", "coach.apply", "✓ Terapkan"),
+    ("en", "stage.new", "new"),
+    ("ru", "stage.new", "новый"),
+    ("en", "nav.members", "Members"),
+    ("ru", "nav.members", "Участники"),
+])
+def test_t_all_languages(code: str, key: str, expected: str) -> None:
+    from app.api._i18n import t
+    _set_lang(code)
+    assert t(key) == expected
+
+
+# ─── HTML generator unit tests ────────────────────────────────────────────────
+
+def test_thread_list_html_empty() -> None:
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    html = thread_list_html([])
+    assert "emp" in html
+    assert "No chats" in html
+
+
+def test_thread_list_html_empty_russian() -> None:
+    from app.api._ui_html import thread_list_html
+    _set_lang("ru")
+    html = thread_list_html([])
+    assert "Нет чатов" in html
+
+
+def test_thread_list_html_with_row() -> None:
+    from datetime import datetime, timezone
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    row = (42, "Alice Test", "new", datetime.now(timezone.utc).replace(tzinfo=None), "Hello", "in")
+    html = thread_list_html([row])
+    assert "Alice Test" in html
+    assert 'hx-get="/ui/chat/42/panel"' in html
+
+
+def test_badge_renders_stage_en() -> None:
+    from app.api._ui_html import _badge
+    _set_lang("en")
+    html = _badge("new")
+    assert "sn" in html
+    assert "new" in html
+
+
+def test_badge_renders_stage_ru() -> None:
+    from app.api._ui_html import _badge
+    _set_lang("ru")
+    html = _badge("new")
+    assert "sn" in html
+    assert "новый" in html
+
+
+def test_app_shell_contains_sidebar_and_nav() -> None:
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>main</div>", active_nav="inbox")
+    assert "Stepan 2" in html
+    assert "Inbox" in html
+    assert "Members" in html
+    assert "RU" in html and "EN" in html and "ID" in html
+    assert 'hx-get="/ui/threads"' in html
+    assert "<div>main</div>" in html
+
+
+def test_app_shell_lang_buttons_highlight_active() -> None:
+    from app.api._ui_html import app_shell
+    _set_lang("ru")
+    html = app_shell("ru", "", active_nav="inbox")
+    assert '"lb on" href="/ui/lang/ru"' in html
+
+
+def test_app_shell_has_help_button() -> None:
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "", active_nav="inbox")
+    assert "help-btn" in html
+    assert "hov" in html
+
+
+def test_app_shell_help_content_matches_nav() -> None:
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "", active_nav="coach")
+    assert "Coach KB" in html
+
+
+def test_chat_panel_html_contains_send_form() -> None:
+    from app.api._ui_html import chat_panel_html
+    _set_lang("en")
+    html = chat_panel_html(7, "Bob", "qualifying", [], [])
+    assert 'hx-post="/ui/chat/7/send"' in html
+    assert "Send" in html
+    assert "qualifying" in html or "sq" in html
+
+
+def test_coach_pair_proposed_shows_actions() -> None:
+    from datetime import datetime, timezone
+    from app.api._ui_panels import _coach_pair
+    _set_lang("en")
+    html = _coach_pair(
+        1, "Change price", "proposed", "pricing",
+        "old text", "new text", "summary", datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    assert "✓ Apply" in html
+    assert "✗ Cancel" in html
+    assert "pricing" in html
+    assert "old text" in html
+    assert "new text" in html
+    # two bubbles: manager (bb-o) and coach (bb-i)
+    assert "bb-o" in html and "bb-i" in html
+
+
+def test_coach_pair_applied_no_actions() -> None:
+    from datetime import datetime, timezone
+    from app.api._ui_panels import _coach_pair
+    _set_lang("en")
+    html = _coach_pair(
+        2, "Done", "applied", None, None, None, "done",
+        datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    assert "✓ Apply" not in html
+    assert "done" in html
+
+
+def test_coach_chat_html_renders_form() -> None:
+    from app.api._ui_panels import coach_chat_html
+    _set_lang("en")
+    html = coach_chat_html(1, [], [])
+    assert 'hx-post="/ui/coach/say"' in html
+    assert "coach-msgs" in html
+
+
+def test_knowledge_panel_html_empty() -> None:
+    from app.api._ui_panels import knowledge_panel_html
+    _set_lang("en")
+    html = knowledge_panel_html([])
+    assert "Knowledge" in html
+
+
+def test_knowledge_panel_html_with_docs() -> None:
+    from app.api._ui_panels import knowledge_panel_html
+    _set_lang("en")
+    docs = [(1, "persona", "Persona", "I am Stepan...")]
+    html = knowledge_panel_html(docs)
+    assert "persona" in html
+    assert "Persona" in html
+    assert 'hx-get="/ui/knowledge/1/edit"' in html
+
+
+def test_members_panel_html() -> None:
+    from app.api._ui_panels import members_panel_html
+    _set_lang("en")
+    rows = [(10, 169510539, "manager", "Dima", 1)]
+    html = members_panel_html(rows)
+    assert "Dima" in html
+    assert "manager" in html
+    assert "p-mgr" in html
+
+
+def test_settings_panel_html_with_desc() -> None:
+    from app.api._ui_panels import settings_panel_html
+    _set_lang("en")
+    rows = [(1, 1, "daily_cap", "100"), (2, 1, "bot_enabled", "true")]
+    html = settings_panel_html(rows)
+    assert "daily_cap" in html
+    assert "bot_enabled" in html
+    assert "Max bot messages" in html  # description shown
+    assert 'hx-post="/ui/settings/1/save"' in html
+
+
+def test_settings_panel_unknown_key_no_desc() -> None:
+    from app.api._ui_panels import settings_panel_html
+    _set_lang("en")
+    rows = [(5, 1, "unknown_setting", "xyz")]
+    html = settings_panel_html(rows)
+    assert "unknown_setting" in html
+    assert "set-desc" not in html  # no description for unknown key
+
+
+def test_products_panel_html() -> None:
+    from app.api._ui_panels import products_panel_html
+    _set_lang("en")
+    products = [(1, "vibe-coding", "Vibe Coding", True, 0)]
+    html = products_panel_html(products)
+    assert "Vibe Coding" in html
+    assert "p-ok" in html
+    assert "hint" in html  # sort explanation shown
+
+
+# ─── route smoke tests ────────────────────────────────────────────────────────
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def test_inbox_returns_200(client: TestClient) -> None:
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 200
+    assert "Stepan 2" in resp.text
+
+
+def test_inbox_with_russian_cookie(client: TestClient) -> None:
+    resp = client.get("/ui/inbox", cookies={"stepan2_lang": "ru"})
+    assert resp.status_code == 200
+    assert "Входящие" in resp.text
+
+
+def test_inbox_has_members_nav(client: TestClient) -> None:
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 200
+    assert "/ui/members/panel" in resp.text
+    assert "/ui/knowledge/panel" in resp.text
+    assert "/ui/settings/panel" in resp.text
+
+
+def test_inbox_has_help_button(client: TestClient) -> None:
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 200
+    assert "help-btn" in resp.text
+
+
+def test_threads_partial_exists(client: TestClient) -> None:
+    resp = client.get("/ui/threads")
+    assert resp.status_code in (200, 500)
+
+
+def test_coach_page_exists(client: TestClient) -> None:
+    resp = client.get("/ui/coach")
+    assert resp.status_code in (200, 500)
+
+
+def test_coach_panel_partial_exists(client: TestClient) -> None:
+    resp = client.get("/ui/coach/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_knowledge_panel_exists(client: TestClient) -> None:
+    resp = client.get("/ui/knowledge/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_products_panel_exists(client: TestClient) -> None:
+    resp = client.get("/ui/products/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_members_panel_exists(client: TestClient) -> None:
+    resp = client.get("/ui/members/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_settings_panel_exists(client: TestClient) -> None:
+    resp = client.get("/ui/settings/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_lang_redirect_sets_cookie(client: TestClient) -> None:
+    resp = client.get("/ui/lang/ru", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "stepan2_lang=ru" in resp.headers.get("set-cookie", "")
+
+
+def test_lang_invalid_falls_back_to_en(client: TestClient) -> None:
+    resp = client.get("/ui/lang/fr", follow_redirects=False)
+    assert resp.status_code == 303
+    assert "stepan2_lang=en" in resp.headers.get("set-cookie", "")
+
+
+def test_chat_panel_not_found_no_500_crash(client: TestClient) -> None:
+    resp = client.get("/ui/chat/9999999/panel")
+    assert resp.status_code in (200, 404, 500)

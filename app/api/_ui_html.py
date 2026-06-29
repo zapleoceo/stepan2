@@ -1,266 +1,333 @@
-"""HTML page builders for the /ui/ manager interface (inline CSS, no template files)."""
+"""HTML generators for the 3-column manager UI (sidebar + thread list + panel)."""
 from __future__ import annotations
 
-import html as h
-from datetime import UTC, datetime, timedelta
+import html as _h
+from datetime import UTC, datetime
 
-_CSS = """
-:root{--bg:#1a1f2e;--bg2:#232a3b;--bg3:#141925;--brd:#2d3748;--tx:#d0d7de;--tx2:#8899aa;
-  --acc:#206bc4;--acc2:#4da6ff;--red:#f03e3e;--green:#51cf66;--yel:#ffa94d}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);
-  color:var(--tx);font-size:14px;line-height:1.5}
-a{color:var(--acc2);text-decoration:none} a:hover{text-decoration:underline}
-nav{background:var(--bg3);padding:.55rem 1.2rem;display:flex;align-items:center;
-  gap:1.2rem;border-bottom:1px solid var(--brd)}
-.brand{font-weight:700;color:#fff;font-size:.95rem;margin-right:.3rem}
-nav a{color:var(--tx2);font-size:.82rem} nav a.on,nav a:hover{color:#fff}
-.wrap{max-width:1000px;margin:0 auto;padding:1.2rem 1rem}
-h2{font-size:1.05rem;font-weight:600;color:#fff;margin-bottom:.9rem}
-.card{background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:.8rem 1rem}
-.badge{display:inline-block;padding:.15rem .45rem;border-radius:10px;
-  font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
-.s-new{background:#1e3a5f;color:#4da6ff}.s-qualifying{background:#2a1f5f;color:#9b7aff}
-.s-presenting{background:#1f3a2a;color:#4adb7a}.s-objection{background:#3a2a1f;color:#ffa94d}
-.s-ready{background:#1f3a2a;color:#51cf66}.s-handed_off{background:#1f3a2a;color:#22b8cf}
-.s-dormant{background:#2a2a2a;color:#868e96}.s-manager{background:#3a1f1f;color:#ff6b6b}
-.btn{display:inline-block;padding:.32rem .75rem;border-radius:5px;font-size:.8rem;
-  font-weight:600;cursor:pointer;border:none;line-height:1.4}
-.btn-p{background:var(--acc);color:#fff}.btn-p:hover{background:#1a5aaa}
-.btn-d{background:#862e2e;color:#fff}.btn-d:hover{background:#c92a2a}
-.btn-s{padding:.18rem .5rem;font-size:.75rem}
-.tc{display:flex;align-items:baseline;gap:.5rem;margin-bottom:.2rem}
-.lname{font-weight:600;color:#e8eef4;font-size:.9rem}
-.lmsg{color:var(--tx2);font-size:.8rem;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;max-width:620px}
-.ttime{color:var(--tx2);font-size:.73rem;margin-left:auto;flex-shrink:0}
-.msgs{display:flex;flex-direction:column;gap:.4rem;margin-bottom:1rem}
-.bbl{display:flex;flex-direction:column;max-width:78%}
-.bbl-in{align-self:flex-start}.bbl-out{align-self:flex-end}
-.btext{padding:.42rem .62rem;border-radius:10px;font-size:.84rem;
-  white-space:pre-wrap;word-break:break-word}
-.bbl-in .btext{background:#232a3b;border:1px solid #2d3748}
-.bbl-out .btext{background:#1e3a5f}.bbl-out.mgr .btext{background:#2a1f3a}
-.bbl-pend .btext{background:#1f3a1f;opacity:.65}
-.bmeta{font-size:.68rem;color:var(--tx2);margin-top:.12rem}
-.bbl-out .bmeta{text-align:right}
-.send-form{display:flex;gap:.5rem;margin-top:.5rem}
-.send-form textarea{flex:1;background:#232a3b;border:1px solid #2d3748;border-radius:6px;
-  color:var(--tx);padding:.45rem .55rem;font-size:.84rem;resize:vertical;min-height:2.8rem}
-.send-form textarea:focus{outline:none;border-color:var(--acc)}
-.req-form{display:flex;flex-direction:column;gap:.5rem}
-.req-form textarea{width:100%;background:#232a3b;border:1px solid #2d3748;border-radius:6px;
-  color:var(--tx);padding:.55rem;font-size:.84rem;resize:vertical;min-height:3.5rem}
-.req-form textarea:focus{outline:none;border-color:var(--acc)}
-.diff-old{background:#3a1f1f;border-left:3px solid var(--red);padding:.35rem .55rem;
-  font-size:.78rem;border-radius:3px;font-family:monospace;
-  white-space:pre-wrap;word-break:break-all;margin-top:.35rem}
-.diff-new{background:#1f3a1f;border-left:3px solid var(--green);padding:.35rem .55rem;
-  font-size:.78rem;border-radius:3px;font-family:monospace;
-  white-space:pre-wrap;word-break:break-all;margin-top:.2rem}
-.edit-row{display:flex;gap:.4rem;margin-top:.4rem;align-items:center}
-.st-applied{color:var(--green)}.st-cancelled,.st-failed{color:var(--tx2)}
-.st-proposed{color:var(--yel)}.st-clarify{color:var(--acc2)}
-#coach-result{margin-top:.8rem}
-"""
+from ._i18n import t
 
 _HTMX = "https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"
+_FA = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
 
-_STAGE_CSS = {
-    "new": "s-new", "qualifying": "s-qualifying", "presenting": "s-presenting",
-    "objection": "s-objection", "ready": "s-ready", "handed_off": "s-handed_off",
-    "dormant": "s-dormant", "manager": "s-manager",
+_CSS = (
+    "*{box-sizing:border-box;margin:0;padding:0}"
+    "html,body{height:100%;overflow:hidden}"
+    "body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+    "background:#0f1117;color:#d0d7de;font-size:14px}"
+    ".sid{width:210px;flex-shrink:0;background:#141925;border-right:1px solid #2d3748;"
+    "display:flex;flex-direction:column}"
+    ".sid-top{padding:.7rem .9rem .45rem;border-bottom:1px solid #2d3748}"
+    ".logo{font-size:1.05rem;font-weight:800;color:#fff}"
+    ".sid-nav{flex:1;padding:.4rem 0;overflow-y:auto}"
+    ".na{display:flex;align-items:center;gap:.5rem;padding:.4rem .75rem;color:#8899aa;"
+    "font-size:.81rem;text-decoration:none;border-radius:6px;margin:.05rem .45rem;"
+    "transition:background .12s,color .12s;cursor:pointer}"
+    ".na:hover{background:rgba(255,255,255,.08);color:#d0d7de}"
+    ".na.on{background:rgba(32,107,196,.22);color:#4da6ff}"
+    ".na i{width:14px;text-align:center}"
+    ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
+    ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
+    ".lrow{display:flex;gap:.22rem;margin-top:.3rem}"
+    ".lb{flex:1;padding:.22rem .1rem;background:rgba(255,255,255,.07);"
+    "border:1px solid rgba(255,255,255,.12);border-radius:4px;color:#8899aa;"
+    "font-size:.68rem;font-weight:600;text-align:center;text-decoration:none}"
+    ".lb.on,.lb:hover{background:rgba(32,107,196,.28);color:#4da6ff;border-color:#206bc4}"
+    ".thr{width:305px;flex-shrink:0;background:#0f1117;border-right:1px solid #2d3748;"
+    "display:flex;flex-direction:column;overflow:hidden}"
+    ".thr-h{padding:.56rem .8rem;border-bottom:1px solid #2d3748;font-size:.82rem;"
+    "font-weight:600;color:#e8eef4;flex-shrink:0}"
+    "#tl{flex:1;overflow-y:auto}"
+    "#tl::-webkit-scrollbar{width:4px}"
+    "#tl::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
+    ".ti{display:block;padding:.56rem .8rem;border-bottom:1px solid rgba(255,255,255,.04);"
+    "text-decoration:none;color:inherit;cursor:pointer;transition:background .1s;"
+    "border-left:2px solid transparent}"
+    ".ti:hover{background:rgba(255,255,255,.05)}"
+    ".ti.on{background:rgba(32,107,196,.14);border-left-color:#206bc4}"
+    ".ti-t{display:flex;align-items:baseline;gap:.35rem;margin-bottom:.1rem}"
+    ".ti-n{font-weight:600;color:#e8eef4;font-size:.84rem;flex:1;overflow:hidden;"
+    "text-overflow:ellipsis;white-space:nowrap}"
+    ".ti-ts{font-size:.68rem;color:#4a5568;flex-shrink:0}"
+    ".ti-p{font-size:.74rem;color:#6b7685;overflow:hidden;text-overflow:ellipsis;"
+    "white-space:nowrap;margin-top:.05rem}"
+    ".bg{display:inline-block;padding:.07rem .3rem;border-radius:5px;font-size:.6rem;"
+    "font-weight:700;text-transform:uppercase;margin-right:.18rem}"
+    ".sn{background:#1e3a5f;color:#4da6ff}.sq{background:#2a1f5f;color:#9b7aff}"
+    ".sp{background:#1f3a2a;color:#4adb7a}.so{background:#3a2a1f;color:#ffa94d}"
+    ".sr{background:#1f3a2a;color:#51cf66}.sh{background:#163030;color:#22b8cf}"
+    ".sd{background:#2a2a2a;color:#868e96}.sm{background:#3a1f1f;color:#ff6b6b}"
+    "#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}"
+    ".ch{padding:.56rem .9rem;border-bottom:1px solid #2d3748;background:#141925;"
+    "display:flex;align-items:center;gap:.55rem;flex-shrink:0}"
+    ".ch-n{font-weight:600;color:#e8eef4;font-size:.9rem}"
+    ".msgs{flex:1;overflow-y:auto;padding:.72rem .95rem;display:flex;"
+    "flex-direction:column;gap:.3rem}"
+    ".msgs::-webkit-scrollbar{width:4px}"
+    ".msgs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
+    ".bb{display:flex;flex-direction:column;max-width:72%}"
+    ".bb-i{align-self:flex-start}.bb-o{align-self:flex-end}.bb-p{opacity:.6;align-self:flex-end}"
+    ".bt{padding:.4rem .56rem;border-radius:9px;font-size:.8rem;"
+    "white-space:pre-wrap;word-break:break-word}"
+    ".bb-i .bt{background:#232a3b;border:1px solid #2d3748}"
+    ".bb-o .bt{background:#1e3a5f}.bb-o.mgr .bt{background:#2a1f3a}"
+    ".bm{font-size:.63rem;color:#4a5568;margin-top:.08rem}"
+    ".bb-o .bm{text-align:right}"
+    ".fin{padding:.52rem .8rem;border-top:1px solid #2d3748;display:flex;gap:.4rem;"
+    "background:#141925;flex-shrink:0}"
+    ".fin textarea{flex:1;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;"
+    "color:#d0d7de;padding:.36rem .52rem;font-size:.8rem;resize:none;"
+    "font-family:inherit;line-height:1.4}"
+    ".fin textarea:focus{outline:none;border-color:#206bc4}"
+    ".bsn{background:#206bc4;color:#fff;border:none;border-radius:6px;"
+    "padding:0 .88rem;font-size:.78rem;font-weight:600;cursor:pointer}"
+    ".bsn:hover{background:#1a5aaa}"
+    ".emp{display:flex;align-items:center;justify-content:center;height:100%;"
+    "color:#4a5568;font-size:.86rem}"
+    ".df{background:#3a1f1f;border-left:2px solid #f03e3e;padding:.25rem .4rem;"
+    "font-family:monospace;font-size:.73rem;white-space:pre-wrap;word-break:break-all;"
+    "border-radius:3px;margin-top:.25rem}"
+    ".dn{background:#1f3a1f;border-left:2px solid #51cf66;padding:.25rem .4rem;"
+    "font-family:monospace;font-size:.73rem;white-space:pre-wrap;word-break:break-all;"
+    "border-radius:3px;margin-top:.18rem}"
+    ".bx{padding:.17rem .4rem;font-size:.7rem;border:none;border-radius:4px;"
+    "cursor:pointer;font-weight:600;margin-right:.2rem;margin-top:.28rem}"
+    ".bx-a{background:#206bc4;color:#fff}.bx-c{background:#862e2e;color:#fff}"
+    ".pnl-body{flex:1;overflow-y:auto;padding:.55rem .8rem}"
+    ".pnl-body::-webkit-scrollbar{width:4px}"
+    ".pnl-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
+    ".tbl{width:100%;border-collapse:collapse;font-size:.81rem}"
+    ".tbl th{text-align:left;padding:.3rem .52rem;color:#6b7685;font-weight:600;"
+    "font-size:.7rem;text-transform:uppercase;border-bottom:1px solid #2d3748}"
+    ".tbl td{padding:.34rem .52rem;border-bottom:1px solid rgba(255,255,255,.04);"
+    "color:#d0d7de;vertical-align:middle}"
+    ".tbl tr:hover td{background:rgba(255,255,255,.04)}"
+    ".pill{display:inline-block;padding:.08rem .36rem;border-radius:8px;"
+    "font-size:.64rem;font-weight:700;text-transform:uppercase}"
+    ".p-ok{background:#1f3a1f;color:#51cf66}.p-off{background:#2a2a2a;color:#868e96}"
+    ".p-mgr{background:#1e3a5f;color:#4da6ff}.p-adm{background:#2a1f5f;color:#9b7aff}"
+    ".set-key{font-family:ui-monospace,monospace;font-size:.79rem;color:#4da6ff}"
+    ".set-desc{font-size:.71rem;color:#6b7685;margin-top:.1rem}"
+    ".set-val{background:#0f1117;border:1px solid #2d3748;border-radius:4px;"
+    "color:#d0d7de;padding:.26rem .42rem;font-size:.79rem;font-family:inherit;width:100%}"
+    ".set-val:focus{outline:none;border-color:#206bc4}"
+    ".frm-ta{width:100%;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;"
+    "color:#d0d7de;padding:.36rem .52rem;font-size:.8rem;resize:vertical;"
+    "min-height:7rem;font-family:inherit}"
+    ".frm-ta:focus{outline:none;border-color:#206bc4}"
+    ".frm-inp{width:100%;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;"
+    "color:#d0d7de;padding:.36rem .52rem;font-size:.8rem;font-family:inherit}"
+    ".frm-inp:focus{outline:none;border-color:#206bc4}"
+    ".frm-lbl{font-size:.72rem;color:#6b7685;margin-bottom:.15rem;display:block}"
+    ".frm-grp{margin-bottom:.45rem}"
+    ".btn-sm{padding:.22rem .55rem;font-size:.75rem;border:none;border-radius:4px;"
+    "cursor:pointer;font-weight:600}"
+    ".btn-p{background:#206bc4;color:#fff}.btn-p:hover{background:#1a5aaa}"
+    ".btn-g{background:rgba(255,255,255,.08);color:#d0d7de;border:none;"
+    "border-radius:4px;text-decoration:none;font-size:.75rem;padding:.22rem .55rem;"
+    "font-weight:600;cursor:pointer}"
+    ".btn-g:hover{background:rgba(255,255,255,.14)}"
+    ".kdoc{background:#1a1f2e;border:1px solid #2d3748;border-radius:7px;"
+    "padding:.5rem .7rem;margin-bottom:.3rem;cursor:pointer}"
+    ".kdoc:hover{border-color:#4a5568}"
+    ".kdoc-slug{font-family:ui-monospace,monospace;font-size:.7rem;color:#4da6ff;"
+    "margin-bottom:.1rem}"
+    ".kdoc-title{font-weight:600;color:#e8eef4;font-size:.82rem;margin-bottom:.1rem}"
+    ".kdoc-preview{font-size:.74rem;color:#6b7685;overflow:hidden;text-overflow:ellipsis;"
+    "white-space:nowrap}"
+    ".hint{font-size:.74rem;color:#4a5568;padding:.32rem 0 .45rem;line-height:1.45}"
+    ".help-btn{position:fixed;bottom:1.1rem;right:1.1rem;width:2rem;height:2rem;"
+    "border-radius:50%;background:#206bc4;color:#fff;border:none;font-size:.85rem;"
+    "font-weight:700;cursor:pointer;z-index:400;box-shadow:0 2px 8px rgba(0,0,0,.5)}"
+    ".hov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);"
+    "z-index:500;align-items:center;justify-content:center}"
+    ".hov.on{display:flex}"
+    ".hov-box{background:#1a1f2e;border:1px solid #2d3748;border-radius:10px;"
+    "padding:1.3rem 1.5rem;max-width:480px;width:90%;max-height:80vh;overflow-y:auto}"
+    ".hov-box h3{color:#e8eef4;font-size:.95rem;margin-bottom:.6rem;font-weight:700}"
+    ".hov-box p{color:#8899aa;font-size:.8rem;line-height:1.6;margin-bottom:.5rem}"
+    ".hov-close{float:right;background:none;border:none;color:#6b7685;"
+    "font-size:1.1rem;cursor:pointer;padding:.1rem .3rem;margin-left:.5rem}"
+)
+
+_STC: dict[str, str] = {
+    "new": "sn", "qualifying": "sq", "presenting": "sp", "objection": "so",
+    "ready": "sr", "handed_off": "sh", "dormant": "sd", "manager": "sm",
 }
 
-_NAV_LINKS = [
-    ("inbox", "/ui/inbox", "Inbox"),
-    ("coach", "/ui/coach", "Coach"),
-    ("admin", "/admin/", "Admin"),
-]
-
-
-def _nav(active: str) -> str:
-    parts = ['<span class="brand">Stepan2</span>']
-    for key, href, label in _NAV_LINKS:
-        cls = ' class="on"' if key == active else ""
-        parts.append(f'<a href="{href}"{cls}>{label}</a>')
-    return f'<nav>{"".join(parts)}</nav>'
-
-
-def _page(title: str, active: str, body: str) -> str:
-    return (
-        f'<!doctype html><html lang="ru"><head>'
-        f'<meta charset="utf-8">'
-        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>{h.escape(title)} — Stepan2</title>'
-        f'<script src="{_HTMX}"></script>'
-        f'<style>{_CSS}</style></head><body>'
-        f'{_nav(active)}<div class="wrap">{body}</div></body></html>'
-    )
+_HELP_KEYS: dict[str, str] = {
+    "inbox": "help.inbox",
+    "coach": "help.coach",
+    "know": "help.know",
+    "products": "help.products",
+    "members": "help.members",
+    "settings": "help.settings",
+}
 
 
 def _ago(dt: datetime | None) -> str:
     if dt is None:
-        return "—"
-    delta = datetime.now(UTC).replace(tzinfo=None) - dt
-    if delta.total_seconds() < 60:
-        return "сейчас"
-    if delta < timedelta(hours=1):
-        return f"{int(delta.total_seconds() // 60)}м"
-    if delta < timedelta(days=1):
-        return f"{int(delta.total_seconds() // 3600)}ч"
-    return f"{delta.days}д"
+        return ""
+    secs = max(0, int((datetime.now(UTC).replace(tzinfo=None) - dt).total_seconds()))
+    if secs < 3600:
+        return f"{secs // 60}м"
+    if secs < 86400:
+        return f"{secs // 3600}ч"
+    return f"{secs // 86400}д"
 
 
 def _badge(stage: str) -> str:
-    cls = _STAGE_CSS.get(stage, "s-dormant")
-    return f'<span class="badge {cls}">{h.escape(stage)}</span>'
+    return f'<span class="bg {_STC.get(stage, "sd")}">{_h.escape(t(f"stage.{stage}"))}</span>'
 
 
-# ── pages ─────────────────────────────────────────────────────────────────────
-
-def inbox_html(threads: list) -> str:
-    if not threads:
-        items = '<p style="color:var(--tx2);padding:1.5rem 0">Нет чатов</p>'
-    else:
-        cards = []
-        for tid, name, stage, last_in, last_msg, last_dir in threads:
-            arrow = "←" if last_dir == "in" else "→"
-            preview = f"{arrow} {h.escape(str(last_msg)[:90])}" if last_msg else ""
-            name_s = h.escape(str(name or f"Lead #{tid}"))
-            badge = _badge(str(stage or "new"))
-            ago = _ago(last_in)
-            cards.append(
-                f'<a href="/ui/chat/{tid}" class="card"'
-                f' style="display:block;margin-bottom:.4rem;color:inherit">'
-                f'<div class="tc"><span class="lname">{name_s}</span>'
-                f'{badge}<span class="ttime">{ago}</span></div>'
-                f'<div class="lmsg">{preview}</div></a>'
-            )
-        items = "".join(cards)
-    return _page("Inbox", "inbox", f'<h2>Inbox ({len(threads)})</h2>{items}')
-
-
-def chat_html(
-    thread_id: int, lead_name: str, stage: str, messages: list, pending: list
-) -> str:
-    bubbles = []
-    for _mid, direction, sent_by, text, occurred_at in messages:
-        if direction == "out":
-            mgr = " mgr" if sent_by == "manager" else ""
-            cls = f"bbl-out{mgr}"
-        else:
-            cls = "bbl-in"
-        label = {"lead": "лид", "agent": "Степан", "manager": "менеджер"}.get(
-            sent_by, sent_by
-        )
-        bubbles.append(
-            f'<div class="bbl {cls}">'
-            f'<div class="btext">{h.escape(str(text or ""))}</div>'
-            f'<div class="bmeta">{h.escape(label)} · {_ago(occurred_at)}</div></div>'
-        )
-    for _rid, text, sched in pending:
-        bubbles.append(
-            f'<div class="bbl bbl-out bbl-pend">'
-            f'<div class="btext">{h.escape(str(text or ""))}</div>'
-            f'<div class="bmeta">ожидает отправки · {_ago(sched)}</div></div>'
-        )
-    no_msg = "<p style=color:var(--tx2)>Нет сообщений</p>"
-    content = "".join(bubbles) or no_msg
-    header = (
-        f'<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.8rem">'
-        f'<a href="/ui/inbox">← Inbox</a>'
-        f'<strong style="color:#fff">{h.escape(lead_name)}</strong>'
-        f'{_badge(stage)}</div>'
-    )
-    msgs = f'<div class="msgs">{content}</div>'
-    form = (
-        f'<form method="post" action="/ui/chat/{thread_id}/send" class="send-form">'
-        f'<textarea name="text" placeholder="Ваше сообщение…" rows="2"></textarea>'
-        f'<button class="btn btn-p" type="submit">Отправить</button></form>'
-    )
-    return _page(lead_name, "inbox", header + msgs + form)
-
-
-def coach_html(branch_id: int, edits: list) -> str:
-    ph = "Что изменить в базе знаний?"
-    form = (
-        f'<div class="card req-form" style="margin-bottom:.8rem">'
-        f'<form hx-post="/ui/coach/say" hx-target="#coach-result" hx-swap="afterbegin">'
-        f'<input type="hidden" name="branch_id" value="{branch_id}">'
-        f'<textarea name="request" placeholder="{ph}" required rows="3"></textarea>'
-        f'<div style="margin-top:.5rem">'
-        f'<button class="btn btn-p" type="submit">Предложить правку</button></div>'
-        f'</form></div>'
-        f'<div id="coach-result"></div>'
-    )
-    header = '<h2 style="margin-top:.8rem">История</h2>' if edits else ""
-    cards = [
-        _edit_card(eid, req, status, slug, old_t, new_t, summary, created_at)
-        for eid, req, status, slug, old_t, new_t, summary, created_at in edits
-    ]
-    return _page("Coach", "coach", form + header + "".join(cards))
-
-
-def coach_partial_html(
-    eid: int,
-    req: str,
-    status: str,
-    slug: str | None,
-    old_t: str | None,
-    new_t: str | None,
-    summary: str | None,
-) -> str:
-    return _edit_card(eid, req, status, slug, old_t, new_t, summary, None)
-
-
-def _edit_card(
-    eid: int,
-    req: str,
-    status: str,
-    slug: str | None,
-    old_t: str | None,
-    new_t: str | None,
-    summary: str | None,
-    created_at: datetime | None,
-) -> str:
-    stat_cls = f"st-{status}"
-    if created_at:
-        time_str = f'<span class="ttime" style="margin-left:auto">{_ago(created_at)}</span>'
-    else:
-        time_str = ""
-    doc_str = f' · <code style="font-size:.75rem">{h.escape(str(slug))}</code>' if slug else ""
-    actions = ""
-    if status == "proposed":
-        apply_f = (
-            f'<form method="post" action="/ui/coach/apply/{eid}" style="display:inline">'
-            f'<button class="btn btn-p btn-s">✓ Применить</button></form>'
-        )
-        cancel_f = (
-            f'<form method="post" action="/ui/coach/cancel/{eid}"'
-            f' style="display:inline;margin-left:.4rem">'
-            f'<button class="btn btn-d btn-s">✗ Отклонить</button></form>'
-        )
-        actions = f'<div class="edit-row">{apply_f}{cancel_f}</div>'
-    diff = ""
-    if old_t and new_t:
-        diff = (
-            f'<div class="diff-old">− {h.escape(str(old_t)[:400])}</div>'
-            f'<div class="diff-new">+ {h.escape(str(new_t)[:400])}</div>'
-        )
-    summ = ""
-    if summary:
-        summ = (
-            f'<div style="color:var(--tx2);font-size:.82rem;margin-top:.25rem">'
-            f'{h.escape(str(summary)[:300])}</div>'
-        )
-    stat_style = 'font-size:.72rem;font-weight:700;text-transform:uppercase'
-    req_style = 'color:#fff;font-size:.85rem;margin-left:.2rem'
+def _thread_item(row: object, active_tid: int | None) -> str:
+    tid, name, stage, ts, last_msg, last_dir = row  # type: ignore[misc]
+    on = " on" if tid == active_tid else ""
+    arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
+    preview = _h.escape((arr + (last_msg or ""))[:80])
     return (
-        f'<div class="card" style="margin-bottom:.45rem">'
-        f'<div style="display:flex;align-items:baseline;gap:.4rem">'
-        f'<span class="{stat_cls}" style="{stat_style}">{status}</span>'
-        f'{doc_str}<span style="{req_style}">{h.escape(str(req)[:180])}</span>'
-        f'{time_str}</div>'
-        f'{summ}{diff}{actions}</div>'
+        f'<a class="ti{on}"'
+        f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
+        f' onclick="setOn(this)"'
+        f' href="/ui/inbox">'
+        f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
+        f'<span class="ti-ts">{_ago(ts)}</span></div>'
+        f'<div class="ti-p">{_badge(str(stage or "new"))} {preview}</div></a>'
+    )
+
+
+def thread_list_html(threads: list, active_tid: int | None = None) -> str:
+    if not threads:
+        return f'<div class="emp">{_h.escape(t("inbox.empty"))}</div>'
+    return "".join(_thread_item(r, active_tid) for r in threads)
+
+
+def _bubble(row: object) -> str:
+    _, direction, sent_by, text, ts = row  # type: ignore[misc]
+    who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
+    who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
+    txt = _h.escape(str(text or ""))
+    if direction == "in":
+        return (
+            f'<div class="bb bb-i"><div class="bt">{txt}</div>'
+            f'<div class="bm">{who} · {_ago(ts)}</div></div>'
+        )
+    mgr = " mgr" if sent_by == "manager" else ""
+    return (
+        f'<div class="bb bb-o{mgr}"><div class="bt">{txt}</div>'
+        f'<div class="bm">{who} · {_ago(ts)}</div></div>'
+    )
+
+
+def messages_html(msgs: list, pending: list, tid: int) -> str:  # noqa: ARG001
+    parts = [_bubble(r) for r in msgs]
+    pend_label = _h.escape(t("chat.pending"))
+    for row in pending:
+        _, ptxt, _ = row  # type: ignore[misc]
+        parts.append(
+            f'<div class="bb bb-p"><div class="bt">{_h.escape(str(ptxt or ""))}</div>'
+            f'<div class="bm">{pend_label}</div></div>'
+        )
+    return "".join(parts)
+
+
+def chat_panel_html(tid: int, name: str, stage: str, msgs: list, pending: list) -> str:
+    ph = _h.escape(t("chat.ph"))
+    send_lbl = _h.escape(t("chat.send"))
+    return (
+        f'<div class="ch"><span class="ch-n">{_h.escape(name)}</span> {_badge(stage)}</div>'
+        f'<div class="msgs" id="msgs-{tid}">{messages_html(msgs, pending, tid)}</div>'
+        f'<form class="fin"'
+        f' hx-post="/ui/chat/{tid}/send"'
+        f' hx-target="#msgs-{tid}"'
+        f' hx-swap="innerHTML"'
+        f' hx-on::after-request="this.reset();scrollMsgs({tid})">'
+        f'<textarea name="text" rows="2" placeholder="{ph}"></textarea>'
+        f'<button class="bsn">{send_lbl}</button></form>'
+    )
+
+
+def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
+    def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "") -> str:
+        cls = "na on" if nav_id == active_nav else "na"
+        lbl = _h.escape(t(key))
+        return f'<a class="{cls}" href="{href}"{extra}><i class="{icon}"></i> {lbl}</a>'
+
+    def _hna(key: str, panel: str, icon: str, nav_id: str) -> str:
+        extra = (
+            f' hx-get="{panel}" hx-target="#main" hx-push-url="{panel}"'
+            f' onclick="setOn(this,\'na\')"'
+        )
+        return _na(key, panel, icon, nav_id, extra)
+
+    coach_extra = (
+        ' hx-get="/ui/coach/panel" hx-target="#main" hx-push-url="/ui/coach"'
+        " onclick=\"setOn(this,'na')\""
+    )
+    nav = (
+        _na("nav.inbox", "/ui/inbox", "fa-solid fa-inbox", "inbox")
+        + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
+        + '<div class="nav-sep"></div>'
+        + _hna("nav.know", "/ui/knowledge/panel", "fa-solid fa-book", "know")
+        + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
+        + _hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")
+        + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
+        + '<div class="nav-sep"></div>'
+        + _na("nav.tables", "/admin/", "fa-solid fa-table", "tables")
+    )
+
+    def _lb(code: str) -> str:
+        cls = "lb on" if code == lang else "lb"
+        return f'<a class="{cls}" href="/ui/lang/{code}">{code.upper()}</a>'
+
+    help_key = _HELP_KEYS.get(active_nav, "")
+    help_title = _h.escape(t(f"nav.{active_nav}") if active_nav in _HELP_KEYS else t("help.title"))
+    help_body = _h.escape(t(help_key)) if help_key else ""
+
+    script = (
+        "function setOn(el,cls){"
+        "cls=cls||'ti';"
+        "document.querySelectorAll('.'+cls+'.on').forEach(e=>e.classList.remove('on'));"
+        "el.classList.add('on');}"
+        "function scrollMsgs(tid){"
+        "var m=document.getElementById('msgs-'+tid);if(m)m.scrollTop=m.scrollHeight;}"
+        "document.addEventListener('htmx:afterSettle',function(e){"
+        "var m=e.target&&e.target.classList&&e.target.classList.contains('msgs')?e.target"
+        ":e.target.querySelector&&e.target.querySelector('.msgs');"
+        "if(m)m.scrollTop=m.scrollHeight;});"
+        "function toggleHelp(){"
+        "document.getElementById('hov').classList.toggle('on');}"
+    )
+    inbox_lbl = _h.escape(t("nav.inbox"))
+    help_lbl = _h.escape(t("help.title"))
+    help_overlay = (
+        f'<button class="help-btn" onclick="toggleHelp()" title="{help_lbl}">?</button>'
+        f'<div class="hov" id="hov" onclick="if(event.target===this)toggleHelp()">'
+        f'<div class="hov-box">'
+        f'<button class="hov-close" onclick="toggleHelp()">✕</button>'
+        f'<h3>{help_title}</h3>'
+        f'<p>{help_body}</p>'
+        f'</div></div>'
+    )
+    return (
+        f'<!doctype html><html lang="{lang}"><head>'
+        f'<meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+        f'<title>Stepan 2</title>'
+        f'<link rel="stylesheet" href="{_FA}">'
+        f'<script src="{_HTMX}" defer></script>'
+        f'<style>{_CSS}</style></head><body>'
+        f'<aside class="sid">'
+        f'<div class="sid-top"><span class="logo">Stepan 2</span></div>'
+        f'<nav class="sid-nav">{nav}</nav>'
+        f'<div class="sid-ft">'
+        f'<div style="font-size:.63rem;color:#4a5568">lang</div>'
+        f'<div class="lrow">{_lb("ru")}{_lb("en")}{_lb("id")}</div>'
+        f'</div></aside>'
+        f'<div class="thr">'
+        f'<div class="thr-h">{inbox_lbl}</div>'
+        f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>'
+        f'</div>'
+        f'<div id="main">{main_html}</div>'
+        f'{help_overlay}'
+        f'<script>{script}</script>'
+        f'</body></html>'
     )

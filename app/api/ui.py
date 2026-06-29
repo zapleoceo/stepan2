@@ -1,21 +1,32 @@
-"""Custom manager UI: inbox, chat view + manual send, coach mode (KB editor via LLM).
+"""Manager UI — 3-column layout (sidebar + thread list + panel).
 
-Routes at /ui/ — no additional auth (same security as /admin/).
-Branch isolation uses the stepan2_branch cookie set by the admin sidebar.
-
-GET  /ui/inbox                   — thread list (newest first)
-GET  /ui/chat/{thread_id}        — conversation + send form
-POST /ui/chat/{thread_id}/send   — add manager message to outbox
-GET  /ui/coach                   — LLM-powered KB editor
-POST /ui/coach/say               — HTMX: propose a KB change (partial HTML)
-POST /ui/coach/apply/{edit_id}   — apply proposed KB change
-POST /ui/coach/cancel/{edit_id}  — discard proposed KB change
+Routes:
+  GET  /ui/inbox                  — full page shell
+  GET  /ui/threads                — HTMX: thread list partial
+  GET  /ui/chat/{id}/panel        — HTMX: chat panel partial
+  POST /ui/chat/{id}/send         — HTMX: send message, returns updated messages HTML
+  GET  /ui/coach                  — full page (coach active)
+  GET  /ui/coach/panel            — HTMX: coach chat panel
+  POST /ui/coach/say              — HTMX: propose KB edit, returns chat bubble pair
+  POST /ui/coach/apply/{id}       — apply edit, redirect
+  POST /ui/coach/cancel/{id}      — cancel edit, redirect
+  GET  /ui/knowledge/panel        — HTMX: KB doc list
+  GET  /ui/knowledge/{id}/edit    — HTMX: KB doc edit form
+  POST /ui/knowledge/{id}/save    — HTMX: save KB doc, returns edit panel
+  GET  /ui/products/panel         — HTMX: products list
+  GET  /ui/members/panel          — HTMX: members list (with user names)
+  GET  /ui/settings/panel         — HTMX: settings list
+  POST /ui/settings/{id}/save     — HTMX: save one setting, returns updated form row
+  GET  /ui/lang/{code}            — set language cookie, redirect back
 """
 from __future__ import annotations
+
+import html as _h
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
+from starlette.responses import Response
 
 from app.adapters.db.models import Outbox
 from app.adapters.db.session import session_scope
@@ -23,133 +34,215 @@ from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import branch_ids_from_request
 from app.modules.conversation.coach_service import apply_edit, cancel_edit, propose_edit
 
-from ._ui_html import chat_html, coach_html, coach_partial_html, inbox_html
+from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
+from ._ui_html import app_shell, chat_panel_html, messages_html, thread_list_html
+from ._ui_panels import (
+    _coach_pair,
+    coach_chat_html,
+    knowledge_edit_html,
+    knowledge_panel_html,
+    members_panel_html,
+    products_panel_html,
+    settings_panel_html,
+)
 
 router = APIRouter(prefix="/ui")
 
+_THREAD_TMPL = (
+    "SELECT ct.id, l.display_name, l.stage, ct.last_in_at,"
+    " (SELECT m.text FROM message m WHERE m.thread_id = ct.id"
+    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_msg,"
+    " (SELECT m.direction FROM message m WHERE m.thread_id = ct.id"
+    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_dir"
+    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+    " {where}"
+    " ORDER BY COALESCE(ct.last_in_at, ct.created_at) DESC LIMIT 100"
+)
 
-# ─── inbox ────────────────────────────────────────────────────────────────────
+
+async def _fetch_threads(session, branch_ids: list[int] | None) -> list:
+    if branch_ids:
+        rows = await session.execute(
+            text(_THREAD_TMPL.format(where="WHERE l.branch_id = ANY(:bids)")),
+            {"bids": branch_ids},
+        )
+    else:
+        rows = await session.execute(text(_THREAD_TMPL.format(where="")))
+    return rows.all()
+
+
+async def _coach_data(session, branch_id: int) -> tuple[list, list]:
+    """Fetch coaching edits (ASC) and active notes for a branch."""
+    edits = (
+        await session.execute(
+            text(
+                "SELECT id, request, status, slug, old_text, new_text, summary, created_at"
+                " FROM coaching_edit WHERE branch_id = :bid ORDER BY id ASC LIMIT 60"
+            ),
+            {"bid": branch_id},
+        )
+    ).all()
+    notes = (
+        await session.execute(
+            text(
+                "SELECT id, text FROM coaching_note"
+                " WHERE branch_id = :bid AND active = true ORDER BY id"
+            ),
+            {"bid": branch_id},
+        )
+    ).all()
+    return list(edits), list(notes)
+
+
+# ─── full pages ───────────────────────────────────────────────────────────────
 
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(request: Request) -> HTMLResponse:
+    lang = apply_lang(request)
+    empty = '<div class="emp">Select a conversation</div>'
+    return HTMLResponse(app_shell(lang, empty, active_nav="inbox"))
+
+
+@router.get("/coach", response_class=HTMLResponse)
+async def coach_page(request: Request) -> HTMLResponse:
+    lang = apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
+    async with session_scope() as session:
+        edits, notes = await _coach_data(session, branch_id)
+    panel = coach_chat_html(branch_id, edits, notes)
+    return HTMLResponse(app_shell(lang, panel, active_nav="coach"))
+
+
+# ─── HTMX partials ────────────────────────────────────────────────────────────
+
+@router.get("/threads", response_class=HTMLResponse)
+async def threads_partial(request: Request) -> HTMLResponse:
+    apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
-        if branch_ids:
-            rows = await session.execute(
-                text("""
-                    SELECT ct.id, l.display_name, l.stage, ct.last_in_at,
-                      (SELECT m.text FROM message m WHERE m.thread_id = ct.id
-                       ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_msg,
-                      (SELECT m.direction FROM message m WHERE m.thread_id = ct.id
-                       ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_dir
-                    FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id
-                    WHERE l.branch_id = ANY(:bids)
-                    ORDER BY COALESCE(ct.last_in_at, ct.created_at) DESC LIMIT 100
-                """),
-                {"bids": branch_ids},
-            )
-        else:
-            rows = await session.execute(text("""
-                SELECT ct.id, l.display_name, l.stage, ct.last_in_at,
-                  (SELECT m.text FROM message m WHERE m.thread_id = ct.id
-                   ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_msg,
-                  (SELECT m.direction FROM message m WHERE m.thread_id = ct.id
-                   ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_dir
-                FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id
-                ORDER BY COALESCE(ct.last_in_at, ct.created_at) DESC LIMIT 100
-            """))
-    return HTMLResponse(inbox_html(rows.all()))
+        rows = await _fetch_threads(session, branch_ids)
+    return HTMLResponse(thread_list_html(rows))
 
 
-# ─── chat ─────────────────────────────────────────────────────────────────────
-
-@router.get("/chat/{thread_id}", response_class=HTMLResponse)
-async def chat_view(thread_id: int) -> HTMLResponse:
+@router.get("/chat/{thread_id}/panel", response_class=HTMLResponse)
+async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
+    apply_lang(request)
     async with session_scope() as session:
         info = (
             await session.execute(
-                text("SELECT ct.id, l.display_name, l.stage, l.branch_id "
-                     "FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"),
+                text(
+                    "SELECT ct.id, l.display_name, l.stage, l.branch_id"
+                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+                ),
                 {"tid": thread_id},
             )
         ).first()
         if not info:
-            return HTMLResponse(
-                "<h2 style='font-family:sans-serif;padding:2rem'>Thread not found</h2>",
-                status_code=404,
-            )
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         msgs = (
             await session.execute(
-                text("SELECT id, direction, sent_by, text, occurred_at FROM message "
-                     "WHERE thread_id = :tid ORDER BY occurred_at, id"),
+                text(
+                    "SELECT id, direction, sent_by, text, occurred_at FROM message"
+                    " WHERE thread_id = :tid ORDER BY occurred_at, id"
+                ),
                 {"tid": thread_id},
             )
         ).all()
         pending = (
             await session.execute(
-                text("SELECT id, text, scheduled_at FROM outbox "
-                     "WHERE thread_id = :tid AND status = 'pending' ORDER BY id"),
+                text(
+                    "SELECT id, text, scheduled_at FROM outbox"
+                    " WHERE thread_id = :tid AND status = 'pending' ORDER BY id"
+                ),
                 {"tid": thread_id},
             )
         ).all()
     _, name, stage, _ = info
     return HTMLResponse(
-        chat_html(thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending)
+        chat_panel_html(thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending)
     )
 
 
-@router.post("/chat/{thread_id}/send")
-async def chat_send(thread_id: int, text_body: str = Form(alias="text")) -> RedirectResponse:
+@router.post("/chat/{thread_id}/send", response_class=HTMLResponse)
+async def chat_send(
+    thread_id: int, request: Request, text_body: str = Form(alias="text")
+) -> HTMLResponse:
+    apply_lang(request)
     text_body = text_body.strip()
-    if not text_body:
-        return RedirectResponse(f"/ui/chat/{thread_id}", status_code=303)
     async with session_scope() as session:
         info = (
             await session.execute(
-                text("SELECT l.branch_id FROM channel_thread ct "
-                     "JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"),
+                text(
+                    "SELECT l.branch_id FROM channel_thread ct"
+                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+                ),
                 {"tid": thread_id},
             )
         ).first()
-        if not info:
-            return RedirectResponse("/ui/inbox", status_code=303)
+        if not info or not text_body:
+            msgs = (
+                await session.execute(
+                    text(
+                        "SELECT id, direction, sent_by, text, occurred_at FROM message"
+                        " WHERE thread_id = :tid ORDER BY occurred_at, id"
+                    ),
+                    {"tid": thread_id},
+                )
+            ).all()
+            return HTMLResponse(messages_html(msgs, [], thread_id))
         session.add(Outbox(
             branch_id=info[0], thread_id=thread_id, text=text_body, source="manager",
         ))
         await session.flush()
-    return RedirectResponse(f"/ui/chat/{thread_id}", status_code=303)
+        msgs = (
+            await session.execute(
+                text(
+                    "SELECT id, direction, sent_by, text, occurred_at FROM message"
+                    " WHERE thread_id = :tid ORDER BY occurred_at, id"
+                ),
+                {"tid": thread_id},
+            )
+        ).all()
+        pending = (
+            await session.execute(
+                text(
+                    "SELECT id, text, scheduled_at FROM outbox"
+                    " WHERE thread_id = :tid AND status = 'pending' ORDER BY id"
+                ),
+                {"tid": thread_id},
+            )
+        ).all()
+    return HTMLResponse(messages_html(msgs, pending, thread_id))
 
 
 # ─── coach ────────────────────────────────────────────────────────────────────
 
-@router.get("/coach", response_class=HTMLResponse)
-async def coach_page(request: Request) -> HTMLResponse:
+@router.get("/coach/panel", response_class=HTMLResponse)
+async def coach_panel_partial(request: Request) -> HTMLResponse:
+    apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     branch_id = branch_ids[0] if branch_ids else 1
     async with session_scope() as session:
-        rows = (
-            await session.execute(
-                text("SELECT id, request, status, slug, old_text, new_text, summary, created_at "
-                     "FROM coaching_edit WHERE branch_id = :bid ORDER BY id DESC LIMIT 50"),
-                {"bid": branch_id},
-            )
-        ).all()
-    return HTMLResponse(coach_html(branch_id, rows))
+        edits, notes = await _coach_data(session, branch_id)
+    return HTMLResponse(coach_chat_html(branch_id, edits, notes))
 
 
 @router.post("/coach/say", response_class=HTMLResponse)
 async def coach_say(
+    request: Request,
     branch_id: int = Form(),
     request_text: str = Form(alias="request"),
 ) -> HTMLResponse:
+    apply_lang(request)
     llm = BrokerLLM()
     async with session_scope() as session:
         edit = await propose_edit(session, branch_id, request_text.strip(), llm)
-        partial = coach_partial_html(
+        html = _coach_pair(
             edit.id, edit.request, edit.status, edit.slug,
-            edit.old_text, edit.new_text, edit.summary,
+            edit.old_text, edit.new_text, edit.summary, edit.created_at,
         )
-    return HTMLResponse(partial)
+    return HTMLResponse(html)
 
 
 @router.post("/coach/apply/{edit_id}")
@@ -168,3 +261,152 @@ async def coach_cancel(edit_id: int, request: Request) -> RedirectResponse:
     async with session_scope() as session:
         await cancel_edit(session, branch_id, edit_id)
     return RedirectResponse("/ui/coach", status_code=303)
+
+
+# ─── knowledge ────────────────────────────────────────────────────────────────
+
+@router.get("/knowledge/panel", response_class=HTMLResponse)
+async def knowledge_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "WHERE branch_id = ANY(:bids)" if branch_ids else ""
+        params = {"bids": branch_ids} if branch_ids else {}
+        q = f"SELECT id, slug, title, content FROM knowledge_doc {where} ORDER BY id"  # noqa: S608
+        docs = (await session.execute(text(q), params)).all()
+    return HTMLResponse(knowledge_panel_html(list(docs)))
+
+
+@router.get("/knowledge/{doc_id}/edit", response_class=HTMLResponse)
+async def knowledge_edit(doc_id: int, request: Request) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text("SELECT id, slug, title, content FROM knowledge_doc WHERE id = :id"),
+                {"id": doc_id},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    html = knowledge_edit_html(row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""))
+    return HTMLResponse(html)
+
+
+@router.post("/knowledge/{doc_id}/save", response_class=HTMLResponse)
+async def knowledge_save(
+    doc_id: int,
+    request: Request,
+    title: str = Form(default=""),
+    content: str = Form(default=""),
+) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        await session.execute(
+            text("UPDATE knowledge_doc SET title = :t, content = :c WHERE id = :id"),
+            {"t": title.strip(), "c": content.strip(), "id": doc_id},
+        )
+        row = (
+            await session.execute(
+                text("SELECT id, slug, title, content FROM knowledge_doc WHERE id = :id"),
+                {"id": doc_id},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    return HTMLResponse(
+        knowledge_edit_html(row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""))
+    )
+
+
+# ─── products ─────────────────────────────────────────────────────────────────
+
+@router.get("/products/panel", response_class=HTMLResponse)
+async def products_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "WHERE branch_id = ANY(:bids)" if branch_ids else ""
+        params = {"bids": branch_ids} if branch_ids else {}
+        q = (
+            "SELECT id, slug, title, is_active, sort_order"  # noqa: S608
+            f" FROM product {where} ORDER BY sort_order, id"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(products_panel_html(list(rows)))
+
+
+# ─── members ──────────────────────────────────────────────────────────────────
+
+@router.get("/members/panel", response_class=HTMLResponse)
+async def members_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "WHERE m.branch_id = ANY(:bids)" if branch_ids else ""
+        params = {"bids": branch_ids} if branch_ids else {}
+        q = (
+            "SELECT u.id, u.telegram_id, m.role, u.name, m.branch_id"  # noqa: S608
+            " FROM membership m JOIN app_user u ON u.id = m.user_id"
+            f" {where} ORDER BY m.branch_id, m.role, u.name"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(members_panel_html(list(rows)))
+
+
+# ─── settings ─────────────────────────────────────────────────────────────────
+
+@router.get("/settings/panel", response_class=HTMLResponse)
+async def settings_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "WHERE branch_id = ANY(:bids)" if branch_ids else ""
+        params = {"bids": branch_ids} if branch_ids else {}
+        q = f"SELECT id, branch_id, key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(settings_panel_html(list(rows)))
+
+
+@router.post("/settings/{setting_id}/save", response_class=HTMLResponse)
+async def settings_save(
+    setting_id: int,
+    request: Request,
+    value: str = Form(default=""),
+) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        await session.execute(
+            text("UPDATE app_setting SET value = :v WHERE id = :id"),
+            {"v": value.strip(), "id": setting_id},
+        )
+        row = (
+            await session.execute(
+                text("SELECT id, branch_id, key, value FROM app_setting WHERE id = :id"),
+                {"id": setting_id},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse("—")
+    val = str(row[3])
+    save_lbl = _h.escape(t("set.save"))
+    saved_lbl = _h.escape(t("set.saved"))
+    return HTMLResponse(
+        f'<form hx-post="/ui/settings/{setting_id}/save" hx-target="this"'
+        f' hx-swap="outerHTML" style="display:flex;gap:.35rem;align-items:center">'
+        f'<input class="set-val" name="value" value="{_h.escape(val)}">'
+        f'<button class="btn-sm btn-p">{save_lbl}</button>'
+        f'<span style="color:#51cf66;font-size:.75rem">{saved_lbl}</span>'
+        f'</form>'
+    )
+
+
+# ─── language switcher ────────────────────────────────────────────────────────
+
+@router.get("/lang/{code}")
+async def set_lang(code: str, request: Request) -> Response:
+    lang = code if code in LANGS else "en"
+    referer = request.headers.get("referer", "/ui/inbox")
+    resp = RedirectResponse(referer, status_code=303)
+    resp.set_cookie(LANG_COOKIE, lang, max_age=60 * 60 * 24 * 365, httponly=False, samesite="lax")
+    return resp
