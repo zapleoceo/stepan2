@@ -9,6 +9,8 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+from datetime import UTC
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -37,6 +39,7 @@ def test_t_returns_fallback_key_for_missing() -> None:
 
 def test_apply_lang_sets_contextvar() -> None:
     from unittest.mock import MagicMock
+
     from app.api._i18n import apply_lang, current_lang
 
     req = MagicMock()
@@ -47,6 +50,7 @@ def test_apply_lang_sets_contextvar() -> None:
 
 def test_apply_lang_rejects_invalid_code() -> None:
     from unittest.mock import MagicMock
+
     from app.api._i18n import apply_lang, current_lang
 
     req = MagicMock()
@@ -90,10 +94,11 @@ def test_thread_list_html_empty_russian() -> None:
 
 
 def test_thread_list_html_with_row() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.api._ui_html import thread_list_html
     _set_lang("en")
-    row = (42, "Alice Test", "new", datetime.now(timezone.utc).replace(tzinfo=None), "Hello", "in")
+    row = (42, "Alice Test", "new", datetime.now(UTC).replace(tzinfo=None), "Hello", "in")
     html = thread_list_html([row])
     assert "Alice Test" in html
     assert 'hx-get="/ui/chat/42/panel"' in html
@@ -159,12 +164,13 @@ def test_chat_panel_html_contains_send_form() -> None:
 
 
 def test_coach_pair_proposed_shows_actions() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.api._ui_panels import _coach_pair
     _set_lang("en")
     html = _coach_pair(
         1, "Change price", "proposed", "pricing",
-        "old text", "new text", "summary", datetime.now(timezone.utc).replace(tzinfo=None),
+        "old text", "new text", "summary", datetime.now(UTC).replace(tzinfo=None),
     )
     assert "✓ Apply" in html
     assert "✗ Cancel" in html
@@ -176,12 +182,13 @@ def test_coach_pair_proposed_shows_actions() -> None:
 
 
 def test_coach_pair_applied_no_actions() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.api._ui_panels import _coach_pair
     _set_lang("en")
     html = _coach_pair(
         2, "Done", "applied", None, None, None, "done",
-        datetime.now(timezone.utc).replace(tzinfo=None),
+        datetime.now(UTC).replace(tzinfo=None),
     )
     assert "✓ Apply" not in html
     assert "done" in html
@@ -378,11 +385,12 @@ def test_leads_panel_html_empty() -> None:
 
 
 def test_leads_panel_html_with_rows() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.api._ui_panels import leads_panel_html
     _set_lang("en")
     rows = [(1, "Alice Test", "+62811234567", "qualifying",
-             datetime.now(timezone.utc).replace(tzinfo=None))]
+             datetime.now(UTC).replace(tzinfo=None))]
     html = leads_panel_html(rows)
     assert "Alice Test" in html
     assert "+62811234567" in html
@@ -398,10 +406,11 @@ def test_outbox_panel_html_empty() -> None:
 
 
 def test_outbox_panel_html_statuses() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.api._ui_panels import outbox_panel_html
     _set_lang("en")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     rows = [
         (1, 10, "sent", "agent", "Hello!", now),
         (2, 10, "pending", "manager", "Wait…", now),
@@ -471,12 +480,13 @@ def test_knowledge_panel_html_has_create_button() -> None:
 
 
 def test_coach_pair_applied_shows_revert() -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.api._ui_panels import _coach_pair
     _set_lang("en")
     html = _coach_pair(
         3, "Done", "applied", "persona", "old", "new", "summary",
-        datetime.now(timezone.utc).replace(tzinfo=None),
+        datetime.now(UTC).replace(tzinfo=None),
     )
     assert "Revert" in html
     assert "/ui/coach/revert/3" in html
