@@ -75,14 +75,16 @@ _CSS = (
     ".bb-o .bt{background:#1e3a5f}.bb-o.mgr .bt{background:#2a1f3a}"
     ".bm{font-size:.63rem;color:#4a5568;margin-top:.08rem}"
     ".bb-o .bm{text-align:right}"
-    ".fin{padding:.52rem .8rem;border-top:1px solid #2d3748;display:flex;gap:.4rem;"
+    ".fin{padding:.45rem .8rem .52rem;border-top:1px solid #2d3748;"
     "background:#141925;flex-shrink:0}"
+    ".fin-acts{display:flex;gap:.3rem;margin-bottom:.3rem}"
+    ".fin-row{display:flex;gap:.4rem;align-items:flex-end}"
     ".fin textarea{flex:1;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;"
     "color:#d0d7de;padding:.36rem .52rem;font-size:.8rem;resize:none;"
     "font-family:inherit;line-height:1.4}"
     ".fin textarea:focus{outline:none;border-color:#206bc4}"
     ".bsn{background:#206bc4;color:#fff;border:none;border-radius:6px;"
-    "padding:0 .88rem;font-size:.78rem;font-weight:600;cursor:pointer}"
+    "padding:0 .88rem;font-size:.78rem;font-weight:600;cursor:pointer;height:2.1rem}"
     ".bsn:hover{background:#1a5aaa}"
     ".emp{display:flex;align-items:center;justify-content:center;height:100%;"
     "color:#4a5568;font-size:.86rem}"
@@ -138,9 +140,9 @@ _CSS = (
     ".kdoc-preview{font-size:.74rem;color:#6b7685;overflow:hidden;text-overflow:ellipsis;"
     "white-space:nowrap}"
     ".hint{font-size:.74rem;color:#4a5568;padding:.32rem 0 .45rem;line-height:1.45}"
-    ".help-btn{position:fixed;bottom:1.1rem;right:1.1rem;width:2rem;height:2rem;"
-    "border-radius:50%;background:#206bc4;color:#fff;border:none;font-size:.85rem;"
-    "font-weight:700;cursor:pointer;z-index:400;box-shadow:0 2px 8px rgba(0,0,0,.5)}"
+    ".help-btn{width:1.45rem;height:1.45rem;border-radius:50%;background:#206bc4;"
+    "color:#fff;border:none;font-size:.72rem;font-weight:700;cursor:pointer;"
+    "flex-shrink:0;line-height:1}"
     ".hov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);"
     "z-index:500;align-items:center;justify-content:center}"
     ".hov.on{display:flex}"
@@ -280,17 +282,10 @@ def chat_header_html(tid: int, name: str, stage: str) -> str:
         f' onchange="this.form.requestSubmit()">{opts}</select>'
         f'</form>'
     )
-    sug_lbl = _h.escape(t("chat.suggest"))
-    suggest_btn = (
-        f'<button class="act-btn"'
-        f' hx-post="/ui/chat/{tid}/suggest"'
-        f' hx-target="#sug-{tid}"'
-        f' hx-swap="innerHTML">{sug_lbl}</button>'
-    )
     return (
         f'<div class="ch" id="chat-hdr-{tid}">'
         f'<span class="ch-n">{_h.escape(name)}</span>'
-        f'<div class="ch-acts">{stage_sel}{suggest_btn}</div></div>'
+        f'<div class="ch-acts">{stage_sel}</div></div>'
     )
 
 
@@ -301,7 +296,8 @@ def chat_panel_html(
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
     sug_lbl = _h.escape(t("chat.suggest"))
-    # Stage selector
+    tr_lbl = _h.escape(t("chat.translate"))
+    # Stage selector in header
     opts = "".join(
         f'<option value="{s}" {"selected" if s == stage else ""}>'
         f'{_h.escape(t(f"stage.{s}"))}</option>'
@@ -315,25 +311,30 @@ def chat_panel_html(
         f'<select class="act-sel" name="stage" onchange="this.form.requestSubmit()">{opts}</select>'
         f'</form>'
     )
-    suggest_btn = (
-        f'<button class="act-btn"'
-        f' hx-post="/ui/chat/{tid}/suggest"'
-        f' hx-target="#sug-{tid}"'
-        f' hx-swap="innerHTML">{sug_lbl}</button>'
-    )
     return (
         f'<div class="ch" id="chat-hdr-{tid}">'
         f'<span class="ch-n">{_h.escape(name)}</span>'
-        f'<div class="ch-acts">{stage_sel}{suggest_btn}</div></div>'
+        f'<div class="ch-acts">{stage_sel}</div></div>'
         f'<div class="msgs" id="msgs-{tid}">{messages_html(msgs, pending, tid)}</div>'
         f'<div id="sug-{tid}"></div>'
-        f'<form class="fin"'
+        f'<div id="tr-{tid}"></div>'
+        f'<div class="fin">'
+        f'<div class="fin-acts">'
+        f'<button class="act-btn"'
+        f' hx-post="/ui/chat/{tid}/suggest"'
+        f' hx-target="#sug-{tid}" hx-swap="innerHTML">{sug_lbl}</button>'
+        f'<button class="act-btn"'
+        f' hx-post="/ui/chat/{tid}/translate"'
+        f' hx-target="#tr-{tid}" hx-swap="innerHTML">{tr_lbl}</button>'
+        f'</div>'
+        f'<form class="fin-row"'
         f' hx-post="/ui/chat/{tid}/send"'
         f' hx-target="#msgs-{tid}"'
         f' hx-swap="innerHTML"'
         f' hx-on::after-request="this.reset();scrollMsgs({tid})">'
         f'<textarea name="text" rows="2" placeholder="{ph}"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
+        f'</div>'
     )
 
 
@@ -422,7 +423,6 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
     inbox_lbl = _h.escape(t("nav.inbox"))
     help_lbl = _h.escape(t("help.title"))
     help_overlay = (
-        f'<button class="help-btn" onclick="toggleHelp()" title="{help_lbl}">?</button>'
         f'<div class="hov" id="hov" onclick="if(event.target===this)toggleHelp()">'
         f'<div class="hov-box">'
         f'<button class="hov-close" onclick="toggleHelp()">✕</button>'
@@ -438,7 +438,10 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         f'<script src="{_HTMX}" defer></script>'
         f'<style>{_CSS}</style></head><body>'
         f'<aside class="sid">'
-        f'<div class="sid-top"><span class="logo">Stepan 2</span></div>'
+        f'<div class="sid-top" style="display:flex;align-items:center;justify-content:space-between">'
+        f'<span class="logo">Stepan 2</span>'
+        f'<button class="help-btn" onclick="toggleHelp()" title="{help_lbl}">?</button>'
+        f'</div>'
         f'<nav class="sid-nav">{nav}</nav>'
         f'<div class="sid-ft">'
         f'<div class="bft-lbl">{_h.escape(t("branch.filter"))}</div>'

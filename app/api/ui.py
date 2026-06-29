@@ -520,6 +520,51 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     return HTMLResponse(suggest_box_html(thread_id, draft.strip()))
 
 
+@router.post("/chat/{thread_id}/translate", response_class=HTMLResponse)
+async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT text FROM message"
+                    " WHERE thread_id = :tid AND direction = 'in'"
+                    " ORDER BY occurred_at DESC, id DESC LIMIT 1"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+    if not row or not row[0]:
+        return HTMLResponse("")
+    last_msg = (row[0] or "")[:800]
+    lang_code = apply_lang(request)
+    target_lang = {"ru": "Russian", "en": "English", "id": "Indonesian"}.get(lang_code, "English")
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"Translate the following message to {target_lang}. "
+                "Return ONLY the translated text, nothing else."
+            ),
+        },
+        {"role": "user", "content": last_msg},
+    ]
+    llm = BrokerLLM()
+    try:
+        translation, _ = await llm.chat(messages, capability="chat:fast", max_tokens=400)
+    except Exception:
+        translation = ""
+    if not translation.strip():
+        return HTMLResponse("")
+    tr_lbl = _h.escape(t("chat.tr_result"))
+    return HTMLResponse(
+        f'<div style="padding:.3rem .75rem;font-size:.76rem;color:#8899aa;'
+        f'background:#141925;border-top:1px solid #2d3748">'
+        f'<span style="color:#4a5568">{tr_lbl}</span> {_h.escape(translation.strip())}'
+        f'</div>'
+    )
+
+
 # ─── products CRUD ────────────────────────────────────────────────────────────
 
 @router.get("/products/new", response_class=HTMLResponse)

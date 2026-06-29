@@ -162,6 +162,8 @@ _TR: dict[str, dict[str, str]] = {
     # chat actions
     "chat.stage":       {"ru": "Стадия",           "en": "Stage",             "id": "Tahap"},
     "chat.suggest":     {"ru": "✦ Предложить",     "en": "✦ Suggest",         "id": "✦ Sarankan"},
+    "chat.translate":   {"ru": "⇄ Перевод",        "en": "⇄ Translate",       "id": "⇄ Terjemah"},
+    "chat.tr_result":   {"ru": "Перевод:",          "en": "Translation:",       "id": "Terjemahan:"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",
