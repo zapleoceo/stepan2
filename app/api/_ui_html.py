@@ -201,10 +201,10 @@ def _ago(dt: datetime | None) -> str:
         return ""
     secs = max(0, int((datetime.now(UTC).replace(tzinfo=None) - dt).total_seconds()))
     if secs < 3600:
-        return f"{secs // 60}м"
+        return f"{secs // 60}{t('time.m')}"
     if secs < 86400:
-        return f"{secs // 3600}ч"
-    return f"{secs // 86400}д"
+        return f"{secs // 3600}{t('time.h')}"
+    return f"{secs // 86400}{t('time.d')}"
 
 
 def _badge(stage: str) -> str:

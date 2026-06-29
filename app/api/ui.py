@@ -110,7 +110,7 @@ async def _coach_data(session, branch_id: int) -> tuple[list, list]:
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
-    empty = '<div class="emp">Select a conversation</div>'
+    empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox"))
 
 
@@ -522,7 +522,7 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
 
 @router.post("/chat/{thread_id}/translate", response_class=HTMLResponse)
 async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
-    apply_lang(request)
+    lang_code = apply_lang(request)
     async with session_scope() as session:
         row = (
             await session.execute(
@@ -537,7 +537,6 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     if not row or not row[0]:
         return HTMLResponse("")
     last_msg = (row[0] or "")[:800]
-    lang_code = apply_lang(request)
     target_lang = {"ru": "Russian", "en": "English", "id": "Indonesian"}.get(lang_code, "English")
     messages = [
         {
@@ -790,6 +789,10 @@ async def agent_toggle(
     request: Request, branch_id: int = Form(default=1),
 ) -> HTMLResponse:
     apply_lang(request)
+    # Validate branch_id against the cookie to prevent cross-branch manipulation
+    allowed = branch_ids_from_request(request)
+    if allowed and branch_id not in allowed:
+        branch_id = allowed[0]
     async with session_scope() as session:
         row = (
             await session.execute(
@@ -831,11 +834,19 @@ def _agent_toggle_html(branch_id: int, enabled: bool) -> str:
 
 # ─── language switcher ────────────────────────────────────────────────────────
 
+_FULL_PAGE_PATHS = {"/ui/inbox", "/ui/coach"}
+
+
 @router.get("/lang/{code}")
 async def set_lang(code: str, request: Request) -> Response:
     lang = code if code in LANGS else "en"
-    referer = request.headers.get("referer", "/ui/inbox")
-    resp = RedirectResponse(referer, status_code=303)
+    # HTMX pushes partial URLs (/ui/*/panel) to the address bar; if the
+    # referer points to a partial, redirect to inbox instead of raw HTML.
+    from urllib.parse import urlparse  # noqa: PLC0415
+    raw_ref = request.headers.get("referer", "")
+    path = urlparse(raw_ref).path if raw_ref else ""
+    target = raw_ref if path in _FULL_PAGE_PATHS else "/ui/inbox"
+    resp = RedirectResponse(target, status_code=303)
     resp.set_cookie(LANG_COOKIE, lang, max_age=60 * 60 * 24 * 365, httponly=False, samesite="lax")
     return resp
 

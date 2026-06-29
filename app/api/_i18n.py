@@ -230,6 +230,10 @@ _TR: dict[str, dict[str, str]] = {
     # agent toggle
     "bot.on":        {"ru": "Бот ON",  "en": "Bot ON",  "id": "Bot ON"},
     "bot.off":       {"ru": "Бот OFF", "en": "Bot OFF", "id": "Bot OFF"},
+    # time abbreviations
+    "time.m":        {"ru": "м",  "en": "m",  "id": "m"},
+    "time.h":        {"ru": "ч",  "en": "h",  "id": "j"},
+    "time.d":        {"ru": "д",  "en": "d",  "id": "h"},
     # stages
     "stage.new":        {"ru": "новый",     "en": "new",          "id": "baru"},
     "stage.qualifying": {"ru": "квалиф.",   "en": "qualifying",   "id": "kualifikasi"},
