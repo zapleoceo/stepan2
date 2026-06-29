@@ -23,6 +23,33 @@
         </div>
       </nav>
 
+      {# ── Manager quick-links ─────────────────────────────────────────────
+         Direct links to the custom manager UI pages (outside SQLAdmin).
+      #}
+      <div style="padding:.1rem .75rem .6rem">
+        <div style="font-size:.62rem;text-transform:uppercase;letter-spacing:.1em;
+                    color:rgba(255,255,255,.35);margin-bottom:.35rem;padding-left:2px">
+          Manager UI
+        </div>
+        <a href="/ui/inbox" style="
+          display:flex;align-items:center;gap:.55rem;
+          padding:.38rem .65rem;border-radius:5px;
+          color:#e8eef4;font-size:.82rem;text-decoration:none;
+          margin-bottom:.25rem;
+          transition:background .12s
+          " onmouseover="this.style.background='rgba(255,255,255,.13)'"
+             onmouseout="this.style.background=''"
+        ><i class="fa-solid fa-inbox" style="width:14px;text-align:center"></i> Inbox</a>
+        <a href="/ui/coach" style="
+          display:flex;align-items:center;gap:.55rem;
+          padding:.38rem .65rem;border-radius:5px;
+          color:#e8eef4;font-size:.82rem;text-decoration:none;
+          transition:background .12s
+          " onmouseover="this.style.background='rgba(255,255,255,.13)'"
+             onmouseout="this.style.background=''"
+        ><i class="fa-solid fa-pencil" style="width:14px;text-align:center"></i> Coach KB</a>
+      </div>
+
       {# ── Branch multi-filter ───────────────────────────────────────────────
          Hidden until JS loads branch list from /_admin/branches.
          Stores selection as cookie stepan2_branch="1,3" (comma-separated ints).

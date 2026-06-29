@@ -30,7 +30,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:
-        return RedirectResponse(url="/admin/", status_code=302)
+        return RedirectResponse(url="/ui/inbox", status_code=302)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, object]:
