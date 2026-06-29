@@ -147,6 +147,31 @@ _CSS = (
     ".hov-box p{color:#8899aa;font-size:.8rem;line-height:1.6;margin-bottom:.5rem}"
     ".hov-close{float:right;background:none;border:none;color:#6b7685;"
     "font-size:1.1rem;cursor:pointer;padding:.1rem .3rem;margin-left:.5rem}"
+    # chat actions
+    ".ch-acts{display:flex;align-items:center;gap:.4rem;margin-left:auto}"
+    ".act-sel{background:#1a1f2e;border:1px solid #2d3748;border-radius:5px;"
+    "color:#d0d7de;font-size:.74rem;padding:.18rem .35rem;cursor:pointer}"
+    ".act-sel:focus{outline:none;border-color:#206bc4}"
+    ".act-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);"
+    "border-radius:5px;color:#8899aa;font-size:.72rem;padding:.18rem .45rem;"
+    "cursor:pointer;white-space:nowrap}"
+    ".act-btn:hover{background:rgba(32,107,196,.28);color:#4da6ff;border-color:#206bc4}"
+    ".act-btn.primary{background:#206bc4;color:#fff;border-color:#206bc4}"
+    ".act-btn.primary:hover{background:#1a5aaa}"
+    # suggest box
+    ".sug-box{padding:.45rem .75rem;background:#1a1f2e;border-top:1px solid #2d3748;"
+    "display:flex;flex-direction:column;gap:.3rem;flex-shrink:0}"
+    ".sug-ta{width:100%;background:#0f1117;border:1px solid #2d3748;border-radius:5px;"
+    "color:#d0d7de;padding:.3rem .45rem;font-size:.79rem;resize:vertical;"
+    "min-height:3.5rem;font-family:inherit;line-height:1.4}"
+    ".sug-ta:focus{outline:none;border-color:#206bc4}"
+    ".sug-acts{display:flex;gap:.4rem}"
+    # lead/outbox tables
+    ".st-pill{display:inline-block;padding:.06rem .28rem;border-radius:5px;"
+    "font-size:.62rem;font-weight:700;text-transform:uppercase}"
+    ".s-pend{background:#2a2218;color:#ffd43b}"
+    ".s-sent{background:#1f3a1f;color:#51cf66}"
+    ".s-fail{background:#3a1f1f;color:#ff6b6b}"
 )
 
 _STC: dict[str, str] = {
@@ -161,6 +186,8 @@ _HELP_KEYS: dict[str, str] = {
     "products": "help.products",
     "members": "help.members",
     "settings": "help.settings",
+    "leads": "help.leads",
+    "outbox": "help.outbox",
 }
 
 
@@ -230,12 +257,73 @@ def messages_html(msgs: list, pending: list, tid: int) -> str:  # noqa: ARG001
     return "".join(parts)
 
 
-def chat_panel_html(tid: int, name: str, stage: str, msgs: list, pending: list) -> str:
+_STAGES = ("new", "qualifying", "presenting", "objection",
+           "ready", "handed_off", "dormant", "manager")
+
+
+def chat_header_html(tid: int, name: str, stage: str) -> str:
+    """Renders just the chat header div (for hx-swap=outerHTML on stage change)."""
+    opts = "".join(
+        f'<option value="{s}" {"selected" if s == stage else ""}>'
+        f'{_h.escape(t(f"stage.{s}"))}</option>'
+        for s in _STAGES
+    )
+    stage_sel = (
+        f'<form style="display:inline;margin:0"'
+        f' hx-post="/ui/chat/{tid}/stage"'
+        f' hx-target="#chat-hdr-{tid}"'
+        f' hx-swap="outerHTML">'
+        f'<select class="act-sel" name="stage"'
+        f' onchange="this.form.requestSubmit()">{opts}</select>'
+        f'</form>'
+    )
+    sug_lbl = _h.escape(t("chat.suggest"))
+    suggest_btn = (
+        f'<button class="act-btn"'
+        f' hx-post="/ui/chat/{tid}/suggest"'
+        f' hx-target="#sug-{tid}"'
+        f' hx-swap="innerHTML">{sug_lbl}</button>'
+    )
+    return (
+        f'<div class="ch" id="chat-hdr-{tid}">'
+        f'<span class="ch-n">{_h.escape(name)}</span>'
+        f'<div class="ch-acts">{stage_sel}{suggest_btn}</div></div>'
+    )
+
+
+def chat_panel_html(
+    tid: int, name: str, stage: str, msgs: list, pending: list,
+    lead_id: int | None = None,
+) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
+    sug_lbl = _h.escape(t("chat.suggest"))
+    # Stage selector
+    opts = "".join(
+        f'<option value="{s}" {"selected" if s == stage else ""}>'
+        f'{_h.escape(t(f"stage.{s}"))}</option>'
+        for s in _STAGES
+    )
+    stage_sel = (
+        f'<form style="display:inline;margin:0"'
+        f' hx-post="/ui/chat/{tid}/stage"'
+        f' hx-target="#chat-hdr-{tid}"'
+        f' hx-swap="outerHTML">'
+        f'<select class="act-sel" name="stage" onchange="this.form.requestSubmit()">{opts}</select>'
+        f'</form>'
+    )
+    suggest_btn = (
+        f'<button class="act-btn"'
+        f' hx-post="/ui/chat/{tid}/suggest"'
+        f' hx-target="#sug-{tid}"'
+        f' hx-swap="innerHTML">{sug_lbl}</button>'
+    )
     return (
-        f'<div class="ch"><span class="ch-n">{_h.escape(name)}</span> {_badge(stage)}</div>'
+        f'<div class="ch" id="chat-hdr-{tid}">'
+        f'<span class="ch-n">{_h.escape(name)}</span>'
+        f'<div class="ch-acts">{stage_sel}{suggest_btn}</div></div>'
         f'<div class="msgs" id="msgs-{tid}">{messages_html(msgs, pending, tid)}</div>'
+        f'<div id="sug-{tid}"></div>'
         f'<form class="fin"'
         f' hx-post="/ui/chat/{tid}/send"'
         f' hx-target="#msgs-{tid}"'
@@ -243,6 +331,25 @@ def chat_panel_html(tid: int, name: str, stage: str, msgs: list, pending: list) 
         f' hx-on::after-request="this.reset();scrollMsgs({tid})">'
         f'<textarea name="text" rows="2" placeholder="{ph}"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
+    )
+
+
+def suggest_box_html(tid: int, draft: str) -> str:
+    """HTML for the suggest box that appears below messages after clicking Suggest."""
+    send_lbl = _h.escape(t("chat.send_stepan"))
+    discard_lbl = _h.escape(t("chat.discard"))
+    ph = _h.escape(t("chat.suggest_ph"))
+    return (
+        f'<div class="sug-box">'
+        f'<textarea class="sug-ta" id="sug-ta-{tid}"'
+        f' placeholder="{ph}">{_h.escape(draft)}</textarea>'
+        f'<div class="sug-acts">'
+        f'<button class="act-btn primary"'
+        f' onclick="sendSuggest({tid})">{send_lbl}</button>'
+        f'<button class="act-btn"'
+        f' onclick="document.getElementById(\'sug-{tid}\').innerHTML=\'\'">'
+        f'{discard_lbl}</button>'
+        f'</div></div>'
     )
 
 
@@ -267,11 +374,13 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         _na("nav.inbox", "/ui/inbox", "fa-solid fa-inbox", "inbox")
         + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
         + '<div class="nav-sep"></div>'
+        + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
         + _hna("nav.know", "/ui/knowledge/panel", "fa-solid fa-book", "know")
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
         + _hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
         + '<div class="nav-sep"></div>'
+        + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox")
         + _na("nav.tables", "/admin/", "fa-solid fa-table", "tables")
     )
 
@@ -296,6 +405,14 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         "if(m)m.scrollTop=m.scrollHeight;});"
         "function toggleHelp(){"
         "document.getElementById('hov').classList.toggle('on');}"
+        # sendSuggest: post draft textarea as manager message
+        "function sendSuggest(tid){"
+        "var ta=document.getElementById('sug-ta-'+tid);"
+        "if(!ta||!ta.value.trim())return;"
+        "var fd=new FormData();fd.append('text',ta.value);"
+        "htmx.ajax('POST','/ui/chat/'+tid+'/send',{"
+        "target:'#msgs-'+tid,swap:'innerHTML',values:fd});"
+        "document.getElementById('sug-'+tid).innerHTML='';}"
     )
     inbox_lbl = _h.escape(t("nav.inbox"))
     help_lbl = _h.escape(t("help.title"))

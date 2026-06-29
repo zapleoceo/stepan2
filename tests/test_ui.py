@@ -335,3 +335,148 @@ def test_lang_invalid_falls_back_to_en(client: TestClient) -> None:
 def test_chat_panel_not_found_no_500_crash(client: TestClient) -> None:
     resp = client.get("/ui/chat/9999999/panel")
     assert resp.status_code in (200, 404, 500)
+
+
+# ─── new panels smoke tests ───────────────────────────────────────────────────
+
+def test_leads_panel_exists(client: TestClient) -> None:
+    resp = client.get("/ui/leads/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_outbox_panel_exists(client: TestClient) -> None:
+    resp = client.get("/ui/outbox/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_products_new_form_exists(client: TestClient) -> None:
+    resp = client.get("/ui/products/new")
+    assert resp.status_code == 200
+    assert "slug" in resp.text
+
+
+def test_knowledge_new_form_exists(client: TestClient) -> None:
+    resp = client.get("/ui/knowledge/new")
+    assert resp.status_code == 200
+    assert "slug" in resp.text
+
+
+def test_inbox_has_leads_nav(client: TestClient) -> None:
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 200
+    assert "/ui/leads/panel" in resp.text
+    assert "/ui/outbox/panel" in resp.text
+
+
+# ─── new HTML generator unit tests ───────────────────────────────────────────
+
+def test_leads_panel_html_empty() -> None:
+    from app.api._ui_panels import leads_panel_html
+    _set_lang("en")
+    html = leads_panel_html([])
+    assert "Leads" in html
+
+
+def test_leads_panel_html_with_rows() -> None:
+    from datetime import datetime, timezone
+    from app.api._ui_panels import leads_panel_html
+    _set_lang("en")
+    rows = [(1, "Alice Test", "+62811234567", "qualifying",
+             datetime.now(timezone.utc).replace(tzinfo=None))]
+    html = leads_panel_html(rows)
+    assert "Alice Test" in html
+    assert "+62811234567" in html
+    assert "sq" in html  # qualifying badge CSS
+
+
+def test_outbox_panel_html_empty() -> None:
+    from app.api._ui_panels import outbox_panel_html
+    _set_lang("en")
+    html = outbox_panel_html([])
+    assert "Outbox" in html
+    assert "read-only" in html
+
+
+def test_outbox_panel_html_statuses() -> None:
+    from datetime import datetime, timezone
+    from app.api._ui_panels import outbox_panel_html
+    _set_lang("en")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = [
+        (1, 10, "sent", "agent", "Hello!", now),
+        (2, 10, "pending", "manager", "Wait…", now),
+        (3, 10, "failed", "followup", "Error", now),
+    ]
+    html = outbox_panel_html(rows)
+    assert "s-sent" in html
+    assert "s-pend" in html
+    assert "s-fail" in html
+
+
+def test_product_edit_html_new() -> None:
+    from app.api._ui_panels import product_edit_html
+    _set_lang("en")
+    html = product_edit_html(None, "", "", "", True, 0)
+    assert "/ui/products/create" in html
+    assert "slug" in html
+
+
+def test_product_edit_html_existing() -> None:
+    from app.api._ui_panels import product_edit_html
+    _set_lang("en")
+    html = product_edit_html(5, "vibe-coding", "Vibe Coding", "Content here", True, 1)
+    assert "/ui/products/5/save" in html
+    assert "Delete" in html
+    assert "vibe-coding" in html
+
+
+def test_knowledge_new_html() -> None:
+    from app.api._ui_panels import knowledge_new_html
+    _set_lang("en")
+    html = knowledge_new_html()
+    assert "/ui/knowledge/create" in html
+    assert "slug" in html
+
+
+def test_chat_header_html() -> None:
+    from app.api._ui_html import chat_header_html
+    _set_lang("en")
+    html = chat_header_html(42, "Alice", "qualifying")
+    assert "chat-hdr-42" in html
+    assert "Alice" in html
+    assert 'selected' in html  # selected option for qualifying
+
+
+def test_suggest_box_html() -> None:
+    from app.api._ui_html import suggest_box_html
+    _set_lang("en")
+    html = suggest_box_html(7, "Draft text here")
+    assert "Draft text here" in html
+    assert "sendSuggest(7)" in html
+    assert "sug-ta-7" in html
+
+
+def test_products_panel_html_has_create_button() -> None:
+    from app.api._ui_panels import products_panel_html
+    _set_lang("en")
+    html = products_panel_html([])
+    assert "/ui/products/new" in html
+
+
+def test_knowledge_panel_html_has_create_button() -> None:
+    from app.api._ui_panels import knowledge_panel_html
+    _set_lang("en")
+    html = knowledge_panel_html([])
+    assert "/ui/knowledge/new" in html
+
+
+def test_coach_pair_applied_shows_revert() -> None:
+    from datetime import datetime, timezone
+    from app.api._ui_panels import _coach_pair
+    _set_lang("en")
+    html = _coach_pair(
+        3, "Done", "applied", "persona", "old", "new", "summary",
+        datetime.now(timezone.utc).replace(tzinfo=None),
+    )
+    assert "Revert" in html
+    assert "/ui/coach/revert/3" in html

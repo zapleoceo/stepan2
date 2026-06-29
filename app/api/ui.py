@@ -35,13 +35,24 @@ from app.admin._branch import branch_ids_from_request
 from app.modules.conversation.coach_service import apply_edit, cancel_edit, propose_edit
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
-from ._ui_html import app_shell, chat_panel_html, messages_html, thread_list_html
+from ._ui_html import (
+    app_shell,
+    chat_header_html,
+    chat_panel_html,
+    messages_html,
+    suggest_box_html,
+    thread_list_html,
+)
 from ._ui_panels import (
     _coach_pair,
     coach_chat_html,
     knowledge_edit_html,
+    knowledge_new_html,
     knowledge_panel_html,
+    leads_panel_html,
     members_panel_html,
+    outbox_panel_html,
+    product_edit_html,
     products_panel_html,
     settings_panel_html,
 )
@@ -399,6 +410,313 @@ async def settings_save(
         f'<span style="color:#51cf66;font-size:.75rem">{saved_lbl}</span>'
         f'</form>'
     )
+
+
+# ─── leads ────────────────────────────────────────────────────────────────────
+
+@router.get("/leads/panel", response_class=HTMLResponse)
+async def leads_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "WHERE branch_id = ANY(:bids)" if branch_ids else ""
+        params = {"bids": branch_ids} if branch_ids else {}
+        q = (
+            "SELECT id, display_name, phone_e164, stage, created_at"  # noqa: S608
+            f" FROM lead {where} ORDER BY created_at DESC LIMIT 200"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(leads_panel_html(list(rows)))
+
+
+# ─── outbox ───────────────────────────────────────────────────────────────────
+
+@router.get("/outbox/panel", response_class=HTMLResponse)
+async def outbox_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "WHERE branch_id = ANY(:bids)" if branch_ids else ""
+        params = {"bids": branch_ids} if branch_ids else {}
+        q = (
+            "SELECT id, thread_id, status, source, text, scheduled_at"  # noqa: S608
+            f" FROM outbox {where} ORDER BY id DESC LIMIT 100"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(outbox_panel_html(list(rows)))
+
+
+# ─── chat: stage change + suggest ─────────────────────────────────────────────
+
+@router.post("/chat/{thread_id}/stage", response_class=HTMLResponse)
+async def chat_stage(
+    thread_id: int, request: Request, stage: str = Form(default="new"),
+) -> HTMLResponse:
+    apply_lang(request)
+    _VALID = {"new", "qualifying", "presenting", "objection",
+               "ready", "handed_off", "dormant", "manager"}
+    if stage not in _VALID:
+        stage = "new"
+    async with session_scope() as session:
+        info = (
+            await session.execute(
+                text(
+                    "SELECT ct.id, l.display_name, l.id as lead_id"
+                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                    " WHERE ct.id = :tid"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+        if not info:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        _, name, lead_id = info
+        await session.execute(
+            text("UPDATE lead SET stage = :s WHERE id = :id"),
+            {"s": stage, "id": lead_id},
+        )
+    return HTMLResponse(
+        chat_header_html(thread_id, str(name or "Lead"), stage)
+    )
+
+
+@router.post("/chat/{thread_id}/suggest", response_class=HTMLResponse)
+async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        msgs = (
+            await session.execute(
+                text(
+                    "SELECT direction, sent_by, text FROM message"
+                    " WHERE thread_id = :tid ORDER BY occurred_at DESC, id DESC LIMIT 10"
+                ),
+                {"tid": thread_id},
+            )
+        ).all()
+    if not msgs:
+        return HTMLResponse("")
+    # Build conversation for the LLM
+    convo_lines = "\n".join(
+        f'{"Lead" if r[0] == "in" else "Bot"}: {(r[2] or "")[:200]}'
+        for r in reversed(msgs)
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful sales assistant. "
+                "Based on the conversation, write a SHORT friendly reply to the lead. "
+                "Reply in the same language as the lead. Max 3 sentences. "
+                "Return ONLY the reply text."
+            ),
+        },
+        {"role": "user", "content": convo_lines},
+    ]
+    llm = BrokerLLM()
+    try:
+        draft, _ = await llm.chat(messages, capability="chat:fast", max_tokens=300)
+    except Exception:
+        draft = ""
+    return HTMLResponse(suggest_box_html(thread_id, draft.strip()))
+
+
+# ─── products CRUD ────────────────────────────────────────────────────────────
+
+@router.get("/products/new", response_class=HTMLResponse)
+async def products_new(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    return HTMLResponse(product_edit_html(None, "", "", "", True, 0))
+
+
+@router.get("/products/{prod_id}/edit", response_class=HTMLResponse)
+async def products_edit(prod_id: int, request: Request) -> HTMLResponse:
+    apply_lang(request)
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT id, slug, title, content, is_active, sort_order"
+                    " FROM product WHERE id = :id"
+                ),
+                {"id": prod_id},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    return HTMLResponse(
+        product_edit_html(row[0], str(row[1]), str(row[2] or ""),
+                          str(row[3] or ""), bool(row[4]), int(row[5] or 0))
+    )
+
+
+@router.post("/products/{prod_id}/save", response_class=HTMLResponse)
+async def products_save(
+    prod_id: int, request: Request,
+    title: str = Form(default=""),
+    content: str = Form(default=""),
+    is_active: str = Form(default=""),
+    sort_order: int = Form(default=0),
+) -> HTMLResponse:
+    apply_lang(request)
+    active = bool(is_active)
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s"
+                " WHERE id=:id"
+            ),
+            {"t": title.strip(), "c": content.strip(), "a": active,
+             "s": sort_order, "id": prod_id},
+        )
+        row = (
+            await session.execute(
+                text(
+                    "SELECT id, slug, title, content, is_active, sort_order"
+                    " FROM product WHERE id = :id"
+                ),
+                {"id": prod_id},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    return HTMLResponse(
+        product_edit_html(row[0], str(row[1]), str(row[2] or ""),
+                          str(row[3] or ""), bool(row[4]), int(row[5] or 0))
+    )
+
+
+@router.post("/products/create", response_class=HTMLResponse)
+async def products_create(
+    request: Request,
+    slug: str = Form(default=""),
+    title: str = Form(default=""),
+    content: str = Form(default=""),
+    is_active: str = Form(default=""),
+    sort_order: int = Form(default=0),
+) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
+    slug = slug.strip().lower().replace(" ", "_")
+    if not slug:
+        html = product_edit_html(None, "", title, content, bool(is_active), sort_order)
+        return HTMLResponse(html)
+    active = bool(is_active)
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "INSERT INTO product (branch_id, slug, title, content, is_active, sort_order)"
+                " VALUES (:bid, :slug, :t, :c, :a, :s)"
+                " ON CONFLICT (branch_id, slug) DO NOTHING"
+            ),
+            {"bid": branch_id, "slug": slug, "t": title.strip(),
+             "c": content.strip(), "a": active, "s": sort_order},
+        )
+        row = (
+            await session.execute(
+                text(
+                    "SELECT id, slug, title, content, is_active, sort_order"
+                    " FROM product WHERE branch_id=:bid AND slug=:slug"
+                ),
+                {"bid": branch_id, "slug": slug},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Could not create product</div>', status_code=500)
+    return HTMLResponse(
+        product_edit_html(row[0], str(row[1]), str(row[2] or ""),
+                          str(row[3] or ""), bool(row[4]), int(row[5] or 0))
+    )
+
+
+@router.post("/products/{prod_id}/delete")
+async def products_delete(prod_id: int, request: Request) -> RedirectResponse:
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        where = "AND branch_id = ANY(:bids)" if branch_ids else ""
+        params: dict = {"id": prod_id}
+        if branch_ids:
+            params["bids"] = branch_ids
+        await session.execute(
+            text(f"DELETE FROM product WHERE id=:id {where}"),  # noqa: S608
+            params,
+        )
+    return RedirectResponse("/ui/products/panel", status_code=303)
+
+
+# ─── knowledge: new doc ────────────────────────────────────────────────────────
+
+@router.get("/knowledge/new", response_class=HTMLResponse)
+async def knowledge_new(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    return HTMLResponse(knowledge_new_html())
+
+
+@router.post("/knowledge/create", response_class=HTMLResponse)
+async def knowledge_create(
+    request: Request,
+    slug: str = Form(default=""),
+    title: str = Form(default=""),
+    content: str = Form(default=""),
+) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
+    slug = slug.strip().lower().replace(" ", "_")
+    if not slug:
+        return HTMLResponse(knowledge_new_html())
+    async with session_scope() as session:
+        await session.execute(
+            text(
+                "INSERT INTO knowledge_doc (branch_id, slug, title, content)"
+                " VALUES (:bid, :slug, :t, :c)"
+                " ON CONFLICT (branch_id, slug) DO NOTHING"
+            ),
+            {"bid": branch_id, "slug": slug, "t": title.strip(), "c": content.strip()},
+        )
+        row = (
+            await session.execute(
+                text(
+                    "SELECT id, slug, title, content FROM knowledge_doc"
+                    " WHERE branch_id=:bid AND slug=:slug"
+                ),
+                {"bid": branch_id, "slug": slug},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Could not create doc</div>', status_code=500)
+    return HTMLResponse(
+        knowledge_edit_html(row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""))
+    )
+
+
+# ─── coach: revert ────────────────────────────────────────────────────────────
+
+@router.post("/coach/revert/{edit_id}")
+async def coach_revert(edit_id: int, request: Request) -> RedirectResponse:
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT slug, new_text, old_text FROM coaching_edit"
+                    " WHERE id=:id AND branch_id=:bid AND status='applied'"
+                ),
+                {"id": edit_id, "bid": branch_id},
+            )
+        ).first()
+        if row and row[0] and row[2] is not None:
+            # restore old_text back to the knowledge doc
+            await session.execute(
+                text("UPDATE knowledge_doc SET content=:c WHERE branch_id=:bid AND slug=:slug"),
+                {"c": row[2], "bid": branch_id, "slug": row[0]},
+            )
+            await session.execute(
+                text("UPDATE coaching_edit SET status='reverted' WHERE id=:id"),
+                {"id": edit_id},
+            )
+    return RedirectResponse("/ui/coach", status_code=303)
 
 
 # ─── language switcher ────────────────────────────────────────────────────────

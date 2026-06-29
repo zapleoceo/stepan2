@@ -159,6 +159,69 @@ _TR: dict[str, dict[str, str]] = {
         ),
         "id": "Pengaturan bot untuk cabang ini. Setiap pengaturan dijelaskan di bawah.",
     },
+    # chat actions
+    "chat.stage":       {"ru": "Стадия",           "en": "Stage",             "id": "Tahap"},
+    "chat.suggest":     {"ru": "✦ Предложить",     "en": "✦ Suggest",         "id": "✦ Sarankan"},
+    "chat.send_stepan": {
+        "ru": "Отправить как Стёпан",
+        "en": "Send as Stepan",
+        "id": "Kirim sebagai Stepan",
+    },
+    "chat.suggest_ph":  {"ru": "Черновик ответа…", "en": "Draft reply…",     "id": "Draf balasan…"},
+    "chat.discard":     {"ru": "✗ Отменить",        "en": "✗ Discard",        "id": "✗ Buang"},
+    # leads panel
+    "nav.leads":        {"ru": "Лиды",        "en": "Leads",       "id": "Lead"},
+    "lead.name":        {"ru": "Имя",         "en": "Name",        "id": "Nama"},
+    "lead.phone":       {"ru": "Телефон",     "en": "Phone",       "id": "Telepon"},
+    "lead.stage":       {"ru": "Стадия",      "en": "Stage",       "id": "Tahap"},
+    "lead.created":     {"ru": "Создан",      "en": "Created",     "id": "Dibuat"},
+    "help.leads": {
+        "ru": (
+            "Все лиды филиала. Один лид = один человек;"
+            " написал в IG и WA — один лид, два треда."
+            " Стадия обновляется ботом и вручную в чате."
+        ),
+        "en": (
+            "All branch leads. One lead = one person;"
+            " IG + WA contact = one lead, two threads."
+            " Stage is updated by bot automatically or manually in chat."
+        ),
+        "id": "Semua lead cabang. Satu lead = satu orang. Tahap diperbarui otomatis oleh bot.",
+    },
+    # outbox panel
+    "nav.outbox":       {"ru": "Исходящие",    "en": "Outbox",      "id": "Kotak Keluar"},
+    "outbox.status":    {"ru": "Статус",       "en": "Status",      "id": "Status"},
+    "outbox.source":    {"ru": "Источник",     "en": "Source",      "id": "Sumber"},
+    "outbox.scheduled": {"ru": "Запланир.",    "en": "Scheduled",   "id": "Dijadwalkan"},
+    "help.outbox": {
+        "ru": (
+            "Очередь исходящих сообщений."
+            " Каждое сообщение проходит через неё — caps и rate-limit применяются здесь."
+            " source: agent=бот, manager=вы, followup=авто."
+        ),
+        "en": (
+            "Outgoing message queue."
+            " Every message passes through here — caps and rate-limits apply here."
+            " source: agent=bot, manager=you, followup=auto."
+        ),
+        "id": "Antrian pesan keluar. Setiap pesan melewati sini. source: agent/manager/followup.",
+    },
+    # products CRUD
+    "prod.create":      {"ru": "+ Продукт",    "en": "+ Product",   "id": "+ Produk"},
+    "prod.title_lbl":   {"ru": "Название",     "en": "Title",       "id": "Judul"},
+    "prod.slug_lbl":    {"ru": "Slug (ID)",    "en": "Slug (ID)",   "id": "Slug (ID)"},
+    "prod.content_lbl": {"ru": "Описание",     "en": "Description", "id": "Deskripsi"},
+    "prod.active_lbl":  {"ru": "Активен",      "en": "Active",      "id": "Aktif"},
+    "prod.sort_lbl":    {"ru": "Порядок",      "en": "Sort",        "id": "Urutan"},
+    "prod.save":        {"ru": "Сохранить",    "en": "Save",        "id": "Simpan"},
+    "prod.saved":       {"ru": "Сохранено ✓",  "en": "Saved ✓",    "id": "Tersimpan ✓"},
+    "prod.delete":      {"ru": "Удалить",      "en": "Delete",      "id": "Hapus"},
+    "prod.back":        {"ru": "← Продукты",   "en": "← Products", "id": "← Produk"},
+    # knowledge CRUD
+    "know.create":      {"ru": "+ Документ",   "en": "+ Doc",       "id": "+ Dokumen"},
+    "know.slug_lbl":    {"ru": "Slug (ID)",    "en": "Slug (ID)",   "id": "Slug (ID)"},
+    # coach revert
+    "coach.revert":     {"ru": "↩ Откатить",   "en": "↩ Revert",   "id": "↩ Kembalikan"},
     # stages
     "stage.new":        {"ru": "новый",     "en": "new",          "id": "baru"},
     "stage.qualifying": {"ru": "квалиф.",   "en": "qualifying",   "id": "kualifikasi"},

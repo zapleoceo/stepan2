@@ -14,6 +14,92 @@ _ST_ECSS: dict[str, str] = {
 
 # ─── coach chat ───────────────────────────────────────────────────────────────
 
+# ─── stage badge helper ───────────────────────────────────────────────────────
+
+_STC: dict[str, str] = {
+    "new": "sn", "qualifying": "sq", "presenting": "sp", "objection": "so",
+    "ready": "sr", "handed_off": "sh", "dormant": "sd", "manager": "sm",
+}
+
+
+def _sbadge(stage: str) -> str:
+    return (
+        f'<span class="bg {_STC.get(stage, "sd")}">'
+        f'{_h.escape(t(f"stage.{stage}"))}</span>'
+    )
+
+
+# ─── leads panel ──────────────────────────────────────────────────────────────
+
+def leads_panel_html(rows: list) -> str:
+    """List of leads with stage badge, phone, and creation date."""
+    title = _h.escape(t("nav.leads"))
+    name_h = _h.escape(t("lead.name"))
+    phone_h = _h.escape(t("lead.phone"))
+    stage_h = _h.escape(t("lead.stage"))
+    created_h = _h.escape(t("lead.created"))
+    hint = _h.escape(t("help.leads"))
+    trows = "".join(
+        f'<tr>'
+        f'<td><strong style="color:#e8eef4">{_h.escape(str(r[1] or "—"))}</strong></td>'
+        f'<td style="font-family:ui-monospace,monospace;font-size:.74rem;color:#4da6ff">'
+        f'{_h.escape(str(r[2] or "—"))}</td>'
+        f'<td>{_sbadge(str(r[3] or "new"))}</td>'
+        f'<td style="color:#4a5568;font-size:.72rem">'
+        f'{str(r[4])[:10] if r[4] else "—"}</td>'
+        f'</tr>'
+        for r in rows  # (id, display_name, phone_e164, stage, created_at)
+    )
+    return (
+        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="pnl-body">'
+        f'<div class="hint">{hint}</div>'
+        f'<table class="tbl">'
+        f'<thead><tr><th>{name_h}</th><th>{phone_h}</th>'
+        f'<th>{stage_h}</th><th>{created_h}</th></tr></thead>'
+        f'<tbody>{trows or "<tr><td colspan=4 style=color:#4a5568>—</td></tr>"}</tbody>'
+        f'</table></div>'
+    )
+
+
+# ─── outbox panel ─────────────────────────────────────────────────────────────
+
+def outbox_panel_html(rows: list) -> str:
+    """Read-only outbox queue monitor (last 100 entries)."""
+    title = _h.escape(t("nav.outbox"))
+    hint = _h.escape(t("help.outbox"))
+
+    def _spill(s: str) -> str:
+        css = {"pending": "s-pend", "sent": "s-sent", "failed": "s-fail"}.get(s, "s-pend")
+        return f'<span class="st-pill {css}">{_h.escape(s)}</span>'
+
+    trows = "".join(
+        f'<tr>'
+        f'<td>{_spill(str(r[2]))}</td>'
+        f'<td style="color:#6b7685;font-size:.72rem">{_h.escape(str(r[3]))}</td>'
+        f'<td style="color:#d0d7de;font-size:.77rem">{_h.escape(str(r[4] or "")[:80])}</td>'
+        f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">'
+        f'{str(r[5])[:16] if r[5] else "—"}</td>'
+        f'</tr>'
+        for r in rows  # (id, thread_id, status, source, text, scheduled_at)
+    )
+    return (
+        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<span style="font-size:.68rem;color:#4a5568;margin-left:.5rem">(read-only)</span></div>'
+        f'<div class="pnl-body">'
+        f'<div class="hint">{hint}</div>'
+        f'<table class="tbl">'
+        f'<thead><tr><th>{_h.escape(t("outbox.status"))}</th>'
+        f'<th>{_h.escape(t("outbox.source"))}</th>'
+        f'<th>Text</th>'
+        f'<th>{_h.escape(t("outbox.scheduled"))}</th></tr></thead>'
+        f'<tbody>{trows or "<tr><td colspan=4 style=color:#4a5568>—</td></tr>"}</tbody>'
+        f'</table></div>'
+    )
+
+
+# ─── coach chat ───────────────────────────────────────────────────────────────
+
 def _coach_pair(
     edit_id: int, req: str, status: str, slug: str | None,
     old_t: str | None, new_t: str | None, summary: str | None,
@@ -39,6 +125,15 @@ def _coach_pair(
             f'<form style="display:inline" method="post"'
             f' action="/ui/coach/cancel/{edit_id}">'
             f'<button class="bx bx-c">{c_lbl}</button></form>'
+            f'</div>'
+        )
+    elif status == "applied":
+        r_lbl = _h.escape(t("coach.revert"))
+        actions = (
+            f'<div style="margin-top:.3rem">'
+            f'<form style="display:inline" method="post"'
+            f' action="/ui/coach/revert/{edit_id}">'
+            f'<button class="bx" style="background:#2a3a2a;color:#51cf66">{r_lbl}</button></form>'
             f'</div>'
         )
     summ = _h.escape(summary or "")
@@ -99,6 +194,7 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
 def knowledge_panel_html(docs: list) -> str:
     """List of KB docs; each card loads the edit view via HTMX."""
     title = _h.escape(t("nav.know"))
+    create_lbl = _h.escape(t("know.create"))
     cards = "".join(
         f'<div class="kdoc"'
         f' hx-get="/ui/knowledge/{doc[0]}/edit" hx-target="#main"'
@@ -112,8 +208,41 @@ def knowledge_panel_html(docs: list) -> str:
     if not docs:
         cards = '<div class="emp">—</div>'
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div style="margin-left:auto">'
+        f'<a class="btn-sm btn-p" hx-get="/ui/knowledge/new" hx-target="#main"'
+        f' hx-push-url="/ui/knowledge/new" style="text-decoration:none">'
+        f'{create_lbl}</a></div></div>'
         f'<div class="pnl-body">{cards}</div>'
+    )
+
+
+def knowledge_new_html() -> str:
+    """Create form for a new KB doc."""
+    back_lbl = _h.escape(t("know.back"))
+    slug_lbl = _h.escape(t("know.slug_lbl"))
+    title_lbl = _h.escape(t("know.title"))
+    content_lbl = _h.escape(t("know.content"))
+    save_lbl = _h.escape(t("know.save"))
+    return (
+        f'<div class="ch">'
+        f'<a class="btn-g" hx-get="/ui/knowledge/panel" hx-target="#main"'
+        f' hx-push-url="/ui/knowledge/panel" style="text-decoration:none">{back_lbl}</a>'
+        f'</div>'
+        f'<div class="pnl-body">'
+        f'<form hx-post="/ui/knowledge/create" hx-target="#main" hx-swap="innerHTML">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{slug_lbl}</label>'
+        f'<input class="frm-inp" name="slug" placeholder="e.g. faq_pricing"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{title_lbl}</label>'
+        f'<input class="frm-inp" name="title"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{content_lbl}</label>'
+        f'<textarea class="frm-ta" name="content" rows="18"></textarea></div>'
+        f'<div style="display:flex;gap:.5rem;margin-top:.4rem">'
+        f'<button class="btn-sm btn-p">{save_lbl}</button>'
+        f'</div></form></div>'
     )
 
 
@@ -151,12 +280,14 @@ def knowledge_edit_html(doc_id: int, slug: str, title: str, content: str) -> str
 # ─── products panel ───────────────────────────────────────────────────────────
 
 def products_panel_html(products: list) -> str:
-    """Read-only list of products with sort_order explanation."""
+    """Clickable list of products with sort_order explanation. Click row → edit form."""
     title = _h.escape(t("nav.products"))
     hint = _h.escape(t("prod.sort_hint"))
+    create_lbl = _h.escape(t("prod.create"))
     rows = "".join(
-        f'<tr>'
-        f'<td style="color:#4a5568;font-size:.72rem">{p[0]}</td>'
+        f'<tr class="kdoc" style="cursor:pointer"'
+        f' hx-get="/ui/products/{p[0]}/edit" hx-target="#main"'
+        f' hx-push-url="/ui/products/{p[0]}/edit">'
         f'<td><strong style="color:#e8eef4">{_h.escape(str(p[2]))}</strong>'
         f'<br><span class="kdoc-slug">{_h.escape(str(p[1]))}</span></td>'
         f'<td><span class="pill {"p-ok" if p[3] else "p-off"}">{"✓" if p[3] else "✗"}</span></td>'
@@ -165,13 +296,73 @@ def products_panel_html(products: list) -> str:
         for p in products  # (id, slug, title, is_active, sort_order)
     )
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div style="margin-left:auto">'
+        f'<a class="btn-sm btn-p" hx-get="/ui/products/new" hx-target="#main"'
+        f' hx-push-url="/ui/products/new" style="text-decoration:none">'
+        f'{create_lbl}</a></div></div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{hint}</div>'
         f'<table class="tbl">'
-        f'<thead><tr><th>ID</th><th>Product</th><th>Active</th><th>Sort</th></tr></thead>'
-        f'<tbody>{rows or "<tr><td colspan=4 style=color:#4a5568>—</td></tr>"}</tbody>'
+        f'<thead><tr><th>Product</th><th>Active</th><th>Sort</th></tr></thead>'
+        f'<tbody>{rows or "<tr><td colspan=3 style=color:#4a5568>—</td></tr>"}</tbody>'
         f'</table></div>'
+    )
+
+
+def product_edit_html(
+    prod_id: int | None, slug: str, title: str,
+    content: str, is_active: bool, sort_order: int,
+) -> str:
+    """Edit (or create) form for a single product."""
+    back_lbl = _h.escape(t("prod.back"))
+    save_lbl = _h.escape(t("prod.save"))
+    del_lbl = _h.escape(t("prod.delete"))
+    title_lbl = _h.escape(t("prod.title_lbl"))
+    slug_lbl = _h.escape(t("prod.slug_lbl"))
+    content_lbl = _h.escape(t("prod.content_lbl"))
+    active_lbl = _h.escape(t("prod.active_lbl"))
+    sort_lbl = _h.escape(t("prod.sort_lbl"))
+    action = f"/ui/products/{prod_id}/save" if prod_id else "/ui/products/create"
+    delete_btn = ""
+    if prod_id:
+        delete_btn = (
+            f'<form style="display:inline" method="post"'
+            f' action="/ui/products/{prod_id}/delete"'
+            f' onsubmit="return confirm(\'{del_lbl}?\')">'
+            f'<button class="btn-sm" style="background:#862e2e;color:#fff">{del_lbl}</button>'
+            f'</form>'
+        )
+    chk = "checked" if is_active else ""
+    return (
+        f'<div class="ch">'
+        f'<a class="btn-g" hx-get="/ui/products/panel" hx-target="#main"'
+        f' hx-push-url="/ui/products/panel" style="text-decoration:none">{back_lbl}</a>'
+        f'</div>'
+        f'<div class="pnl-body">'
+        f'<form hx-post="{action}" hx-target="#main" hx-swap="innerHTML">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{slug_lbl}</label>'
+        f'<input class="frm-inp" name="slug" value="{_h.escape(slug or "")}"'
+        f' {"readonly" if prod_id else ""}></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{title_lbl}</label>'
+        f'<input class="frm-inp" name="title" value="{_h.escape(title or "")}"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{content_lbl}</label>'
+        f'<textarea class="frm-ta" name="content" rows="14">'
+        f'{_h.escape(content or "")}</textarea></div>'
+        f'<div class="frm-grp" style="display:flex;align-items:center;gap:.8rem">'
+        f'<label style="display:flex;align-items:center;gap:.35rem;font-size:.8rem;'
+        f'color:#d0d7de;cursor:pointer">'
+        f'<input type="checkbox" name="is_active" value="1" {chk}> {active_lbl}</label>'
+        f'<label class="frm-lbl" style="margin:0">{sort_lbl}: </label>'
+        f'<input class="frm-inp" style="width:4rem" type="number" name="sort_order"'
+        f' value="{sort_order}"></div>'
+        f'<div style="display:flex;gap:.5rem;margin-top:.5rem">'
+        f'<button class="btn-sm btn-p">{save_lbl}</button>'
+        f'{delete_btn}</div>'
+        f'</form></div>'
     )
 
 
