@@ -728,3 +728,43 @@ async def set_lang(code: str, request: Request) -> Response:
     resp = RedirectResponse(referer, status_code=303)
     resp.set_cookie(LANG_COOKIE, lang, max_age=60 * 60 * 24 * 365, httponly=False, samesite="lax")
     return resp
+
+
+# ─── branch filter ────────────────────────────────────────────────────────────
+
+_BRANCH_COOKIE = "stepan2_branch"
+
+
+@router.get("/branches/widget", response_class=HTMLResponse)
+async def branches_widget(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    current = request.cookies.get(_BRANCH_COOKIE, "")
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text("SELECT id, name FROM branch WHERE is_active ORDER BY id")
+            )
+        ).all()
+    all_lbl = _h.escape(t("branch.all"))
+    sel_all = "selected" if not current else ""
+    opts = f'<option value="" {sel_all}>{all_lbl}</option>'
+    for bid, bname in rows:
+        sel = "selected" if str(bid) in current.split(",") else ""
+        opts += f'<option value="{bid}" {sel}>{_h.escape(bname)}</option>'
+    return HTMLResponse(
+        f'<form method="post" action="/ui/branch-filter">'
+        f'<select name="bid" class="bft-sel" onchange="this.form.submit()">'
+        f'{opts}</select></form>'
+    )
+
+
+@router.post("/branch-filter")
+async def branch_filter(request: Request, bid: str = Form(default="")) -> RedirectResponse:
+    referer = request.headers.get("referer", "/ui/inbox")
+    resp = RedirectResponse(referer, status_code=303)
+    if bid.strip():
+        resp.set_cookie(_BRANCH_COOKIE, bid.strip(), path="/", max_age=86400 * 30,
+                        httponly=False, samesite="lax")
+    else:
+        resp.delete_cookie(_BRANCH_COOKIE, path="/")
+    return resp

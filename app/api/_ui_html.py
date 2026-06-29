@@ -32,6 +32,9 @@ _CSS = (
     "border:1px solid rgba(255,255,255,.12);border-radius:4px;color:#8899aa;"
     "font-size:.68rem;font-weight:600;text-align:center;text-decoration:none}"
     ".lb.on,.lb:hover{background:rgba(32,107,196,.28);color:#4da6ff;border-color:#206bc4}"
+    ".bft-lbl{font-size:.63rem;color:#4a5568;margin-bottom:.2rem}"
+    ".bft-sel{width:100%;background:#1a1f2e;border:1px solid #2d3748;border-radius:4px;"
+    "color:#d0d7de;font-size:.72rem;padding:.22rem .35rem;cursor:pointer}"
     ".thr{width:305px;flex-shrink:0;background:#0f1117;border-right:1px solid #2d3748;"
     "display:flex;flex-direction:column;overflow:hidden}"
     ".thr-h{padding:.56rem .8rem;border-bottom:1px solid #2d3748;font-size:.82rem;"
@@ -362,13 +365,13 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
     def _hna(key: str, panel: str, icon: str, nav_id: str) -> str:
         extra = (
             f' hx-get="{panel}" hx-target="#main" hx-push-url="{panel}"'
-            f' onclick="setOn(this,\'na\')"'
+            f' onclick="setOn(this,\'na\');showThr(false)"'
         )
         return _na(key, panel, icon, nav_id, extra)
 
     coach_extra = (
         ' hx-get="/ui/coach/panel" hx-target="#main" hx-push-url="/ui/coach"'
-        " onclick=\"setOn(this,'na')\""
+        " onclick=\"setOn(this,'na');showThr(false)\""
     )
     nav = (
         _na("nav.inbox", "/ui/inbox", "fa-solid fa-inbox", "inbox")
@@ -403,6 +406,9 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         "var m=e.target&&e.target.classList&&e.target.classList.contains('msgs')?e.target"
         ":e.target.querySelector&&e.target.querySelector('.msgs');"
         "if(m)m.scrollTop=m.scrollHeight;});"
+        "function showThr(v){"
+        "var el=document.querySelector('.thr');"
+        "if(el)el.style.display=v?'':'none';}"
         "function toggleHelp(){"
         "document.getElementById('hov').classList.toggle('on');}"
         # sendSuggest: post draft textarea as manager message
@@ -436,10 +442,17 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         f'<div class="sid-top"><span class="logo">Stepan 2</span></div>'
         f'<nav class="sid-nav">{nav}</nav>'
         f'<div class="sid-ft">'
+        f'<div class="bft-lbl">{_h.escape(t("branch.filter"))}</div>'
+        f'<div id="branch-sel"'
+        f' hx-get="/ui/branches/widget"'
+        f' hx-trigger="load"'
+        f' hx-swap="innerHTML"></div>'
+        f'<div style="margin-top:.45rem">'
         f'<div style="font-size:.63rem;color:#4a5568">lang</div>'
         f'<div class="lrow">{_lb("ru")}{_lb("en")}{_lb("id")}</div>'
+        f'</div>'
         f'</div></aside>'
-        f'<div class="thr">'
+        f'<div class="thr"{"" if active_nav == "inbox" else " style=\'display:none\'"}>'
         f'<div class="thr-h">{inbox_lbl}</div>'
         f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>'
         f'</div>'

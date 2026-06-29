@@ -222,6 +222,9 @@ _TR: dict[str, dict[str, str]] = {
     "know.slug_lbl":    {"ru": "Slug (ID)",    "en": "Slug (ID)",   "id": "Slug (ID)"},
     # coach revert
     "coach.revert":     {"ru": "↩ Откатить",   "en": "↩ Revert",   "id": "↩ Kembalikan"},
+    # branch selector
+    "branch.filter": {"ru": "Филиал", "en": "Branch", "id": "Cabang"},
+    "branch.all":    {"ru": "Все филиалы", "en": "All branches", "id": "Semua cabang"},
     # stages
     "stage.new":        {"ru": "новый",     "en": "new",          "id": "baru"},
     "stage.qualifying": {"ru": "квалиф.",   "en": "qualifying",   "id": "kualifikasi"},
