@@ -53,12 +53,13 @@ class OutboxSender:
         return row
 
     def _outgoing(self, thread, row: Outbox, external_id: str | None) -> Message:
+        sent_by = row.source if row.source in ("manager", "agent") else "agent"
         return Message(
             branch_id=self.branch_id,
             thread_id=row.thread_id,
             channel_id=thread.channel_id,
             external_id=external_id or f"out-{row.id}",
             direction="out",
-            sent_by="agent",
+            sent_by=sent_by,
             text=row.text,
         )

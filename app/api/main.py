@@ -12,6 +12,7 @@ from fastapi.responses import RedirectResponse
 from app.adapters.db.session import engine
 from app.admin.api import router as admin_meta_router
 from app.admin.setup import mount_admin
+from app.api.ui import router as ui_router
 from app.api.webhooks import router as webhooks_router
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
 
     app.include_router(webhooks_router)
     app.include_router(admin_meta_router)
+    app.include_router(ui_router)
     _try_mount_admin(app)
     return app
 

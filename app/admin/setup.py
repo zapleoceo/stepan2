@@ -24,6 +24,7 @@ from app.adapters.db.models import (
     AppSetting,
     Branch,
     Channel,
+    CoachingEdit,
     CoachingNote,
     KnowledgeDoc,
     Lead,
@@ -258,6 +259,40 @@ class OutboxAdmin(BranchScopedModelView, model=Outbox):
     page_size = 50
 
 
+class CoachingEditAdmin(BranchScopedModelView, model=CoachingEdit):
+    """Coach KB edits — LLM-proposed old→new diffs, manageable from here too."""
+    name = "Coaching Edit"
+    name_plural = "Coaching Edits"
+    icon = "fa-solid fa-pencil"
+    column_list = [
+        CoachingEdit.id, CoachingEdit.branch_id, CoachingEdit.status,
+        CoachingEdit.slug, CoachingEdit.request, CoachingEdit.summary, CoachingEdit.created_at,
+    ]
+    column_details_list = [
+        CoachingEdit.id, CoachingEdit.branch_id, CoachingEdit.status,
+        CoachingEdit.request, CoachingEdit.slug,
+        CoachingEdit.old_text, CoachingEdit.new_text, CoachingEdit.summary,
+        CoachingEdit.added_by, CoachingEdit.applied_at, CoachingEdit.created_at,
+    ]
+    column_sortable_list = [CoachingEdit.id, CoachingEdit.status, CoachingEdit.created_at]
+    column_labels = {
+        "id": "ID", "branch_id": "Branch", "status": "Status", "slug": "Doc",
+        "request": "Request", "old_text": "Old", "new_text": "New",
+        "summary": "Summary", "added_by": "By", "applied_at": "Applied", "created_at": "Created",
+    }
+    column_formatters = {
+        CoachingEdit.request: lambda m, a: _trunc(m.request, 80),
+        CoachingEdit.summary: lambda m, a: _trunc(m.summary, 80) if m.summary else "",
+    }
+    form_overrides = {"old_text": TextAreaField, "new_text": TextAreaField}
+    form_widget_args = {
+        "old_text": {**_TEXTAREA, "rows": 5},
+        "new_text": {**_TEXTAREA, "rows": 5},
+    }
+    form_columns = ["branch_id", "status", "slug", "request", "old_text", "new_text", "summary"]
+    page_size = 50
+
+
 class CoachingNoteAdmin(BranchScopedModelView, model=CoachingNote):
     """Bot coaching directives — active manager notes are injected into the prompt."""
     name = "Coaching Note"
@@ -331,6 +366,7 @@ _VIEWS: list[type[ModelView]] = [
     UserAdmin,
     MembershipAdmin,
     CoachingNoteAdmin,
+    CoachingEditAdmin,
     AppSettingAdmin,
     OutboxAdmin,
     ManagerAlertAdmin,

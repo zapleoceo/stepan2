@@ -193,6 +193,23 @@ class ManagerAlert(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class CoachingEdit(SQLModel, table=True):
+    """Coach KB editor: manager request → LLM proposes old→new diff → manager applies."""
+    __tablename__ = "coaching_edit"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    request: str
+    status: str = Field(default="proposed")  # proposed|applied|cancelled|clarify|failed
+    slug: str | None = Field(default=None, description="target knowledge doc slug")
+    old_text: str | None = Field(default=None)
+    new_text: str | None = Field(default=None)
+    summary: str | None = Field(default=None)
+    added_by: str | None = Field(default=None)
+    applied_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class CoachingNote(SQLModel, table=True):
     """Директива для бота: менеджер в чате задаёт правила/советы.
 
