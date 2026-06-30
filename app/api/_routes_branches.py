@@ -83,8 +83,8 @@ async def branches_create(
         row = (
             await session.execute(
                 text(
-                    "INSERT INTO branch (name, lang, tz_offset_h, is_active)"
-                    " VALUES (:name, :lang, :tz, :active) RETURNING id"
+                    "INSERT INTO branch (name, lang, tz_offset_h, is_active, created_at)"
+                    " VALUES (:name, :lang, :tz, :active, NOW()) RETURNING id"
                 ),
                 {"name": name, "lang": lang, "tz": tz_offset_h, "active": active},
             )
