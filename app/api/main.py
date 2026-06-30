@@ -21,18 +21,30 @@ from app.api.webhooks import router as webhooks_router
 
 logger = logging.getLogger(__name__)
 
-# Matches /ui/<section>/panel but NOT /ui/chat/<tid>/panel (handled separately)
-_PANEL_RE = re.compile(r"^/ui/([^/]+)/panel$")
+# Full-page routes that already return a complete shell — never re-wrap these.
+_FULL_PAGE_ROUTES = frozenset({"/ui/inbox", "/ui/coach", "/ui/knowledge", "/ui/reports"})
+
+# First path segment after /ui/ → sidebar nav_id
+_SECTION_NAV = {
+    "chat": "inbox",
+    "funnel": "inbox",
+    "threads": "inbox",
+    "knowledge": "know",
+    "coach": "coach",
+    "reports": "reports",
+}
+
+_UI_SECTION_RE = re.compile(r"^/ui/([^/]+)")
 
 
 class _PartialShellMiddleware(BaseHTTPMiddleware):
-    """Wrap panel fragments in the full app shell on direct (non-HTMX) browser load.
+    """Wrap any /ui/** fragment in the full shell on direct (non-HTMX) browser load.
 
-    HTMX navigation pushes partial URLs like /ui/settings/panel to the address
-    bar.  On page refresh the browser requests that URL directly — the route
-    returns only a fragment, which renders without CSS or JS.  This middleware
-    intercepts such requests (no HX-Request header) and wraps the fragment in
-    the full app_shell(), giving the user a proper full page."""
+    HTMX navigation pushes partial URLs (/ui/settings/panel, /ui/chat/123/panel,
+    /ui/knowledge/5/edit, /ui/branches/new …) to the address bar.  On page
+    refresh the browser GETs that URL and gets a raw HTML fragment without CSS.
+    This middleware intercepts any non-HTMX GET to /ui/** whose response body
+    does NOT already start with <!DOCTYPE and wraps it in app_shell()."""
 
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
@@ -41,38 +53,45 @@ class _PartialShellMiddleware(BaseHTTPMiddleware):
         from app.api._i18n import DEFAULT_LANG, LANG_COOKIE, LANGS, _lang  # noqa: PLC0415
         from app.api._ui_html import app_shell  # noqa: PLC0415
 
-        is_htmx = request.headers.get("HX-Request") == "true"
         path = request.url.path
-        m = _PANEL_RE.match(path)
+        is_htmx = request.headers.get("HX-Request") == "true"
 
-        if not is_htmx and m:
-            section = m.group(1)
-            # chat/{tid}/panel is a different shape; skip (handled by chat route)
-            if section == "chat":
-                return await call_next(request)
+        # Only intercept direct (non-HTMX) GET requests under /ui/
+        if is_htmx or request.method != "GET" or not path.startswith("/ui/"):
+            return await call_next(request)
+        # Full-page routes already return a complete shell
+        if path in _FULL_PAGE_ROUTES:
+            return await call_next(request)
 
-            response = await call_next(request)
-            if response.status_code != 200:
-                return response
+        response = await call_next(request)
+        if response.status_code != 200:
+            return response
 
-            raw = request.cookies.get(LANG_COOKIE, DEFAULT_LANG)
-            lang = raw if raw in LANGS else DEFAULT_LANG
-            _lang.set(lang)
+        # Only wrap HTML responses
+        ct = response.headers.get("content-type", "")
+        if "text/html" not in ct:
+            return response
 
-            body = b""
-            async for chunk in response.body_iterator:
-                body += chunk
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+        decoded = body.decode("utf-8")
 
-            # Map URL section to sidebar nav_id
-            _NAV = {
-                "knowledge": "know",
-                "coach": "coach",
-            }
-            active_nav = _NAV.get(section, section)
-            full_html = app_shell(lang, body.decode("utf-8"), active_nav=active_nav)
-            return HTMLResponse(full_html, status_code=200)
+        # If the route already returns a full page, pass through unchanged
+        if decoded.lstrip().lower().startswith("<!"):
+            return HTMLResponse(decoded, status_code=200,
+                                headers=dict(response.headers))
 
-        return await call_next(request)
+        raw = request.cookies.get(LANG_COOKIE, DEFAULT_LANG)
+        lang = raw if raw in LANGS else DEFAULT_LANG
+        _lang.set(lang)
+
+        m = _UI_SECTION_RE.match(path)
+        section = m.group(1) if m else ""
+        active_nav = _SECTION_NAV.get(section, section)
+
+        full_html = app_shell(lang, decoded, active_nav=active_nav)
+        return HTMLResponse(full_html, status_code=200)
 
 
 @asynccontextmanager
