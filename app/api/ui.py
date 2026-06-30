@@ -29,8 +29,8 @@ from ._routes_chat import router as _chat_router
 from ._routes_coach import router as _coach_router
 from ._routes_knowledge import router as _knowledge_router
 from ._routes_products import router as _products_router
-from ._ui_html import app_shell, thread_list_html
-from ._ui_panels import coach_chat_html, knowledge_list_html
+from ._ui_html import app_shell, funnel_html, thread_list_html
+from ._ui_panels import coach_chat_html, knowledge_list_html, reports_panel_html
 
 router = APIRouter(prefix="/ui")
 router.include_router(_channels_router)
@@ -52,7 +52,25 @@ _THREAD_TMPL = (
     " ORDER BY COALESCE(ct.last_in_at, ct.created_at) DESC LIMIT 100"
 )
 
-_FULL_PAGE_PATHS = {"/ui/inbox", "/ui/coach", "/ui/knowledge"}
+_STAGE_COUNTS_Q = (  # noqa: S608
+    "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
+)
+_HOUR_IN_Q = (  # noqa: S608
+    "SELECT EXTRACT(HOUR FROM m.occurred_at)::int AS h, COUNT(*)"
+    " FROM message m JOIN channel_thread ct ON ct.id = m.thread_id"
+    " JOIN lead l ON l.id = ct.lead_id"
+    " WHERE m.direction='in' {and_where}"
+    " GROUP BY h"
+)
+_HOUR_OUT_Q = (  # noqa: S608
+    "SELECT EXTRACT(HOUR FROM m.occurred_at)::int AS h, COUNT(*)"
+    " FROM message m JOIN channel_thread ct ON ct.id = m.thread_id"
+    " JOIN lead l ON l.id = ct.lead_id"
+    " WHERE m.direction='out' {and_where}"
+    " GROUP BY h"
+)
+
+_FULL_PAGE_PATHS = {"/ui/inbox", "/ui/coach", "/ui/knowledge", "/ui/reports"}
 
 
 # ─── full pages ───────────────────────────────────────────────────────────────
@@ -93,12 +111,33 @@ async def coach_page(request: Request) -> HTMLResponse:
 
 # ─── thread list ──────────────────────────────────────────────────────────────
 
-@router.get("/threads", response_class=HTMLResponse)
-async def threads_partial(request: Request) -> HTMLResponse:
+@router.get("/funnel", response_class=HTMLResponse)
+async def funnel_partial(request: Request) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where_clause = "WHERE l.branch_id = ANY(:bids)" if branch_ids else ""
-    params = {"bids": branch_ids} if branch_ids else {}
+    where, params = _branch_where(branch_ids)
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(_STAGE_COUNTS_Q.format(where=where)), params
+            )
+        ).all()
+    counts = {r[0]: int(r[1]) for r in rows}
+    return HTMLResponse(funnel_html(counts))
+
+
+@router.get("/threads", response_class=HTMLResponse)
+async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    conditions, params = [], {}
+    if branch_ids:
+        conditions.append("l.branch_id = ANY(:bids)")
+        params["bids"] = branch_ids
+    if stage.strip():
+        conditions.append("l.stage = :stage")
+        params["stage"] = stage.strip()
+    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (
             await session.execute(
@@ -106,6 +145,35 @@ async def threads_partial(request: Request) -> HTMLResponse:
             )
         ).all()
     return HTMLResponse(thread_list_html(rows))
+
+
+@router.get("/reports", response_class=HTMLResponse)
+async def reports_page(request: Request) -> HTMLResponse:
+    lang = apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    and_where = ("AND l.branch_id = ANY(:bids)" if branch_ids else "")
+    async with session_scope() as session:
+        sc_rows = (
+            await session.execute(
+                text(_STAGE_COUNTS_Q.format(where=where)), params
+            )
+        ).all()
+        hi_rows = (
+            await session.execute(
+                text(_HOUR_IN_Q.format(and_where=and_where)), params
+            )
+        ).all()
+        ho_rows = (
+            await session.execute(
+                text(_HOUR_OUT_Q.format(and_where=and_where)), params
+            )
+        ).all()
+    stage_counts = {r[0]: int(r[1]) for r in sc_rows}
+    hour_in = {int(r[0]): int(r[1]) for r in hi_rows}
+    hour_out = {int(r[0]): int(r[1]) for r in ho_rows}
+    panel = reports_panel_html(stage_counts, hour_in, hour_out)
+    return HTMLResponse(app_shell(lang, panel, active_nav="reports"))
 
 
 # ─── language switcher ────────────────────────────────────────────────────────

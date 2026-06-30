@@ -17,9 +17,19 @@ _ST_ECSS: dict[str, str] = {
 # ─── stage badge helper ───────────────────────────────────────────────────────
 
 _STC: dict[str, str] = {
-    "new": "sn", "qualifying": "sq", "presenting": "sp", "objection": "so",
-    "ready": "sr", "handed_off": "sh", "dormant": "sd", "manager": "sm",
+    "new": "sn", "nurturing": "snu", "qualifying": "sq", "presenting": "sp",
+    "objection": "so", "ready": "sr", "handed_off": "sh", "dormant": "sd",
+    "manager": "sm",
 }
+_STAGE_COLOR: dict[str, str] = {
+    "new": "#4da6ff", "nurturing": "#d6a96f", "qualifying": "#9b7aff",
+    "presenting": "#4adb7a", "objection": "#ffa94d", "ready": "#51cf66",
+    "handed_off": "#22b8cf", "dormant": "#868e96", "manager": "#ff6b6b",
+}
+_ALL_STAGES = (
+    "new", "nurturing", "qualifying", "presenting", "objection",
+    "ready", "handed_off", "dormant", "manager",
+)
 
 
 def _sbadge(stage: str) -> str:
@@ -893,4 +903,122 @@ def settings_panel_html(settings: list) -> str:
         f'<thead><tr><th>Key</th><th>Value</th></tr></thead>'
         f'<tbody>{rows or "<tr><td colspan=2 style=color:#4a5568>—</td></tr>"}</tbody>'
         f'</table></div>'
+    )
+
+
+# ─── reports panel ────────────────────────────────────────────────────────────
+
+def reports_panel_html(
+    stage_counts: dict[str, int],
+    hour_in: dict[int, int],
+    hour_out: dict[int, int],
+) -> str:
+    _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
+    _won = ("ready", "handed_off")
+    total = sum(stage_counts.values())
+    pipeline = sum(stage_counts.get(s, 0) for s in _pipeline)
+    won = sum(stage_counts.get(s, 0) for s in _won)
+    dormant = stage_counts.get("dormant", 0)
+    manager_n = stage_counts.get("manager", 0)
+    conv = round(won / total * 100, 1) if total else 0.0
+
+    def _kpi(label: str, value: str, color: str = "#e8eef4") -> str:
+        return (
+            f'<div class="kpi">'
+            f'<div class="kpi-n" style="color:{color}">{_h.escape(value)}</div>'
+            f'<div class="kpi-l">{_h.escape(t(label))}</div></div>'
+        )
+
+    kpis = (
+        _kpi("rep.total", str(total))
+        + _kpi("rep.pipeline", str(pipeline), "#9b7aff")
+        + _kpi("rep.won", str(won), "#51cf66")
+        + _kpi("rep.conv", f"{conv}%", "#ffa94d")
+        + _kpi("rep.dormant", str(dormant), "#868e96")
+    )
+
+    # distribution bar (pipeline / won / dormant / manager)
+    bar_parts = [
+        (pipeline, "#9b7aff"), (won, "#51cf66"),
+        (dormant, "#868e96"), (manager_n, "#ff6b6b"),
+    ]
+    bar_segs = "".join(
+        f'<div style="flex-grow:{n};background:{c};display:flex;align-items:center;'
+        f'justify-content:center;color:rgba(0,0,0,.7);font-size:.6rem;font-weight:700;'
+        f'min-width:16px" title="{round(n/total*100,1) if total else 0}%">'
+        f'{round(n/total*100,1) if total else 0}%</div>'
+        for n, c in bar_parts if n
+    )
+    status_bar = (
+        f'<div style="display:flex;height:18px;border-radius:3px;overflow:hidden;'
+        f'gap:1px;margin:.5rem 0 .9rem">{bar_segs}</div>'
+    )
+
+    # stage breakdown table
+    tbl_rows = ""
+    for s in _ALL_STAGES:
+        n = stage_counts.get(s, 0)
+        badge = (
+            f'<span class="bg {_STC.get(s, "sd")}">'
+            f'{_h.escape(t(f"stage.{s}"))}</span>'
+        )
+        bar_w = round(n / (max(stage_counts.values(), default=1) or 1) * 80)
+        tbl_rows += (
+            f'<tr><td>{badge}</td>'
+            f'<td class="rep-n">{n}'
+            f'<span style="display:inline-block;width:{bar_w}px;height:5px;'
+            f'background:{_STAGE_COLOR.get(s,"#4a5568")};opacity:.45;'
+            f'border-radius:2px;margin-left:.4rem;vertical-align:middle"></span>'
+            f'</td></tr>'
+        )
+
+    by_stage_lbl = _h.escape(t("rep.by_stage"))
+    stage_lbl = _h.escape(t("rep.stage"))
+    count_lbl = _h.escape(t("rep.count"))
+    stage_table = (
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:.7rem 0 .35rem">{by_stage_lbl}</h3>'
+        f'<table class="rep-tbl"><thead>'
+        f'<tr><th>{stage_lbl}</th><th style="text-align:right">{count_lbl}</th></tr>'
+        f'</thead><tbody>{tbl_rows}</tbody></table>'
+    )
+
+    # hourly activity chart
+    max_val = max(max(hour_in.values(), default=0), max(hour_out.values(), default=0), 1)
+    hour_bars = ""
+    for h in range(24):
+        n_in = hour_in.get(h, 0)
+        n_out = hour_out.get(h, 0)
+        h_in = round(n_in / max_val * 100)
+        h_out = round(n_out / max_val * 100)
+        hour_bars += (
+            f'<div class="hbar" title="{h:02d}:00 ↓{n_in} ↑{n_out}">'
+            f'<div style="flex:1;display:flex;flex-direction:column;gap:1px;'
+            f'justify-content:flex-end;width:100%">'
+            f'<div style="height:{h_in}%;background:#4da6ff;'
+            f'{"min-height:1px" if n_in else ""}"></div>'
+            f'<div style="height:{h_out}%;background:#51cf66;'
+            f'{"min-height:1px" if n_out else ""}"></div>'
+            f'</div>'
+            f'<div class="hbar-l">{h if h % 4 == 0 else ""}</div>'
+            f'</div>'
+        )
+
+    title_lbl = _h.escape(t("rep.title"))
+    act_lbl = _h.escape(t("rep.activity"))
+    in_lbl = _h.escape(t("rep.msgs_in"))
+    out_lbl = _h.escape(t("rep.msgs_out"))
+
+    return (
+        f'<div class="ch"><span class="ch-n">{title_lbl}</span></div>'
+        f'<div class="pnl-body">'
+        f'<div class="kpi-row">{kpis}</div>'
+        f'{status_bar}'
+        f'{stage_table}'
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl} (24h)</h3>'
+        f'<div class="hchart">{hour_bars}</div>'
+        f'<div style="font-size:.63rem;color:#4a5568;margin-top:.3rem">'
+        f'<span style="color:#4da6ff">▮</span> {in_lbl}&nbsp;&nbsp;'
+        f'<span style="color:#51cf66">▮</span> {out_lbl}'
+        f'</div>'
+        f'</div>'
     )

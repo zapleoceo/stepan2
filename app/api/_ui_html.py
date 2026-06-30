@@ -55,10 +55,44 @@ _CSS = (
     "white-space:nowrap;margin-top:.05rem}"
     ".bg{display:inline-block;padding:.07rem .3rem;border-radius:5px;font-size:.6rem;"
     "font-weight:700;text-transform:uppercase;margin-right:.18rem}"
-    ".sn{background:#1e3a5f;color:#4da6ff}.sq{background:#2a1f5f;color:#9b7aff}"
+    ".sn{background:#1e3a5f;color:#4da6ff}.snu{background:#3a2a10;color:#d6a96f}"
+    ".sq{background:#2a1f5f;color:#9b7aff}"
     ".sp{background:#1f3a2a;color:#4adb7a}.so{background:#3a2a1f;color:#ffa94d}"
     ".sr{background:#1f3a2a;color:#51cf66}.sh{background:#163030;color:#22b8cf}"
     ".sd{background:#2a2a2a;color:#868e96}.sm{background:#3a1f1f;color:#ff6b6b}"
+    # funnel widget
+    ".fnl{padding:.4rem .6rem .5rem;border-bottom:1px solid #1e2636;flex-shrink:0}"
+    ".fnl-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem}"
+    ".fnl-cap{font-size:.6rem;font-weight:800;letter-spacing:.07em;color:#4a5568}"
+    ".fnl-tot{font-size:.68rem;color:#6b7685}"
+    ".fnl-tot b{color:#c8d6e5}"
+    ".fnl-track{display:flex;height:20px;border-radius:3px;overflow:hidden;gap:1px}"
+    ".fseg{display:flex;align-items:center;justify-content:center;cursor:pointer;"
+    "min-width:12px;color:rgba(0,0,0,.7);font-size:.58rem;font-weight:800;"
+    "text-decoration:none;transition:filter .1s}"
+    ".fseg:hover,.fchip:hover,.fnl-all:hover{filter:brightness(1.2)}"
+    ".fseg.on{box-shadow:inset 0 0 0 2px rgba(255,255,255,.85)}"
+    ".fchip.on,.fnl-all.on{text-decoration:underline}"
+    ".fnl-bot{display:flex;gap:.3rem;margin-top:.35rem;flex-wrap:wrap;align-items:center}"
+    ".fchip{display:inline-flex;align-items:center;gap:.18rem;padding:.12rem .38rem;"
+    "border-radius:3px;font-size:.63rem;font-weight:700;cursor:pointer;"
+    "text-decoration:none;border:1px solid transparent}"
+    ".fnl-all{font-size:.62rem;color:#4a5568;cursor:pointer;text-decoration:none;"
+    "padding:.12rem .3rem;border-radius:3px}"
+    # reports panel
+    ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
+    ".kpi{background:#141925;border:1px solid #2d3748;border-radius:6px;"
+    "padding:.5rem .75rem;min-width:90px}"
+    ".kpi-n{font-size:1.5rem;font-weight:800;line-height:1.15}"
+    ".kpi-l{font-size:.64rem;color:#6b7685;margin-top:.1rem}"
+    ".rep-tbl{width:100%;border-collapse:collapse;font-size:.77rem;margin-bottom:.7rem}"
+    ".rep-tbl th{text-align:left;color:#6b7685;font-weight:600;font-size:.65rem;"
+    "padding:.25rem .4rem;border-bottom:1px solid #2d3748}"
+    ".rep-tbl td{padding:.25rem .4rem;border-bottom:1px solid #1a2033}"
+    ".rep-n{text-align:right;font-weight:700;color:#e8eef4}"
+    ".hchart{display:flex;align-items:flex-end;gap:2px;height:64px;margin-top:.3rem}"
+    ".hbar{display:flex;flex-direction:column;align-items:center;flex:1;height:100%}"
+    ".hbar-l{font-size:.52rem;color:#4a5568;margin-top:1px;line-height:1}"
     "#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}"
     ".ch{padding:.56rem .9rem;border-bottom:1px solid #2d3748;background:#141925;"
     "display:flex;align-items:center;gap:.55rem;flex-shrink:0}"
@@ -180,9 +214,65 @@ _CSS = (
 )
 
 _STC: dict[str, str] = {
-    "new": "sn", "qualifying": "sq", "presenting": "sp", "objection": "so",
-    "ready": "sr", "handed_off": "sh", "dormant": "sd", "manager": "sm",
+    "new": "sn", "nurturing": "snu", "qualifying": "sq", "presenting": "sp",
+    "objection": "so", "ready": "sr", "handed_off": "sh", "dormant": "sd",
+    "manager": "sm",
 }
+
+_PIPELINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready", "handed_off")
+_SIDE_STAGES = ("dormant", "manager")
+_STAGE_COLOR: dict[str, str] = {
+    "new": "#4da6ff", "nurturing": "#d6a96f", "qualifying": "#9b7aff",
+    "presenting": "#4adb7a", "objection": "#ffa94d", "ready": "#51cf66",
+    "handed_off": "#22b8cf", "dormant": "#868e96", "manager": "#ff6b6b",
+}
+_SIDE_ICON = {"dormant": "😴", "manager": "👤"}
+
+
+def funnel_html(counts: dict[str, int]) -> str:
+    """Compact funnel bar for the inbox .thr column."""
+    total = sum(counts.values())
+    cap = _h.escape(t("fnl.title"))
+    tot_lbl = _h.escape(t("fnl.total"))
+    all_lbl = _h.escape(t("fnl.all"))
+
+    segs = []
+    for s in _PIPELINE:
+        n = counts.get(s, 0)
+        color = _STAGE_COLOR[s]
+        label = _h.escape(t(f"stage.{s}"))
+        segs.append(
+            f'<a class="fseg" style="flex-grow:{max(n,1)};background:{color}"'
+            f' hx-get="/ui/threads?stage={s}" hx-target="#tl" hx-swap="innerHTML"'
+            f' onclick="setFnl(this)" title="{label}: {n}">'
+            f'{"<b>" + str(n) + "</b>" if n > 0 else ""}</a>'
+        )
+
+    chips = []
+    for s in _SIDE_STAGES:
+        n = counts.get(s, 0)
+        color = _STAGE_COLOR[s]
+        icon = _SIDE_ICON.get(s, "")
+        label = _h.escape(t(f"stage.{s}"))
+        chips.append(
+            f'<a class="fchip" style="color:{color};border-color:{color}"'
+            f' hx-get="/ui/threads?stage={s}" hx-target="#tl" hx-swap="innerHTML"'
+            f' onclick="setFnl(this)" title="{label}: {n}">{icon} {n}</a>'
+        )
+    chips.append(
+        f'<a class="fnl-all on"'
+        f' hx-get="/ui/threads" hx-target="#tl" hx-swap="innerHTML"'
+        f' onclick="setFnl(this)">{all_lbl}</a>'
+    )
+
+    return (
+        f'<div class="fnl">'
+        f'<div class="fnl-hd"><span class="fnl-cap">{cap}</span>'
+        f'<span class="fnl-tot">{tot_lbl}: <b>{total}</b></span></div>'
+        f'<div class="fnl-track">{"".join(segs)}</div>'
+        f'<div class="fnl-bot">{"".join(chips)}</div>'
+        f'</div>'
+    )
 
 _HELP_KEYS: dict[str, str] = {
     "inbox": "help.inbox",
@@ -194,6 +284,7 @@ _HELP_KEYS: dict[str, str] = {
     "leads": "help.leads",
     "outbox": "help.outbox",
     "branches": "help.branches",
+    "reports": "help.reports",
 }
 
 
@@ -263,8 +354,10 @@ def messages_html(msgs: list, pending: list, tid: int) -> str:  # noqa: ARG001
     return "".join(parts)
 
 
-_STAGES = ("new", "qualifying", "presenting", "objection",
-           "ready", "handed_off", "dormant", "manager")
+_STAGES = (
+    "new", "nurturing", "qualifying", "presenting", "objection",
+    "ready", "handed_off", "dormant", "manager",
+)
 
 
 def chat_header_html(tid: int, name: str, stage: str) -> str:
@@ -388,6 +481,7 @@ def app_shell(
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
         + _hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
         + '<div class="nav-sep"></div>'
+        + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox")
     )
 
@@ -416,6 +510,10 @@ def app_shell(
         "function toggleHelp(){"
         "document.getElementById('hov').classList.toggle('on');}"
         # sendSuggest: post draft textarea as manager message
+        "function setFnl(el){"
+        "document.querySelectorAll('.fseg.on,.fchip.on,.fnl-all.on')"
+        ".forEach(e=>e.classList.remove('on'));"
+        "el.classList.add('on');}"
         "function sendSuggest(tid){"
         "var ta=document.getElementById('sug-ta-'+tid);"
         "if(!ta||!ta.value.trim())return;"
@@ -433,6 +531,8 @@ def app_shell(
     elif active_nav == "inbox":
         _show_thr = True
         _thr_inner = (
+            f'<div id="fnl-wrap"'
+            f' hx-get="/ui/funnel" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
             f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s"'
             f' hx-swap="innerHTML"></div>'

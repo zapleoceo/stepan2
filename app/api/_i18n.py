@@ -311,6 +311,7 @@ _TR: dict[str, dict[str, str]] = {
     "time.d":        {"ru": "д",  "en": "d",  "id": "h"},
     # stages
     "stage.new":        {"ru": "новый",     "en": "new",          "id": "baru"},
+    "stage.nurturing":  {"ru": "прогрев",   "en": "nurturing",    "id": "nurturing"},
     "stage.qualifying": {"ru": "квалиф.",   "en": "qualifying",   "id": "kualifikasi"},
     "stage.presenting": {"ru": "презент.",  "en": "presenting",   "id": "presentasi"},
     "stage.objection":  {"ru": "возраж.",   "en": "objection",    "id": "keberatan"},
@@ -318,4 +319,33 @@ _TR: dict[str, dict[str, str]] = {
     "stage.handed_off": {"ru": "передан",   "en": "handed off",   "id": "diteruskan"},
     "stage.dormant":    {"ru": "дремлет",   "en": "dormant",      "id": "tidak aktif"},
     "stage.manager":    {"ru": "менеджер",  "en": "manager",      "id": "manajer"},
+    # funnel widget
+    "fnl.title":   {"ru": "ВОРОНКА",        "en": "FUNNEL",       "id": "CORONG"},
+    "fnl.total":   {"ru": "Всего",          "en": "Total",        "id": "Total"},
+    "fnl.all":     {"ru": "все",            "en": "all",          "id": "semua"},
+    # reports
+    "nav.reports": {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
+    "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
+    "rep.total":   {"ru": "Всего лидов",    "en": "Total leads",  "id": "Total lead"},
+    "rep.pipeline":{"ru": "В работе",       "en": "Pipeline",     "id": "Pipeline"},
+    "rep.won":     {"ru": "Закрытые",       "en": "Won",          "id": "Berhasil"},
+    "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},
+    "rep.dormant": {"ru": "Спящие",         "en": "Dormant",      "id": "Tidak aktif"},
+    "rep.by_stage":{"ru": "По стадиям",     "en": "By stage",     "id": "Per tahap"},
+    "rep.stage":   {"ru": "Стадия",         "en": "Stage",        "id": "Tahap"},
+    "rep.count":   {"ru": "Кол-во",         "en": "Count",        "id": "Jumlah"},
+    "rep.activity":{"ru": "Активность",     "en": "Activity",     "id": "Aktivitas"},
+    "rep.msgs_in": {"ru": "входящие",       "en": "incoming",     "id": "masuk"},
+    "rep.msgs_out":{"ru": "исходящие",      "en": "outgoing",     "id": "keluar"},
+    "help.reports": {
+        "ru": (
+            "Общая статистика: воронка по стадиям, конверсия, активность по часам."
+            " Обновляется при каждом открытии."
+        ),
+        "en": (
+            "Overall stats: stage funnel, conversion rate, hourly activity."
+            " Refreshes on every open."
+        ),
+        "id": "Statistik: corong tahap, konversi, aktivitas per jam.",
+    },
 }

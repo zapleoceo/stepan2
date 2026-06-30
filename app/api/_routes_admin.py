@@ -16,6 +16,7 @@ from ._ui_panels import (
     leads_panel_html,
     members_panel_html,
     outbox_panel_html,
+    reports_panel_html,
     settings_panel_html,
 )
 
@@ -65,6 +66,35 @@ async def members_panel(request: Request) -> HTMLResponse:
         )
         rows = (await session.execute(text(q), params)).all()
     return HTMLResponse(members_panel_html(list(rows)))
+
+
+@router.get("/reports/panel", response_class=HTMLResponse)
+async def reports_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    and_where = "AND l.branch_id = ANY(:bids)" if branch_ids else ""
+    _sc = (  # noqa: S608
+        "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
+    )
+    _hi = (  # noqa: S608
+        "SELECT EXTRACT(HOUR FROM m.occurred_at)::int, COUNT(*)"
+        " FROM message m JOIN channel_thread ct ON ct.id=m.thread_id"
+        " JOIN lead l ON l.id=ct.lead_id WHERE m.direction='in' {and_where} GROUP BY 1"
+    )
+    _ho = (  # noqa: S608
+        "SELECT EXTRACT(HOUR FROM m.occurred_at)::int, COUNT(*)"
+        " FROM message m JOIN channel_thread ct ON ct.id=m.thread_id"
+        " JOIN lead l ON l.id=ct.lead_id WHERE m.direction='out' {and_where} GROUP BY 1"
+    )
+    async with session_scope() as session:
+        sc = (await session.execute(text(_sc.format(where=where)), params)).all()
+        hi = (await session.execute(text(_hi.format(and_where=and_where)), params)).all()
+        ho = (await session.execute(text(_ho.format(and_where=and_where)), params)).all()
+    stage_counts = {r[0]: int(r[1]) for r in sc}
+    hour_in = {int(r[0]): int(r[1]) for r in hi}
+    hour_out = {int(r[0]): int(r[1]) for r in ho}
+    return HTMLResponse(reports_panel_html(stage_counts, hour_in, hour_out))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)
