@@ -193,6 +193,7 @@ _HELP_KEYS: dict[str, str] = {
     "settings": "help.settings",
     "leads": "help.leads",
     "outbox": "help.outbox",
+    "branches": "help.branches",
 }
 
 
@@ -357,7 +358,9 @@ def suggest_box_html(tid: int, draft: str) -> str:
     )
 
 
-def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
+def app_shell(
+    lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
+) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
         lbl = _h.escape(t(key))
@@ -379,10 +382,11 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
         + '<div class="nav-sep"></div>'
         + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
-        + _hna("nav.know", "/ui/knowledge/panel", "fa-solid fa-book", "know")
+        + _na("nav.know", "/ui/knowledge", "fa-solid fa-book", "know")
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
         + _hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
+        + _hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
         + '<div class="nav-sep"></div>'
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox")
     )
@@ -422,6 +426,21 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
     )
     inbox_lbl = _h.escape(t("nav.inbox"))
     help_lbl = _h.escape(t("help.title"))
+    # .thr column: shown for inbox (thread list) or when caller passes custom thr_html
+    if thr_html is not None:
+        _show_thr = True
+        _thr_inner = thr_html
+    elif active_nav == "inbox":
+        _show_thr = True
+        _thr_inner = (
+            f'<div class="thr-h">{inbox_lbl}</div>'
+            f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s"'
+            f' hx-swap="innerHTML"></div>'
+        )
+    else:
+        _show_thr = False
+        _thr_inner = ""
+    _thr_style = "" if _show_thr else " style='display:none'"
     help_overlay = (
         f'<div class="hov" id="hov" onclick="if(event.target===this)toggleHelp()">'
         f'<div class="hov-box">'
@@ -459,10 +478,7 @@ def app_shell(lang: str, main_html: str, active_nav: str = "inbox") -> str:
         f'<div class="lrow">{_lb("ru")}{_lb("en")}{_lb("id")}</div>'
         f'</div>'
         f'</div></aside>'
-        f'<div class="thr"{"" if active_nav == "inbox" else " style=\'display:none\'"}>'
-        f'<div class="thr-h">{inbox_lbl}</div>'
-        f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>'
-        f'</div>'
+        f'<div class="thr"{_thr_style}>{_thr_inner}</div>'
         f'<div id="main">{main_html}</div>'
         f'{help_overlay}'
         f'<script>{script}</script>'

@@ -10,9 +10,16 @@ from app.admin._branch import branch_ids_from_request
 
 from ._i18n import apply_lang
 from ._query import _branch_where
-from ._ui_panels import knowledge_edit_html, knowledge_new_html, knowledge_panel_html
+from ._ui_panels import (
+    _knowledge_items_html,
+    knowledge_edit_html,
+    knowledge_new_html,
+    knowledge_panel_html,
+)
 
 router = APIRouter()
+
+_KNOW_Q = "SELECT id, slug, title, content FROM knowledge_doc {where} ORDER BY id"  # noqa: S608
 
 
 @router.get("/knowledge/panel", response_class=HTMLResponse)
@@ -21,9 +28,19 @@ async def knowledge_panel(request: Request) -> HTMLResponse:
     branch_ids = branch_ids_from_request(request)
     where, params = _branch_where(branch_ids)
     async with session_scope() as session:
-        q = f"SELECT id, slug, title, content FROM knowledge_doc {where} ORDER BY id"  # noqa: S608
-        docs = (await session.execute(text(q), params)).all()
+        docs = (await session.execute(text(_KNOW_Q.format(where=where)), params)).all()
     return HTMLResponse(knowledge_panel_html(list(docs)))
+
+
+@router.get("/knowledge/list", response_class=HTMLResponse)
+async def knowledge_list_partial(request: Request) -> HTMLResponse:
+    """HTMX partial: list items for #know-list refresh after save/create."""
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    async with session_scope() as session:
+        docs = (await session.execute(text(_KNOW_Q.format(where=where)), params)).all()
+    return HTMLResponse(_knowledge_items_html(list(docs)))
 
 
 @router.get("/knowledge/new", response_class=HTMLResponse)
@@ -59,7 +76,6 @@ async def knowledge_save(
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
-        # Include branch check in UPDATE to prevent cross-branch writes
         if branch_ids:
             await session.execute(
                 text(
@@ -81,9 +97,11 @@ async def knowledge_save(
         ).first()
     if not row:
         return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-    return HTMLResponse(
+    resp = HTMLResponse(
         knowledge_edit_html(row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""))
     )
+    resp.headers["HX-Trigger"] = "refreshKnowledgeList"
+    return resp
 
 
 @router.post("/knowledge/create", response_class=HTMLResponse)
@@ -119,6 +137,8 @@ async def knowledge_create(
         ).first()
     if not row:
         return HTMLResponse('<div class="emp">Could not create doc</div>', status_code=500)
-    return HTMLResponse(
+    resp = HTMLResponse(
         knowledge_edit_html(row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""))
     )
+    resp.headers["HX-Trigger"] = "refreshKnowledgeList"
+    return resp

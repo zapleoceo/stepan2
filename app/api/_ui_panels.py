@@ -191,7 +191,44 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
     )
 
 
-# ─── knowledge panel ──────────────────────────────────────────────────────────
+# ─── knowledge sidebar & panel ───────────────────────────────────────────────
+
+def _knowledge_items_html(docs: list, active_id: int | None = None) -> str:
+    """Plain <a> items for #know-list — reused in full list and HTMX refresh."""
+    items = "".join(
+        f'<a class="ti{"  on" if doc[0] == active_id else ""}"'
+        f' hx-get="/ui/knowledge/{doc[0]}/edit" hx-target="#main"'
+        f' hx-push-url="/ui/knowledge/{doc[0]}/edit"'
+        f' onclick="setOn(this)">'
+        f'<div class="ti-t"><span class="ti-n">{_h.escape(str(doc[2] or doc[1]))}</span></div>'
+        f'<div class="ti-p">{_h.escape(str(doc[1]))}</div>'
+        f'</a>'
+        for doc in docs
+    )
+    return items if items else '<div class="emp">—</div>'
+
+
+def knowledge_list_html(docs: list) -> str:
+    """Sidebar list of knowledge docs for .thr column (like thread_list_html)."""
+    know_lbl = _h.escape(t("nav.know"))
+    create_lbl = _h.escape(t("know.create"))
+    return (
+        f'<div class="thr-h" style="display:flex;align-items:center;'
+        f'justify-content:space-between">'
+        f'<span>{know_lbl}</span>'
+        f'<a class="btn-sm btn-p" hx-get="/ui/knowledge/new" hx-target="#main"'
+        f' hx-push-url="/ui/knowledge/new"'
+        f' style="text-decoration:none;font-size:.7rem;padding:.18rem .45rem">'
+        f'{create_lbl}</a>'
+        f'</div>'
+        f'<div id="know-list"'
+        f' hx-trigger="refreshKnowledgeList from:body"'
+        f' hx-get="/ui/knowledge/list" hx-swap="innerHTML"'
+        f' style="flex:1;overflow-y:auto">'
+        f'{_knowledge_items_html(docs)}'
+        f'</div>'
+    )
+
 
 def knowledge_panel_html(docs: list) -> str:
     """List of KB docs; each card loads the edit view via HTMX."""
@@ -221,16 +258,13 @@ def knowledge_panel_html(docs: list) -> str:
 
 def knowledge_new_html() -> str:
     """Create form for a new KB doc."""
-    back_lbl = _h.escape(t("know.back"))
     slug_lbl = _h.escape(t("know.slug_lbl"))
     title_lbl = _h.escape(t("know.title"))
     content_lbl = _h.escape(t("know.content"))
     save_lbl = _h.escape(t("know.save"))
+    new_lbl = _h.escape(t("know.new_doc"))
     return (
-        f'<div class="ch">'
-        f'<a class="btn-g" hx-get="/ui/knowledge/panel" hx-target="#main"'
-        f' hx-push-url="/ui/knowledge/panel" style="text-decoration:none">{back_lbl}</a>'
-        f'</div>'
+        f'<div class="ch"><span class="ch-n">{new_lbl}</span></div>'
         f'<div class="pnl-body">'
         f'<form hx-post="/ui/knowledge/create" hx-target="#main" hx-swap="innerHTML">'
         f'<div class="frm-grp">'
@@ -249,17 +283,14 @@ def knowledge_new_html() -> str:
 
 
 def knowledge_edit_html(doc_id: int, slug: str, title: str, content: str) -> str:
-    """Edit form for a single KB doc."""
-    back_lbl = _h.escape(t("know.back"))
+    """Edit form for a single KB doc (navigation via sidebar)."""
     title_lbl = _h.escape(t("know.title"))
     content_lbl = _h.escape(t("know.content"))
     save_lbl = _h.escape(t("know.save"))
     return (
         f'<div class="ch">'
-        f'<a class="btn-g" hx-get="/ui/knowledge/panel" hx-target="#main"'
-        f' hx-push-url="/ui/knowledge/panel" style="text-decoration:none">'
-        f'{back_lbl}</a>'
-        f'<span class="kdoc-slug" style="margin-left:.4rem">{_h.escape(slug)}</span>'
+        f'<span class="ch-n">{_h.escape(title or slug)}</span>'
+        f'<span style="margin-left:.4rem;font-size:.74rem;color:#6b7685">{_h.escape(slug)}</span>'
         f'</div>'
         f'<div class="pnl-body">'
         f'<form hx-post="/ui/knowledge/{doc_id}/save" hx-target="#main" hx-swap="innerHTML">'
@@ -271,7 +302,7 @@ def knowledge_edit_html(doc_id: int, slug: str, title: str, content: str) -> str
         f'<label class="frm-lbl">{content_lbl}</label>'
         f'<textarea class="frm-ta" name="content" rows="22">{_h.escape(content or "")}</textarea>'
         f'</div>'
-        f'<div style="display:flex;gap:.5rem;margin-top:.4rem">'
+        f'<div style="display:flex;gap:.5rem;align-items:center;margin-top:.4rem">'
         f'<button class="btn-sm btn-p">{save_lbl}</button>'
         f'</div>'
         f'</form>'
@@ -451,6 +482,107 @@ def _set_desc(key: str) -> str:
         return ""
     lang = current_lang()
     return doc.get(lang) or doc.get("en") or ""
+
+
+def branches_panel_html(rows: list) -> str:
+    """List of branches with name, lang, tz, active flag and edit button."""
+    title = _h.escape(t("nav.branches"))
+    hint = _h.escape(t("help.branches"))
+    create_lbl = _h.escape(t("br.create"))
+    name_h = _h.escape(t("br.name"))
+    lang_h = _h.escape(t("br.lang_lbl"))
+    tz_h = _h.escape(t("br.tz"))
+    active_h = _h.escape(t("br.active"))
+    edit_lbl = _h.escape(t("br.edit"))
+    trows = "".join(
+        f'<tr>'
+        f'<td style="color:#4a5568;font-size:.72rem">{r[0]}</td>'
+        f'<td><strong style="color:#e8eef4">{_h.escape(str(r[1] or "—"))}</strong></td>'
+        f'<td style="font-family:ui-monospace,monospace;font-size:.74rem;color:#4da6ff">'
+        f'{_h.escape(str(r[2] or "—"))}</td>'
+        f'<td style="color:#d0d7de;font-size:.74rem">UTC+{r[3]}</td>'
+        f'<td><span class="pill {"p-ok" if r[4] else "p-off"}">'
+        f'{"on" if r[4] else "off"}</span></td>'
+        f'<td><button class="act-btn"'
+        f' hx-get="/ui/branches/{r[0]}/edit"'
+        f' hx-target="#main" hx-push-url="true">{edit_lbl}</button></td>'
+        f'</tr>'
+        for r in rows  # (id, name, lang, tz_offset_h, is_active)
+    )
+    return (
+        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div class="ch-acts">'
+        f'<button class="act-btn"'
+        f' hx-get="/ui/branches/new"'
+        f' hx-target="#main" hx-push-url="true">{create_lbl}</button>'
+        f'</div></div>'
+        f'<div class="pnl-body">'
+        f'<div class="hint">{hint}</div>'
+        f'<table class="tbl">'
+        f'<thead><tr><th>ID</th><th>{name_h}</th>'
+        f'<th>{lang_h}</th><th>{tz_h}</th>'
+        f'<th>{active_h}</th><th></th></tr></thead>'
+        f'<tbody>{trows or "<tr><td colspan=6 style=color:#4a5568>—</td></tr>"}</tbody>'
+        f'</table></div>'
+    )
+
+
+def branch_edit_html(
+    bid: int | None,
+    name: str,
+    lang: str,
+    tz: int,
+    is_active: bool,
+    seeded: bool = False,
+) -> str:
+    """Form for creating or editing a branch."""
+    title = _h.escape(t("br.new" if bid is None else "br.edit_title"))
+    action = "/ui/branches/create" if bid is None else f"/ui/branches/{bid}/save"
+    lang_opts = "".join(
+        f'<option value="{lc}" {"selected" if lc == lang else ""}>{lc}</option>'
+        for lc in ("id", "en", "ru")
+    )
+    active_checked = "checked" if is_active else ""
+    save_lbl = _h.escape(t("br.save"))
+    back_lbl = _h.escape(t("br.back"))
+    name_lbl = _h.escape(t("br.name"))
+    lang_lbl = _h.escape(t("br.lang_lbl"))
+    tz_lbl = _h.escape(t("br.tz"))
+    active_lbl = _h.escape(t("br.active"))
+    seeded_note = (
+        f'<div class="hint" style="color:#51cf66;margin-bottom:.5rem">'
+        f'{_h.escape(t("br.settings_seeded"))}</div>'
+        if seeded else ""
+    )
+    return (
+        f'<div class="ch">'
+        f'<button class="act-btn"'
+        f' hx-get="/ui/branches/panel"'
+        f' hx-target="#main" hx-push-url="true">{back_lbl}</button>'
+        f'<span class="ch-n" style="margin-left:.6rem">{title}</span>'
+        f'</div>'
+        f'<div class="pnl-body">'
+        f'{seeded_note}'
+        f'<form hx-post="{action}" hx-target="#main" hx-push-url="true"'
+        f' style="max-width:400px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{name_lbl}</label>'
+        f'<input class="frm-inp" name="name" value="{_h.escape(name)}" required></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{lang_lbl}</label>'
+        f'<select class="act-sel" name="lang"'
+        f' style="width:100%;padding:.32rem .35rem">{lang_opts}</select></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{tz_lbl} (7 = Jakarta, 3 = Москва, 0 = UTC)</label>'
+        f'<input class="frm-inp" name="tz_offset_h" type="number"'
+        f' min="-12" max="14" value="{tz}"></div>'
+        f'<div class="frm-grp" style="display:flex;align-items:center;gap:.5rem">'
+        f'<input type="checkbox" name="is_active" id="br-active" {active_checked}>'
+        f'<label class="frm-lbl" for="br-active" style="margin:0">{active_lbl}</label></div>'
+        f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
+        f'</form>'
+        f'</div>'
+    )
 
 
 def settings_panel_html(settings: list) -> str:

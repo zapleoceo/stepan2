@@ -222,11 +222,44 @@ _TR: dict[str, dict[str, str]] = {
     # knowledge CRUD
     "know.create":      {"ru": "+ Документ",   "en": "+ Doc",       "id": "+ Dokumen"},
     "know.slug_lbl":    {"ru": "Slug (ID)",    "en": "Slug (ID)",   "id": "Slug (ID)"},
+    "know.select":  {"ru": "Выберите документ", "en": "Select a document", "id": "Pilih dokumen"},
+    "know.new_doc": {"ru": "Новый документ",    "en": "New Document",      "id": "Dokumen Baru"},
     # coach revert
     "coach.revert":     {"ru": "↩ Откатить",   "en": "↩ Revert",   "id": "↩ Kembalikan"},
     # branch selector
     "branch.filter": {"ru": "Филиал", "en": "Branch", "id": "Cabang"},
     "branch.all":    {"ru": "Все филиалы", "en": "All branches", "id": "Semua cabang"},
+    # branch management panel
+    "nav.branches":  {"ru": "Филиалы",      "en": "Branches",    "id": "Cabang"},
+    "br.name":       {"ru": "Название",     "en": "Name",        "id": "Nama"},
+    "br.lang_lbl":   {"ru": "Язык бота",   "en": "Bot language","id": "Bahasa bot"},
+    "br.tz":         {"ru": "UTC смещение", "en": "UTC offset",  "id": "Zona waktu (UTC)"},
+    "br.active":     {"ru": "Активен",     "en": "Active",       "id": "Aktif"},
+    "br.create":     {"ru": "+ Филиал",    "en": "+ Branch",     "id": "+ Cabang"},
+    "br.new":        {"ru": "Новый филиал","en": "New Branch",   "id": "Cabang Baru"},
+    "br.edit_title": {"ru": "Редактировать филиал","en": "Edit Branch","id": "Edit Cabang"},
+    "br.edit":       {"ru": "Изменить",    "en": "Edit",         "id": "Edit"},
+    "br.save":       {"ru": "Сохранить",   "en": "Save",         "id": "Simpan"},
+    "br.back":       {"ru": "← Филиалы",  "en": "← Branches",   "id": "← Cabang"},
+    "help.branches": {
+        "ru": (
+            "Управление филиалами."
+            " Каждый филиал — отдельный арендатор: своя KB, продукты и настройки бота."
+            " При создании нового филиала настройки добавляются автоматически."
+            " Язык влияет на то, на каком языке бот ведёт переписку."
+        ),
+        "en": (
+            "Manage branches."
+            " Each branch is a separate tenant with its own KB, products, and bot settings."
+            " Default settings are seeded automatically when a branch is created."
+            " Language controls the bot's conversation language."
+        ),
+        "id": (
+            "Kelola cabang."
+            " Setiap cabang adalah tenant terpisah dengan KB, produk, dan pengaturan bot sendiri."
+            " Pengaturan default ditambahkan otomatis saat cabang dibuat."
+        ),
+    },
     # agent toggle
     "bot.on":        {"ru": "Бот ON",  "en": "Bot ON",  "id": "Bot ON"},
     "bot.off":       {"ru": "Бот OFF", "en": "Bot OFF", "id": "Bot OFF"},

@@ -282,7 +282,7 @@ def test_inbox_has_members_nav(client: TestClient) -> None:
     resp = client.get("/ui/inbox")
     assert resp.status_code == 200
     assert "/ui/members/panel" in resp.text
-    assert "/ui/knowledge/panel" in resp.text
+    assert 'href="/ui/knowledge"' in resp.text
     assert "/ui/settings/panel" in resp.text
 
 
