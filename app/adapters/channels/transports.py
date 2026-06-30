@@ -60,7 +60,9 @@ class InstagrapiTransport:
                     client.private_request, endpoint,
                     params={"visual_message_return_type": "unseen", "limit": "20"},
                 )
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                import logging  # noqa: PLC0415
+                logging.getLogger(__name__).warning("IG %s failed: %s", endpoint, exc)
                 continue
             for t in (raw.get("inbox") or {}).get("threads", []):
                 items = t.get("items") or []
