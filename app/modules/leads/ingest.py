@@ -13,6 +13,7 @@ from app.adapters.db.models import Message
 from app.ports.channel import InboundMessage
 
 from .identity import IdentityService
+from .phone import extract_phone
 from .repository import MessageRepo
 
 WINDOW = timedelta(hours=24)  # private-channel reply window (e.g. MBS 24h)
@@ -36,8 +37,9 @@ class IngestService:
             external_id = _external_id(inbound)
             if await self.messages.by_external(channel_id, external_id) is not None:
                 continue  # already ingested — idempotent
+            phone = extract_phone(inbound.text)  # merge key when the lead shares a number
             _lead, thread = await self.identity.resolve_or_create(
-                inbound.external_thread_id, channel_id, None, None
+                inbound.external_thread_id, channel_id, None, phone
             )
             created.append(await self._store(thread, channel_id, external_id, inbound))
         return created
