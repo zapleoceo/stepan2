@@ -25,8 +25,20 @@ _SEED_SETTINGS: dict[str, str] = {
     "daily_cap": "500",
     "quiet_start": "22",
     "quiet_end": "8",
+    "reply_delay_min_s": "5",
+    "reply_delay_max_s": "30",
+    "tz_offset_h": "7",
+    "tg_group_id": "",
     "followup_enabled": "false",
     "followup_schedule_h": "4,24,72",
+    "knowledge_backend": "direct",
+    "llm_backend": "local",
+    "tech_search_enabled": "false",
+    "tech_usecase_enabled": "true",
+    "fb_account_id": "",
+    "fb_business_id": "",
+    "meta_pixel_id": "",
+    "meta_capi_token": "",
 }
 
 

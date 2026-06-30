@@ -26,6 +26,14 @@ _DEFAULTS: dict[str, str] = {
     "tg_group_id": "",
     "followup_enabled": "false",
     "followup_schedule_h": "4,24,72",
+    "knowledge_backend": "direct",
+    "llm_backend": "local",
+    "tech_search_enabled": "false",
+    "tech_usecase_enabled": "true",
+    "fb_account_id": "",
+    "fb_business_id": "",
+    "meta_pixel_id": "",
+    "meta_capi_token": "",
 }
 
 _TTL = 30.0
@@ -46,6 +54,10 @@ class BranchSettings:
     tg_group_id: str
     followup_enabled: bool
     followup_schedule_h: list[int]
+    knowledge_backend: str
+    llm_backend: str
+    tech_search_enabled: bool
+    tech_usecase_enabled: bool
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -114,4 +126,8 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         tg_group_id=raw.get("tg_group_id", _DEFAULTS.get("tg_group_id", "")),
         followup_enabled=_b(raw, "followup_enabled"),
         followup_schedule_h=_parse_schedule(raw),
+        knowledge_backend=raw.get("knowledge_backend", "direct"),
+        llm_backend=raw.get("llm_backend", "local"),
+        tech_search_enabled=_b(raw, "tech_search_enabled"),
+        tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
     )
