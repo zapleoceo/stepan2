@@ -13,28 +13,10 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .repository import SettingRepo
+from .schema import defaults as _schema_defaults
 
-_DEFAULTS: dict[str, str] = {
-    "agent_enabled_global": "true",
-    "hourly_cap": "120",
-    "daily_cap": "500",
-    "quiet_start": "22",
-    "quiet_end": "8",
-    "reply_delay_min_s": "5",
-    "reply_delay_max_s": "30",
-    "tz_offset_h": "7",
-    "tg_group_id": "",
-    "followup_enabled": "false",
-    "followup_schedule_h": "4,24,72",
-    "knowledge_backend": "direct",
-    "llm_backend": "local",
-    "tech_search_enabled": "false",
-    "tech_usecase_enabled": "true",
-    "fb_account_id": "",
-    "fb_business_id": "",
-    "meta_pixel_id": "",
-    "meta_capi_token": "",
-}
+# Single source of truth lives in schema.py; defaults derive from it (DRY).
+_DEFAULTS: dict[str, str] = _schema_defaults()
 
 _TTL = 30.0
 _cache: dict[int, tuple[BranchSettings, float]] = {}

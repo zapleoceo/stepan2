@@ -9,6 +9,8 @@ from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
+from app.modules.settings import schema as settings_schema
+from app.modules.settings.service import invalidate
 
 from ._i18n import apply_lang, t
 from ._query import _branch_where
@@ -17,8 +19,8 @@ from ._ui_panels import (
     members_panel_html,
     outbox_panel_html,
     reports_panel_html,
-    settings_panel_html,
 )
+from ._ui_settings import field_html, settings_form_html
 
 router = APIRouter()
 
@@ -99,13 +101,13 @@ async def reports_panel(request: Request) -> HTMLResponse:
 
 @router.get("/settings/panel", response_class=HTMLResponse)
 async def settings_panel(request: Request) -> HTMLResponse:
-    apply_lang(request)
+    lang = apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     where, params = _branch_where(branch_ids)
     async with session_scope() as session:
-        q = f"SELECT id, branch_id, key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
+        q = f"SELECT key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
         rows = (await session.execute(text(q), params)).all()
-    return HTMLResponse(settings_panel_html(list(rows)))
+    return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
 
 
 @router.post("/settings/{setting_id}/save", response_class=HTMLResponse)
@@ -147,6 +149,40 @@ async def settings_save(
         f'<span style="color:#51cf66;font-size:.75rem">{saved_lbl}</span>'
         f'</form>'
     )
+
+
+@router.post("/settings/save", response_class=HTMLResponse)
+async def settings_save_by_key(
+    request: Request, key: str = Form(...), value: str = Form(default=""),
+) -> HTMLResponse:
+    """Upsert one setting by key for the active branch and re-render that field.
+
+    A blank secret is treated as "keep current" (the value is never echoed back)."""
+    lang = apply_lang(request)
+    field = settings_schema.field_for(key)
+    if field is None:
+        return HTMLResponse("", status_code=400)
+    branch_ids = branch_ids_from_request(request)
+    bid = branch_ids[0] if branch_ids else 1
+    val = value.strip()
+    async with session_scope() as session:
+        if field.kind == "secret" and not val:
+            cur = (
+                await session.execute(
+                    text("SELECT value FROM app_setting WHERE branch_id=:b AND key=:k"),
+                    {"b": bid, "k": key},
+                )
+            ).first()
+            return HTMLResponse(field_html(field, cur[0] if cur else "", lang))
+        await session.execute(
+            text(
+                "INSERT INTO app_setting (branch_id, key, value) VALUES (:b, :k, :v)"
+                " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"
+            ),
+            {"b": bid, "k": key, "v": val},
+        )
+    invalidate(bid)
+    return HTMLResponse(field_html(field, val, lang, saved=True))
 
 
 @router.get("/agent-status", response_class=HTMLResponse)
