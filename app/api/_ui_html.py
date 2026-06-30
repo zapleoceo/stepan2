@@ -124,14 +124,20 @@ _CSS = (
     "white-space:pre-wrap;word-break:break-word}"
     ".bb-i .bt{background:#232a3b;border:1px solid #2d3748}"
     ".bb-o .bt{background:#1e3a5f}.bb-o.mgr .bt{background:#2a1f3a}"
-    ".bm{font-size:.63rem;color:#4a5568;margin-top:.08rem;display:flex;"
+    ".bt.trview{color:#5aa2ff}"
+    ".bm{font-size:.63rem;color:#4a5568;margin-bottom:.1rem;display:flex;"
     "align-items:center;gap:.2rem}"
     ".bb-o .bm{justify-content:flex-end}"
-    # per-message translate and delete buttons
+    ".b-llm{font-size:.59rem;color:#4a5568;opacity:.6;margin-top:.12rem;"
+    "font-family:ui-monospace,monospace}"
+    ".bb-o .b-llm{text-align:right}"
+    # per-message translate and delete buttons — hidden until bubble hover
     ".trx,.delx{background:none;border:none;color:#4a5568;cursor:pointer;"
-    "font-size:.68rem;padding:0 .1rem;line-height:1;opacity:.55;transition:opacity .1s,color .1s}"
-    ".trx:hover{opacity:1;color:#4da6ff}"
-    ".delx:hover{opacity:1;color:#ff6b6b}"
+    "font-size:.68rem;padding:0 .1rem;line-height:1;opacity:0;"
+    "transition:opacity .12s,color .1s}"
+    ".bb:hover .trx,.bb:hover .delx{opacity:.5}"
+    ".trx:hover{opacity:1!important;color:#4da6ff}"
+    ".delx:hover{opacity:1!important;color:#ff6b6b}"
     ".fin{padding:.45rem .8rem .52rem;border-top:1px solid #2d3748;"
     "background:#141925;flex-shrink:0}"
     ".fin-acts{display:flex;gap:.3rem;margin-bottom:.3rem}"
@@ -359,7 +365,7 @@ def thread_list_html(threads: list, active_tid: int | None = None) -> str:
 
 
 def _bubble(row: object, tid: int) -> str:
-    mid, direction, sent_by, text, ts = row  # type: ignore[misc]
+    mid, direction, sent_by, text, ts, llm_info = row  # type: ignore[misc]
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
     txt = _h.escape(str(text or ""))
@@ -372,8 +378,8 @@ def _bubble(row: object, tid: int) -> str:
     if direction == "in":
         return (
             f'<div class="bb bb-i" id="bb-{mid}">'
-            f'<div class="bt" id="bt-{mid}">{txt}</div>'
             f'<div class="bm">{who} · {time_str} {tr_btn}</div>'
+            f'<div class="bt" id="bt-{mid}">{txt}</div>'
             f'</div>'
         )
     mgr = " mgr" if sent_by == "manager" else ""
@@ -383,10 +389,15 @@ def _bubble(row: object, tid: int) -> str:
         f' hx-target="#bb-{mid}" hx-swap="outerHTML"'
         f' hx-confirm="">×</button>'
     )
+    llm_chip = (
+        f'<div class="b-llm">🤖 {_h.escape(str(llm_info))}</div>'
+        if llm_info else ""
+    )
     return (
         f'<div class="bb bb-o{mgr}" id="bb-{mid}">'
+        f'<div class="bm">{who} · {time_str} {tr_btn} {del_btn}</div>'
         f'<div class="bt" id="bt-{mid}">{txt}</div>'
-        f'<div class="bm">{tr_btn} {time_str} · {who} {del_btn}</div>'
+        f'{llm_chip}'
         f'</div>'
     )
 
@@ -585,17 +596,23 @@ def app_shell(
         "function trMsg(mid,tid){"
         "var el=document.getElementById('bt-'+mid);"
         "if(!el)return;"
+        "if(el.dataset.state==='tr'){"
+        "el.innerHTML=el.dataset.orig;el.dataset.state='';"
+        "el.classList.remove('trview');return;}"
         "if(el.dataset.tr){"
-        "if(el.dataset.showing==='tr'){el.innerHTML=el.dataset.orig;el.dataset.showing='orig';}"
-        "else{el.innerHTML=el.dataset.tr;el.dataset.showing='tr';}"
-        "return;}"
         "el.dataset.orig=el.innerHTML;"
-        "el.dataset.showing='orig';"
+        "el.innerHTML=el.dataset.tr;el.dataset.state='tr';"
+        "el.classList.add('trview');return;}"
+        "el.style.opacity='.45';"
+        "el.dataset.orig=el.innerHTML;"
         "fetch('/ui/chat/'+tid+'/msg/'+mid+'/tr',{headers:{'HX-Request':'true'}})"
         ".then(function(r){return r.text();})"
         ".then(function(html){"
-        "if(html.trim()){el.dataset.tr=html;el.innerHTML=html;el.dataset.showing='tr';}})"
-        ".catch(function(){});}"
+        "el.style.opacity='';"
+        "if(html.trim()){"
+        "el.dataset.tr=html;el.innerHTML=html;"
+        "el.dataset.state='tr';el.classList.add('trview');}})"
+        ".catch(function(){el.style.opacity='';});}"
         # resize + collapse init (runs once after DOM ready)
         "(function(){"
         "var sb=document.querySelector('.sid');"

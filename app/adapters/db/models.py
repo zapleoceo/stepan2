@@ -160,6 +160,7 @@ class Message(SQLModel, table=True):
     sent_by: str = Field(default="lead", description="lead|agent|manager")
     text: str = Field(default="")
     occurred_at: datetime = Field(default_factory=_utcnow)
+    llm_info: str | None = Field(default=None)
 
 
 class Outbox(SQLModel, table=True):
@@ -175,6 +176,7 @@ class Outbox(SQLModel, table=True):
     scheduled_at: datetime = Field(default_factory=_utcnow)
     sent_at: datetime | None = Field(default=None)
     error: str | None = Field(default=None)
+    llm_info: str | None = Field(default=None)
 
 
 class ManagerAlert(SQLModel, table=True):

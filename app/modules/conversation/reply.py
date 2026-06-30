@@ -21,6 +21,21 @@ from .prompt import build_messages
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 
+def _fmt_llm_meta(meta: dict) -> str | None:
+    model = (meta.get("model") or "").split("/")[-1]
+    t_in = meta.get("tokens_in", 0)
+    t_out = meta.get("tokens_out", 0)
+    cost = meta.get("cost_usd")
+    parts: list[str] = []
+    if model:
+        parts.append(model)
+    if t_in or t_out:
+        parts.append(f"{t_in}↑ {t_out}↓")
+    if cost is not None:
+        parts.append(f"${cost:.4f}")
+    return " · ".join(parts) if parts else None
+
+
 class ReplyService:
     """Decide and enqueue the agent's reply for one branch's thread."""
 
@@ -43,6 +58,7 @@ class ReplyService:
         self.messages = MessageRepo(session, branch_id)
         self.outbox = OutboxRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
+        self._last_llm_meta: dict = {}
 
     async def decide(self, thread_id: int) -> Decision | None:
         """Run the model over the thread; None if the thread is foreign or has no dialog."""
@@ -56,9 +72,10 @@ class ReplyService:
         context = await self.knowledge.knowledge_context(thread.product_slug)
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(context, dialog, await self._lang(), coaching_notes=notes)
-        raw, _meta = await self.llm.chat(
+        raw, meta = await self.llm.chat(
             messages, capability="chat:smart", require_json_schema=True
         )
+        self._last_llm_meta = meta
         return parse_decision(raw)
 
     async def _lang(self) -> str:
@@ -82,6 +99,7 @@ class ReplyService:
                 thread_id=thread_id,
                 text=decision.reply,
                 scheduled_at=scheduled_at,
+                llm_info=_fmt_llm_meta(self._last_llm_meta),
             )
         )
         if decision.needs_manager and self._notifier is not None:

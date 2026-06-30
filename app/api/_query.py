@@ -19,7 +19,7 @@ async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
     return (
         await session.execute(
             text(
-                "SELECT id, direction, sent_by, text, occurred_at FROM message"
+                "SELECT id, direction, sent_by, text, occurred_at, llm_info FROM message"
                 " WHERE thread_id = :tid ORDER BY occurred_at, id"
             ),
             {"tid": thread_id},

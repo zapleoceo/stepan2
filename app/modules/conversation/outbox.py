@@ -62,4 +62,5 @@ class OutboxSender:
             direction="out",
             sent_by=sent_by,
             text=row.text,
+            llm_info=row.llm_info,
         )
