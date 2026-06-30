@@ -5,6 +5,8 @@ lives in leads.repository; we only add the conversation-specific reads (dialog, 
 oldest_pending) on top, keeping a single isolation primitive."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -69,3 +71,8 @@ class OutboxRepo(BranchScoped[Outbox]):
             .order_by(Outbox.scheduled_at, Outbox.id)
         )
         return (await self.session.exec(q)).first()
+
+    async def count_sent_since(self, since: datetime) -> int:
+        """How many lines this branch actually sent since `since` — hourly/daily cap accounting."""
+        q = self._q().where(Outbox.status == "sent", Outbox.sent_at >= since)
+        return len((await self.session.exec(q)).all())
