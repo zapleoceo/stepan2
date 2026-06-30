@@ -20,7 +20,7 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 _VALID_STAGES = frozenset({
-    "new", "qualifying", "presenting", "objection",
+    "new", "nurturing", "qualifying", "presenting", "objection",
     "ready", "handed_off", "dormant", "manager",
 })
 
@@ -32,7 +32,8 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
         info = (
             await session.execute(
                 text(
-                    "SELECT ct.id, l.display_name, l.stage, l.branch_id"
+                    "SELECT ct.id, l.display_name, l.stage, l.branch_id,"
+                    " ct.product_slug, ct.external_thread_id"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -43,9 +44,12 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         msgs = await fetch_messages(session, thread_id)
         pending = await fetch_pending(session, thread_id)
-    _, name, stage, _ = info
+    _, name, stage, _, product_slug, ig_id = info
     return HTMLResponse(
-        chat_panel_html(thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending)
+        chat_panel_html(
+            thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
+            product_slug=product_slug, ig_id=ig_id,
+        )
     )
 
 
@@ -88,7 +92,8 @@ async def chat_stage(
         info = (
             await session.execute(
                 text(
-                    "SELECT ct.id, l.display_name, l.id as lead_id"
+                    "SELECT ct.id, l.display_name, l.id as lead_id,"
+                    " ct.product_slug, ct.external_thread_id"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -97,12 +102,15 @@ async def chat_stage(
         ).first()
         if not info:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        _, name, lead_id = info
+        _, name, lead_id, product_slug, ig_id = info
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
             {"s": stage, "id": lead_id},
         )
-    return HTMLResponse(chat_header_html(thread_id, str(name or "Lead"), stage))
+    return HTMLResponse(
+        chat_header_html(thread_id, str(name or "Lead"), stage,
+                         product_slug=product_slug, ig_id=ig_id)
+    )
 
 
 @router.post("/chat/{thread_id}/suggest", response_class=HTMLResponse)
@@ -147,6 +155,7 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
 
 @router.post("/chat/{thread_id}/translate", response_class=HTMLResponse)
 async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
+    """Translate the last inbound message (global toolbar button)."""
     lang_code = apply_lang(request)
     async with session_scope() as session:
         row = (
@@ -190,3 +199,43 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
         f'<span style="color:#4a5568">{tr_lbl}</span>'
         f' {_h.escape(translation.strip())}</div>'
     )
+
+
+@router.get("/chat/{thread_id}/msg/{mid}/tr", response_class=HTMLResponse)
+async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HTMLResponse:  # noqa: ARG001
+    """Translate a specific message bubble to Russian (per-bubble 🌐 button)."""
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text("SELECT text FROM message WHERE id = :mid AND thread_id = :tid"),
+                {"mid": mid, "tid": thread_id},
+            )
+        ).first()
+    if not row or not row[0]:
+        return HTMLResponse("")
+    msg_text = (row[0] or "")[:800]
+    llm_msgs = [
+        {
+            "role": "system",
+            "content": "Translate the following message to Russian. Return ONLY the translation.",
+        },
+        {"role": "user", "content": msg_text},
+    ]
+    llm = BrokerLLM()
+    try:
+        translation, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=400)
+        return HTMLResponse(_h.escape(translation.strip()))
+    except Exception as exc:
+        _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
+        return HTMLResponse(_h.escape(msg_text))
+
+
+@router.post("/chat/{thread_id}/msg/{mid}/delete", response_class=HTMLResponse)
+async def msg_delete(thread_id: int, mid: int) -> HTMLResponse:
+    """Delete a message from DB; HTMX removes the bubble via outerHTML swap to empty."""
+    async with session_scope() as session:
+        await session.execute(
+            text("DELETE FROM message WHERE id = :mid AND thread_id = :tid"),
+            {"mid": mid, "tid": thread_id},
+        )
+    return HTMLResponse("")

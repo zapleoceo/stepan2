@@ -15,16 +15,18 @@ _CSS = (
     "body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
     "background:#0f1117;color:#d0d7de;font-size:14px}"
     ".sid{width:210px;flex-shrink:0;background:#141925;border-right:1px solid #2d3748;"
-    "display:flex;flex-direction:column}"
-    ".sid-top{padding:.7rem .9rem .45rem;border-bottom:1px solid #2d3748}"
+    "display:flex;flex-direction:column;transition:width .15s}"
+    ".sid-top{padding:.7rem .9rem .45rem;border-bottom:1px solid #2d3748;"
+    "display:flex;align-items:center;justify-content:space-between}"
     ".logo{font-size:1.05rem;font-weight:800;color:#fff}"
-    ".sid-nav{flex:1;padding:.4rem 0;overflow-y:auto}"
+    ".sid-nav{flex:1;padding:.4rem 0;overflow-y:auto;overflow-x:hidden}"
     ".na{display:flex;align-items:center;gap:.5rem;padding:.4rem .75rem;color:#8899aa;"
     "font-size:.81rem;text-decoration:none;border-radius:6px;margin:.05rem .45rem;"
-    "transition:background .12s,color .12s;cursor:pointer}"
+    "transition:background .12s,color .12s;cursor:pointer;white-space:nowrap;overflow:hidden}"
     ".na:hover{background:rgba(255,255,255,.08);color:#d0d7de}"
     ".na.on{background:rgba(32,107,196,.22);color:#4da6ff}"
-    ".na i{width:14px;text-align:center}"
+    ".na i{width:14px;text-align:center;flex-shrink:0}"
+    ".na-lbl{overflow:hidden;text-overflow:ellipsis}"
     ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
     ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
     ".lrow{display:flex;gap:.22rem;margin-top:.3rem}"
@@ -35,6 +37,20 @@ _CSS = (
     ".bft-lbl{font-size:.63rem;color:#4a5568;margin-bottom:.2rem}"
     ".bft-sel{width:100%;background:#1a1f2e;border:1px solid #2d3748;border-radius:4px;"
     "color:#d0d7de;font-size:.72rem;padding:.22rem .35rem;cursor:pointer}"
+    # sidebar collapse
+    ".sb-col{background:none;border:none;color:#4a5568;cursor:pointer;font-size:.9rem;"
+    "padding:.1rem .25rem;line-height:1;flex-shrink:0}"
+    ".sb-col:hover{color:#d0d7de}"
+    ".sid.collapsed{width:48px!important;min-width:48px!important}"
+    ".sid.collapsed .logo{display:none}"
+    ".sid.collapsed .na-lbl{display:none}"
+    ".sid.collapsed .nav-sep,.sid.collapsed .sid-ft{display:none}"
+    ".sid.collapsed .na{justify-content:center;padding:.4rem 0;margin:.05rem .2rem}"
+    ".sid.collapsed .sid-top{justify-content:center;padding:.7rem .3rem .45rem}"
+    # sidebar + thread resize handles
+    ".sbrz,.thrz{width:4px;flex-shrink:0;background:#1e2636;cursor:col-resize;"
+    "transition:background .15s;z-index:10}"
+    ".sbrz:hover,.sbrz.drag,.thrz:hover,.thrz.drag{background:#206bc4}"
     ".thr{width:305px;flex-shrink:0;background:#0f1117;border-right:1px solid #2d3748;"
     "display:flex;flex-direction:column;overflow:hidden}"
     ".thr-h{padding:.56rem .8rem;border-bottom:1px solid #2d3748;font-size:.82rem;"
@@ -95,8 +111,9 @@ _CSS = (
     ".hbar-l{font-size:.52rem;color:#4a5568;margin-top:1px;line-height:1}"
     "#main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}"
     ".ch{padding:.56rem .9rem;border-bottom:1px solid #2d3748;background:#141925;"
-    "display:flex;align-items:center;gap:.55rem;flex-shrink:0}"
+    "display:flex;align-items:center;gap:.55rem;flex-shrink:0;flex-wrap:wrap}"
     ".ch-n{font-weight:600;color:#e8eef4;font-size:.9rem}"
+    ".ch-sub{font-size:.67rem;color:#4a5568;font-family:monospace}"
     ".msgs{flex:1;overflow-y:auto;padding:.72rem .95rem;display:flex;"
     "flex-direction:column;gap:.3rem}"
     ".msgs::-webkit-scrollbar{width:4px}"
@@ -107,8 +124,14 @@ _CSS = (
     "white-space:pre-wrap;word-break:break-word}"
     ".bb-i .bt{background:#232a3b;border:1px solid #2d3748}"
     ".bb-o .bt{background:#1e3a5f}.bb-o.mgr .bt{background:#2a1f3a}"
-    ".bm{font-size:.63rem;color:#4a5568;margin-top:.08rem}"
-    ".bb-o .bm{text-align:right}"
+    ".bm{font-size:.63rem;color:#4a5568;margin-top:.08rem;display:flex;"
+    "align-items:center;gap:.2rem}"
+    ".bb-o .bm{justify-content:flex-end}"
+    # per-message translate and delete buttons
+    ".trx,.delx{background:none;border:none;color:#4a5568;cursor:pointer;"
+    "font-size:.68rem;padding:0 .1rem;line-height:1;opacity:.55;transition:opacity .1s,color .1s}"
+    ".trx:hover{opacity:1;color:#4da6ff}"
+    ".delx:hover{opacity:1;color:#ff6b6b}"
     ".fin{padding:.45rem .8rem .52rem;border-top:1px solid #2d3748;"
     "background:#141925;flex-shrink:0}"
     ".fin-acts{display:flex;gap:.3rem;margin-bottom:.3rem}"
@@ -299,6 +322,16 @@ def _ago(dt: datetime | None) -> str:
     return f"{secs // 86400}{t('time.d')}"
 
 
+def _fmt_time(dt: datetime | None) -> str:
+    """Exact HH:MM; includes date (DD.MM) if message is older than 24 hours."""
+    if dt is None:
+        return ""
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if (now - dt).total_seconds() > 86400:
+        return dt.strftime("%d.%m %H:%M")
+    return dt.strftime("%H:%M")
+
+
 def _badge(stage: str) -> str:
     return f'<span class="bg {_STC.get(stage, "sd")}">{_h.escape(t(f"stage.{stage}"))}</span>'
 
@@ -325,25 +358,41 @@ def thread_list_html(threads: list, active_tid: int | None = None) -> str:
     return "".join(_thread_item(r, active_tid) for r in threads)
 
 
-def _bubble(row: object) -> str:
-    _, direction, sent_by, text, ts = row  # type: ignore[misc]
+def _bubble(row: object, tid: int) -> str:
+    mid, direction, sent_by, text, ts = row  # type: ignore[misc]
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
     txt = _h.escape(str(text or ""))
+    time_str = _fmt_time(ts)
+
+    tr_btn = (
+        f'<button class="trx" title="Translate" tabindex="-1"'
+        f' onclick="trMsg({mid},{tid})">🌐</button>'
+    )
     if direction == "in":
         return (
-            f'<div class="bb bb-i"><div class="bt">{txt}</div>'
-            f'<div class="bm">{who} · {_ago(ts)}</div></div>'
+            f'<div class="bb bb-i" id="bb-{mid}">'
+            f'<div class="bt" id="bt-{mid}">{txt}</div>'
+            f'<div class="bm">{who} · {time_str} {tr_btn}</div>'
+            f'</div>'
         )
     mgr = " mgr" if sent_by == "manager" else ""
+    del_btn = (
+        f'<button class="delx" title="Delete" tabindex="-1"'
+        f' hx-post="/ui/chat/{tid}/msg/{mid}/delete"'
+        f' hx-target="#bb-{mid}" hx-swap="outerHTML"'
+        f' hx-confirm="">×</button>'
+    )
     return (
-        f'<div class="bb bb-o{mgr}"><div class="bt">{txt}</div>'
-        f'<div class="bm">{who} · {_ago(ts)}</div></div>'
+        f'<div class="bb bb-o{mgr}" id="bb-{mid}">'
+        f'<div class="bt" id="bt-{mid}">{txt}</div>'
+        f'<div class="bm">{tr_btn} {time_str} · {who} {del_btn}</div>'
+        f'</div>'
     )
 
 
-def messages_html(msgs: list, pending: list, tid: int) -> str:  # noqa: ARG001
-    parts = [_bubble(r) for r in msgs]
+def messages_html(msgs: list, pending: list, tid: int) -> str:
+    parts = [_bubble(r, tid) for r in msgs]
     pend_label = _h.escape(t("chat.pending"))
     for row in pending:
         _, ptxt, _ = row  # type: ignore[misc]
@@ -360,7 +409,13 @@ _STAGES = (
 )
 
 
-def chat_header_html(tid: int, name: str, stage: str) -> str:
+def chat_header_html(
+    tid: int,
+    name: str,
+    stage: str,
+    product_slug: str | None = None,
+    ig_id: str | None = None,
+) -> str:
     """Renders just the chat header div (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
         f'<option value="{s}" {"selected" if s == stage else ""}>'
@@ -376,39 +431,41 @@ def chat_header_html(tid: int, name: str, stage: str) -> str:
         f' onchange="this.form.requestSubmit()">{opts}</select>'
         f'</form>'
     )
+    product_badge = ""
+    if product_slug:
+        product_badge = (
+            f' <span class="bg sq" style="font-size:.62rem;text-transform:none">'
+            f'{_h.escape(product_slug)}</span>'
+        )
+    ig_chip = ""
+    if ig_id:
+        short = ig_id[:14] + "…" if len(ig_id) > 16 else ig_id
+        ig_chip = f' <span class="ch-sub" title="{_h.escape(ig_id)}">{_h.escape(short)}</span>'
     return (
         f'<div class="ch" id="chat-hdr-{tid}">'
         f'<span class="ch-n">{_h.escape(name)}</span>'
+        f'{product_badge}{ig_chip}'
         f'<div class="ch-acts">{stage_sel}</div></div>'
     )
 
 
 def chat_panel_html(
-    tid: int, name: str, stage: str, msgs: list, pending: list,
-    lead_id: int | None = None,
+    tid: int,
+    name: str,
+    stage: str,
+    msgs: list,
+    pending: list,
+    lead_id: int | None = None,  # noqa: ARG001 (reserved for future use)
+    product_slug: str | None = None,
+    ig_id: str | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
     sug_lbl = _h.escape(t("chat.suggest"))
     tr_lbl = _h.escape(t("chat.translate"))
-    # Stage selector in header
-    opts = "".join(
-        f'<option value="{s}" {"selected" if s == stage else ""}>'
-        f'{_h.escape(t(f"stage.{s}"))}</option>'
-        for s in _STAGES
-    )
-    stage_sel = (
-        f'<form style="display:inline;margin:0"'
-        f' hx-post="/ui/chat/{tid}/stage"'
-        f' hx-target="#chat-hdr-{tid}"'
-        f' hx-swap="outerHTML">'
-        f'<select class="act-sel" name="stage" onchange="this.form.requestSubmit()">{opts}</select>'
-        f'</form>'
-    )
+    header = chat_header_html(tid, name, stage, product_slug=product_slug, ig_id=ig_id)
     return (
-        f'<div class="ch" id="chat-hdr-{tid}">'
-        f'<span class="ch-n">{_h.escape(name)}</span>'
-        f'<div class="ch-acts">{stage_sel}</div></div>'
+        f'{header}'
         f'<div class="msgs" id="msgs-{tid}">{messages_html(msgs, pending, tid)}</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
@@ -457,7 +514,11 @@ def app_shell(
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
         lbl = _h.escape(t(key))
-        return f'<a class="{cls}" href="{href}"{extra}><i class="{icon}"></i> {lbl}</a>'
+        return (
+            f'<a class="{cls}" href="{href}"{extra}>'
+            f'<i class="{icon}"></i>'
+            f'<span class="na-lbl">{lbl}</span></a>'
+        )
 
     def _hna(key: str, panel: str, icon: str, nav_id: str) -> str:
         extra = (
@@ -509,7 +570,6 @@ def app_shell(
         "if(el)el.style.display=v?'':'none';}"
         "function toggleHelp(){"
         "document.getElementById('hov').classList.toggle('on');}"
-        # sendSuggest: post draft textarea as manager message
         "function setFnl(el){"
         "document.querySelectorAll('.fseg.on,.fchip.on,.fnl-all.on')"
         ".forEach(e=>e.classList.remove('on'));"
@@ -521,6 +581,65 @@ def app_shell(
         "htmx.ajax('POST','/ui/chat/'+tid+'/send',{"
         "target:'#msgs-'+tid,swap:'innerHTML',values:fd});"
         "document.getElementById('sug-'+tid).innerHTML='';}"
+        # per-message translate toggle with LLM fetch + client-side cache
+        "function trMsg(mid,tid){"
+        "var el=document.getElementById('bt-'+mid);"
+        "if(!el)return;"
+        "if(el.dataset.tr){"
+        "if(el.dataset.showing==='tr'){el.innerHTML=el.dataset.orig;el.dataset.showing='orig';}"
+        "else{el.innerHTML=el.dataset.tr;el.dataset.showing='tr';}"
+        "return;}"
+        "el.dataset.orig=el.innerHTML;"
+        "el.dataset.showing='orig';"
+        "fetch('/ui/chat/'+tid+'/msg/'+mid+'/tr',{headers:{'HX-Request':'true'}})"
+        ".then(function(r){return r.text();})"
+        ".then(function(html){"
+        "if(html.trim()){el.dataset.tr=html;el.innerHTML=html;el.dataset.showing='tr';}})"
+        ".catch(function(){});}"
+        # resize + collapse init (runs once after DOM ready)
+        "(function(){"
+        "var sb=document.querySelector('.sid');"
+        "var sbcol=document.getElementById('sb-col');"
+        "if(sb&&localStorage.getItem('sbCollapsed')==='1'){"
+        "sb.classList.add('collapsed');"
+        "if(sbcol)sbcol.textContent='▸';}"
+        "if(sb&&sbcol){sbcol.addEventListener('click',function(){"
+        "var c=sb.classList.contains('collapsed');"
+        "if(c){sb.classList.remove('collapsed');"
+        "sb.style.width=(localStorage.getItem('sbw')||'210')+'px';"
+        "localStorage.setItem('sbCollapsed','0');sbcol.textContent='◂';}"
+        "else{sb.classList.add('collapsed');"
+        "localStorage.setItem('sbCollapsed','1');sbcol.textContent='▸';}});}"
+        "var sbrz=document.getElementById('sbrz');"
+        "if(sb&&sbrz){"
+        "var sw=parseInt(localStorage.getItem('sbw')||'');"
+        "if(sw>=140&&sw<=400)sb.style.width=sw+'px';"
+        "sbrz.addEventListener('pointerdown',function(e){"
+        "e.preventDefault();sbrz.setPointerCapture(e.pointerId);sbrz.classList.add('drag');"
+        "function mv(ev){"
+        "var x=Math.min(400,Math.max(140,ev.clientX));sb.style.width=x+'px';"
+        "sb.classList.remove('collapsed');"
+        "if(sbcol)sbcol.textContent='◂';"
+        "localStorage.setItem('sbCollapsed','0');}"
+        "function up(){sbrz.removeEventListener('pointermove',mv);"
+        "sbrz.removeEventListener('pointerup',up);sbrz.classList.remove('drag');"
+        "localStorage.setItem('sbw',parseInt(sb.style.width)||210);}"
+        "sbrz.addEventListener('pointermove',mv);sbrz.addEventListener('pointerup',up);});}"
+        "var thr=document.querySelector('.thr');"
+        "var thrz=document.getElementById('thrz');"
+        "if(thr&&thrz){"
+        "var tw=parseInt(localStorage.getItem('thrw')||'');"
+        "if(tw>=200&&tw<=600)thr.style.width=tw+'px';"
+        "thrz.addEventListener('pointerdown',function(e){"
+        "e.preventDefault();thrz.setPointerCapture(e.pointerId);thrz.classList.add('drag');"
+        "var sx=e.clientX;var sw2=thr.offsetWidth;"
+        "function mv2(ev){"
+        "var x=Math.min(600,Math.max(200,sw2+(ev.clientX-sx)));thr.style.width=x+'px';}"
+        "function up2(){thrz.removeEventListener('pointermove',mv2);"
+        "thrz.removeEventListener('pointerup',up2);thrz.classList.remove('drag');"
+        "localStorage.setItem('thrw',parseInt(thr.style.width)||305);}"
+        "thrz.addEventListener('pointermove',mv2);thrz.addEventListener('pointerup',up2);});}"
+        "})();"
     )
     inbox_lbl = _h.escape(t("nav.inbox"))
     help_lbl = _h.escape(t("help.title"))
@@ -557,10 +676,12 @@ def app_shell(
         f'<script src="{_HTMX}" defer></script>'
         f'<style>{_CSS}</style></head><body>'
         f'<aside class="sid">'
-        f'<div class="sid-top" style="display:flex;align-items:center;'
-        f'justify-content:space-between">'
+        f'<div class="sid-top">'
         f'<span class="logo">Stepan 2</span>'
+        f'<div style="display:flex;gap:.25rem;align-items:center">'
+        f'<button class="sb-col" id="sb-col" title="Toggle sidebar">◂</button>'
         f'<button class="help-btn" onclick="toggleHelp()" title="{help_lbl}">?</button>'
+        f'</div>'
         f'</div>'
         f'<nav class="sid-nav">{nav}</nav>'
         f'<div class="sid-ft">'
@@ -578,7 +699,9 @@ def app_shell(
         f'<div class="lrow">{_lb("ru")}{_lb("en")}{_lb("id")}</div>'
         f'</div>'
         f'</div></aside>'
+        f'<div class="sbrz" id="sbrz" title="⇆ Resize sidebar"></div>'
         f'<div class="thr"{_thr_style}>{_thr_inner}</div>'
+        f'<div class="thrz" id="thrz" title="⇆ Resize threads"></div>'
         f'<div id="main">{main_html}</div>'
         f'{help_overlay}'
         f'<script>{script}</script>'
