@@ -69,6 +69,14 @@ _CSS = (
     ".ti-ts{font-size:.68rem;color:#4a5568;flex-shrink:0}"
     ".ti-p{font-size:.74rem;color:#6b7685;overflow:hidden;text-overflow:ellipsis;"
     "white-space:nowrap;margin-top:.05rem}"
+    ".ti-sub{font-size:.62rem;color:#4a5568;display:flex;gap:.35rem;margin-top:.06rem;"
+    "white-space:nowrap;overflow:hidden;align-items:center}"
+    ".ti-cnt{opacity:.7}"
+    ".ch-meta{width:100%;font-size:.67rem;color:#4a5568;display:flex;gap:.55rem;"
+    "align-items:center;margin-top:.18rem;padding-top:.22rem;"
+    "border-top:1px solid #1e2636;flex-wrap:wrap}"
+    ".ch-meta a{color:#4a5568;text-decoration:none}"
+    ".ch-meta a:hover{color:#8899aa}"
     ".bg{display:inline-block;padding:.07rem .3rem;border-radius:5px;font-size:.6rem;"
     "font-weight:700;text-transform:uppercase;margin-right:.18rem}"
     ".sn{background:#1e3a5f;color:#4da6ff}.snu{background:#3a2a10;color:#d6a96f}"
@@ -343,18 +351,31 @@ def _badge(stage: str) -> str:
 
 
 def _thread_item(row: object, active_tid: int | None) -> str:
-    tid, name, stage, ts, last_msg, last_dir = row  # type: ignore[misc]
+    tid, name, stage, last_act, phone, product_slug, last_msg, last_dir, cnt_in, cnt_out = row  # type: ignore[misc]
     on = " on" if tid == active_tid else ""
     arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
     preview = _h.escape((arr + (last_msg or ""))[:80])
+    prod_badge = (
+        f' <span class="bg sq" style="font-size:.57rem;text-transform:none">'
+        f'{_h.escape(str(product_slug))}</span>'
+        if product_slug else ""
+    )
+    sub_parts = []
+    if phone:
+        sub_parts.append(f'<span>{_h.escape(str(phone))}</span>')
+    total = (cnt_in or 0) + (cnt_out or 0)
+    if total:
+        sub_parts.append(f'<span class="ti-cnt">💬 {cnt_in or 0}/{cnt_out or 0}</span>')
+    sub_row = f'<div class="ti-sub">{"  ·  ".join(sub_parts)}</div>' if sub_parts else ""
     return (
         f'<a class="ti{on}"'
         f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
         f' onclick="setOn(this)"'
         f' href="/ui/inbox">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
-        f'<span class="ti-ts">{_ago(ts)}</span></div>'
-        f'<div class="ti-p">{_badge(str(stage or "new"))} {preview}</div></a>'
+        f'<span class="ti-ts">{_ago(last_act)}</span></div>'
+        f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge} {preview}</div>'
+        f'{sub_row}</a>'
     )
 
 
@@ -426,6 +447,9 @@ def chat_header_html(
     stage: str,
     product_slug: str | None = None,
     ig_id: str | None = None,
+    phone: str | None = None,
+    created_at: datetime | None = None,
+    last_in_at: datetime | None = None,
 ) -> str:
     """Renders just the chat header div (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -452,11 +476,24 @@ def chat_header_html(
     if ig_id:
         short = ig_id[:14] + "…" if len(ig_id) > 16 else ig_id
         ig_chip = f' <span class="ch-sub" title="{_h.escape(ig_id)}">{_h.escape(short)}</span>'
+    meta_parts = []
+    if phone:
+        meta_parts.append(f'<a href="tel:{_h.escape(phone)}">📞 {_h.escape(phone)}</a>')
+    if created_at:
+        meta_parts.append(f'<span>📅 с {created_at.strftime("%d %b %Y")}</span>')
+    if last_in_at:
+        meta_parts.append(f'<span>⬇ {_fmt_time(last_in_at)}</span>')
+    meta_row = (
+        f'<div class="ch-meta">{"  ·  ".join(meta_parts)}</div>'
+        if meta_parts else ""
+    )
     return (
         f'<div class="ch" id="chat-hdr-{tid}">'
         f'<span class="ch-n">{_h.escape(name)}</span>'
         f'{product_badge}{ig_chip}'
-        f'<div class="ch-acts">{stage_sel}</div></div>'
+        f'<div class="ch-acts">{stage_sel}</div>'
+        f'{meta_row}'
+        f'</div>'
     )
 
 
@@ -469,12 +506,19 @@ def chat_panel_html(
     lead_id: int | None = None,  # noqa: ARG001 (reserved for future use)
     product_slug: str | None = None,
     ig_id: str | None = None,
+    phone: str | None = None,
+    created_at: datetime | None = None,
+    last_in_at: datetime | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
     sug_lbl = _h.escape(t("chat.suggest"))
     tr_lbl = _h.escape(t("chat.translate"))
-    header = chat_header_html(tid, name, stage, product_slug=product_slug, ig_id=ig_id)
+    header = chat_header_html(
+        tid, name, stage,
+        product_slug=product_slug, ig_id=ig_id,
+        phone=phone, created_at=created_at, last_in_at=last_in_at,
+    )
     return (
         f'{header}'
         f'<div class="msgs" id="msgs-{tid}">{messages_html(msgs, pending, tid)}</div>'

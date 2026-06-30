@@ -42,14 +42,20 @@ router.include_router(_admin_router)
 router.include_router(_branches_router)
 
 _THREAD_TMPL = (
-    "SELECT ct.id, l.display_name, l.stage, ct.last_in_at,"
+    "SELECT ct.id, l.display_name, l.stage,"
+    " GREATEST(ct.last_in_at, ct.last_out_at, ct.created_at) AS last_act,"
+    " l.phone_e164, ct.product_slug,"
     " (SELECT m.text FROM message m WHERE m.thread_id = ct.id"
     "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_msg,"
     " (SELECT m.direction FROM message m WHERE m.thread_id = ct.id"
-    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_dir"
+    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_dir,"
+    " (SELECT COUNT(*) FROM message m WHERE m.thread_id = ct.id"
+    "  AND m.direction = 'in') cnt_in,"
+    " (SELECT COUNT(*) FROM message m WHERE m.thread_id = ct.id"
+    "  AND m.direction = 'out') cnt_out"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " {where}"
-    " ORDER BY COALESCE(ct.last_in_at, ct.created_at) DESC LIMIT 100"
+    " ORDER BY GREATEST(ct.last_in_at, ct.last_out_at, ct.created_at) DESC NULLS LAST LIMIT 100"
 )
 
 _STAGE_COUNTS_Q = (  # noqa: S608
