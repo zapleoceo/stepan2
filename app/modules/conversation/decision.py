@@ -9,6 +9,8 @@ from dataclasses import dataclass
 
 from app.domain.enums import Stage
 
+from .sanitize import clean_reply
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -17,6 +19,8 @@ class Decision:
     product_slug: str | None
     ready: bool
     needs_manager: bool
+    manager_question: str | None = None
+    kb_gap: str | None = None
 
 
 def _strip_fences(raw: str) -> str:
@@ -53,9 +57,11 @@ def parse_decision(raw_json: str) -> Decision:
         raise ValueError("'reply' must be a string")
 
     return Decision(
-        reply=reply,
+        reply=clean_reply(reply),
         stage=stage,
-        product_slug=data.get("product_slug"),
+        product_slug=data.get("product_slug") or None,
         ready=bool(data.get("ready", False)),
         needs_manager=bool(data.get("needs_manager", False)),
+        manager_question=data.get("manager_question") or None,
+        kb_gap=data.get("kb_gap") or None,
     )

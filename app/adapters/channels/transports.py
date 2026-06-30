@@ -5,6 +5,7 @@ Each implements one of the adapter transport Protocols. Third-party imports are 
 inject fakes instead. Swap the underlying API here; adapters stay untouched."""
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 
@@ -31,7 +32,8 @@ class InstagrapiTransport:
 
     async def fetch_threads(self) -> list[dict[str, Any]]:
         client = self._ensure_client()
-        threads = client.direct_threads(amount=20)
+        # instagrapi is a synchronous library — run in a thread to avoid blocking the loop
+        threads = await asyncio.to_thread(client.direct_threads, amount=20)
         out: list[dict[str, Any]] = []
         for thread in threads:
             last = thread.messages[0] if thread.messages else None
@@ -49,13 +51,15 @@ class InstagrapiTransport:
 
     async def send_direct(self, thread_id: str, text: str) -> dict[str, Any]:
         client = self._ensure_client()
-        message = client.direct_send(text, thread_ids=[int(thread_id)])
+        message = await asyncio.to_thread(
+            client.direct_send, text, thread_ids=[int(thread_id)]
+        )
         return {"item_id": message.id}
 
     async def account_health(self) -> str:
         client = self._ensure_client()
         try:
-            client.get_timeline_feed()
+            await asyncio.to_thread(client.get_timeline_feed)
         except Exception as exc:  # instagrapi raises ChallengeRequired/LoginRequired here
             return "challenge" if "challenge" in type(exc).__name__.lower() else "expired"
         return "ok"

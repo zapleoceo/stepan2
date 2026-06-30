@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # Instagram private-API proxy (same geo as login — avoids checkpoint). Empty = none.
     ig_proxy: str = Field(default="", description="proxy URL for instagrapi transport")
 
+    # Telegram bot token for manager alerts (BotFather token — never in VCS)
+    tg_bot_token: str = Field(default="", description="Telegram bot token for manager pings")
+
     # Admin/super-admin bootstrap (Telegram id of the first super_admin)
     bootstrap_super_admin: int = Field(default=0)
 

@@ -11,8 +11,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Outbox
 from app.modules.knowledge.service import KnowledgeService
+from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import BranchSettings
 from app.ports.llm import LLMPort
+from app.ports.notify import NotifierPort
 
 from .decision import Decision, parse_decision
 from .prompt import build_messages
@@ -29,12 +31,14 @@ class ReplyService:
         llm: LLMPort,
         knowledge: KnowledgeService,
         branch_settings: BranchSettings | None = None,
+        notifier: NotifierPort | None = None,
     ) -> None:
         self.session = session
         self.branch_id = branch_id
         self.llm = llm
         self.knowledge = knowledge
         self.settings = branch_settings
+        self._notifier = notifier
         self.threads = ThreadRepo(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
         self.outbox = OutboxRepo(session, branch_id)
@@ -65,13 +69,14 @@ class ReplyService:
     async def enqueue_reply(self, thread_id: int, decision: Decision) -> Outbox | None:
         """Queue the decided reply; None for a foreign thread.
 
+        Also fires a manager alert when needs_manager=True (if a notifier is wired).
         scheduled_at respects reply_delay from BranchSettings (random window).
         """
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
         scheduled_at = self._scheduled_at()
-        return await self.outbox.add(
+        outbox = await self.outbox.add(
             Outbox(
                 branch_id=self.branch_id,
                 thread_id=thread_id,
@@ -79,6 +84,33 @@ class ReplyService:
                 scheduled_at=scheduled_at,
             )
         )
+        if decision.needs_manager and self._notifier is not None:
+            await self._raise_manager_alert(thread_id, thread.lead_id, decision)
+        return outbox
+
+    async def _raise_manager_alert(
+        self, thread_id: int, lead_id: int, decision: Decision
+    ) -> None:
+        q = decision.manager_question or ""
+        gap = decision.kb_gap or ""
+        summary_en = q or "Lead requests human handoff"
+        summary_ru = f"Вопрос: {q}" if q else "Лид запросил менеджера"
+        if gap:
+            summary_ru += f"\nПробел в KB: {gap}"
+        alerts = AlertService(self.session, self.branch_id, self._notifier)
+        try:
+            await alerts.raise_alert(
+                lead_id=lead_id,
+                kind="needs_manager",
+                summary_en=summary_en,
+                summary_ru=summary_ru,
+                thread_id=thread_id,
+            )
+        except Exception:
+            import logging  # noqa: PLC0415
+            logging.getLogger(__name__).warning(
+                "manager alert failed thread=%s lead=%s", thread_id, lead_id, exc_info=True
+            )
 
     def _scheduled_at(self) -> datetime:
         """Return send time: now + random delay from settings (or immediate if none)."""

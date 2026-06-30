@@ -16,6 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
+from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
@@ -24,6 +25,7 @@ from app.modules.conversation.repository import ThreadRepo
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.leads.ingest import IngestService
 from app.modules.settings.service import get_settings
+from app.ports.notify import NotifierPort
 
 from . import wiring
 
@@ -49,6 +51,19 @@ async def ingest_active_channels(ctx: dict[str, Any]) -> int:
     return stored
 
 
+def _build_notifier(branch_cfg: object) -> NotifierPort | None:
+    """Build a TelegramNotifier for the branch; return None if config is incomplete."""
+    bot_token = settings().tg_bot_token
+    tg_group = getattr(branch_cfg, "tg_group_id", "")
+    if not bot_token or not tg_group:
+        return None
+    try:
+        return TelegramNotifier(bot_token=bot_token, group_chat_id=int(tg_group))
+    except (ValueError, TypeError) as exc:
+        logger.warning("cannot build TelegramNotifier: %s", exc)
+        return None
+
+
 async def reply_pending(ctx: dict[str, Any]) -> int:
     """Decide and enqueue the agent reply for every thread awaiting one. Returns enqueued."""
     enqueued = 0
@@ -67,7 +82,11 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
                 continue
 
             knowledge = KnowledgeService(session, branch.id)
-            reply = ReplyService(session, branch.id, llm, knowledge, branch_settings=branch_cfg)
+            notifier = _build_notifier(branch_cfg)
+            reply = ReplyService(
+                session, branch.id, llm, knowledge,
+                branch_settings=branch_cfg, notifier=notifier,
+            )
             for thread_id in await wiring.threads_awaiting_reply(session, branch.id):
                 decision = await reply.decide(thread_id)
                 if decision is None:

@@ -213,3 +213,115 @@ async def test_send_next_none_when_nothing_pending(db_session):
     thread_id = await _thread_with_inbound(s, branch_id)
 
     assert await OutboxSender(s, branch_id, FakeChannel()).send_next(thread_id) is None
+
+
+# ── sanitize ──────────────────────────────────────────────────────────────────
+
+def test_clean_reply_strips_zero_width():
+    from app.modules.conversation.sanitize import clean_reply
+    assert clean_reply("Halo​ Kakak") == "Halo Kakak"
+
+
+def test_clean_reply_removes_fake_phone_line():
+    from app.modules.conversation.sanitize import clean_reply
+    text = "Silakan hubungi kami!\n📱 Telepon: +62 812 3456 7890\nTerima kasih"
+    result = clean_reply(text)
+    assert "+62 812" not in result
+    assert "Silakan" in result and "Terima kasih" in result
+
+
+def test_clean_reply_keeps_official_number():
+    from app.modules.conversation.sanitize import clean_reply
+    line = "📱 Telepon: +62 811 1314 400"
+    assert clean_reply(line) == line
+
+
+def test_clean_reply_replaces_em_dash():
+    from app.modules.conversation.sanitize import clean_reply
+    assert clean_reply("Vibe Coding—kursus") == "Vibe Coding - kursus"
+
+
+# ── decision: manager_question + kb_gap ──────────────────────────────────────
+
+def test_parse_decision_extracts_manager_question():
+    from app.modules.conversation.decision import parse_decision
+    raw = json.dumps({
+        "reply": "Aku sambungkan ke tim.",
+        "stage": "manager",
+        "product_slug": None,
+        "ready": False,
+        "needs_manager": True,
+        "manager_question": "Lead minta cicilan khusus untuk bulan Juli.",
+        "kb_gap": "Promo July tidak ada di KB.",
+    })
+    d = parse_decision(raw)
+    assert d.needs_manager is True
+    assert d.manager_question == "Lead minta cicilan khusus untuk bulan Juli."
+    assert d.kb_gap == "Promo July tidak ada di KB."
+
+
+def test_parse_decision_manager_question_defaults_to_none():
+    from app.modules.conversation.decision import parse_decision
+    d = parse_decision(json.dumps({
+        "reply": "ok", "stage": "qualifying",
+        "product_slug": None, "ready": False, "needs_manager": False,
+    }))
+    assert d.manager_question is None
+    assert d.kb_gap is None
+
+
+# ── manager alert ─────────────────────────────────────────────────────────────
+
+class FakeNotifier:
+    """Records notify_manager calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def notify_manager(self, **kwargs: Any) -> None:
+        self.calls.append(kwargs)
+
+
+async def test_enqueue_reply_triggers_alert_when_needs_manager(db_session):
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id)
+    notifier = FakeNotifier()
+    decision = Decision(
+        reply="Sambungkan ke tim.",
+        stage=Stage.MANAGER,
+        product_slug=None,
+        ready=False,
+        needs_manager=True,
+        manager_question="Lead tanya diskon khusus.",
+    )
+    svc = ReplyService(s, branch_id, FakeLLM(_DECISION), KnowledgeService(s, branch_id),
+                       notifier=notifier)
+
+    row = await svc.enqueue_reply(thread_id, decision)
+
+    assert row is not None
+    assert len(notifier.calls) == 1
+    call = notifier.calls[0]
+    assert call["kind"] == "needs_manager"
+    assert "Lead tanya diskon khusus." in call["summary_en"]
+
+
+async def test_enqueue_reply_no_alert_without_needs_manager(db_session):
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id)
+    notifier = FakeNotifier()
+    decision = Decision(
+        reply="Oke!",
+        stage=Stage.QUALIFYING,
+        product_slug=None,
+        ready=False,
+        needs_manager=False,
+    )
+    svc = ReplyService(s, branch_id, FakeLLM(_DECISION), KnowledgeService(s, branch_id),
+                       notifier=notifier)
+
+    await svc.enqueue_reply(thread_id, decision)
+
+    assert len(notifier.calls) == 0

@@ -11,8 +11,13 @@ from app.adapters.db.models import Message
 
 _DECISION_CONTRACT = (
     "Reply to the lead in language '{lang}'. Then return ONLY a JSON object: "
-    '{{"reply": str, "stage": str, "product_slug": str|null, '
-    '"ready": bool, "needs_manager": bool}}. No prose outside the JSON.'
+    '{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, '
+    '"needs_manager": bool, '
+    '"manager_question": str|null, '
+    '"kb_gap": str|null}}. '
+    "manager_question: the specific thing the lead needs a human to resolve (null if not needed). "
+    "kb_gap: knowledge or info you lacked to answer (null if KB was sufficient). "
+    "No prose outside the JSON."
 )
 
 _COACHING_HEADER = "MANDATORY RULES (from manager — follow strictly):"
