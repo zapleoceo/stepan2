@@ -1,0 +1,224 @@
+"""Admin routes: leads, outbox, members, settings, agent toggle, branches."""
+from __future__ import annotations
+
+import html as _h
+
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import text
+
+from app.adapters.db.session import session_scope
+from app.admin._branch import branch_ids_from_request
+
+from ._i18n import apply_lang, t
+from ._query import _branch_where
+from ._ui_panels import (
+    leads_panel_html,
+    members_panel_html,
+    outbox_panel_html,
+    settings_panel_html,
+)
+
+router = APIRouter()
+
+_BRANCH_COOKIE = "stepan2_branch"
+
+
+@router.get("/leads/panel", response_class=HTMLResponse)
+async def leads_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    async with session_scope() as session:
+        q = (
+            "SELECT id, display_name, phone_e164, stage, created_at"  # noqa: S608
+            f" FROM lead {where} ORDER BY created_at DESC LIMIT 200"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(leads_panel_html(list(rows)))
+
+
+@router.get("/outbox/panel", response_class=HTMLResponse)
+async def outbox_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    async with session_scope() as session:
+        q = (
+            "SELECT id, thread_id, status, source, text, scheduled_at"  # noqa: S608
+            f" FROM outbox {where} ORDER BY id DESC LIMIT 100"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(outbox_panel_html(list(rows)))
+
+
+@router.get("/members/panel", response_class=HTMLResponse)
+async def members_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids, col="m.branch_id")
+    async with session_scope() as session:
+        q = (
+            "SELECT u.id, u.telegram_id, m.role, u.name, m.branch_id"  # noqa: S608
+            " FROM membership m JOIN app_user u ON u.id = m.user_id"
+            f" {where} ORDER BY m.branch_id, m.role, u.name"
+        )
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(members_panel_html(list(rows)))
+
+
+@router.get("/settings/panel", response_class=HTMLResponse)
+async def settings_panel(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    async with session_scope() as session:
+        q = f"SELECT id, branch_id, key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
+        rows = (await session.execute(text(q), params)).all()
+    return HTMLResponse(settings_panel_html(list(rows)))
+
+
+@router.post("/settings/{setting_id}/save", response_class=HTMLResponse)
+async def settings_save(
+    setting_id: int, request: Request, value: str = Form(default=""),
+) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        if branch_ids:
+            await session.execute(
+                text(
+                    "UPDATE app_setting SET value=:v"
+                    " WHERE id=:id AND branch_id=ANY(:bids)"
+                ),
+                {"v": value.strip(), "id": setting_id, "bids": branch_ids},
+            )
+        else:
+            await session.execute(
+                text("UPDATE app_setting SET value=:v WHERE id=:id"),
+                {"v": value.strip(), "id": setting_id},
+            )
+        row = (
+            await session.execute(
+                text("SELECT id, branch_id, key, value FROM app_setting WHERE id=:id"),
+                {"id": setting_id},
+            )
+        ).first()
+    if not row:
+        return HTMLResponse("—")
+    val = str(row[3])
+    save_lbl = _h.escape(t("set.save"))
+    saved_lbl = _h.escape(t("set.saved"))
+    return HTMLResponse(
+        f'<form hx-post="/ui/settings/{setting_id}/save" hx-target="this"'
+        f' hx-swap="outerHTML" style="display:flex;gap:.35rem;align-items:center">'
+        f'<input class="set-val" name="value" value="{_h.escape(val)}">'
+        f'<button class="btn-sm btn-p">{save_lbl}</button>'
+        f'<span style="color:#51cf66;font-size:.75rem">{saved_lbl}</span>'
+        f'</form>'
+    )
+
+
+@router.get("/agent-status", response_class=HTMLResponse)
+async def agent_status(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT value FROM app_setting"
+                    " WHERE branch_id=:bid AND key='agent_enabled_global'"
+                ),
+                {"bid": branch_id},
+            )
+        ).first()
+    enabled = (row[0].lower() in ("true", "1", "yes")) if row else True
+    return HTMLResponse(_agent_toggle_html(branch_id, enabled))
+
+
+@router.post("/agent-toggle", response_class=HTMLResponse)
+async def agent_toggle(
+    request: Request, branch_id: int = Form(default=1),
+) -> HTMLResponse:
+    apply_lang(request)
+    allowed = branch_ids_from_request(request)
+    if allowed and branch_id not in allowed:
+        branch_id = allowed[0]
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT value FROM app_setting"
+                    " WHERE branch_id=:bid AND key='agent_enabled_global'"
+                ),
+                {"bid": branch_id},
+            )
+        ).first()
+        enabled = (row[0].lower() in ("true", "1", "yes")) if row else True
+        new_val = "false" if enabled else "true"
+        await session.execute(
+            text(
+                "INSERT INTO app_setting (branch_id, key, value)"
+                " VALUES (:bid, 'agent_enabled_global', :v)"
+                " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"
+            ),
+            {"bid": branch_id, "v": new_val},
+        )
+    return HTMLResponse(_agent_toggle_html(branch_id, not enabled))
+
+
+def _agent_toggle_html(branch_id: int, enabled: bool) -> str:
+    lbl = _h.escape(t("bot.on" if enabled else "bot.off"))
+    color = "#51cf66" if enabled else "#ff6b6b"
+    bg = "rgba(31,58,31,.9)" if enabled else "rgba(58,31,31,.9)"
+    return (
+        f'<form id="bot-tog" hx-post="/ui/agent-toggle" hx-target="#bot-tog"'
+        f' hx-swap="outerHTML" style="margin-top:.35rem">'
+        f'<input type="hidden" name="branch_id" value="{branch_id}">'
+        f'<button type="submit" style="width:100%;padding:.28rem .5rem;'
+        f'background:{bg};border:1px solid {color};border-radius:5px;'
+        f'color:{color};font-size:.72rem;font-weight:700;cursor:pointer;'
+        f'text-align:center">{lbl}</button>'
+        f'</form>'
+    )
+
+
+@router.get("/branches/widget", response_class=HTMLResponse)
+async def branches_widget(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    current = request.cookies.get(_BRANCH_COOKIE, "")
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text("SELECT id, name FROM branch WHERE is_active ORDER BY id")
+            )
+        ).all()
+    all_lbl = _h.escape(t("branch.all"))
+    sel_all = "selected" if not current else ""
+    opts = f'<option value="" {sel_all}>{all_lbl}</option>'
+    for bid, bname in rows:
+        sel = "selected" if str(bid) in current.split(",") else ""
+        opts += f'<option value="{bid}" {sel}>{_h.escape(bname)}</option>'
+    return HTMLResponse(
+        f'<form method="post" action="/ui/branch-filter">'
+        f'<select name="bid" class="bft-sel" onchange="this.form.submit()">'
+        f'{opts}</select></form>'
+    )
+
+
+@router.post("/branch-filter")
+async def branch_filter(
+    request: Request, bid: str = Form(default=""),
+) -> RedirectResponse:
+    referer = request.headers.get("referer", "/ui/inbox")
+    resp = RedirectResponse(referer, status_code=303)
+    if bid.strip():
+        resp.set_cookie(
+            _BRANCH_COOKIE, bid.strip(), path="/", max_age=86400 * 30,
+            httponly=False, samesite="lax",
+        )
+    else:
+        resp.delete_cookie(_BRANCH_COOKIE, path="/")
+    return resp

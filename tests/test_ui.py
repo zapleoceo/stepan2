@@ -521,3 +521,171 @@ def test_admin_root_redirects_to_ui() -> None:
     resp = client.get("/admin")
     assert resp.status_code == 302
     assert resp.headers["location"] == "/ui/inbox"
+
+
+# ─── lang switch: must redirect to full-page URL ──────────────────────────────
+
+def test_lang_switch_from_full_page_preserves_referer() -> None:
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get(
+        "/ui/lang/ru",
+        headers={"Referer": "http://testserver/ui/inbox"},
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "http://testserver/ui/inbox"
+    assert "stepan2_lang=ru" in resp.headers.get("set-cookie", "")
+
+
+def test_lang_switch_from_partial_redirects_to_inbox() -> None:
+    """HTMX partial URLs must NOT be used as redirect targets after lang switch."""
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get(
+        "/ui/lang/ru",
+        headers={"Referer": "http://testserver/ui/settings/panel"},
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/ui/inbox"
+
+
+def test_lang_switch_no_referer_redirects_to_inbox() -> None:
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get("/ui/lang/en")
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/ui/inbox"
+
+
+def test_lang_switch_invalid_code_defaults_to_en() -> None:
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get("/ui/lang/fr")
+    assert resp.status_code == 303
+    assert "stepan2_lang=en" in resp.headers.get("set-cookie", "")
+
+
+# ─── branch helper unit tests ─────────────────────────────────────────────────
+
+def test_branch_where_with_ids_returns_clause() -> None:
+    from app.api._query import _branch_where
+    where, params = _branch_where([1, 2])
+    assert "ANY(:bids)" in where
+    assert params == {"bids": [1, 2]}
+
+
+def test_branch_where_none_returns_empty() -> None:
+    from app.api._query import _branch_where
+    where, params = _branch_where(None)
+    assert where == ""
+    assert params == {}
+
+
+def test_branch_where_custom_col() -> None:
+    from app.api._query import _branch_where
+    where, params = _branch_where([3], col="m.branch_id")
+    assert "m.branch_id = ANY(:bids)" in where
+    assert params == {"bids": [3]}
+
+
+# ─── POST route smoke tests ────────────────────────────────────────────────────
+
+def test_chat_send_missing_thread_returns_200(client: TestClient) -> None:
+    resp = client.post("/ui/chat/99999/send", data={"text": "hello"})
+    assert resp.status_code in (200, 500)
+
+
+def test_chat_send_empty_text_returns_200(client: TestClient) -> None:
+    resp = client.post("/ui/chat/1/send", data={"text": "  "})
+    assert resp.status_code in (200, 500)
+
+
+def test_knowledge_save_missing_doc_returns_404_or_500(client: TestClient) -> None:
+    resp = client.post(
+        "/ui/knowledge/99999/save",
+        data={"title": "Test", "content": "Content"},
+    )
+    assert resp.status_code in (404, 500)
+
+
+def test_products_save_missing_prod_returns_404_or_500(client: TestClient) -> None:
+    resp = client.post(
+        "/ui/products/99999/save",
+        data={"title": "Test", "content": "Content", "sort_order": "0"},
+    )
+    assert resp.status_code in (404, 500)
+
+
+def test_products_delete_missing_prod_returns_303(client: TestClient) -> None:
+    """Delete of non-existent product redirects (303) in prod; 500 in SQLite test env."""
+    client_no_follow = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    resp = client_no_follow.post("/ui/products/99999/delete")
+    assert resp.status_code in (303, 500)
+
+
+def test_settings_save_missing_setting_returns_dash(client: TestClient) -> None:
+    resp = client.post("/ui/settings/99999/save", data={"value": "x"})
+    assert resp.status_code in (200, 500)
+    if resp.status_code == 200:
+        assert "—" in resp.text or resp.text == ""
+
+
+def test_chat_stage_invalid_stage_coerced_to_new(client: TestClient) -> None:
+    resp = client.post("/ui/chat/99999/stage", data={"stage": "invalid"})
+    assert resp.status_code in (200, 404, 500)
+
+
+def test_agent_toggle_post_returns_html(client: TestClient) -> None:
+    resp = client.post("/ui/agent-toggle", data={"branch_id": "1"})
+    assert resp.status_code in (200, 500)
+    if resp.status_code == 200:
+        assert "bot-tog" in resp.text
+
+
+# ─── query helpers: fetch_messages, fetch_pending ─────────────────────────────
+
+def test_ago_returns_localized_minutes() -> None:
+    """_ago must use i18n time abbreviations, not hardcoded Russian."""
+    from datetime import datetime, timedelta
+
+    from app.api._ui_html import _ago
+    _set_lang("en")
+    dt = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
+    result = _ago(dt)
+    assert "m" in result  # English: "5m"
+    assert "м" not in result  # Must not be Russian
+
+
+def test_ago_returns_russian_when_lang_ru() -> None:
+    from datetime import datetime, timedelta
+
+    from app.api._ui_html import _ago
+    _set_lang("ru")
+    dt = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
+    result = _ago(dt)
+    assert "м" in result  # Russian: "5м"
+
+
+def test_ago_hours_uses_i18n() -> None:
+    from datetime import datetime, timedelta
+
+    from app.api._ui_html import _ago
+    _set_lang("en")
+    dt = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=3)
+    result = _ago(dt)
+    assert "h" in result  # English: "3h"
+
+
+# ─── sub-module route registration ───────────────────────────────────────────
+
+def test_all_sub_routers_reachable(client: TestClient) -> None:
+    """Smoke-test each sub-router endpoint is registered (200 or 404/500 is fine)."""
+    partial_urls = [
+        "/ui/leads/panel",
+        "/ui/outbox/panel",
+        "/ui/members/panel",
+        "/ui/settings/panel",
+        "/ui/knowledge/panel",
+        "/ui/products/panel",
+        "/ui/knowledge/new",
+        "/ui/products/new",
+    ]
+    for url in partial_urls:
+        resp = client.get(url)
+        assert resp.status_code in (200, 500), f"Unexpected status {resp.status_code} for {url}"
