@@ -13,7 +13,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels import REGISTRY
 from app.adapters.channels.instagram import InstagramAdapter
-from app.adapters.channels.transports import InstagrapiTransport
+from app.adapters.channels.meta_business import MetaBusinessAdapter
+from app.adapters.channels.transports import (
+    EvolutionTransport,
+    GraphTransportHTTP,
+    InstagrapiTransport,
+)
+from app.adapters.channels.whatsapp import WhatsAppAdapter
 from app.adapters.crypto import decrypt
 from app.adapters.db.models import (
     Branch,
@@ -92,10 +98,32 @@ async def build_channel_port(session: AsyncSession, channel: Channel) -> Channel
         dump = await _active_session_settings(session, channel.id or 0)
         if dump is None:
             raise RuntimeError(f"no active session for channel {channel.id}")
+        proxy = dump.pop("proxy", None) or settings().ig_proxy  # per-channel proxy first
         transport = InstagrapiTransport(
-            username=channel.handle or "", session_settings=dump,
-            proxy=settings().ig_proxy)
+            username=channel.handle or "", session_settings=dump, proxy=proxy)
         return InstagramAdapter(transport, handle=channel.handle or "")
+    if channel.kind == ChannelKind.META_BUSINESS:
+        dump = await _active_session_settings(session, channel.id or 0)
+        if dump is None:
+            raise RuntimeError(f"no active token for Meta Business channel {channel.id}")
+        transport = GraphTransportHTTP(
+            base_url=dump.get("base_url", "https://graph.instagram.com/v21.0"),
+            account_id=dump.get("account_id") or channel.account_id or "",
+            token=dump["token"],
+        )
+        return MetaBusinessAdapter(
+            transport, account_id=dump.get("account_id") or channel.account_id or ""
+        )
+    if channel.kind == ChannelKind.WHATSAPP:
+        dump = await _active_session_settings(session, channel.id or 0)
+        if dump is None:
+            raise RuntimeError(f"no WhatsApp config for channel {channel.id}")
+        transport = EvolutionTransport(
+            base_url=dump["base_url"],
+            instance=dump["instance"],
+            api_key=dump["api_key"],
+        )
+        return WhatsAppAdapter(transport, instance=dump["instance"])
     raise NotImplementedError(
         f"transport wiring for {channel.kind} channel {channel.id} is not configured yet"
     )

@@ -590,7 +590,277 @@ def branch_edit_html(
         f'<label class="frm-lbl" for="br-active" style="margin:0">{active_lbl}</label></div>'
         f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
         f'</form>'
+        + (_channels_section(bid) if bid is not None else "")
+        + '</div>'
+    )
+
+
+def _channels_section(bid: int) -> str:
+    ch_title = _h.escape(t("ch.title"))
+    add_lbl = _h.escape(t("ch.add"))
+    return (
+        f'<hr style="border:none;border-top:1px solid #2d3748;margin:1.2rem 0 .7rem">'
+        f'<div style="display:flex;align-items:center;justify-content:space-between;'
+        f'margin-bottom:.5rem">'
+        f'<span style="font-weight:600;color:#e8eef4;font-size:.82rem">{ch_title}</span>'
+        f'<button class="btn-sm btn-p"'
+        f' hx-get="/ui/channels/branch/{bid}/new"'
+        f' hx-target="#ch-form" hx-swap="innerHTML">{add_lbl}</button>'
         f'</div>'
+        f'<div id="ch-list"'
+        f' hx-get="/ui/channels/branch/{bid}"'
+        f' hx-trigger="load, refreshChannelList from:body"'
+        f' hx-swap="innerHTML">'
+        f'</div>'
+        f'<div id="ch-form" style="margin-top:.75rem"></div>'
+    )
+
+
+def channel_list_partial_html(channels: list, sessions: list, branch_id: int) -> str:
+    """HTMX-loaded channel table for #ch-list inside branch edit."""
+    session_map = {r[0]: r[1] for r in sessions}
+    _kind_lbl = {
+        "instagram": "Instagram", "meta_business": "Meta Business", "whatsapp": "WhatsApp",
+    }
+    _st_cls = {"active": "p-ok", "expired": "p-off", "challenge": "p-off", "none": "p-off"}
+    _st_i18n = {
+        "active": "ch.st_active", "expired": "ch.st_exp",
+        "challenge": "ch.st_chal", "none": "ch.st_none",
+    }
+    if not channels:
+        return (
+            f'<div class="emp" style="height:2rem">{_h.escape(t("ch.no_ch"))}</div>'
+        )
+    rows = ""
+    for ch in channels:
+        ch_id, kind, handle, acct, active = ch[0], ch[1], ch[2], ch[3], ch[4]
+        st = session_map.get(ch_id, "none")
+        st_pill = (
+            f'<span class="pill {_st_cls.get(st,"p-off")}"'
+            + (' style="background:#3a2a1f;color:#ffa94d"' if st == "challenge" else "")
+            + f'>{_h.escape(t(_st_i18n.get(st,"ch.st_none")))}</span>'
+        )
+        active_pill = (
+            f'<span class="pill p-ok">{_h.escape(t("ch.active"))}</span>'
+            if active else '<span class="pill p-off">off</span>'
+        )
+        rows += (
+            f'<tr>'
+            f'<td style="color:#4da6ff;font-size:.77rem">'
+            f'{_kind_lbl.get(kind, kind)}</td>'
+            f'<td style="font-family:ui-monospace,monospace;font-size:.75rem">'
+            f'{_h.escape(handle or acct or "—")}</td>'
+            f'<td>{st_pill}</td>'
+            f'<td>{active_pill}</td>'
+            f'<td style="white-space:nowrap">'
+            f'<button class="act-btn" style="margin-right:.2rem"'
+            f' hx-get="/ui/channels/{ch_id}/edit"'
+            f' hx-target="#ch-form" hx-swap="innerHTML">'
+            f'{_h.escape(t("ch.edit"))}</button>'
+            f'<button class="act-btn" style="margin-right:.2rem"'
+            f' hx-get="/ui/channels/{ch_id}/credential"'
+            f' hx-target="#ch-form" hx-swap="innerHTML">'
+            f'{_h.escape(t("ch.connect"))}</button>'
+            f'<button class="act-btn" style="background:#862e2e"'
+            f' hx-post="/ui/channels/{ch_id}/delete"'
+            f' hx-target="#ch-list" hx-swap="innerHTML">'
+            f'{_h.escape(t("ch.delete"))}</button>'
+            f'</td></tr>'
+        )
+    kind_h = _h.escape(t("ch.kind"))
+    handle_h = _h.escape(t("ch.handle"))
+    return (
+        f'<table class="tbl"><thead><tr>'
+        f'<th>{kind_h}</th><th>{handle_h}</th>'
+        f'<th>Status</th><th></th><th></th>'
+        f'</tr></thead><tbody>{rows}</tbody></table>'
+    )
+
+
+def channel_new_form_html(branch_id: int) -> str:
+    """Form to create a new channel (kind selector + metadata)."""
+    title = _h.escape(t("ch.new"))
+    kind_opts = "".join(
+        f'<option value="{v}">{_h.escape(t(k))}</option>'
+        for v, k in (
+            ("instagram", "ch.kind_ig"),
+            ("meta_business", "ch.kind_meta"),
+            ("whatsapp", "ch.kind_wa"),
+        )
+    )
+    save_lbl = _h.escape(t("ch.save"))
+    handle_lbl = _h.escape(t("ch.handle"))
+    return (
+        f'<div style="font-weight:600;color:#e8eef4;font-size:.82rem;margin-bottom:.55rem">'
+        f'{title}</div>'
+        f'<form hx-post="/ui/channels/branch/{branch_id}/create"'
+        f' hx-target="#ch-list" hx-swap="innerHTML" style="max-width:360px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.kind"))}</label>'
+        f'<select class="act-sel" name="kind"'
+        f' style="width:100%;padding:.3rem .35rem">{kind_opts}</select></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{handle_lbl}'
+        f' <span style="color:#4a5568;font-size:.7rem">'
+        f'(username / номер / handle)</span></label>'
+        f'<input class="frm-inp" name="handle"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.page_id"))}'
+        f' <span style="color:#4a5568;font-size:.7rem">(опц.)</span></label>'
+        f'<input class="frm-inp" name="account_id"></div>'
+        f'<div class="frm-grp" style="display:flex;align-items:center;gap:.5rem">'
+        f'<input type="checkbox" name="is_active" id="ch-active" checked>'
+        f'<label class="frm-lbl" for="ch-active" style="margin:0">'
+        f'{_h.escape(t("ch.active"))}</label></div>'
+        f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
+        f'</form>'
+    )
+
+
+def channel_edit_form_html(
+    ch_id: int, kind: str, handle: str, account_id: str, is_active: bool,
+) -> str:
+    """Form to edit channel metadata (handle, account_id, active)."""
+    _kind_lbl = {
+        "instagram": "Instagram", "meta_business": "Meta Business", "whatsapp": "WhatsApp",
+    }
+    checked = "checked" if is_active else ""
+    save_lbl = _h.escape(t("ch.save"))
+    return (
+        f'<div style="font-weight:600;color:#4da6ff;font-size:.8rem;margin-bottom:.55rem">'
+        f'{_kind_lbl.get(kind, kind)} #{ch_id}</div>'
+        f'<form hx-post="/ui/channels/{ch_id}/save"'
+        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.handle"))}</label>'
+        f'<input class="frm-inp" name="handle" value="{_h.escape(handle)}"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.page_id"))}</label>'
+        f'<input class="frm-inp" name="account_id" value="{_h.escape(account_id)}"></div>'
+        f'<div class="frm-grp" style="display:flex;align-items:center;gap:.5rem">'
+        f'<input type="checkbox" name="is_active" id="ch-a{ch_id}" {checked}>'
+        f'<label class="frm-lbl" for="ch-a{ch_id}" style="margin:0">'
+        f'{_h.escape(t("ch.active"))}</label></div>'
+        f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
+        f'</form>'
+    )
+
+
+def channel_credential_html(ch_id: int, kind: str, status: str) -> str:
+    """Credential entry/status panel for a channel (loaded into #ch-form)."""
+    _st_cls = {"active": "p-ok", "expired": "p-off", "challenge": "p-off"}
+    _st_i18n = {"active": "ch.st_active", "expired": "ch.st_exp", "challenge": "ch.st_chal"}
+    st_pill = (
+        f'<span class="pill {_st_cls.get(status, "p-off")}"'
+        + (' style="background:#3a2a1f;color:#ffa94d"' if status == "challenge" else "")
+        + f'>{_h.escape(t(_st_i18n.get(status, "ch.st_none")))}</span>'
+    )
+    header = (
+        f'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">'
+        f'<span style="font-weight:600;color:#e8eef4;font-size:.82rem">'
+        f'{_h.escape(t("ch.connect"))}</span>{st_pill}</div>'
+    )
+    if kind == "instagram":
+        body = _ch_ig_form(ch_id)
+    elif kind == "meta_business":
+        body = _ch_meta_form(ch_id)
+    elif kind == "whatsapp":
+        body = _ch_wa_form(ch_id)
+    else:
+        body = '<div class="emp">Unknown channel kind</div>'
+    return header + body
+
+
+def channel_ig_login_form_html(
+    ch_id: int, step: str = "login", flow_id: str = "", error: str = "",
+) -> str:
+    """Standalone IG login form (returned after 2FA challenge or on error)."""
+    return channel_credential_html.__wrapped_ig__(ch_id, step, flow_id, error)  # type: ignore[attr-defined]
+
+
+def _ch_err(error: str) -> str:
+    if not error:
+        return ""
+    return (
+        f'<div style="color:#f03e3e;font-size:.76rem;margin-bottom:.4rem">'
+        f'{_h.escape(error)}</div>'
+    )
+
+
+def _ch_ig_form(ch_id: int, step: str = "login", flow_id: str = "", error: str = "") -> str:
+    err = _ch_err(error)
+    if step == "2fa":
+        return (
+            f'{err}'
+            f'<form hx-post="/ui/channels/{ch_id}/ig/verify"'
+            f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:320px">'
+            f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
+            f'<div class="frm-grp">'
+            f'<label class="frm-lbl">{_h.escape(t("ch.code_2fa"))}</label>'
+            f'<input class="frm-inp" name="code" autocomplete="one-time-code" autofocus></div>'
+            f'<button type="submit" class="btn-sm btn-p">'
+            f'{_h.escape(t("ch.verify"))}</button>'
+            f'</form>'
+        )
+    return (
+        f'{err}'
+        f'<form hx-post="/ui/channels/{ch_id}/ig/start"'
+        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:340px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.ig_json"))}</label>'
+        f'<textarea class="frm-ta" name="session_json" rows="3"'
+        f' placeholder=\'{{"device_settings":...}}\' style="min-height:4rem"></textarea></div>'
+        f'<div style="color:#6b7685;font-size:.71rem;text-align:center;margin:.3rem 0">'
+        f'{_h.escape(t("ch.or_login"))}</div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.username"))}</label>'
+        f'<input class="frm-inp" name="username"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.password"))}</label>'
+        f'<input class="frm-inp" name="password" type="password"></div>'
+        f'<button type="submit" class="btn-sm btn-p">'
+        f'{_h.escape(t("ch.ig_login"))}</button>'
+        f'</form>'
+    )
+
+
+def _ch_meta_form(ch_id: int, error: str = "") -> str:
+    return (
+        f'{_ch_err(error)}'
+        f'<form hx-post="/ui/channels/{ch_id}/meta/connect"'
+        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.page_id"))}</label>'
+        f'<input class="frm-inp" name="page_id" placeholder="123456789"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.token"))}'
+        f' <span style="color:#4a5568;font-size:.7rem">(Graph API)</span></label>'
+        f'<input class="frm-inp" name="token" placeholder="EAAxx..."></div>'
+        f'<button type="submit" class="btn-sm btn-p">'
+        f'{_h.escape(t("ch.connect"))}</button>'
+        f'</form>'
+    )
+
+
+def _ch_wa_form(ch_id: int, error: str = "") -> str:
+    return (
+        f'{_ch_err(error)}'
+        f'<form hx-post="/ui/channels/{ch_id}/wa/connect"'
+        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.wa_url"))}</label>'
+        f'<input class="frm-inp" name="base_url"'
+        f' placeholder="https://evolution.example.com"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.wa_inst"))}</label>'
+        f'<input class="frm-inp" name="instance"'
+        f' placeholder="my-instance"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.wa_key"))}</label>'
+        f'<input class="frm-inp" name="api_key"></div>'
+        f'<button type="submit" class="btn-sm btn-p">'
+        f'{_h.escape(t("ch.connect"))}</button>'
+        f'</form>'
     )
 
 

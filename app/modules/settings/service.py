@@ -24,6 +24,8 @@ _DEFAULTS: dict[str, str] = {
     "reply_delay_max_s": "30",
     "tz_offset_h": "7",
     "tg_group_id": "",
+    "followup_enabled": "false",
+    "followup_schedule_h": "4,24,72",
 }
 
 _TTL = 30.0
@@ -42,6 +44,8 @@ class BranchSettings:
     reply_delay_max_s: int
     tz_offset_h: int
     tg_group_id: str
+    followup_enabled: bool
+    followup_schedule_h: list[int]
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -89,6 +93,14 @@ def _i(raw: dict[str, str], key: str) -> int:
             return 0
 
 
+def _parse_schedule(raw: dict[str, str]) -> list[int]:
+    val = raw.get("followup_schedule_h", _DEFAULTS.get("followup_schedule_h", "4,24,72"))
+    try:
+        return sorted({int(h.strip()) for h in val.split(",") if h.strip()})
+    except ValueError:
+        return [4, 24, 72]
+
+
 def _parse(raw: dict[str, str]) -> BranchSettings:
     return BranchSettings(
         agent_enabled=_b(raw, "agent_enabled_global"),
@@ -100,4 +112,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         reply_delay_max_s=_i(raw, "reply_delay_max_s"),
         tz_offset_h=_i(raw, "tz_offset_h"),
         tg_group_id=raw.get("tg_group_id", _DEFAULTS.get("tg_group_id", "")),
+        followup_enabled=_b(raw, "followup_enabled"),
+        followup_schedule_h=_parse_schedule(raw),
     )

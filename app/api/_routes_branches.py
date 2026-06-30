@@ -25,6 +25,8 @@ _SEED_SETTINGS: dict[str, str] = {
     "daily_cap": "500",
     "quiet_start": "22",
     "quiet_end": "8",
+    "followup_enabled": "false",
+    "followup_schedule_h": "4,24,72",
 }
 
 
@@ -71,7 +73,11 @@ async def branches_create(
     name = name.strip()
     if not name:
         return HTMLResponse(branch_edit_html(None, "", lang, tz_offset_h, bool(is_active)))
-    lang = lang if lang in ("id", "en", "ru") else "id"
+    _valid_langs = {
+        "id", "ms", "en", "ru", "zh", "ar", "vi", "th", "hi", "ko", "ja", "es", "fr", "de",
+        "pt", "tr",
+    }
+    lang = lang if lang in _valid_langs else "id"
     active = bool(is_active)
     async with session_scope() as session:
         row = (
@@ -109,7 +115,11 @@ async def branches_save(
 ) -> HTMLResponse:
     apply_lang(request)
     name = name.strip()
-    lang = lang if lang in ("id", "en", "ru") else "id"
+    _valid_langs = {
+        "id", "ms", "en", "ru", "zh", "ar", "vi", "th", "hi", "ko", "ja", "es", "fr", "de",
+        "pt", "tr",
+    }
+    lang = lang if lang in _valid_langs else "id"
     active = bool(is_active)
     async with session_scope() as session:
         await session.execute(

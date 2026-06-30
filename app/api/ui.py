@@ -24,6 +24,7 @@ from ._query import _branch_where, fetch_coach_data
 from ._routes_admin import _agent_toggle_html  # noqa: F401 (re-exported for tests)
 from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
+from ._routes_channels import router as _channels_router
 from ._routes_chat import router as _chat_router
 from ._routes_coach import router as _coach_router
 from ._routes_knowledge import router as _knowledge_router
@@ -32,6 +33,7 @@ from ._ui_html import app_shell, thread_list_html
 from ._ui_panels import coach_chat_html, knowledge_list_html
 
 router = APIRouter(prefix="/ui")
+router.include_router(_channels_router)
 router.include_router(_chat_router)
 router.include_router(_coach_router)
 router.include_router(_knowledge_router)

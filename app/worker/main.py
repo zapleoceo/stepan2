@@ -17,6 +17,7 @@ from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.config import settings
+from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import ThreadRepo
@@ -76,6 +77,28 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
     return enqueued
 
 
+async def schedule_followups(ctx: dict[str, Any]) -> int:
+    """Set follow-up timers for cold threads and queue proactive messages.
+
+    Runs every 10 minutes (between ingest and reply); quiet hours are respected.
+    Only fires when followup_enabled=true in branch settings."""
+    sent = 0
+    llm = BrokerLLM()
+    async with session_scope() as session:
+        for branch in await wiring.active_branches(session):
+            assert branch.id is not None
+            branch_cfg = await get_settings(session, branch.id)
+            if not branch_cfg.followup_enabled:
+                continue
+            if branch_cfg.is_quiet_hour():
+                continue
+            knowledge = KnowledgeService(session, branch.id)
+            svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)
+            await svc.reset_timers()
+            sent += await svc.run()
+    return sent
+
+
 async def send_outbox(ctx: dict[str, Any]) -> int:
     """Drain one pending outbox line per thread through its channel. Returns rows attempted."""
     attempted = 0
@@ -119,11 +142,14 @@ class WorkerSettings:
     """ARQ worker config. Cron drives the three orchestration tasks on a steady cadence;
     they are staggered so each minute ingests, then replies, then sends in order."""
 
-    functions = [ingest_active_channels, reply_pending, send_outbox]
+    functions = [ingest_active_channels, reply_pending, send_outbox, schedule_followups]
     cron_jobs = [
         cron(ingest_active_channels, second=0, run_at_startup=False),
         cron(reply_pending, second=20, run_at_startup=False),
         cron(send_outbox, second=40, run_at_startup=False),
+        # Follow-ups run every 10 minutes (minute divisible by 10, second=50)
+        cron(schedule_followups, minute={0, 10, 20, 30, 40, 50}, second=50,
+             run_at_startup=False),
     ]
     redis_settings = _redis_settings()
     max_jobs = 10

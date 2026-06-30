@@ -82,6 +82,7 @@ class ChannelThread(SQLModel, table=True):
     window_until: datetime | None = Field(default=None, description="окно ответа канала")
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
+    next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
     created_at: datetime = Field(default_factory=_utcnow)
 
 

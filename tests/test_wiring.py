@@ -1,4 +1,4 @@
-"""build_channel_port: Instagram wired from ChannelSession; others not yet; isolation."""
+"""build_channel_port: Instagram, WhatsApp and Meta wired from ChannelSession."""
 import json
 
 import pytest
@@ -38,12 +38,13 @@ async def test_build_port_no_session_raises(db_session):
         await build_channel_port(db_session, ch)
 
 
-async def test_build_whatsapp_not_implemented(db_session):
+async def test_build_whatsapp_no_session_raises(db_session):
     b = Branch(name="ID")
     db_session.add(b)
     await db_session.flush()
     ch = Channel(branch_id=b.id, kind=ChannelKind.WHATSAPP, handle="x")
     db_session.add(ch)
     await db_session.flush()
-    with pytest.raises(NotImplementedError):
+    # WA is wired; without a credential session it raises RuntimeError
+    with pytest.raises(RuntimeError, match="no WhatsApp config"):
         await build_channel_port(db_session, ch)
