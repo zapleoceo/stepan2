@@ -24,7 +24,9 @@ from app.ports.channel import SendResult
 class FakeChannel:
     kind = ChannelKind.INSTAGRAM
 
-    def __init__(self) -> None:
+    def __init__(self, *, ok: bool = True, error: str | None = None) -> None:
+        self._ok = ok
+        self._error = error
         self.sent: list[tuple[str, str]] = []
 
     async def fetch_inbound(self) -> list[Any]:
@@ -32,7 +34,11 @@ class FakeChannel:
 
     async def send_text(self, external_thread_id: str, text: str) -> SendResult:
         self.sent.append((external_thread_id, text))
-        return SendResult(ok=True, external_message_id="ext-1")
+        return SendResult(
+            ok=self._ok,
+            external_message_id="ext-1" if self._ok else None,
+            error=self._error,
+        )
 
     async def session_status(self) -> Any:
         return None
@@ -118,3 +124,19 @@ async def test_cap_zero_means_unlimited(db_session) -> None:
     channel = FakeChannel()
     row = await OutboxSender(db_session, bid, channel).send_next(tid)
     assert row is not None and row.status == "sent"
+
+
+async def test_soft_block_reschedules_instead_of_failing(db_session) -> None:
+    bid, tid = await _setup(db_session, hourly_cap=999, daily_cap=999, sent_now=0)
+    channel = FakeChannel(ok=False, error="challenge_required")
+    row = await OutboxSender(db_session, bid, channel).send_next(tid)
+    assert row is not None
+    assert row.status == "pending"  # retried later, not dropped
+    assert row.scheduled_at > datetime.now(UTC).replace(tzinfo=None)
+
+
+async def test_hard_error_marks_failed(db_session) -> None:
+    bid, tid = await _setup(db_session, hourly_cap=999, daily_cap=999, sent_now=0)
+    channel = FakeChannel(ok=False, error="recipient not found")
+    row = await OutboxSender(db_session, bid, channel).send_next(tid)
+    assert row is not None and row.status == "failed"

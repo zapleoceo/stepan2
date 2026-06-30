@@ -25,6 +25,20 @@ def _branch_day_start(now_utc_naive: datetime, tz_offset_h: int) -> datetime:
     return midnight - timedelta(hours=tz_offset_h)
 
 
+# IG/WA soft blocks (challenge, rate limit, transient) — retry later, don't drop the line.
+_SOFT_BLOCK = (
+    "challenge", "feedback_required", "login_required", "checkpoint", "please wait",
+    "rate", "429", "spam", "blocked", "try again", "throttl", "temporarily",
+)
+_RETRY_AFTER = timedelta(minutes=15)
+
+
+def _is_soft_block(error: str | None) -> bool:
+    """True when a send error is transient (back off + retry) vs a hard, give-up failure."""
+    low = (error or "").lower()
+    return any(token in low for token in _SOFT_BLOCK)
+
+
 class OutboxSender:
     """Send the next pending outbox row of one branch's thread via the channel."""
 
@@ -58,6 +72,10 @@ class OutboxSender:
             row.sent_at = now
             row.error = None
             await self.messages.add(self._outgoing(thread, row, result.external_message_id))
+        elif _is_soft_block(result.error):
+            row.status = "pending"  # transient (challenge/rate) — back off, don't drop
+            row.scheduled_at = now + _RETRY_AFTER
+            row.error = result.error
         else:
             row.status = "failed"
             row.error = result.error
