@@ -39,7 +39,12 @@ class IngestService:
                 continue  # already ingested — idempotent
             phone = extract_phone(inbound.text)  # merge key when the lead shares a number
             _lead, thread = await self.identity.resolve_or_create(
-                inbound.external_thread_id, channel_id, None, phone
+                inbound.external_thread_id, channel_id,
+                display_name=inbound.sender_name,
+                phone=phone,
+                ig_user_id=inbound.sender_id,
+                ig_username=inbound.sender_username,
+                avatar_url=inbound.sender_avatar,
             )
             created.append(await self._store(thread, channel_id, external_id, inbound))
         return created
@@ -63,6 +68,14 @@ class IngestService:
         thread.window_until = inbound.occurred_at + WINDOW
         if inbound.product_hint and thread.product_slug is None:
             thread.product_slug = inbound.product_hint
+        if inbound.lead_source and thread.lead_source is None:
+            thread.lead_source = inbound.lead_source
+        if inbound.ad_id and thread.ad_id is None:
+            thread.ad_id = inbound.ad_id
+        if inbound.ad_media_id and thread.ad_media_id is None:
+            thread.ad_media_id = inbound.ad_media_id
+        if inbound.ad_preview_url:
+            thread.ad_preview_url = inbound.ad_preview_url  # always refresh (CDN URL)
         return msg
 
 

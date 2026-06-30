@@ -9,6 +9,25 @@ import asyncio
 from typing import Any
 
 
+def _detect_lead_source(thread: dict, lead_pk: Any) -> str | None:
+    """Infer how the lead found us from IG thread send_attribution metadata."""
+    attrs = thread.get("send_attribution") or {}
+    lead_str = str(lead_pk) if lead_pk else ""
+    pairs: list[tuple] = (
+        list(attrs.items()) if isinstance(attrs, dict)
+        else [(a.get("user_id"), a.get("display_name", "")) for a in attrs if isinstance(a, dict)]
+    )
+    for uid, sa in pairs:
+        if str(uid) != lead_str:
+            continue
+        low = (sa or "").lower()
+        if "ctd" in low or "ad" in low:
+            return "ad_clicktomsg"
+        if "story" in low:
+            return "story"
+    return None
+
+
 class InstagrapiTransport:
     """Implements channels.instagram.IGTransport by wrapping a logged-in instagrapi client."""
 
@@ -32,25 +51,42 @@ class InstagrapiTransport:
 
     async def fetch_threads(self) -> list[dict[str, Any]]:
         client = self._ensure_client()
-        # instagrapi is a synchronous library — run in a thread to avoid blocking the loop
-        threads = await asyncio.to_thread(client.direct_threads, amount=20)
-        # own_id: skip threads whose LAST message was sent by us (already stored as out/agent)
         own_id = str(client.user_id) if client.user_id else None
         out: list[dict[str, Any]] = []
-        for thread in threads:
-            last = thread.messages[0] if thread.messages else None
-            if last is None:
+        # Raw private API gives ad_context_data / send_attribution not in the pydantic model
+        for endpoint in ("direct_v2/inbox/", "direct_v2/pending_inbox/"):
+            try:
+                raw = await asyncio.to_thread(
+                    client.private_request, endpoint,
+                    params={"visual_message_return_type": "unseen", "limit": "20"},
+                )
+            except Exception:
                 continue
-            if own_id and str(last.user_id) == own_id:
-                continue  # last msg is ours — no new inbound to ingest
-            out.append(
-                {
-                    "thread_id": thread.id,
-                    "sender_id": str(last.user_id),
-                    "text": last.text or "",
-                    "timestamp": last.timestamp,
-                }
-            )
+            for t in (raw.get("inbox") or {}).get("threads", []):
+                items = t.get("items") or []
+                if not items:
+                    continue
+                last = items[0]
+                last_uid = str(last.get("user_id", ""))
+                if own_id and last_uid == own_id:
+                    continue  # last msg is ours — no new inbound
+                users = t.get("users") or []
+                lead_u = next((u for u in users if str(u.get("pk", "")) != own_id), None)
+                acd = t.get("ad_context_data") or {}
+                pm = t.get("professional_metadata") or {}
+                out.append({
+                    "thread_id": str(t.get("thread_id", "")),
+                    "sender_id": last_uid,
+                    "sender_username": (lead_u or {}).get("username") or None,
+                    "sender_name": (lead_u or {}).get("full_name") or None,
+                    "sender_avatar": str((lead_u or {}).get("profile_pic_url") or "") or None,
+                    "text": last.get("text") or "",
+                    "timestamp": last.get("timestamp"),
+                    "ad_id": str(acd["ad_id"]) if acd.get("ad_id") else None,
+                    "ad_media_id": str(pm["ad_ig_media_id"]) if pm.get("ad_ig_media_id") else None,
+                    "ad_preview_url": acd.get("ad_picture_url") or None,
+                    "lead_source": _detect_lead_source(t, (lead_u or {}).get("pk")),
+                })
         return out
 
     async def send_direct(self, thread_id: str, text: str) -> dict[str, Any]:

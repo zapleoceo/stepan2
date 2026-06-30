@@ -55,6 +55,13 @@ class InstagramAdapter:
             text=str(thread.get("text", "")),
             occurred_at=_as_dt(thread.get("timestamp")),
             product_hint=thread.get("ad_product"),
+            sender_username=thread.get("sender_username") or None,
+            sender_name=thread.get("sender_name") or None,
+            sender_avatar=thread.get("sender_avatar") or None,
+            ad_id=thread.get("ad_id") or None,
+            ad_media_id=thread.get("ad_media_id") or None,
+            ad_preview_url=thread.get("ad_preview_url") or None,
+            lead_source=thread.get("lead_source") or None,
         )
 
 

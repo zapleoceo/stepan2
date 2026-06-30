@@ -27,29 +27,67 @@ class IdentityService:
         channel_id: int,
         display_name: str | None,
         phone: str | None,
+        ig_user_id: str | None = None,
+        ig_username: str | None = None,
+        avatar_url: str | None = None,
     ) -> tuple[Lead, ChannelThread]:
         """Return (lead, thread): phone-match → existing thread's lead → new lead."""
         thread = await self.threads.by_external(channel_id, external_thread_id)
-        lead = await self._resolve_lead(thread, phone, display_name)
+        lead = await self._resolve_lead(
+            thread, phone, display_name, ig_user_id, ig_username, avatar_url
+        )
         thread = await self._upsert_thread(thread, lead, channel_id, external_thread_id)
         return lead, thread
 
     async def _resolve_lead(
-        self, thread: ChannelThread | None, phone: str | None, display_name: str | None
+        self,
+        thread: ChannelThread | None,
+        phone: str | None,
+        display_name: str | None,
+        ig_user_id: str | None = None,
+        ig_username: str | None = None,
+        avatar_url: str | None = None,
     ) -> Lead:
         if phone:
             existing = await self.leads.by_phone(phone)
             if existing is not None:
+                self._backfill(existing, phone, display_name, ig_user_id, ig_username, avatar_url)
                 return existing
         if thread is not None:
             lead = await self.leads.get(thread.lead_id)
             if lead is not None:
-                if phone and lead.phone_e164 is None:
-                    lead.phone_e164 = phone  # backfill once the number surfaces
+                self._backfill(lead, phone, display_name, ig_user_id, ig_username, avatar_url)
                 return lead
         return await self.leads.add(
-            Lead(display_name=display_name, phone_e164=phone, branch_id=self.branch_id)
+            Lead(
+                display_name=display_name,
+                phone_e164=phone,
+                ig_user_id=ig_user_id,
+                ig_username=ig_username,
+                avatar_url=avatar_url,
+                branch_id=self.branch_id,
+            )
         )
+
+    @staticmethod
+    def _backfill(
+        lead: Lead,
+        phone: str | None,
+        display_name: str | None,
+        ig_user_id: str | None,
+        ig_username: str | None,
+        avatar_url: str | None,
+    ) -> None:
+        if phone and lead.phone_e164 is None:
+            lead.phone_e164 = phone
+        if display_name and lead.display_name is None:
+            lead.display_name = display_name
+        if ig_user_id and lead.ig_user_id is None:
+            lead.ig_user_id = ig_user_id
+        if ig_username and lead.ig_username is None:
+            lead.ig_username = ig_username
+        if avatar_url:
+            lead.avatar_url = avatar_url  # always refresh (CDN URL expires)
 
     async def _upsert_thread(
         self,

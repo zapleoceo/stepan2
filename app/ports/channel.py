@@ -18,7 +18,14 @@ class InboundMessage:
     sender_id: str
     text: str
     occurred_at: datetime
-    product_hint: str | None = None  # из рекламного контекста, если есть
+    product_hint: str | None = None
+    sender_username: str | None = None   # IG @handle
+    sender_name: str | None = None       # full name from profile
+    sender_avatar: str | None = None     # profile_pic_url (CDN, short-lived)
+    ad_id: str | None = None             # Meta Ads Manager ID
+    ad_media_id: str | None = None       # IG media ID of the ad creative
+    ad_preview_url: str | None = None    # creative thumbnail URL
+    lead_source: str | None = None       # 'story'|'ad_clicktomsg'|None
 
 
 @dataclass(frozen=True)

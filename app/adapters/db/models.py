@@ -62,6 +62,9 @@ class Lead(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     branch_id: int = Field(foreign_key="branch.id", index=True)
     display_name: str | None = Field(default=None)
+    ig_username: str | None = Field(default=None, index=True)
+    ig_user_id: str | None = Field(default=None, index=True)
+    avatar_url: str | None = Field(default=None)
     phone_e164: str | None = Field(default=None, index=True, description="ключ сопоставления")
     email: str | None = Field(default=None)
     stage: Stage = Field(default=Stage.NEW, sa_type=String)
@@ -83,6 +86,10 @@ class ChannelThread(SQLModel, table=True):
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
     next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
+    lead_source: str | None = Field(default=None, description="story|ad_clicktomsg|None")
+    ad_id: str | None = Field(default=None, description="Meta Ads Manager ID")
+    ad_media_id: str | None = Field(default=None, description="IG media ID of ad creative")
+    ad_preview_url: str | None = Field(default=None, description="ad creative thumbnail CDN URL")
     created_at: datetime = Field(default_factory=_utcnow)
 
 

@@ -99,9 +99,10 @@ def test_thread_list_html_with_row() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")
     row = (42, "Alice Test", "new", datetime.now(UTC).replace(tzinfo=None),
-           "+62812345", "course-a", "Hello", "in", 5, 3)
+           "+62812345", "course-a", "alicetest", None, "Hello", "in", 5, 3)
     html = thread_list_html([row])
     assert "Alice Test" in html
+    assert "@alicetest" in html
     assert 'hx-get="/ui/chat/42/panel"' in html
 
 

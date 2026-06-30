@@ -34,7 +34,9 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                 text(
                     "SELECT ct.id, l.display_name, l.stage, l.branch_id,"
                     " ct.product_slug, ct.external_thread_id,"
-                    " l.phone_e164, l.created_at, ct.last_in_at"
+                    " l.phone_e164, l.created_at, ct.last_in_at,"
+                    " l.ig_username, l.avatar_url,"
+                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -45,12 +47,18 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         msgs = await fetch_messages(session, thread_id)
         pending = await fetch_pending(session, thread_id)
-    _, name, stage, _, product_slug, ig_id, phone, created_at, last_in_at = info
+    (_, name, stage, _, product_slug, ig_id,
+     phone, created_at, last_in_at,
+     ig_username, avatar_url,
+     lead_source, ad_id, ad_media_id, ad_preview_url) = info
     return HTMLResponse(
         chat_panel_html(
             thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
             product_slug=product_slug, ig_id=ig_id,
             phone=phone, created_at=created_at, last_in_at=last_in_at,
+            ig_username=ig_username, avatar_url=avatar_url,
+            lead_source=lead_source, ad_id=ad_id,
+            ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
         )
     )
 
@@ -96,7 +104,9 @@ async def chat_stage(
                 text(
                     "SELECT ct.id, l.display_name, l.id as lead_id,"
                     " ct.product_slug, ct.external_thread_id,"
-                    " l.phone_e164, l.created_at, ct.last_in_at"
+                    " l.phone_e164, l.created_at, ct.last_in_at,"
+                    " l.ig_username, l.avatar_url,"
+                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -105,7 +115,10 @@ async def chat_stage(
         ).first()
         if not info:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        _, name, lead_id, product_slug, ig_id, phone, created_at, last_in_at = info
+        (_, name, lead_id, product_slug, ig_id,
+         phone, created_at, last_in_at,
+         ig_username, avatar_url,
+         lead_source, ad_id, ad_media_id, ad_preview_url) = info
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
             {"s": stage, "id": lead_id},
@@ -113,7 +126,10 @@ async def chat_stage(
     return HTMLResponse(
         chat_header_html(thread_id, str(name or "Lead"), stage,
                          product_slug=product_slug, ig_id=ig_id,
-                         phone=phone, created_at=created_at, last_in_at=last_in_at)
+                         phone=phone, created_at=created_at, last_in_at=last_in_at,
+                         ig_username=ig_username, avatar_url=avatar_url,
+                         lead_source=lead_source, ad_id=ad_id,
+                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url)
     )
 
 

@@ -58,20 +58,41 @@ _CSS = (
     "#tl{flex:1;overflow-y:auto}"
     "#tl::-webkit-scrollbar{width:4px}"
     "#tl::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
-    ".ti{display:block;padding:.56rem .8rem;border-bottom:1px solid rgba(255,255,255,.04);"
+    ".ti{display:flex;align-items:flex-start;gap:.5rem;padding:.52rem .8rem;"
+    "border-bottom:1px solid rgba(255,255,255,.04);"
     "text-decoration:none;color:inherit;cursor:pointer;transition:background .1s;"
     "border-left:2px solid transparent}"
     ".ti:hover{background:rgba(255,255,255,.05)}"
     ".ti.on{background:rgba(32,107,196,.14);border-left-color:#206bc4}"
+    ".ti-av{width:32px;height:32px;border-radius:50%;flex-shrink:0;"
+    "background-size:cover;background-position:center;"
+    "background-color:#2a3550;color:#6b7685;font-size:.78rem;font-weight:700;"
+    "display:flex;align-items:center;justify-content:center;margin-top:.06rem}"
+    ".ch-av{width:36px;height:36px;border-radius:50%;flex-shrink:0;"
+    "background-size:cover;background-position:center;"
+    "background-color:#2a3550;color:#6b7685;font-size:.88rem;font-weight:700;"
+    "display:flex;align-items:center;justify-content:center}"
+    ".ti-body{flex:1;min-width:0;overflow:hidden}"
     ".ti-t{display:flex;align-items:baseline;gap:.35rem;margin-bottom:.1rem}"
     ".ti-n{font-weight:600;color:#e8eef4;font-size:.84rem;flex:1;overflow:hidden;"
     "text-overflow:ellipsis;white-space:nowrap}"
     ".ti-ts{font-size:.68rem;color:#4a5568;flex-shrink:0}"
     ".ti-p{font-size:.74rem;color:#6b7685;overflow:hidden;text-overflow:ellipsis;"
     "white-space:nowrap;margin-top:.05rem}"
+    ".ti-handle{font-size:.67rem;color:#4a5568;margin-top:.02rem}"
     ".ti-sub{font-size:.62rem;color:#4a5568;display:flex;gap:.35rem;margin-top:.06rem;"
     "white-space:nowrap;overflow:hidden;align-items:center}"
     ".ti-cnt{opacity:.7}"
+    # source bar (lead origin — ad / story / direct)
+    ".srcbar{display:flex;align-items:center;gap:.45rem;padding:.22rem .9rem;"
+    "background:#0d1017;border-bottom:1px solid #1e2636;font-size:.71rem;flex-shrink:0}"
+    ".srclbl{display:inline-flex;align-items:center;gap:.25rem;color:#6b7685}"
+    ".src-paid{color:#d6a96f}.src-story{color:#4da6ff}.src-direct{color:#4a5568}"
+    ".srcid{font-family:ui-monospace,monospace;font-size:.65rem;color:#4a5568;cursor:pointer;"
+    "padding:.1rem .3rem;background:#1a1f2e;border-radius:3px;text-decoration:none}"
+    ".srcid:hover{color:#8899aa}"
+    ".srcthumb{width:30px;height:30px;border-radius:4px;object-fit:cover;"
+    "border:1px solid #2d3748;flex-shrink:0}"
     ".ch-meta{width:100%;font-size:.67rem;color:#4a5568;display:flex;gap:.55rem;"
     "align-items:center;margin-top:.18rem;padding-top:.22rem;"
     "border-top:1px solid #1e2636;flex-wrap:wrap}"
@@ -350,8 +371,60 @@ def _badge(stage: str) -> str:
     return f'<span class="bg {_STC.get(stage, "sd")}">{_h.escape(t(f"stage.{stage}"))}</span>'
 
 
+def _avatar(name: str | None, avatar_url: str | None, size_cls: str = "ti-av") -> str:
+    initial = _h.escape(((name or "?")[0]).upper())
+    if avatar_url and avatar_url.lower().startswith(("http://", "https://")):
+        safe_url = _h.escape(avatar_url)
+        return (
+            f'<span class="{size_cls}" style="background-image:url(\'{safe_url}\')">'
+            f'{initial}</span>'
+        )
+    return f'<span class="{size_cls}">{initial}</span>'
+
+
+def _source_bar(
+    lead_source: str | None,
+    ad_id: str | None,
+    ad_media_id: str | None,
+    ad_preview_url: str | None,
+) -> str:
+    is_ad = bool(ad_id or ad_media_id or (lead_source or "").startswith("ad"))
+    is_story = (lead_source or "") == "story"
+    thumb = ""
+    if is_ad and ad_preview_url and ad_preview_url.lower().startswith(("http://", "https://")):
+        url = _h.escape(ad_preview_url)
+        thumb = (
+            f'<a href="{url}" target="_blank" rel="noreferrer">'
+            f'<img class="srcthumb" src="{url}" alt="" referrerpolicy="no-referrer"'
+            f' loading="lazy" onerror="this.style.display=\'none\'"></a>'
+        )
+    if is_ad:
+        parts = []
+        if ad_id:
+            safe_id = _h.escape(ad_id)
+            parts.append(
+                f'<span class="srcid" title="Copy ad ID"'
+                f' onclick="navigator.clipboard&&navigator.clipboard.writeText(\'{safe_id}\')">'
+                f'{safe_id}</span>'
+            )
+        if ad_media_id:
+            ig_post = _h.escape(f"https://www.instagram.com/p/{ad_media_id}/")
+            parts.append(
+                f'<a class="srcid" href="{ig_post}" target="_blank" rel="noreferrer">📷 IG ↗</a>'
+            )
+        extra = (" · " + " · ".join(parts)) if parts else ""
+        lbl = f'<span class="srclbl src-paid">📣 Ad{extra}</span>'
+    elif is_story:
+        lbl = '<span class="srclbl src-story">📖 Story</span>'
+    else:
+        lbl = '<span class="srclbl src-direct">💬 Direct</span>'
+    return f'<div class="srcbar">{thumb}{lbl}</div>'
+
+
 def _thread_item(row: object, active_tid: int | None) -> str:
-    tid, name, stage, last_act, phone, product_slug, last_msg, last_dir, cnt_in, cnt_out = row  # type: ignore[misc]
+    (tid, name, stage, last_act, phone, product_slug,
+     ig_username, avatar_url,
+     last_msg, last_dir, cnt_in, cnt_out) = row  # type: ignore[misc]
     on = " on" if tid == active_tid else ""
     arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
     preview = _h.escape((arr + (last_msg or ""))[:80])
@@ -359,6 +432,10 @@ def _thread_item(row: object, active_tid: int | None) -> str:
         f' <span class="bg sq" style="font-size:.57rem;text-transform:none">'
         f'{_h.escape(str(product_slug))}</span>'
         if product_slug else ""
+    )
+    handle_row = (
+        f'<div class="ti-handle">@{_h.escape(str(ig_username))}</div>'
+        if ig_username else ""
     )
     sub_parts = []
     if phone:
@@ -372,10 +449,13 @@ def _thread_item(row: object, active_tid: int | None) -> str:
         f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
         f' onclick="setOn(this)"'
         f' href="/ui/inbox">'
+        f'{_avatar(str(name or "?"), avatar_url)}'
+        f'<div class="ti-body">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
         f'<span class="ti-ts">{_ago(last_act)}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge} {preview}</div>'
-        f'{sub_row}</a>'
+        f'{handle_row}'
+        f'{sub_row}</div></a>'
     )
 
 
@@ -450,8 +530,14 @@ def chat_header_html(
     phone: str | None = None,
     created_at: datetime | None = None,
     last_in_at: datetime | None = None,
+    ig_username: str | None = None,
+    avatar_url: str | None = None,
+    lead_source: str | None = None,
+    ad_id: str | None = None,
+    ad_media_id: str | None = None,
+    ad_preview_url: str | None = None,
 ) -> str:
-    """Renders just the chat header div (for hx-swap=outerHTML on stage change)."""
+    """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
         f'<option value="{s}" {"selected" if s == stage else ""}>'
         f'{_h.escape(t(f"stage.{s}"))}</option>'
@@ -472,8 +558,26 @@ def chat_header_html(
             f' <span class="bg sq" style="font-size:.62rem;text-transform:none">'
             f'{_h.escape(product_slug)}</span>'
         )
+    # Avatar with optional IG profile link
+    av_html = _avatar(name, avatar_url, size_cls="ch-av")
+    if ig_username:
+        ig_link = _h.escape(f"https://www.instagram.com/{ig_username}/")
+        av_html = f'<a href="{ig_link}" target="_blank" rel="noreferrer">{av_html}</a>'
+    # Name with optional @handle and IG link
+    name_html = _h.escape(name)
+    handle_html = ""
+    if ig_username:
+        ig_link = _h.escape(f"https://www.instagram.com/{ig_username}/")
+        name_html = (
+            f'<a href="{ig_link}" target="_blank" rel="noreferrer"'
+            f' style="color:inherit;text-decoration:none">{name_html}</a>'
+        )
+        handle_html = (
+            f' <span class="ch-sub">@{_h.escape(ig_username)}</span>'
+        )
+    # Thread ID chip (short)
     ig_chip = ""
-    if ig_id:
+    if ig_id and not ig_username:
         short = ig_id[:14] + "…" if len(ig_id) > 16 else ig_id
         ig_chip = f' <span class="ch-sub" title="{_h.escape(ig_id)}">{_h.escape(short)}</span>'
     meta_parts = []
@@ -487,12 +591,17 @@ def chat_header_html(
         f'<div class="ch-meta">{"  ·  ".join(meta_parts)}</div>'
         if meta_parts else ""
     )
+    src_bar = _source_bar(lead_source, ad_id, ad_media_id, ad_preview_url)
     return (
-        f'<div class="ch" id="chat-hdr-{tid}">'
-        f'<span class="ch-n">{_h.escape(name)}</span>'
+        f'<div id="chat-hdr-{tid}">'
+        f'<div class="ch">'
+        f'{av_html}'
+        f'<span class="ch-n">{name_html}{handle_html}</span>'
         f'{product_badge}{ig_chip}'
         f'<div class="ch-acts">{stage_sel}</div>'
         f'{meta_row}'
+        f'</div>'
+        f'{src_bar}'
         f'</div>'
     )
 
@@ -509,6 +618,12 @@ def chat_panel_html(
     phone: str | None = None,
     created_at: datetime | None = None,
     last_in_at: datetime | None = None,
+    ig_username: str | None = None,
+    avatar_url: str | None = None,
+    lead_source: str | None = None,
+    ad_id: str | None = None,
+    ad_media_id: str | None = None,
+    ad_preview_url: str | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -518,6 +633,9 @@ def chat_panel_html(
         tid, name, stage,
         product_slug=product_slug, ig_id=ig_id,
         phone=phone, created_at=created_at, last_in_at=last_in_at,
+        ig_username=ig_username, avatar_url=avatar_url,
+        lead_source=lead_source, ad_id=ad_id,
+        ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
     )
     return (
         f'{header}'
