@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # Admin/super-admin bootstrap (Telegram id of the first super_admin)
     bootstrap_super_admin: int = Field(default=0)
 
+    # Auth gate — opt-in so the code can ship before the login bot/domain are wired.
+    auth_enabled: bool = Field(default=False, description="enforce session auth on /ui + /admin")
+    # HMAC secret for the session cookie; falls back to secret_key when empty.
+    session_secret: str = Field(default="")
+    # Bot username for the Telegram Login widget (domain bound via BotFather).
+    tg_login_bot_username: str = Field(default="")
+
     debug: bool = Field(default=False)
 
 

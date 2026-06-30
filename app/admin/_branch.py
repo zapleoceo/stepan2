@@ -1,20 +1,28 @@
-"""Branch cookie helper — single source of truth for branch filter state.
+"""Branch filter resolution — combines the UI cookie with the caller's identity.
 
-Cookie value: comma-separated integer branch_ids, e.g. "1,3".
-Empty / missing cookie means "show all" (no WHERE clause).
-Not httponly so the JS widget can read the current selection without an API call.
+Cookie value: comma-separated integer branch_ids, e.g. "1,3" (the UI selection).
+The auth middleware attaches request.state.allowed_branch_ids (None = super_admin /
+all branches). A scoped user can never exceed their allowed set by editing the cookie;
+with auth disabled (no state) the cookie alone drives the filter, empty = show all.
 """
 from __future__ import annotations
 
 from starlette.requests import Request
 
 BRANCH_COOKIE = "stepan2_branch"
+_NO_ROWS = [-1]  # branch_id that can never match → authed user with zero branches
 
 
 def branch_ids_from_request(request: Request) -> list[int] | None:
-    """Return selected branch_ids from cookie, or None (= show all)."""
+    """Resolve the effective branch_ids to filter by, or None (= all branches)."""
     raw = (request.cookies.get(BRANCH_COOKIE) or "").strip()
-    if not raw:
-        return None
-    ids = [int(p) for p in raw.split(",") if p.strip().isdigit()]
-    return ids if ids else None
+    selected = [int(p) for p in raw.split(",") if p.strip().isdigit()]
+
+    allowed = getattr(getattr(request, "state", None), "allowed_branch_ids", None)
+    if allowed is None:  # super_admin or auth disabled → cookie alone (None = all)
+        return selected or None
+    if not allowed:  # authenticated but no branch memberships → see nothing
+        return _NO_ROWS
+    if selected:  # narrow the selection to what the user is allowed to see
+        return [b for b in selected if b in allowed] or allowed
+    return allowed

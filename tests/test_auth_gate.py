@@ -1,0 +1,170 @@
+"""Auth gate: signed session, Telegram-login verification, branch scoping, middleware."""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import os
+import time
+
+os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
+
+from cryptography.fernet import Fernet  # noqa: E402
+
+os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
+
+from fastapi.testclient import TestClient  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+
+from app.admin._branch import BRANCH_COOKIE, branch_ids_from_request  # noqa: E402
+from app.api._auth import SESSION_COOKIE, mint_session, verify_telegram_login  # noqa: E402
+from app.api._routes_auth import _login_html  # noqa: E402
+from app.api._session import sign, verify  # noqa: E402
+from app.api.main import app  # noqa: E402
+
+
+class _StubSettings:
+    """Minimal settings double for toggling the gate in middleware tests."""
+
+    def __init__(self, **kw: object) -> None:
+        self.auth_enabled = kw.get("auth_enabled", True)
+        self.session_secret = kw.get("session_secret", "testsecret")
+        self.secret_key = kw.get("secret_key", "")
+        self.tg_bot_token = kw.get("tg_bot_token", "")
+        self.tg_login_bot_username = kw.get("tg_login_bot_username", "")
+        self.bootstrap_super_admin = kw.get("bootstrap_super_admin", 0)
+
+
+def _enable(monkeypatch, **kw) -> None:
+    monkeypatch.setattr("app.api._auth.settings", lambda: _StubSettings(**kw))
+
+
+# ─── signed session cookie ────────────────────────────────────────────────────
+
+def test_session_roundtrip() -> None:
+    token = sign({"uid": 5, "iat": time.time()}, "sec")
+    assert verify(token, "sec", 3600)["uid"] == 5
+
+
+def test_session_tamper_rejected() -> None:
+    body, sig = sign({"uid": 5, "iat": time.time()}, "sec").split(".", 1)
+    flipped = body[:-1] + ("A" if body[-1] != "A" else "B")
+    assert verify(f"{flipped}.{sig}", "sec", 3600) is None
+
+
+def test_session_wrong_secret_rejected() -> None:
+    assert verify(sign({"uid": 5, "iat": time.time()}, "sec"), "other", 3600) is None
+
+
+def test_session_expired_rejected() -> None:
+    assert verify(sign({"uid": 5, "iat": time.time() - 7200}, "sec"), "sec", 3600) is None
+
+
+def test_session_garbage_rejected() -> None:
+    assert verify("not-a-token", "sec", 3600) is None
+
+
+# ─── Telegram login verification ──────────────────────────────────────────────
+
+def _tg_hash(data: dict[str, str], token: str) -> str:
+    check = "\n".join(sorted(f"{k}={v}" for k, v in data.items()))
+    secret = hashlib.sha256(token.encode()).digest()
+    return hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+
+
+def test_tg_login_valid() -> None:
+    data = {"id": "169510539", "first_name": "Dima", "auth_date": str(int(time.time()))}
+    data["hash"] = _tg_hash(data, "TOKEN")
+    assert verify_telegram_login(data, "TOKEN") == 169510539
+
+
+def test_tg_login_bad_hash_rejected() -> None:
+    data = {"id": "1", "auth_date": str(int(time.time())), "hash": "deadbeef"}
+    assert verify_telegram_login(data, "TOKEN") is None
+
+
+def test_tg_login_stale_rejected() -> None:
+    data = {"id": "1", "auth_date": str(int(time.time()) - 100_000)}
+    data["hash"] = _tg_hash(data, "TOKEN")
+    assert verify_telegram_login(data, "TOKEN", max_age_s=86400) is None
+
+
+def test_tg_login_no_token_rejected() -> None:
+    assert verify_telegram_login({"id": "1", "hash": "x"}, "") is None
+
+
+# ─── identity-aware branch scoping ────────────────────────────────────────────
+
+def _req(cookie: str | None = None, allowed: object = "__unset__") -> Request:
+    headers = [(b"cookie", f"{BRANCH_COOKIE}={cookie}".encode())] if cookie else []
+    req = Request({"type": "http", "headers": headers, "state": {}})
+    if allowed != "__unset__":
+        req.state.allowed_branch_ids = allowed
+    return req
+
+
+def test_scope_auth_off_cookie_drives() -> None:
+    assert branch_ids_from_request(_req(cookie="1,3")) == [1, 3]
+    assert branch_ids_from_request(_req()) is None
+
+
+def test_scope_super_admin_sees_all() -> None:
+    assert branch_ids_from_request(_req(allowed=None)) is None
+    assert branch_ids_from_request(_req(cookie="2", allowed=None)) == [2]
+
+
+def test_scope_user_cannot_exceed_allowed() -> None:
+    assert branch_ids_from_request(_req(cookie="1,7", allowed=[1])) == [1]
+    assert branch_ids_from_request(_req(cookie="7", allowed=[1])) == [1]
+    assert branch_ids_from_request(_req(allowed=[1])) == [1]
+
+
+def test_scope_no_membership_sees_nothing() -> None:
+    assert branch_ids_from_request(_req(allowed=[])) == [-1]
+
+
+# ─── middleware gate ──────────────────────────────────────────────────────────
+
+def test_gate_disabled_by_default_allows_access() -> None:
+    resp = TestClient(app, raise_server_exceptions=False).get("/ui/inbox")
+    assert resp.status_code == 200
+
+
+def test_gate_enabled_redirects_anonymous(monkeypatch) -> None:
+    _enable(monkeypatch)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/login"
+
+
+def test_gate_enabled_htmx_gets_hx_redirect(monkeypatch) -> None:
+    _enable(monkeypatch)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/threads", headers={"HX-Request": "true"})
+    assert resp.status_code == 401
+    assert resp.headers.get("HX-Redirect") == "/login"
+
+
+def test_gate_enabled_valid_session_allows(monkeypatch) -> None:
+    _enable(monkeypatch)
+    token = mint_session(telegram_id=1, user_id=1, name="x", is_super=True, branch_ids=[])
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox", cookies={SESSION_COOKIE: token})
+    assert resp.status_code == 200
+
+
+def test_gate_enabled_healthz_public(monkeypatch) -> None:
+    _enable(monkeypatch)
+    assert TestClient(app, raise_server_exceptions=False).get("/healthz").status_code == 200
+
+
+# ─── login page ───────────────────────────────────────────────────────────────
+
+def test_login_html_with_bot_has_widget() -> None:
+    html = _login_html("mybot")
+    assert "telegram-widget" in html
+    assert "mybot" in html
+
+
+def test_login_html_without_bot_warns() -> None:
+    assert "BotFather" in _login_html("")

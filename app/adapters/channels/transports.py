@@ -34,11 +34,15 @@ class InstagrapiTransport:
         client = self._ensure_client()
         # instagrapi is a synchronous library — run in a thread to avoid blocking the loop
         threads = await asyncio.to_thread(client.direct_threads, amount=20)
+        # own_id: skip threads whose LAST message was sent by us (already stored as out/agent)
+        own_id = str(client.user_id) if client.user_id else None
         out: list[dict[str, Any]] = []
         for thread in threads:
             last = thread.messages[0] if thread.messages else None
             if last is None:
                 continue
+            if own_id and str(last.user_id) == own_id:
+                continue  # last msg is ours — no new inbound to ingest
             out.append(
                 {
                     "thread_id": thread.id,
