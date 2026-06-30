@@ -538,9 +538,18 @@ def branch_edit_html(
     """Form for creating or editing a branch."""
     title = _h.escape(t("br.new" if bid is None else "br.edit_title"))
     action = "/ui/branches/create" if bid is None else f"/ui/branches/{bid}/save"
+    _branch_langs = (
+        ("id", "Bahasa Indonesia"), ("ms", "Bahasa Melayu"), ("en", "English"),
+        ("ru", "Русский"), ("zh", "中文 (Mandarin)"), ("ar", "العربية"),
+        ("vi", "Tiếng Việt"), ("th", "ภาษาไทย"), ("hi", "हिन्दी"),
+        ("ko", "한국어"), ("ja", "日本語"), ("es", "Español"),
+        ("fr", "Français"), ("de", "Deutsch"), ("pt", "Português"),
+        ("tr", "Türkçe"),
+    )
     lang_opts = "".join(
-        f'<option value="{lc}" {"selected" if lc == lang else ""}>{lc}</option>'
-        for lc in ("id", "en", "ru")
+        f'<option value="{lc}" {"selected" if lc == lang else ""}>'
+        f'{lbl} ({lc})</option>'
+        for lc, lbl in _branch_langs
     )
     active_checked = "checked" if is_active else ""
     save_lbl = _h.escape(t("br.save"))
