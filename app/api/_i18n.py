@@ -240,7 +240,12 @@ _TR: dict[str, dict[str, str]] = {
     "br.edit_title": {"ru": "Редактировать филиал","en": "Edit Branch","id": "Edit Cabang"},
     "br.edit":       {"ru": "Изменить",    "en": "Edit",         "id": "Edit"},
     "br.save":       {"ru": "Сохранить",   "en": "Save",         "id": "Simpan"},
-    "br.back":       {"ru": "← Филиалы",  "en": "← Branches",   "id": "← Cabang"},
+    "br.back":           {"ru": "← Филиалы",  "en": "← Branches",   "id": "← Cabang"},
+    "br.settings_seeded": {
+        "ru": "Настройки бота засеяны по умолчанию.",
+        "en": "Default bot settings have been seeded automatically.",
+        "id": "Pengaturan bot default telah ditambahkan otomatis.",
+    },
     "help.branches": {
         "ru": (
             "Управление филиалами."

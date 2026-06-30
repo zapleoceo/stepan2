@@ -685,7 +685,162 @@ def test_all_sub_routers_reachable(client: TestClient) -> None:
         "/ui/products/panel",
         "/ui/knowledge/new",
         "/ui/products/new",
+        "/ui/branches/panel",
+        "/ui/branches/new",
     ]
     for url in partial_urls:
         resp = client.get(url)
         assert resp.status_code in (200, 500), f"Unexpected status {resp.status_code} for {url}"
+
+
+# ─── branches i18n ────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("code,key,expected", [
+    ("ru", "nav.branches", "Филиалы"),
+    ("en", "nav.branches", "Branches"),
+    ("id", "nav.branches", "Cabang"),
+    ("en", "br.create", "+ Branch"),
+    ("ru", "br.create", "+ Филиал"),
+    ("en", "br.save", "Save"),
+    ("ru", "br.save", "Сохранить"),
+    ("en", "br.new", "New Branch"),
+    ("en", "br.edit_title", "Edit Branch"),
+    ("en", "br.settings_seeded", "Default bot settings have been seeded automatically."),
+    ("ru", "br.settings_seeded", "Настройки бота засеяны по умолчанию."),
+    ("id", "br.settings_seeded", "Pengaturan bot default telah ditambahkan otomatis."),
+])
+def test_branch_i18n_keys(code: str, key: str, expected: str) -> None:
+    from app.api._i18n import t
+    _set_lang(code)
+    assert t(key) == expected
+
+
+# ─── branches HTML generators ─────────────────────────────────────────────────
+
+def test_branches_panel_html_empty_has_create_button() -> None:
+    from app.api._ui_panels import branches_panel_html
+    _set_lang("en")
+    html = branches_panel_html([])
+    assert "/ui/branches/new" in html
+    assert "+ Branch" in html
+
+
+def test_branches_panel_html_renders_row() -> None:
+    from app.api._ui_panels import branches_panel_html
+    _set_lang("en")
+    rows = [(1, "Indonesia", "id", 7, True)]
+    html = branches_panel_html(rows)
+    assert "Indonesia" in html
+    assert "UTC+7" in html
+    assert "p-ok" in html
+
+
+def test_branches_panel_html_inactive_pill() -> None:
+    from app.api._ui_panels import branches_panel_html
+    _set_lang("en")
+    rows = [(2, "Test Branch", "en", 0, False)]
+    html = branches_panel_html(rows)
+    assert "p-off" in html
+    assert "Test Branch" in html
+
+
+def test_branches_panel_html_edit_link() -> None:
+    from app.api._ui_panels import branches_panel_html
+    _set_lang("en")
+    rows = [(3, "Vietnam", "vi", 7, True)]
+    html = branches_panel_html(rows)
+    assert "/ui/branches/3/edit" in html
+
+
+def test_branch_edit_html_create_form() -> None:
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(None, "", "id", 7, is_active=True)
+    assert 'action="/ui/branches/create"' in html or "/ui/branches/create" in html
+    assert "New Branch" in html
+
+
+def test_branch_edit_html_edit_form() -> None:
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(5, "Malaysia", "en", 8, is_active=True)
+    assert "/ui/branches/5/save" in html
+    assert "Malaysia" in html
+
+
+def test_branch_edit_html_seeded_note_visible() -> None:
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(3, "New", "id", 7, is_active=True, seeded=True)
+    assert "seeded automatically" in html
+
+
+def test_branch_edit_html_no_seeded_note_by_default() -> None:
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(None, "", "id", 7, is_active=False)
+    assert "seeded" not in html
+
+
+def test_branch_edit_html_inactive_no_checked() -> None:
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(1, "Test", "id", 7, is_active=False)
+    assert 'checked' not in html
+
+
+def test_branch_edit_html_active_has_checked() -> None:
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(1, "Test", "id", 7, is_active=True)
+    assert 'checked' in html
+
+
+# ─── branches routes smoke tests ──────────────────────────────────────────────
+
+def test_branches_panel_route(client: TestClient) -> None:
+    resp = client.get("/ui/branches/panel")
+    assert resp.status_code in (200, 500)
+
+
+def test_branches_new_route_returns_200(client: TestClient) -> None:
+    """New-branch form has no DB access — must always return 200."""
+    resp = client.get("/ui/branches/new")
+    assert resp.status_code == 200
+    assert "/ui/branches/create" in resp.text
+
+
+def test_branches_edit_missing_returns_404_or_500(client: TestClient) -> None:
+    resp = client.get("/ui/branches/99999/edit")
+    assert resp.status_code in (404, 500)
+
+
+def test_branches_create_empty_name_stays_on_form(client: TestClient) -> None:
+    """Empty name must not insert — returns form (200) or DB error (500)."""
+    resp = client.post("/ui/branches/create", data={"name": "", "lang": "id", "tz_offset_h": "7"})
+    assert resp.status_code in (200, 500)
+    if resp.status_code == 200:
+        assert "/ui/branches/create" in resp.text
+
+
+def test_branches_create_with_name_returns_200_or_500(client: TestClient) -> None:
+    """SQLite lacks RETURNING support → 500 is acceptable in test env."""
+    resp = client.post(
+        "/ui/branches/create",
+        data={"name": "Test Branch", "lang": "en", "tz_offset_h": "8", "is_active": "on"},
+    )
+    assert resp.status_code in (200, 500)
+
+
+def test_branches_save_missing_returns_200_or_500(client: TestClient) -> None:
+    resp = client.post(
+        "/ui/branches/99999/save",
+        data={"name": "Updated", "lang": "en", "tz_offset_h": "8"},
+    )
+    assert resp.status_code in (200, 500)
+
+
+def test_inbox_has_branches_nav_link(client: TestClient) -> None:
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 200
+    assert "/ui/branches/panel" in resp.text

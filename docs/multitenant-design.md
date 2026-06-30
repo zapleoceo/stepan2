@@ -34,7 +34,7 @@
 | Конфиг | **Pydantic Settings** | типобезопасный конфиг из env |
 | Auth + RBAC | **FastAPI-Users** + **Casbin** | вход + политики ролей/филиалов |
 | Фоновые задачи | **ARQ** (Redis) | очередь задач вместо самописных async-циклов |
-| Админка | **SQLAdmin** | готовый CRUD филиалов/БЗ/пользователей |
+| Админка | **SQLAdmin** + главный UI | SQLAdmin — low-level backup; основной CRUD филиалов/KB/продуктов — в `/ui/` |
 | Каналы / LLM | **Port + Adapter** | заменяемость API без переписывания ядра |
 | Тесты | **pytest** + pytest-asyncio + **testcontainers** | реальный Postgres/Redis в тестах |
 
