@@ -49,16 +49,26 @@ async def active_channels(session: AsyncSession, branch_id: int) -> list[Channel
 
 
 async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[int]:
-    """Thread ids with a fresh inbound the bot still owns (lead spoke last, not silent)."""
+    """Thread ids with a fresh inbound the bot still owns (lead spoke last, not silent).
+
+    Per-lead agent_enabled gates manager takeovers; the NOT-EXISTS pending guard stops
+    a second generation while a queued reply waits out its human-typing delay."""
+    pending = (
+        select(Outbox.id)
+        .where(Outbox.thread_id == ChannelThread.id, Outbox.status == "pending")
+        .exists()
+    )
     rows = await session.exec(
         select(ChannelThread.id)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
         .where(
             Lead.branch_id == branch_id,
+            Lead.agent_enabled.is_(True),  # type: ignore[attr-defined]
             Lead.stage.not_in(BOT_SILENT_STAGES),  # type: ignore[attr-defined]
             ChannelThread.last_in_at.is_not(None),  # type: ignore[attr-defined]
             (ChannelThread.last_out_at.is_(None))  # type: ignore[attr-defined]
             | (ChannelThread.last_out_at < ChannelThread.last_in_at),  # type: ignore[operator]
+            ~pending,
         )
     )
     return [tid for tid in rows.scalars().all() if tid is not None]

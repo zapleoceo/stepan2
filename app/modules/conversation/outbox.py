@@ -7,15 +7,19 @@ enforced here (the single egress) for anti-ban — automated lines are held back
 branch is over budget; manager-sent lines bypass the cap (human override)."""
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Message, Outbox
+from app.adapters.db.models import Lead, Message, Outbox, StageEvent
+from app.domain.enums import Stage
 from app.modules.settings.service import get_settings
 from app.ports.channel import ChannelPort
 
 from .repository import MessageRepo, OutboxRepo, ThreadRepo
+
+logger = logging.getLogger(__name__)
 
 
 def _branch_day_start(now_utc_naive: datetime, tz_offset_h: int) -> datetime:
@@ -60,7 +64,13 @@ class OutboxSender:
         now = datetime.now(UTC).replace(tzinfo=None)
         if row.scheduled_at > now:
             return None  # not due yet — respect reply delay
-        if row.source != "manager" and await self._cap_reached(now):
+        cfg = await get_settings(self.session, self.branch_id)
+        if row.source == "followup" and cfg.is_quiet_hour():
+            return None  # follow-ups hold at night; live replies still go out (S1)
+        if row.source != "manager" and await self._cap_reached(now, cfg):
+            logger.info(
+                "outbox hold branch=%d thread=%d: send cap reached", self.branch_id, thread_id
+            )
             return None  # hourly/daily send cap hit — leave queued for a later tick
         thread = await self.threads.by_id(thread_id)
         if thread is None:
@@ -72,20 +82,65 @@ class OutboxSender:
             row.sent_at = now
             row.error = None
             await self.messages.add(self._outgoing(thread, row, result.external_message_id))
+            thread.last_out_at = now  # reply-loop watermark — bot no longer "owes" a reply
+            await self._plan_followup(thread, row, cfg, now)
+            self.session.add(thread)
+            logger.info(
+                "sent branch=%d thread=%d source=%s", self.branch_id, thread_id, row.source
+            )
         elif _is_soft_block(result.error):
             row.status = "pending"  # transient (challenge/rate) — back off, don't drop
             row.scheduled_at = now + _RETRY_AFTER
             row.error = result.error
+            logger.warning(
+                "soft-block branch=%d thread=%d: %s — retry at %s",
+                self.branch_id, thread_id, result.error, row.scheduled_at,
+            )
         else:
             row.status = "failed"
             row.error = result.error
+            logger.warning(
+                "send failed branch=%d thread=%d: %s", self.branch_id, thread_id, result.error
+            )
         self.session.add(row)
         await self.session.flush()
         return row
 
-    async def _cap_reached(self, now: datetime) -> bool:
+    async def _plan_followup(self, thread, row: Outbox, cfg, now: datetime) -> None:
+        """After a bot send: arm the next follow-up step, or close the cycle.
+
+        S1 semantics — the timer counts from the bot's last message, indexed by
+        followups_sent; the last follow-up of the schedule puts the lead to dormant.
+        Manager sends do not touch the cycle."""
+        if row.source not in ("agent", "followup"):
+            return
+        schedule = cfg.followup_schedule_h
+        if cfg.followup_enabled and schedule and thread.followups_sent < len(schedule):
+            thread.next_followup_at = now + timedelta(
+                hours=schedule[thread.followups_sent]
+            )
+            return
+        thread.next_followup_at = None
+        if row.source == "followup" and schedule and thread.followups_sent >= len(schedule):
+            await self._to_dormant(thread, now)
+
+    async def _to_dormant(self, thread, now: datetime) -> None:
+        """Schedule exhausted, lead still silent → dormant (+ journal entry)."""
+        lead = await self.session.get(Lead, thread.lead_id)
+        if lead is None or lead.stage == Stage.DORMANT:
+            return
+        self.session.add(StageEvent(
+            branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+            from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
+            actor="system", reason="followup schedule exhausted", created_at=now,
+        ))
+        lead.stage = Stage.DORMANT
+        self.session.add(lead)
+        logger.info("branch=%d lead=%d → dormant (followups exhausted)",
+                    self.branch_id, lead.id)
+
+    async def _cap_reached(self, now: datetime, s) -> bool:
         """True when the branch already hit its hourly or daily send cap (cap ≤ 0 = off)."""
-        s = await get_settings(self.session, self.branch_id)
         if s.hourly_cap > 0:
             if await self.outbox.count_sent_since(now - timedelta(hours=1)) >= s.hourly_cap:
                 return True

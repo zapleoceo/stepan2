@@ -1,17 +1,15 @@
-"""Follow-up scheduler — proactively re-engages cold threads via the outbox.
+"""Follow-up scheduler — S1 semantics: the timer lives off the BOT's last send.
 
-Strategy:
- 1. reset_timers(): for threads where the lead spoke last and no timer is set,
-    schedule next_followup_at = last_in_at + schedule[0] hours.
- 2. run(): send all threads whose next_followup_at has passed, then advance
-    the timer to the next step (or clear it when schedule is exhausted).
-
-This module writes only to outbox and channel_thread; all sends go through
-the normal OutboxSender → channel transport path, so caps and window checks
-are applied uniformly."""
+Arming happens in OutboxSender after a successful bot send (next_followup_at =
+sent_at + schedule[followups_sent]); a fresh inbound resets the cycle in ingest.
+This service only harvests DUE threads: re-checks the lead is still silent, skips
+threads with queued outbox, generates the nudge, increments followups_sent and
+queues the row. Exhaustion → dormant happens in OutboxSender after the last send.
+One broken thread never aborts the rest (per-thread try)."""
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -27,37 +25,36 @@ if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
     from app.ports.llm import LLMPort
 
+logger = logging.getLogger(__name__)
+
+# Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
+# already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
+# `new` is excluded: an untouched lead gets a live reply, not a nudge).
 _FOLLOWUP_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug"
+    "SELECT ct.id, ct.product_slug, ct.followups_sent"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid"
-    "   AND l.stage NOT IN ('ready', 'handed_off', 'dormant', 'manager')"
+    "   AND l.stage IN ('nurturing', 'qualifying', 'presenting', 'objection')"
+    "   AND l.agent_enabled = :on"
     "   AND ct.next_followup_at IS NOT NULL"
     "   AND ct.next_followup_at <= :now"
-)
-
-_RESET_Q = (  # noqa: S608
-    "UPDATE channel_thread"
-    " SET next_followup_at = last_in_at + :interval"
-    " FROM lead l"
-    " WHERE channel_thread.lead_id = l.id"
-    "   AND l.branch_id = :bid"
-    "   AND l.stage NOT IN ('ready', 'handed_off', 'dormant', 'manager')"
-    "   AND channel_thread.last_in_at IS NOT NULL"
-    "   AND channel_thread.next_followup_at IS NULL"
-    "   AND (channel_thread.last_out_at IS NULL"
-    "        OR channel_thread.last_out_at < channel_thread.last_in_at)"
+    "   AND ct.followups_sent < :max_steps"
+    "   AND ct.last_out_at IS NOT NULL"
+    "   AND (ct.last_in_at IS NULL OR ct.last_in_at <= ct.last_out_at)"
+    "   AND NOT EXISTS (SELECT 1 FROM outbox o"
+    "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
 )
 
 _FOLLOWUP_NUDGE = (
-    "[System: the lead has not replied for a while. "
-    "Write a short friendly follow-up in {lang} to re-engage them naturally. "
-    "Do not mention the wait. Return the JSON as usual.]"
+    "[System: the lead has not replied since your last message. This is follow-up"
+    " attempt {n} of {total}. Write a short friendly follow-up in {lang} to"
+    " re-engage them naturally — vary the angle, do not mention the wait or the"
+    " attempt number. Return the JSON as usual.]"
 )
 
 
 class FollowupService:
-    """Manages next_followup_at timers and queues proactive outbox rows."""
+    """Harvest due follow-up threads and queue nudges via the outbox."""
 
     def __init__(
         self,
@@ -77,38 +74,44 @@ class FollowupService:
         self.outbox = OutboxRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
 
-    async def reset_timers(self) -> int:
-        """Schedule next_followup_at for threads that have none yet."""
-        schedule = self.settings.followup_schedule_h
-        if not schedule:
-            return 0
-        result = await self.session.execute(
-            text(_RESET_Q),
-            {"bid": self.branch_id, "interval": timedelta(hours=schedule[0])},
-        )
-        return result.rowcount  # type: ignore[return-value]
-
     async def run(self) -> int:
-        """Send due follow-ups and advance each thread's timer."""
-        if not self.settings.followup_enabled or not self.settings.followup_schedule_h:
+        """Queue nudges for every due thread; one failure never blocks the rest."""
+        cfg = self.settings
+        if not cfg.followup_enabled or not cfg.followup_schedule_h:
             return 0
+        if not cfg.agent_enabled or cfg.is_quiet_hour():
+            return 0  # global OFF / night: generation fully skipped (S1 semantics)
         now = datetime.now(UTC).replace(tzinfo=None)
         rows = (
-            await self.session.execute(text(_FOLLOWUP_Q), {"bid": self.branch_id, "now": now})
+            await self.session.execute(
+                text(_FOLLOWUP_Q),
+                {
+                    "bid": self.branch_id, "now": now, "on": True,
+                    "max_steps": len(cfg.followup_schedule_h),
+                },
+            )
         ).all()
-        sent = 0
-        for thread_id, product_slug in rows:
-            if await self._queue_followup(thread_id, product_slug, now):
-                await self._advance_timer(thread_id, now)
-                sent += 1
-        return sent
+        queued = 0
+        for thread_id, product_slug, sent_so_far in rows:
+            try:
+                if await self._queue_followup(thread_id, product_slug, sent_so_far, now):
+                    queued += 1
+            except Exception:
+                logger.exception(
+                    "followup failed branch=%d thread=%d", self.branch_id, thread_id
+                )
+        if rows:
+            logger.info(
+                "followups branch=%d: %d due, %d queued", self.branch_id, len(rows), queued
+            )
+        return queued
 
     async def _lang(self) -> str:
         branch = await self.session.get(Branch, self.branch_id)
         return branch.lang if branch is not None else "id"
 
     async def _queue_followup(
-        self, thread_id: int, product_slug: str | None, now: datetime,
+        self, thread_id: int, product_slug: str | None, sent_so_far: int, now: datetime,
     ) -> bool:
         dialog = await self.messages.dialog(thread_id)
         if not dialog:
@@ -117,46 +120,53 @@ class FollowupService:
         context = await self.knowledge.knowledge_context(product_slug)
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(context, dialog, lang, coaching_notes=notes)
-        messages.append({"role": "user", "content": _FOLLOWUP_NUDGE.format(lang=lang)})
-        raw, _ = await self.llm.chat(
+        total = len(self.settings.followup_schedule_h)
+        messages.append({
+            "role": "user",
+            "content": _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total),
+        })
+        raw, meta = await self.llm.chat(
             messages, capability="chat:smart", require_json_schema=True
         )
         from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
-        decision = parse_decision(raw)
-        if not decision or not decision.reply:
+        try:
+            decision = parse_decision(raw)
+        except ValueError:
+            logger.warning(
+                "followup: unparseable decision branch=%d thread=%d — attempt not burned",
+                self.branch_id, thread_id,
+            )
             return False
+        if not decision.reply:
+            return False
+        if await self._lead_replied_meanwhile(thread_id):
+            return False  # race: lead answered while we were generating (S1 guard)
+        from .reply import _fmt_llm_meta  # noqa: PLC0415 (same package, avoid cycle)
         await self.outbox.add(Outbox(
             branch_id=self.branch_id,
             thread_id=thread_id,
             text=decision.reply,
             source="followup",
             scheduled_at=now,
+            llm_info=_fmt_llm_meta(meta),
         ))
+        # consume the timer + burn the attempt; OutboxSender re-arms after the send
+        thread = await self.threads.by_id(thread_id)
+        if thread is not None:
+            thread.next_followup_at = None
+            thread.followups_sent = sent_so_far + 1
+            self.session.add(thread)
+            await self.session.flush()
         return True
 
-    async def _advance_timer(self, thread_id: int, now: datetime) -> None:
-        """Move next_followup_at to next schedule step, or NULL when exhausted."""
-        row = (await self.session.execute(
-            text(
-                "SELECT next_followup_at, last_in_at"
-                " FROM channel_thread WHERE id=:id"
-            ),
-            {"id": thread_id},
-        )).first()
-        if not row or not row[1]:
-            return
-        last_in_at: datetime = row[1]
-        schedule = self.settings.followup_schedule_h
-        elapsed_h = (now - last_in_at).total_seconds() / 3600
-        current_step = -1
-        for i, h in enumerate(schedule):
-            if elapsed_h >= h:
-                current_step = i
-        if current_step + 1 >= len(schedule):
-            next_at = None
-        else:
-            next_at = last_in_at + timedelta(hours=schedule[current_step + 1])
-        await self.session.execute(
-            text("UPDATE channel_thread SET next_followup_at=:next_at WHERE id=:id"),
-            {"next_at": next_at, "id": thread_id},
-        )
+    async def _lead_replied_meanwhile(self, thread_id: int) -> bool:
+        row = (
+            await self.session.execute(
+                text("SELECT last_in_at, last_out_at FROM channel_thread WHERE id=:id"),
+                {"id": thread_id},
+            )
+        ).first()
+        if not row:
+            return True  # thread vanished — do not send
+        last_in, last_out = row
+        return last_in is not None and (last_out is None or last_in > last_out)

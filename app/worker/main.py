@@ -113,8 +113,7 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
                 continue
             knowledge = KnowledgeService(session, branch.id)
             svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)
-            await svc.reset_timers()
-            sent += await svc.run()
+            sent += await svc.run()  # timers are armed by OutboxSender after bot sends
     return sent
 
 

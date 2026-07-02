@@ -38,3 +38,9 @@ class SessionStatus(StrEnum):
 BOT_SILENT_STAGES: frozenset[Stage] = frozenset(
     {Stage.READY, Stage.HANDED_OFF, Stage.DORMANT, Stage.MANAGER}
 )
+
+# Стадии, где ведёт человек — свежий входящий НЕ включает бота обратно
+# (dormant сюда не входит: спящий лид оживает в qualifying).
+HUMAN_LED_STAGES: frozenset[Stage] = frozenset(
+    {Stage.READY, Stage.HANDED_OFF, Stage.MANAGER}
+)
