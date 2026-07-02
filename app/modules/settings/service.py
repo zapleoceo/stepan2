@@ -37,7 +37,6 @@ class BranchSettings:
     followup_enabled: bool
     followup_schedule_h: list[int]
     knowledge_backend: str
-    llm_backend: str
     tech_search_enabled: bool
     tech_usecase_enabled: bool
     daily_budget_usd: float
@@ -125,7 +124,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         followup_enabled=_b(raw, "followup_enabled"),
         followup_schedule_h=_parse_schedule(raw),
         knowledge_backend=raw.get("knowledge_backend", "direct"),
-        llm_backend=raw.get("llm_backend", "local"),
         tech_search_enabled=_b(raw, "tech_search_enabled"),
         tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),

@@ -97,8 +97,6 @@ SCHEMA: list[SettingSection] = [
            _l("Кейсы под лида", "Tailor use-cases", "Kasus sesuai lead"), width="130px"),
         _f("tech_search_enabled", "bool", "false",
            _l("Веб-поиск", "Web search", "Pencarian web"), width="130px"),
-        _f("llm_backend", "text", "local", _l("LLM backend", "LLM backend", "LLM backend"),
-           hidden=True),
     ]),
     SettingSection("fa-solid fa-bell",
                    _l("Уведомления", "Notifications", "Notifikasi"), [

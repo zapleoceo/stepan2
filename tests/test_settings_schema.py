@@ -22,7 +22,7 @@ _LANGS = ("ru", "en", "id")
 _BRANCH_KEYS = (
     "agent_enabled_global", "hourly_cap", "daily_cap", "quiet_start", "quiet_end",
     "reply_delay_min_s", "reply_delay_max_s", "tz_offset_h", "tg_group_id",
-    "followup_enabled", "followup_schedule_h", "knowledge_backend", "llm_backend",
+    "followup_enabled", "followup_schedule_h", "knowledge_backend",
     "tech_search_enabled", "tech_usecase_enabled",
 )
 
@@ -114,9 +114,11 @@ def test_placeholder_rendered() -> None:
     assert "-1001234567890" in html
 
 
-def test_hidden_field_not_rendered() -> None:
-    html = settings_form_html({}, "en")
-    assert '"key": "llm_backend"' not in html
+def test_no_llm_provider_token_keys() -> None:
+    """Broker-only: no local-LLM backend switch or provider-key settings exist."""
+    assert S.field_for("llm_backend") is None
+    keys = set(S.defaults())
+    assert not (keys & {"llm_backend", "openai_key", "gemini_key", "provider_key"})
 
 
 def test_current_value_overrides_default() -> None:
