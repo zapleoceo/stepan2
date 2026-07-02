@@ -20,7 +20,7 @@ from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
-from ._query import _branch_where, fetch_coach_data
+from ._query import _branch_where, fetch_ad_funnel, fetch_coach_data
 from ._routes_admin import _agent_toggle_html  # noqa: F401 (re-exported for tests)
 from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
@@ -177,10 +177,11 @@ async def reports_page(request: Request) -> HTMLResponse:
                 text(_HOUR_OUT_Q.format(and_where=and_where)), params
             )
         ).all()
+        ad_funnel = await fetch_ad_funnel(session, branch_ids)
     stage_counts = {r[0]: int(r[1]) for r in sc_rows}
     hour_in = {int(r[0]): int(r[1]) for r in hi_rows}
     hour_out = {int(r[0]): int(r[1]) for r in ho_rows}
-    panel = reports_panel_html(stage_counts, hour_in, hour_out)
+    panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel)
     return HTMLResponse(app_shell(lang, panel, active_nav="reports"))
 
 

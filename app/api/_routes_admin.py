@@ -13,7 +13,7 @@ from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
 
 from ._i18n import apply_lang, t
-from ._query import _branch_where
+from ._query import _branch_where, fetch_ad_funnel
 from ._ui_panels import (
     leads_panel_html,
     members_panel_html,
@@ -93,10 +93,11 @@ async def reports_panel(request: Request) -> HTMLResponse:
         sc = (await session.execute(text(_sc.format(where=where)), params)).all()
         hi = (await session.execute(text(_hi.format(and_where=and_where)), params)).all()
         ho = (await session.execute(text(_ho.format(and_where=and_where)), params)).all()
+        ad_funnel = await fetch_ad_funnel(session, branch_ids)
     stage_counts = {r[0]: int(r[1]) for r in sc}
     hour_in = {int(r[0]): int(r[1]) for r in hi}
     hour_out = {int(r[0]): int(r[1]) for r in ho}
-    return HTMLResponse(reports_panel_html(stage_counts, hour_in, hour_out))
+    return HTMLResponse(reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)

@@ -164,6 +164,8 @@ _TR: dict[str, dict[str, str]] = {
     "chat.suggest":     {"ru": "✦ Предложить",     "en": "✦ Suggest",         "id": "✦ Sarankan"},
     "chat.translate":   {"ru": "⇄ Перевод",        "en": "⇄ Translate",       "id": "⇄ Terjemah"},
     "chat.tr_result":   {"ru": "Перевод:", "en": "Translation:", "id": "Terjemahan:"},
+    "rep.ad_funnel":    {"ru": "Воронка по рекламе", "en": "Ad funnel", "id": "Corong iklan"},
+    "rep.ad":           {"ru": "Реклама", "en": "Ad", "id": "Iklan"},
     "chat.block":       {"ru": "Заблокировать (спам)", "en": "Block (spam)",
                          "id": "Blokir (spam)"},
     "chat.blocked":     {"ru": "заблок.", "en": "blocked", "id": "diblokir"},

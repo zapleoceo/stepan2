@@ -4,7 +4,7 @@ from __future__ import annotations
 import html as _h
 
 from ._i18n import current_lang, t
-from ._ui_html import _ago
+from ._ui_html import _ago, ig_post_url
 
 _ST_ECSS: dict[str, str] = {
     "proposed": "es-p", "applied": "es-a",
@@ -908,10 +908,60 @@ def settings_panel_html(settings: list) -> str:
 
 # ─── reports panel ────────────────────────────────────────────────────────────
 
+def _ad_funnel_html(rows: list) -> str:
+    """Per-ad funnel table: leads from each ad → pipeline / won / conv%, + FB deep link."""
+    if not rows:
+        return ""
+    hdr = (
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
+        f'{_h.escape(t("rep.ad_funnel"))}</h3>'
+    )
+    body = ""
+    for ad_id, ad_media_id, total, pipeline, won, dormant in rows:
+        total = int(total or 0)
+        won = int(won or 0)
+        conv = round(won / total * 100, 1) if total else 0.0
+        fb = _h.escape(
+            "https://adsmanager.facebook.com/adsmanager/manage/ads?"
+            f"selected_ad_ids={ad_id}"
+        )
+        ad_cell = (
+            f'<a href="{fb}" target="_blank" rel="noreferrer"'
+            f' style="color:#4da6ff;font-family:ui-monospace,monospace;font-size:.7rem">'
+            f'{_h.escape(str(ad_id))}</a>'
+        )
+        if ad_media_id:
+            post = ig_post_url(str(ad_media_id))
+            if post:
+                ad_cell += (
+                    f' <a href="{_h.escape(post)}" target="_blank" rel="noreferrer"'
+                    f' title="IG post" style="text-decoration:none">📷</a>'
+                )
+        body += (
+            f'<tr><td>{ad_cell}</td>'
+            f'<td class="rep-n">{total}</td>'
+            f'<td class="rep-n" style="color:#9b7aff">{int(pipeline or 0)}</td>'
+            f'<td class="rep-n" style="color:#51cf66">{won}</td>'
+            f'<td class="rep-n" style="color:#868e96">{int(dormant or 0)}</td>'
+            f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
+        )
+    return (
+        f'{hdr}<table class="rep-tbl"><thead><tr>'
+        f'<th>{_h.escape(t("rep.ad"))}</th>'
+        f'<th style="text-align:right">{_h.escape(t("rep.total"))}</th>'
+        f'<th style="text-align:right">{_h.escape(t("rep.pipeline"))}</th>'
+        f'<th style="text-align:right">{_h.escape(t("rep.won"))}</th>'
+        f'<th style="text-align:right">{_h.escape(t("rep.dormant"))}</th>'
+        f'<th style="text-align:right">{_h.escape(t("rep.conv"))}</th>'
+        f'</tr></thead><tbody>{body}</tbody></table>'
+    )
+
+
 def reports_panel_html(
     stage_counts: dict[str, int],
     hour_in: dict[int, int],
     hour_out: dict[int, int],
+    ad_funnel: list | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1014,6 +1064,7 @@ def reports_panel_html(
         f'<div class="kpi-row">{kpis}</div>'
         f'{status_bar}'
         f'{stage_table}'
+        f'{_ad_funnel_html(ad_funnel or [])}'
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl} (24h)</h3>'
         f'<div class="hchart">{hour_bars}</div>'
         f'<div style="font-size:.63rem;color:#4a5568;margin-top:.3rem">'
