@@ -143,7 +143,7 @@ class ReplyService:
         if new_stage == Stage.MANAGER:
             lead.agent_enabled = False  # human takes over; manager may re-enable
         if new_stage == Stage.READY:
-            await self._handoff(lead, thread)
+            await self._handoff(lead, thread, decision.ready_subtype)
         self.session.add(lead)
         logger.info("branch=%d lead=%d stage → %s", self.branch_id, lead.id, new_stage)
 
@@ -156,19 +156,23 @@ class ReplyService:
             return Stage.PRESENTING
         return decision.stage
 
-    async def _handoff(self, lead: Lead, thread) -> None:
-        """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event."""
+    async def _handoff(self, lead: Lead, thread, subtype: str | None) -> None:
+        """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event.
+
+        subtype (deal|openhouse) distinguishes an enrollment from an open-house signup —
+        it drives the alert kind and the Meta CAPI event, and feeds the Won-split report."""
         now = datetime.now(UTC).replace(tzinfo=None)
         lead.agent_enabled = False
         lead.handed_off_at = now
-        lead.ready_subtype = lead.ready_subtype or "deal"
+        lead.ready_subtype = lead.ready_subtype or subtype or "deal"
+        kind = f"ready_{lead.ready_subtype}"
         alerts = AlertService(self.session, self.branch_id, self._notifier)
         try:
             await alerts.raise_alert(
                 lead_id=lead.id,
-                kind="ready_deal",
-                summary_en=f"Lead is ready to enroll · phone {lead.phone_e164}",
-                summary_ru=f"Лид готов записаться · телефон {lead.phone_e164}",
+                kind=kind,
+                summary_en=f"Lead is ready ({lead.ready_subtype}) · phone {lead.phone_e164}",
+                summary_ru=f"Лид готов ({lead.ready_subtype}) · телефон {lead.phone_e164}",
                 thread_id=thread.id,
                 lead_phone=lead.phone_e164,
             )

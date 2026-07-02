@@ -32,6 +32,18 @@ _FAKE_PHONE_LINE = re.compile(r"\U0001f4f1\s*(?:телефон|telepon|phone)", 
 # Prices (Rp/jt/IDR) do NOT start with +62/08x → no false positives on prices.
 _PHONE_PAT = re.compile(r"(?:\+62|\b08[1-9])[\d\s.\-]{6,}")
 
+# Markdown artifacts reasoning models emit — IM users never type these, so strip the
+# markers (keep the text). Single-`*` italic is left alone: too risky next to prices/×.
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.S)
+_MD_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+", re.M)
+_MD_BULLET = re.compile(r"^(\s*)[-*]\s+", re.M)
+
+
+def _strip_markdown(s: str) -> str:
+    s = _MD_BOLD.sub(lambda m: m.group(1) or m.group(2) or "", s)
+    s = _MD_HEADER.sub("", s)
+    return _MD_BULLET.sub(r"\1• ", s)
+
 
 def _has_fake_phone(line: str) -> bool:
     """True if line contains a phone-like token that is NOT the official IT STEP number."""
@@ -43,6 +55,7 @@ def _has_fake_phone(line: str) -> bool:
 def clean_reply(text: str) -> str:
     """Strip zero-width chars, AI punctuation, and fabricated Indonesian phone lines."""
     s = (text or "").translate(_ZW)
+    s = _strip_markdown(s)
     s = _DASH.sub(" - ", s)
     for pat, repl in _HUMANIZE:
         s = pat.sub(repl, s)

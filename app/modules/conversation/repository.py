@@ -7,13 +7,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, CoachingNote, Message, Outbox
 from app.adapters.db.repository import BranchScoped
 from app.modules.leads.repository import MessageRepo as _LeadMessageRepo
 from app.modules.leads.repository import ThreadRepo as _LeadThreadRepo
+
+_MAX_CONTEXT_MSGS = 40  # cap the dialog fed to the LLM — bounds token cost on long threads
 
 
 class ThreadRepo(_LeadThreadRepo):
@@ -29,11 +31,18 @@ class MessageRepo(_LeadMessageRepo):
     """Adds dialog loading for the prompt builder."""
 
     async def dialog(self, thread_id: int) -> list[Message]:
-        """A thread's messages oldest-first — the dialog handed to the prompt builder."""
-        q = self._q().where(Message.thread_id == thread_id).order_by(
-            Message.occurred_at, Message.id
+        """The thread's most recent messages (capped), oldest-first for the prompt builder.
+
+        Capped at _MAX_CONTEXT_MSGS so an active thread doesn't grow the LLM context —
+        and the bill — without bound on every reply."""
+        q = (
+            self._q()
+            .where(Message.thread_id == thread_id)
+            .order_by(Message.occurred_at.desc(), Message.id.desc())
+            .limit(_MAX_CONTEXT_MSGS)
         )
-        return list((await self.session.exec(q)).all())
+        rows = list((await self.session.exec(q)).all())
+        return list(reversed(rows))
 
 
 class CoachingNoteRepo:
@@ -64,11 +73,18 @@ class OutboxRepo(BranchScoped[Outbox]):
         super().__init__(session, branch_id)
 
     async def oldest_pending(self, thread_id: int) -> Outbox | None:
-        """Next queued line for a thread (FIFO), or None when nothing is pending."""
+        """Next due line for a thread by source priority then time (manager → agent →
+        followup), so a manager/live reply never waits behind a queued nudge."""
+        priority = case(
+            (Outbox.source == "manager", 0),
+            (Outbox.source == "agent", 1),
+            (Outbox.source == "followup", 2),
+            else_=3,
+        )
         q = (
             self._q()
             .where(Outbox.thread_id == thread_id, Outbox.status == "pending")
-            .order_by(Outbox.scheduled_at, Outbox.id)
+            .order_by(priority, Outbox.scheduled_at, Outbox.id)
         )
         return (await self.session.exec(q)).first()
 
