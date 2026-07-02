@@ -8,9 +8,10 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.domain.clock import branch_now
 
 from .repository import SettingRepo
 from .schema import defaults as _schema_defaults
@@ -47,7 +48,7 @@ class BranchSettings:
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
-        now_h = (datetime.now(UTC) + timedelta(hours=self.tz_offset_h)).hour
+        now_h = branch_now(self.tz_offset_h).hour
         if self.quiet_start > self.quiet_end:  # e.g. 22→08 wraps midnight
             return now_h >= self.quiet_start or now_h < self.quiet_end
         return self.quiet_start <= now_h < self.quiet_end

@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Lead, Message, Outbox, StageEvent
+from app.domain.clock import branch_day_start_utc
 from app.domain.enums import Stage
 from app.modules.settings.service import get_settings
 from app.ports.channel import ChannelPort
@@ -22,11 +23,6 @@ from .repository import MessageRepo, OutboxRepo, ThreadRepo
 logger = logging.getLogger(__name__)
 
 
-def _branch_day_start(now_utc_naive: datetime, tz_offset_h: int) -> datetime:
-    """UTC instant of the branch-local midnight preceding `now` (daily cap window start)."""
-    local = now_utc_naive + timedelta(hours=tz_offset_h)
-    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    return midnight - timedelta(hours=tz_offset_h)
 
 
 # IG/WA soft blocks (challenge, rate limit, transient) — retry later, don't drop the line.
@@ -147,7 +143,7 @@ class OutboxSender:
             if await self.outbox.count_sent_since(now - timedelta(hours=1)) >= s.hourly_cap:
                 return True
         if s.daily_cap > 0:
-            day_start = _branch_day_start(now, s.tz_offset_h)
+            day_start = branch_day_start_utc(now, s.tz_offset_h)
             if await self.outbox.count_sent_since(day_start) >= s.daily_cap:
                 return True
         return False

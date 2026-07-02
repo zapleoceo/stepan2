@@ -107,3 +107,28 @@ async def cancel_edit(
     session.add(edit)
     await session.flush()
     return edit
+
+
+async def revert_edit(
+    session: AsyncSession, branch_id: int, edit_id: int
+) -> CoachingEdit | None:
+    """Undo an applied edit by the INVERSE substring swap (new_text → old_text).
+
+    NOT a whole-document restore: replacing the doc with the stored old_text would wipe
+    everything else and any later edits. If new_text is no longer present (doc changed
+    since), the revert is refused rather than guessing."""
+    edit = await session.get(CoachingEdit, edit_id)
+    if not edit or edit.branch_id != branch_id or edit.status != "applied":
+        return None
+    if edit.slug and edit.old_text is not None and edit.new_text is not None:
+        doc = await KnowledgeRepo(session, branch_id).by_slug(edit.slug)
+        if doc and edit.new_text in doc.content:
+            doc.content = doc.content.replace(edit.new_text, edit.old_text, 1)
+            session.add(doc)
+            edit.status = "reverted"
+        else:
+            edit.status = "revert_failed"
+            edit.summary = (edit.summary or "") + " [новый текст не найден — откат невозможен]"
+    session.add(edit)
+    await session.flush()
+    return edit

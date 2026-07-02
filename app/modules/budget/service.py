@@ -6,11 +6,12 @@ Accumulation is a single atomic INSERT … ON CONFLICT DO UPDATE — no select-t
 race and (critically) no rollback on a caller-owned session."""
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.domain.clock import branch_today
 from app.modules.settings.service import get_settings
 
 _UPSERT = (
@@ -19,10 +20,6 @@ _UPSERT = (
     " ON CONFLICT (branch_id, day) DO UPDATE"
     " SET used_usd = used_usd + excluded.used_usd, calls = calls + 1"
 )
-
-
-def _branch_today(tz_offset_h: int) -> date:
-    return (datetime.now(UTC) + timedelta(hours=tz_offset_h)).date()
 
 
 class BudgetService:
@@ -63,7 +60,7 @@ class BudgetService:
 
     async def _today(self) -> date:
         cfg = await get_settings(self.session, self.branch_id)
-        return _branch_today(cfg.tz_offset_h)
+        return branch_today(cfg.tz_offset_h)
 
 
 def _to_float(raw: object) -> float:

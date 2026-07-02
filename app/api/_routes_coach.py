@@ -7,7 +7,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import branch_ids_from_request
-from app.modules.conversation.coach_service import apply_edit, cancel_edit, propose_edit
+from app.modules.conversation.coach_service import (
+    apply_edit,
+    cancel_edit,
+    propose_edit,
+    revert_edit,
+)
 
 from ._i18n import apply_lang
 from ._query import fetch_coach_data
@@ -63,30 +68,8 @@ async def coach_cancel(edit_id: int, request: Request) -> RedirectResponse:
 
 @router.post("/coach/revert/{edit_id}")
 async def coach_revert(edit_id: int, request: Request) -> RedirectResponse:
-    from sqlalchemy import text  # noqa: PLC0415
-
     branch_ids = branch_ids_from_request(request)
     branch_id = branch_ids[0] if branch_ids else 1
     async with session_scope() as session:
-        row = (
-            await session.execute(
-                text(
-                    "SELECT slug, new_text, old_text FROM coaching_edit"
-                    " WHERE id=:id AND branch_id=:bid AND status='applied'"
-                ),
-                {"id": edit_id, "bid": branch_id},
-            )
-        ).first()
-        if row and row[0] and row[2] is not None:
-            await session.execute(
-                text(
-                    "UPDATE knowledge_doc SET content=:c"
-                    " WHERE branch_id=:bid AND slug=:slug"
-                ),
-                {"c": row[2], "bid": branch_id, "slug": row[0]},
-            )
-            await session.execute(
-                text("UPDATE coaching_edit SET status='reverted' WHERE id=:id"),
-                {"id": edit_id},
-            )
+        await revert_edit(session, branch_id, edit_id)
     return RedirectResponse("/ui/coach", status_code=303)
