@@ -150,7 +150,9 @@ async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
                 text(_THREAD_TMPL.format(where=where_clause)), params,
             )
         ).all()
-    return HTMLResponse(thread_list_html(rows))
+    raw_open = request.cookies.get("stepan2_open_thread", "")
+    active_tid = int(raw_open) if raw_open.isdigit() else None
+    return HTMLResponse(thread_list_html(rows, active_tid))
 
 
 @router.get("/reports", response_class=HTMLResponse)

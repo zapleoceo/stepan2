@@ -332,6 +332,28 @@ def funnel_html(counts: dict[str, int]) -> str:
         f'</div>'
     )
 
+_IG_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+
+def ig_post_url(media_id: str | None) -> str | None:
+    """Convert a numeric Instagram media id to its /p/<shortcode>/ post URL."""
+    if not media_id:
+        return None
+    digits = str(media_id).split("_", 1)[0]
+    if not digits.isdigit():
+        return None
+    n = int(digits)
+    if n == 0:
+        code = _IG_ALPHABET[0]
+    else:
+        chars = []
+        while n > 0:
+            n, rem = divmod(n, 64)
+            chars.append(_IG_ALPHABET[rem])
+        code = "".join(reversed(chars))
+    return f"https://www.instagram.com/p/{code}/"
+
+
 _HELP_KEYS: dict[str, str] = {
     "inbox": "help.inbox",
     "coach": "help.coach",
@@ -407,8 +429,9 @@ def _source_bar(
                 f' onclick="navigator.clipboard&&navigator.clipboard.writeText(\'{safe_id}\')">'
                 f'{safe_id}</span>'
             )
-        if ad_media_id:
-            ig_post = _h.escape(f"https://www.instagram.com/p/{ad_media_id}/")
+        post_url = ig_post_url(ad_media_id)
+        if post_url:
+            ig_post = _h.escape(post_url)
             parts.append(
                 f'<a class="srcid" href="{ig_post}" target="_blank" rel="noreferrer">📷 IG ↗</a>'
             )
@@ -447,7 +470,7 @@ def _thread_item(row: object, active_tid: int | None) -> str:
     return (
         f'<a class="ti{on}"'
         f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
-        f' onclick="setOn(this)"'
+        f' onclick="setOn(this);setOpenThread({tid})"'
         f' href="/ui/inbox">'
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
@@ -503,6 +526,25 @@ def _bubble(row: object, tid: int) -> str:
     )
 
 
+def _last_msg_id(msgs: list) -> int:
+    return int(msgs[-1][0]) if msgs else 0
+
+
+def poll_sentinel_html(tid: int, after_id: int) -> str:
+    """Self-replacing 4s poller: fetches bubbles with id > after_id and reinserts itself."""
+    return (
+        f'<div id="poll-{tid}"'
+        f' hx-get="/ui/chat/{tid}/since/{after_id}"'
+        f' hx-trigger="every 4s" hx-swap="outerHTML" hx-sync="this:replace"></div>'
+    )
+
+
+def since_bubbles_html(msgs: list, tid: int, after_id: int) -> str:
+    """Bubbles for messages newer than after_id plus a fresh poll sentinel."""
+    bubbles = "".join(_bubble(r, tid) for r in msgs)
+    return bubbles + poll_sentinel_html(tid, _last_msg_id(msgs) or after_id)
+
+
 def messages_html(msgs: list, pending: list, tid: int) -> str:
     parts = [_bubble(r, tid) for r in msgs]
     pend_label = _h.escape(t("chat.pending"))
@@ -512,6 +554,7 @@ def messages_html(msgs: list, pending: list, tid: int) -> str:
             f'<div class="bb bb-p"><div class="bt">{_h.escape(str(ptxt or ""))}</div>'
             f'<div class="bm">{pend_label}</div></div>'
         )
+    parts.append(poll_sentinel_html(tid, _last_msg_id(msgs)))
     return "".join(parts)
 
 
@@ -519,6 +562,22 @@ _STAGES = (
     "new", "nurturing", "qualifying", "presenting", "objection",
     "ready", "handed_off", "dormant", "manager",
 )
+
+
+def chat_bot_pill_html(tid: int, enabled: bool) -> str:
+    """Per-lead bot ON/OFF pill shown in the chat header (hx-swap=outerHTML)."""
+    lbl = _h.escape(t("bot.on" if enabled else "bot.off"))
+    color = "#51cf66" if enabled else "#ff6b6b"
+    bg = "rgba(31,58,31,.35)" if enabled else "rgba(58,31,31,.35)"
+    return (
+        f'<form id="bot-pill-{tid}" style="display:inline;margin:0"'
+        f' hx-post="/ui/chat/{tid}/bot-toggle"'
+        f' hx-target="#bot-pill-{tid}" hx-swap="outerHTML">'
+        f'<button type="submit" class="act-btn"'
+        f' style="background:{bg};border-color:{color};color:{color}"'
+        f' title="{lbl}">🤖 {lbl}</button>'
+        f'</form>'
+    )
 
 
 def chat_header_html(
@@ -536,6 +595,7 @@ def chat_header_html(
     ad_id: str | None = None,
     ad_media_id: str | None = None,
     ad_preview_url: str | None = None,
+    agent_enabled: bool = True,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -592,13 +652,14 @@ def chat_header_html(
         if meta_parts else ""
     )
     src_bar = _source_bar(lead_source, ad_id, ad_media_id, ad_preview_url)
+    bot_pill = chat_bot_pill_html(tid, agent_enabled)
     return (
         f'<div id="chat-hdr-{tid}">'
         f'<div class="ch">'
         f'{av_html}'
         f'<span class="ch-n">{name_html}{handle_html}</span>'
         f'{product_badge}{ig_chip}'
-        f'<div class="ch-acts">{stage_sel}</div>'
+        f'<div class="ch-acts">{bot_pill}{stage_sel}</div>'
         f'{meta_row}'
         f'</div>'
         f'{src_bar}'
@@ -624,6 +685,7 @@ def chat_panel_html(
     ad_id: str | None = None,
     ad_media_id: str | None = None,
     ad_preview_url: str | None = None,
+    agent_enabled: bool = True,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -636,6 +698,7 @@ def chat_panel_html(
         ig_username=ig_username, avatar_url=avatar_url,
         lead_source=lead_source, ad_id=ad_id,
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+        agent_enabled=agent_enabled,
     )
     return (
         f'{header}'
@@ -734,6 +797,8 @@ def app_shell(
         "el.classList.add('on');}"
         "function scrollMsgs(tid){"
         "var m=document.getElementById('msgs-'+tid);if(m)m.scrollTop=m.scrollHeight;}"
+        "function setOpenThread(tid){"
+        "document.cookie='stepan2_open_thread='+tid+';path=/;max-age=86400;samesite=lax';}"
         "document.addEventListener('htmx:afterSettle',function(e){"
         "var m=e.target&&e.target.classList&&e.target.classList.contains('msgs')?e.target"
         ":e.target.querySelector&&e.target.querySelector('.msgs');"
@@ -750,7 +815,7 @@ def app_shell(
         "function sendSuggest(tid){"
         "var ta=document.getElementById('sug-ta-'+tid);"
         "if(!ta||!ta.value.trim())return;"
-        "var fd=new FormData();fd.append('text',ta.value);"
+        "var fd=new FormData();fd.append('text',ta.value);fd.append('source','agent');"
         "htmx.ajax('POST','/ui/chat/'+tid+'/send',{"
         "target:'#msgs-'+tid,swap:'innerHTML',values:fd});"
         "document.getElementById('sug-'+tid).innerHTML='';}"

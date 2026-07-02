@@ -11,10 +11,20 @@ from sqlalchemy import text
 from app.adapters.db.models import Outbox
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
+from app.admin._branch import branch_ids_from_request
 
 from ._i18n import apply_lang, t
 from ._query import fetch_messages, fetch_pending
-from ._ui_html import chat_header_html, chat_panel_html, messages_html, suggest_box_html
+from ._ui_html import (
+    chat_bot_pill_html,
+    chat_header_html,
+    chat_panel_html,
+    messages_html,
+    since_bubbles_html,
+    suggest_box_html,
+)
+
+_AGENT_SOURCES = frozenset({"agent", "manager"})
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -36,7 +46,8 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                     " ct.product_slug, ct.external_thread_id,"
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
-                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url"
+                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
+                    " l.agent_enabled"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -50,7 +61,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
-     lead_source, ad_id, ad_media_id, ad_preview_url) = info
+     lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled) = info
     return HTMLResponse(
         chat_panel_html(
             thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -59,16 +70,22 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             ig_username=ig_username, avatar_url=avatar_url,
             lead_source=lead_source, ad_id=ad_id,
             ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+            agent_enabled=bool(agent_enabled),
         )
     )
 
 
 @router.post("/chat/{thread_id}/send", response_class=HTMLResponse)
 async def chat_send(
-    thread_id: int, request: Request, text_body: str = Form(alias="text"),
+    thread_id: int,
+    request: Request,
+    text_body: str = Form(alias="text"),
+    source: str = Form(default="manager"),
+    llm_info: str | None = Form(default=None),
 ) -> HTMLResponse:
     apply_lang(request)
     text_body = text_body.strip()
+    src = source if source in _AGENT_SOURCES else "manager"
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -83,12 +100,58 @@ async def chat_send(
             msgs = await fetch_messages(session, thread_id)
             return HTMLResponse(messages_html(msgs, [], thread_id))
         session.add(Outbox(
-            branch_id=info[0], thread_id=thread_id, text=text_body, source="manager",
+            branch_id=info[0], thread_id=thread_id, text=text_body, source=src,
+            llm_info=(llm_info if src == "agent" else None),
         ))
         await session.flush()
         msgs = await fetch_messages(session, thread_id)
         pending = await fetch_pending(session, thread_id)
     return HTMLResponse(messages_html(msgs, pending, thread_id))
+
+
+@router.get("/chat/{thread_id}/since/{after_id}", response_class=HTMLResponse)
+async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLResponse:
+    """Return only message bubbles newer than after_id plus a fresh poll sentinel."""
+    apply_lang(request)
+    async with session_scope() as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT id, direction, sent_by, text, occurred_at, llm_info FROM message"
+                    " WHERE thread_id = :tid AND id > :after ORDER BY occurred_at, id"
+                ),
+                {"tid": thread_id, "after": after_id},
+            )
+        ).all()
+    return HTMLResponse(since_bubbles_html(list(rows), thread_id, after_id))
+
+
+@router.post("/chat/{thread_id}/bot-toggle", response_class=HTMLResponse)
+async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
+    """Flip the per-lead agent_enabled flag for this thread's lead; re-render the pill."""
+    apply_lang(request)
+    allowed = branch_ids_from_request(request)
+    async with session_scope() as session:
+        info = (
+            await session.execute(
+                text(
+                    "SELECT l.id, l.branch_id, l.agent_enabled FROM channel_thread ct"
+                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+        if not info:
+            return HTMLResponse("")
+        lead_id, branch_id, enabled = info
+        if allowed and branch_id not in allowed:
+            return HTMLResponse(chat_bot_pill_html(thread_id, bool(enabled)))
+        new_val = not bool(enabled)
+        await session.execute(
+            text("UPDATE lead SET agent_enabled = :v WHERE id = :id"),
+            {"v": new_val, "id": lead_id},
+        )
+    return HTMLResponse(chat_bot_pill_html(thread_id, new_val))
 
 
 @router.post("/chat/{thread_id}/stage", response_class=HTMLResponse)
@@ -106,7 +169,8 @@ async def chat_stage(
                     " ct.product_slug, ct.external_thread_id,"
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
-                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url"
+                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
+                    " l.agent_enabled"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -118,7 +182,7 @@ async def chat_stage(
         (_, name, lead_id, product_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
-         lead_source, ad_id, ad_media_id, ad_preview_url) = info
+         lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled) = info
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
             {"s": stage, "id": lead_id},
@@ -129,7 +193,8 @@ async def chat_stage(
                          phone=phone, created_at=created_at, last_in_at=last_in_at,
                          ig_username=ig_username, avatar_url=avatar_url,
                          lead_source=lead_source, ad_id=ad_id,
-                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url)
+                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+                         agent_enabled=bool(agent_enabled))
     )
 
 
