@@ -237,6 +237,55 @@ async def sync_crm(ctx: dict[str, Any]) -> int:
     return synced
 
 
+async def refresh_profiles(ctx: dict[str, Any]) -> int:
+    """Refresh IG follower/following stats for stale active-funnel leads (TTL ~6h).
+
+    Heavy private-API call, so capped per tick per branch to respect rate limits. Runs
+    every 30 minutes. A per-lead fetch failure leaves that lead untouched."""
+    from app.modules.leads.profiles import ProfileService  # noqa: PLC0415
+    refreshed = 0
+    async with session_scope() as session:
+        for branch in await wiring.active_branches(session):
+            assert branch.id is not None
+            svc = ProfileService(session, branch.id)
+            for channel in await wiring.active_channels(session, branch.id):
+                try:
+                    port = await wiring.build_channel_port(session, channel)
+                except (NotImplementedError, KeyError, RuntimeError) as exc:
+                    logger.warning("skip profiles channel %s: %s", channel.id, exc)
+                    continue
+                if not hasattr(port, "fetch_profile"):
+                    continue  # channel kind has no profile stats
+                refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
+    return refreshed
+
+
+async def backfill_media(ctx: dict[str, Any]) -> int:
+    """Download media flagged pending at ingest and attach a MediaAsset (capped batch).
+
+    Runs every few minutes; a download failure keeps the flag set so the next tick
+    retries. Safe no-op when nothing is flagged."""
+    from app.modules.media.service import MediaService  # noqa: PLC0415
+    done = 0
+    async with session_scope() as session:
+        for branch in await wiring.active_branches(session):
+            assert branch.id is not None
+            svc = MediaService(session, branch.id)
+            for channel in await wiring.active_channels(session, branch.id):
+                assert channel.id is not None
+                if not await svc.pending(channel.id, limit=1):
+                    continue  # nothing flagged — skip building the port
+                try:
+                    port = await wiring.build_channel_port(session, channel)
+                except (NotImplementedError, KeyError, RuntimeError) as exc:
+                    logger.warning("skip media channel %s: %s", channel.id, exc)
+                    continue
+                if not hasattr(port, "download_media"):
+                    continue  # channel kind can't download media
+                done += await svc.backfill(channel.id, port, limit=20)  # type: ignore[arg-type]
+    return done
+
+
 def _redis_settings() -> RedisSettings:
     """ARQ broker connection from the app's redis_url (parsed, never reconstructed)."""
     return RedisSettings.from_dsn(settings().redis_url)
@@ -248,7 +297,7 @@ class WorkerSettings:
 
     functions = [
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
-        process_deletions, sync_crm,
+        process_deletions, sync_crm, refresh_profiles, backfill_media,
     ]
     cron_jobs = [
         cron(ingest_active_channels, second=0, run_at_startup=False),
@@ -261,6 +310,10 @@ class WorkerSettings:
              run_at_startup=False),
         # CRM push every 5 minutes (only branches with crm_enabled + webhook URL)
         cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
+        # Profile stats refresh every 30 minutes (heavy, TTL-gated, capped batch)
+        cron(refresh_profiles, minute={0, 30}, second=15, run_at_startup=False),
+        # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)
+        cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
     ]
     redis_settings = _redis_settings()
     max_jobs = 10

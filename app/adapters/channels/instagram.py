@@ -27,6 +27,12 @@ class IGTransport(Protocol):
     async def account_health(self) -> str:
         ...
 
+    async def fetch_user_stats(self, ig_user_id: str) -> dict[str, Any]:
+        ...
+
+    async def download_media(self, url: str) -> bytes:
+        ...
+
 
 class InstagramAdapter:
     """Implements app.ports.channel.ChannelPort for IG follow-up via a private transport."""
@@ -58,6 +64,24 @@ class InstagramAdapter:
 
     async def session_status(self) -> SessionStatus:
         return _map_health(await self._t.account_health())
+
+    async def fetch_profile(self, ig_user_id: str) -> dict[str, Any] | None:
+        """Follower/following counts for a lead; None on transport failure (logged)."""
+        try:
+            raw = await self._t.fetch_user_stats(ig_user_id)
+        except Exception as exc:  # noqa: BLE001 — loop keeps going, lead untouched
+            import logging  # noqa: PLC0415
+
+            logging.getLogger(__name__).warning(
+                "IG fetch_profile failed user=%s: %s", ig_user_id, exc)
+            return None
+        return {
+            "follower_count": raw.get("follower_count"),
+            "following_count": raw.get("following_count"),
+        }
+
+    async def download_media(self, url: str) -> bytes:
+        return await self._t.download_media(url)
 
     def _to_inbound(self, thread: dict[str, Any]) -> InboundMessage:
         return InboundMessage(

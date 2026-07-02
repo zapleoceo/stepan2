@@ -117,6 +117,24 @@ class InstagrapiTransport:
             return "challenge" if "challenge" in type(exc).__name__.lower() else "expired"
         return "ok"
 
+    async def fetch_user_stats(self, ig_user_id: str) -> dict[str, Any]:
+        """Follower/following counts for one IG user (heavy private-API call)."""
+        client = self._ensure_client()
+        info = await asyncio.to_thread(client.user_info, int(ig_user_id))
+        return {
+            "follower_count": getattr(info, "follower_count", None),
+            "following_count": getattr(info, "following_count", None),
+        }
+
+    async def download_media(self, url: str) -> bytes:
+        """Fetch raw media bytes from a CDN url (instagrapi item ids not needed here)."""
+        import httpx  # lazy: real transport only, never imported by unit tests
+
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.get(url)
+        r.raise_for_status()
+        return r.content
+
 
 class EvolutionTransport:
     """Implements channels.whatsapp.WhatsAppTransport over the Evolution API (HTTP)."""

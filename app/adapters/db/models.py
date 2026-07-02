@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from sqlalchemy import BigInteger, String, UniqueConstraint
+from sqlalchemy import BigInteger, LargeBinary, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.domain.enums import ChannelKind, Role, SessionStatus, Stage
@@ -71,6 +71,10 @@ class Lead(SQLModel, table=True):
     ready_subtype: str | None = Field(default=None)
     agent_enabled: bool = Field(default=True, description="per-lead бот-тумблер (manager takeover)")
     handed_off_at: datetime | None = Field(default=None)
+    follower_count: int | None = Field(default=None)
+    following_count: int | None = Field(default=None)
+    last_active_at: datetime | None = Field(default=None)
+    profile_synced_at: datetime | None = Field(default=None, description="последний refresh")
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -172,6 +176,7 @@ class Message(SQLModel, table=True):
     occurred_at: datetime = Field(default_factory=_utcnow)
     llm_info: str | None = Field(default=None)
     delete_requested: bool = Field(default=False, index=True, description="ждёт IG-unsend")
+    media_pending: bool = Field(default=False, index=True, description="медиа ждёт backfill")
 
 
 class Outbox(SQLModel, table=True):
@@ -253,6 +258,20 @@ class StageEvent(SQLModel, table=True):
     to_stage: str
     actor: str = Field(default="bot", description="bot|manager|system|<user name>")
     reason: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class MediaAsset(SQLModel, table=True):
+    """Скачанное медиа лида (IG image/video/audio) — заполняется backfill-воркером."""
+    __tablename__ = "media_asset"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    message_id: int | None = Field(default=None, foreign_key="message.id", index=True)
+    kind: str = Field(description="image|video|audio")
+    mime: str | None = Field(default=None)
+    url: str | None = Field(default=None, description="CDN-ссылка источника (может протухнуть)")
+    data: bytes | None = Field(default=None, sa_type=LargeBinary)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
