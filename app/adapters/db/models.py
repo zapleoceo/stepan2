@@ -69,6 +69,8 @@ class Lead(SQLModel, table=True):
     email: str | None = Field(default=None)
     stage: Stage = Field(default=Stage.NEW, sa_type=String)
     ready_subtype: str | None = Field(default=None)
+    agent_enabled: bool = Field(default=True, description="per-lead бот-тумблер (manager takeover)")
+    handed_off_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -86,6 +88,7 @@ class ChannelThread(SQLModel, table=True):
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
     next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
+    followups_sent: int = Field(default=0, description="сколько фолоапов уже ушло по расписанию")
     lead_source: str | None = Field(default=None, description="story|ad_clicktomsg|None")
     ad_id: str | None = Field(default=None, description="Meta Ads Manager ID")
     ad_media_id: str | None = Field(default=None, description="IG media ID of ad creative")
@@ -234,6 +237,21 @@ class CoachingNote(SQLModel, table=True):
     text: str
     active: bool = Field(default=True)
     added_by: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class StageEvent(SQLModel, table=True):
+    """Журнал переходов воронки — кто/когда/почему сменил стадию лида."""
+    __tablename__ = "stage_event"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    lead_id: int = Field(foreign_key="lead.id", index=True)
+    thread_id: int | None = Field(default=None)
+    from_stage: str
+    to_stage: str
+    actor: str = Field(default="bot", description="bot|manager|system|<user name>")
+    reason: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
