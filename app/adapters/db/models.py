@@ -5,7 +5,7 @@ layer (a single scoped() helper), never ad-hoc per query. No business logic here
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import BigInteger, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
@@ -235,3 +235,15 @@ class CoachingNote(SQLModel, table=True):
     active: bool = Field(default=True)
     added_by: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class LlmSpend(SQLModel, table=True):
+    """Дневной LLM-расход филиала (cost_usd от брокера) — основа budget-гейта."""
+    __tablename__ = "llm_spend"
+    __table_args__ = (UniqueConstraint("branch_id", "day", name="uq_llm_spend_branch_day"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    day: date = Field(index=True, description="локальный день филиала (tz_offset_h)")
+    used_usd: float = Field(default=0.0)
+    calls: int = Field(default=0)

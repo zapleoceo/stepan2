@@ -40,6 +40,11 @@ class BranchSettings:
     llm_backend: str
     tech_search_enabled: bool
     tech_usecase_enabled: bool
+    daily_budget_usd: float
+    crm_enabled: bool
+    crm_webhook_url: str
+    meta_pixel_id: str
+    meta_capi_token: str
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -87,6 +92,17 @@ def _i(raw: dict[str, str], key: str) -> int:
             return 0
 
 
+def _f(raw: dict[str, str], key: str) -> float:
+    default = _DEFAULTS.get(key, "0")
+    try:
+        return float(raw.get(key, default) or default)
+    except ValueError:
+        try:
+            return float(default)
+        except ValueError:
+            return 0.0
+
+
 def _parse_schedule(raw: dict[str, str]) -> list[int]:
     val = raw.get("followup_schedule_h", _DEFAULTS.get("followup_schedule_h", "4,24,72"))
     try:
@@ -112,4 +128,9 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         llm_backend=raw.get("llm_backend", "local"),
         tech_search_enabled=_b(raw, "tech_search_enabled"),
         tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
+        daily_budget_usd=_f(raw, "daily_budget_usd"),
+        crm_enabled=_b(raw, "crm_enabled"),
+        crm_webhook_url=raw.get("crm_webhook_url", ""),
+        meta_pixel_id=raw.get("meta_pixel_id", ""),
+        meta_capi_token=raw.get("meta_capi_token", ""),
     )
