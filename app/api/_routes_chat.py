@@ -13,6 +13,7 @@ from app.adapters.db.models import Outbox
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import branch_ids_from_request
+from app.modules.conversation.translate import translate_message
 
 from ._i18n import apply_lang, t
 from ._query import fetch_messages, fetch_pending
@@ -365,34 +366,22 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
 
 @router.get("/chat/{thread_id}/msg/{mid}/tr", response_class=HTMLResponse)
 async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HTMLResponse:
-    """Translate a specific message bubble to Russian (per-bubble 🌐 button)."""
+    """Translate a message bubble to Russian (cached in message.tr_text — no re-billing)."""
     allowed = branch_ids_from_request(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-        row = (
-            await session.execute(
-                text("SELECT text FROM message WHERE id = :mid AND thread_id = :tid"),
-                {"mid": mid, "tid": thread_id},
-            )
-        ).first()
-    if not row or not row[0]:
-        return HTMLResponse("")
-    msg_text = (row[0] or "")[:800]
-    llm_msgs = [
-        {
-            "role": "system",
-            "content": "Translate the following message to Russian. Return ONLY the translation.",
-        },
-        {"role": "user", "content": msg_text},
-    ]
-    llm = BrokerLLM()
-    try:
-        translation, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=400)
-        return HTMLResponse(_h.escape(translation.strip()))
-    except Exception as exc:
-        _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
-        return HTMLResponse(_h.escape(msg_text))
+        try:
+            tr = await translate_message(session, mid, BrokerLLM())
+        except Exception as exc:
+            _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
+            orig = (
+                await session.execute(
+                    text("SELECT text FROM message WHERE id=:mid"), {"mid": mid}
+                )
+            ).first()
+            return HTMLResponse(_h.escape(orig[0]) if orig and orig[0] else "")
+    return HTMLResponse(_h.escape(tr) if tr else "")
 
 
 @router.post("/chat/{thread_id}/msg/{mid}/delete", response_class=HTMLResponse)

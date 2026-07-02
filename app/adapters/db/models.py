@@ -178,6 +178,7 @@ class Message(SQLModel, table=True):
     text: str = Field(default="")
     occurred_at: datetime = Field(default_factory=_utcnow)
     llm_info: str | None = Field(default=None)
+    tr_text: str | None = Field(default=None, description="кэш перевода (не биллить повторно)")
     delete_requested: bool = Field(default=False, index=True, description="ждёт IG-unsend")
     media_pending: bool = Field(default=False, index=True, description="медиа ждёт backfill")
 
