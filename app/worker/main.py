@@ -18,6 +18,7 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
+from app.domain.enums import SessionStatus
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reply import ReplyService
@@ -43,12 +44,50 @@ async def ingest_active_channels(ctx: dict[str, Any]) -> int:
                 assert channel.id is not None
                 try:
                     port = await wiring.build_channel_port(session, channel)
-                    inbound = await port.fetch_inbound()
                 except (NotImplementedError, KeyError, RuntimeError) as exc:
                     logger.warning("skip ingest channel %s: %s", channel.id, exc)
                     continue
+                if not await _healthy(session, branch.id, channel, port):
+                    continue  # checkpoint/expired session — frozen until re-login
+                try:
+                    inbound = await port.fetch_inbound()
+                except Exception:
+                    logger.exception("ingest fetch failed channel %s", channel.id)
+                    continue
                 stored += len(await ingest.ingest(channel.id, inbound))
     return stored
+
+
+async def _healthy(session: AsyncSession, branch_id: int, channel: Channel, port) -> bool:
+    """Gate a channel on its live session status; a CHALLENGE freezes it + alerts once.
+
+    Freezing = flip the ChannelSession out of ACTIVE so build_channel_port skips this
+    channel in every loop (ingest/reply/send/unsend) until a re-login restores it."""
+    try:
+        status = await port.session_status()
+    except Exception:
+        logger.exception("session_status failed channel %s", channel.id)
+        return True  # transient probe error — don't freeze on a flaky check
+    if status == SessionStatus.ACTIVE:
+        return True
+    flipped = await wiring.mark_session_status(session, channel.id, status)
+    logger.error(
+        "ACCOUNT CHECKPOINT branch=%d channel=%s status=%s — frozen until re-login",
+        branch_id, channel.id, status,
+    )
+    if flipped:
+        cfg = await get_settings(session, branch_id)
+        notifier = _build_notifier(cfg)
+        if notifier is not None:
+            try:
+                await notifier.notify_manager(
+                    branch_id=branch_id, lead_id=0, kind="channel_checkpoint",
+                    summary_en=f"IG channel {channel.handle or channel.id} needs re-login",
+                    summary_ru=f"IG-канал {channel.handle or channel.id} требует ре-логина",
+                )
+            except Exception:
+                logger.warning("checkpoint alert failed channel %s", channel.id)
+    return False
 
 
 def _build_notifier(branch_cfg: object) -> NotifierPort | None:

@@ -84,6 +84,28 @@ async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> 
     return list(rows.scalars().all())
 
 
+async def mark_session_status(
+    session: AsyncSession, channel_id: int, status: SessionStatus
+) -> bool:
+    """Flip the channel's ACTIVE session to a new status (e.g. CHALLENGE on checkpoint).
+
+    build_channel_port only loads ACTIVE sessions, so a non-ACTIVE status freezes the
+    channel across every loop until a re-login restores it. Returns True if it flipped."""
+    rows = await session.exec(
+        select(ChannelSession).where(
+            ChannelSession.channel_id == channel_id,
+            ChannelSession.status == SessionStatus.ACTIVE,
+        )
+    )
+    row = rows.scalars().first()
+    if row is None:
+        return False
+    row.status = status
+    session.add(row)
+    await session.flush()
+    return True
+
+
 async def _active_session_settings(session: AsyncSession, channel_id: int) -> dict | None:
     """Decrypt the channel's active session secret (instagrapi dump) — or None."""
     rows = await session.exec(
