@@ -580,6 +580,31 @@ def chat_bot_pill_html(tid: int, enabled: bool) -> str:
     )
 
 
+def chat_block_pill_html(tid: int, blocked: bool) -> str:
+    """Per-lead block toggle (spam). Blocked → bot ignores the lead entirely."""
+    if blocked:
+        style = "background:rgba(58,31,31,.5);border-color:#ff6b6b;color:#ff6b6b"
+        body = f'🚫 {_h.escape(t("chat.blocked"))}'
+    else:
+        style = ""
+        body = "🚫"
+    return (
+        f'<form id="blk-{tid}" style="display:inline;margin:0"'
+        f' hx-post="/ui/chat/{tid}/block" hx-target="#blk-{tid}" hx-swap="outerHTML">'
+        f'<button type="submit" class="act-btn" style="{style}"'
+        f' title="{_h.escape(t("chat.block"))}">{body}</button>'
+        f'</form>'
+    )
+
+
+def _clear_ctx_btn(tid: int) -> str:
+    return (
+        f'<button class="act-btn" hx-post="/ui/chat/{tid}/clear" hx-swap="none"'
+        f' hx-confirm="{_h.escape(t("chat.clear_confirm"))}"'
+        f' title="{_h.escape(t("chat.clear"))}">🧹</button>'
+    )
+
+
 def chat_header_html(
     tid: int,
     name: str,
@@ -596,6 +621,7 @@ def chat_header_html(
     ad_media_id: str | None = None,
     ad_preview_url: str | None = None,
     agent_enabled: bool = True,
+    is_blocked: bool = False,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -653,13 +679,15 @@ def chat_header_html(
     )
     src_bar = _source_bar(lead_source, ad_id, ad_media_id, ad_preview_url)
     bot_pill = chat_bot_pill_html(tid, agent_enabled)
+    block_pill = chat_block_pill_html(tid, is_blocked)
+    clear_btn = _clear_ctx_btn(tid)
     return (
         f'<div id="chat-hdr-{tid}">'
         f'<div class="ch">'
         f'{av_html}'
         f'<span class="ch-n">{name_html}{handle_html}</span>'
         f'{product_badge}{ig_chip}'
-        f'<div class="ch-acts">{bot_pill}{stage_sel}</div>'
+        f'<div class="ch-acts">{bot_pill}{block_pill}{clear_btn}{stage_sel}</div>'
         f'{meta_row}'
         f'</div>'
         f'{src_bar}'
@@ -686,6 +714,7 @@ def chat_panel_html(
     ad_media_id: str | None = None,
     ad_preview_url: str | None = None,
     agent_enabled: bool = True,
+    is_blocked: bool = False,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -698,7 +727,7 @@ def chat_panel_html(
         ig_username=ig_username, avatar_url=avatar_url,
         lead_source=lead_source, ad_id=ad_id,
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-        agent_enabled=agent_enabled,
+        agent_enabled=agent_enabled, is_blocked=is_blocked,
     )
     return (
         f'{header}'

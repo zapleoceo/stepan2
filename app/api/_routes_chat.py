@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html as _h
 import logging
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
@@ -16,6 +17,7 @@ from app.admin._branch import branch_ids_from_request
 from ._i18n import apply_lang, t
 from ._query import fetch_messages, fetch_pending
 from ._ui_html import (
+    chat_block_pill_html,
     chat_bot_pill_html,
     chat_header_html,
     chat_panel_html,
@@ -67,7 +69,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled"
+                    " l.agent_enabled, l.is_blocked"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -81,7 +83,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
-     lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled) = info
+     lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked) = info
     return HTMLResponse(
         chat_panel_html(
             thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -90,7 +92,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             ig_username=ig_username, avatar_url=avatar_url,
             lead_source=lead_source, ad_id=ad_id,
             ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-            agent_enabled=bool(agent_enabled),
+            agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
         )
     )
 
@@ -170,6 +172,56 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
     return HTMLResponse(chat_bot_pill_html(thread_id, new_val))
 
 
+@router.post("/chat/{thread_id}/block", response_class=HTMLResponse)
+async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
+    """Toggle the lead's is_blocked flag; blocking also mutes the bot. Re-render the pill."""
+    apply_lang(request)
+    allowed = branch_ids_from_request(request)
+    async with session_scope() as session:
+        info = (
+            await session.execute(
+                text(
+                    "SELECT l.id, l.branch_id, l.is_blocked FROM channel_thread ct"
+                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+        if not info:
+            return HTMLResponse("")
+        lead_id, branch_id, blocked = info
+        if allowed is not None and branch_id not in allowed:
+            return HTMLResponse(chat_block_pill_html(thread_id, bool(blocked)))
+        new_val = not bool(blocked)
+        if new_val:
+            await session.execute(
+                text("UPDATE lead SET is_blocked=true, agent_enabled=false WHERE id=:id"),
+                {"id": lead_id},
+            )
+        else:
+            await session.execute(
+                text("UPDATE lead SET is_blocked=false WHERE id=:id"), {"id": lead_id}
+            )
+    return HTMLResponse(chat_block_pill_html(thread_id, new_val))
+
+
+@router.post("/chat/{thread_id}/clear", response_class=HTMLResponse)
+async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
+    """Set context_cleared_at=now — dialog before it stops entering the prompt (local
+    reset; IG history untouched)."""
+    apply_lang(request)
+    allowed = branch_ids_from_request(request)
+    now = datetime.now(UTC).replace(tzinfo=None)
+    async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
+        await session.execute(
+            text("UPDATE channel_thread SET context_cleared_at=:t WHERE id=:tid"),
+            {"t": now, "tid": thread_id},
+        )
+    return HTMLResponse("")
+
+
 @router.post("/chat/{thread_id}/stage", response_class=HTMLResponse)
 async def chat_stage(
     thread_id: int, request: Request, stage: str = Form(default="new"),
@@ -189,7 +241,7 @@ async def chat_stage(
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled"
+                    " l.agent_enabled, l.is_blocked"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -201,7 +253,7 @@ async def chat_stage(
         (_, name, lead_id, product_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
-         lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled) = info
+         lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked) = info
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
             {"s": stage, "id": lead_id},
@@ -213,7 +265,7 @@ async def chat_stage(
                          ig_username=ig_username, avatar_url=avatar_url,
                          lead_source=lead_source, ad_id=ad_id,
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-                         agent_enabled=bool(agent_enabled))
+                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked))
     )
 
 

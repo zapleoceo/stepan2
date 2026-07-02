@@ -70,6 +70,7 @@ class Lead(SQLModel, table=True):
     stage: Stage = Field(default=Stage.NEW, sa_type=String)
     ready_subtype: str | None = Field(default=None)
     agent_enabled: bool = Field(default=True, description="per-lead бот-тумблер (manager takeover)")
+    is_blocked: bool = Field(default=False, index=True, description="спам/бан — бот игнорит")
     handed_off_at: datetime | None = Field(default=None)
     follower_count: int | None = Field(default=None)
     following_count: int | None = Field(default=None)
@@ -93,6 +94,8 @@ class ChannelThread(SQLModel, table=True):
     last_out_at: datetime | None = Field(default=None)
     next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
     followups_sent: int = Field(default=0, description="сколько фолоапов уже ушло по расписанию")
+    context_cleared_at: datetime | None = Field(
+        default=None, description="watermark: диалог до этого времени не идёт в промпт")
     lead_source: str | None = Field(default=None, description="story|ad_clicktomsg|None")
     ad_id: str | None = Field(default=None, description="Meta Ads Manager ID")
     ad_media_id: str | None = Field(default=None, description="IG media ID of ad creative")

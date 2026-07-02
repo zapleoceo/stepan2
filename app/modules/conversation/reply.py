@@ -83,7 +83,7 @@ class ReplyService:
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
-        dialog = await self.messages.dialog(thread_id)
+        dialog = await self.messages.dialog(thread_id, since=thread.context_cleared_at)
         if not dialog:
             return None
 

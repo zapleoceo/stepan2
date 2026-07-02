@@ -118,7 +118,9 @@ class FollowupService:
         if await budget.over_budget():
             logger.warning("branch=%d over daily LLM budget — followups held", self.branch_id)
             return False
-        dialog = await self.messages.dialog(thread_id)
+        thread = await self.threads.by_id(thread_id)
+        since = thread.context_cleared_at if thread is not None else None
+        dialog = await self.messages.dialog(thread_id, since=since)
         if not dialog:
             return False
         lang = await self._lang()

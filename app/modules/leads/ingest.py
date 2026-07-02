@@ -139,7 +139,7 @@ class IngestService:
         """Fresh inbound re-enables the bot — except when a human leads the stage.
 
         Dormant leads wake up into qualifying (S1 semantics) with a journal entry."""
-        if lead.stage in HUMAN_LED_STAGES:
+        if lead.is_blocked or lead.stage in HUMAN_LED_STAGES:
             return
         if lead.stage == Stage.DORMANT:
             self.session.add(StageEvent(

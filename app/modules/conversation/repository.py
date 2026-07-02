@@ -30,17 +30,18 @@ class ThreadRepo(_LeadThreadRepo):
 class MessageRepo(_LeadMessageRepo):
     """Adds dialog loading for the prompt builder."""
 
-    async def dialog(self, thread_id: int) -> list[Message]:
+    async def dialog(
+        self, thread_id: int, since: datetime | None = None
+    ) -> list[Message]:
         """The thread's most recent messages (capped), oldest-first for the prompt builder.
 
         Capped at _MAX_CONTEXT_MSGS so an active thread doesn't grow the LLM context —
-        and the bill — without bound on every reply."""
-        q = (
-            self._q()
-            .where(Message.thread_id == thread_id)
-            .order_by(Message.occurred_at.desc(), Message.id.desc())
-            .limit(_MAX_CONTEXT_MSGS)
-        )
+        and the bill — without bound. `since` (a thread's context_cleared_at) drops
+        history before a manual clear so it never re-enters the prompt."""
+        q = self._q().where(Message.thread_id == thread_id)
+        if since is not None:
+            q = q.where(Message.occurred_at > since)
+        q = q.order_by(Message.occurred_at.desc(), Message.id.desc()).limit(_MAX_CONTEXT_MSGS)
         rows = list((await self.session.exec(q)).all())
         return list(reversed(rows))
 

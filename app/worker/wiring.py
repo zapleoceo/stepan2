@@ -64,6 +64,7 @@ async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[
         .where(
             Lead.branch_id == branch_id,
             Lead.agent_enabled.is_(True),  # type: ignore[attr-defined]
+            Lead.is_blocked.is_(False),  # type: ignore[attr-defined]
             Lead.stage.not_in(BOT_SILENT_STAGES),  # type: ignore[attr-defined]
             ChannelThread.last_in_at.is_not(None),  # type: ignore[attr-defined]
             (ChannelThread.last_out_at.is_(None))  # type: ignore[attr-defined]
