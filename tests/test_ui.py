@@ -621,13 +621,6 @@ def test_products_delete_missing_prod_returns_303(client: TestClient) -> None:
     assert resp.status_code in (303, 500)
 
 
-def test_settings_save_missing_setting_returns_dash(client: TestClient) -> None:
-    resp = client.post("/ui/settings/99999/save", data={"value": "x"})
-    assert resp.status_code in (200, 500)
-    if resp.status_code == 200:
-        assert "—" in resp.text or resp.text == ""
-
-
 def test_chat_stage_invalid_stage_coerced_to_new(client: TestClient) -> None:
     resp = client.post("/ui/chat/99999/stage", data={"stage": "invalid"})
     assert resp.status_code in (200, 404, 500)

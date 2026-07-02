@@ -55,7 +55,8 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
 
     resp = RedirectResponse(url="/ui/inbox", status_code=303)
     resp.set_cookie(
-        SESSION_COOKIE, token, max_age=SESSION_MAX_AGE_S, httponly=True, samesite="lax",
+        SESSION_COOKIE, token, max_age=SESSION_MAX_AGE_S,
+        httponly=True, samesite="lax", secure=True,
     )
     return resp
 

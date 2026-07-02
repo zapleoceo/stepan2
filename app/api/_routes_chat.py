@@ -35,9 +35,29 @@ _VALID_STAGES = frozenset({
 })
 
 
+async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) -> int | None:
+    """Thread's lead branch_id, or None if it doesn't exist or is outside the caller's
+    allowed branches — the per-thread tenant-ownership guard (blocks cross-branch IDOR)."""
+    row = (
+        await session.execute(
+            text(
+                "SELECT l.branch_id FROM channel_thread ct"
+                " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+            ),
+            {"tid": thread_id},
+        )
+    ).first()
+    if row is None:
+        return None
+    if allowed is not None and row[0] not in allowed:
+        return None
+    return row[0]
+
+
 @router.get("/chat/{thread_id}/panel", response_class=HTMLResponse)
 async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -54,7 +74,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                 {"tid": thread_id},
             )
         ).first()
-        if not info:
+        if not info or (allowed is not None and info[3] not in allowed):
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         msgs = await fetch_messages(session, thread_id)
         pending = await fetch_pending(session, thread_id)
@@ -86,21 +106,14 @@ async def chat_send(
     apply_lang(request)
     text_body = text_body.strip()
     src = source if source in _AGENT_SOURCES else "manager"
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
-        info = (
-            await session.execute(
-                text(
-                    "SELECT l.branch_id FROM channel_thread ct"
-                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
-        if not info or not text_body:
+        branch_id = await _guarded_branch(session, thread_id, allowed)
+        if branch_id is None or not text_body:
             msgs = await fetch_messages(session, thread_id)
             return HTMLResponse(messages_html(msgs, [], thread_id))
         session.add(Outbox(
-            branch_id=info[0], thread_id=thread_id, text=text_body, source=src,
+            branch_id=branch_id, thread_id=thread_id, text=text_body, source=src,
             llm_info=(llm_info if src == "agent" else None),
         ))
         await session.flush()
@@ -113,7 +126,10 @@ async def chat_send(
 async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLResponse:
     """Return only message bubbles newer than after_id plus a fresh poll sentinel."""
     apply_lang(request)
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
         rows = (
             await session.execute(
                 text(
@@ -161,7 +177,10 @@ async def chat_stage(
     apply_lang(request)
     if stage not in _VALID_STAGES:
         stage = "new"
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         info = (
             await session.execute(
                 text(
@@ -201,7 +220,10 @@ async def chat_stage(
 @router.post("/chat/{thread_id}/suggest", response_class=HTMLResponse)
 async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
         msgs = (
             await session.execute(
                 text(
@@ -242,7 +264,10 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
 async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     """Translate the last inbound message (global toolbar button)."""
     lang_code = apply_lang(request)
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
         row = (
             await session.execute(
                 text(
@@ -287,9 +312,12 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
 
 
 @router.get("/chat/{thread_id}/msg/{mid}/tr", response_class=HTMLResponse)
-async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HTMLResponse:  # noqa: ARG001
+async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HTMLResponse:
     """Translate a specific message bubble to Russian (per-bubble 🌐 button)."""
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
         row = (
             await session.execute(
                 text("SELECT text FROM message WHERE id = :mid AND thread_id = :tid"),
@@ -316,11 +344,14 @@ async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HT
 
 
 @router.post("/chat/{thread_id}/msg/{mid}/delete", response_class=HTMLResponse)
-async def msg_delete(thread_id: int, mid: int) -> HTMLResponse:
+async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse:
     """Retract a message. Outgoing → request an IG unsend (worker revokes, then the
     row disappears); inbound → we can't unsend the lead's message, so only our local
     copy is removed. Never claims a retraction that didn't happen in IG."""
+    allowed = branch_ids_from_request(request)
     async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
         row = (
             await session.execute(
                 text("SELECT direction FROM message WHERE id=:mid AND thread_id=:tid"),

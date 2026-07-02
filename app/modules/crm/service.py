@@ -5,9 +5,11 @@ pattern but push-based). Gated by settings: crm_enabled + crm_webhook_url. A fai
 POST leaves the row unsynced; the next tick retries."""
 from __future__ import annotations
 
+import ipaddress
 import logging
 from datetime import UTC, datetime
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -16,6 +18,27 @@ from app.adapters.db.models import ManagerAlert
 from app.modules.settings.service import get_settings
 
 logger = logging.getLogger(__name__)
+
+_BLOCKED_HOSTS = frozenset({"localhost", "metadata", "metadata.google.internal"})
+
+
+def is_safe_webhook_url(url: str) -> bool:
+    """SSRF guard for the operator-set CRM URL: https only, no localhost / private /
+    link-local host (blocks exfil of lead PII to 169.254.169.254 or internal services)."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower()
+    if host in _BLOCKED_HOSTS or not ("." in host or ":" in host):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)  # literal IP → must be global
+    except ValueError:
+        return True  # a hostname (DNS) — acceptable; host denylist above catches localhost
+    return ip.is_global
 
 
 class CrmTransport(Protocol):
@@ -35,7 +58,10 @@ class CrmSyncService:
     async def sync_pending(self, limit: int = 20) -> int:
         cfg = await get_settings(self.session, self.branch_id)
         url = (cfg.crm_webhook_url or "").strip()
-        if not cfg.crm_enabled or not url.startswith("http"):
+        if not cfg.crm_enabled or not url:
+            return 0
+        if not is_safe_webhook_url(url):
+            logger.warning("crm sync branch=%d: unsafe webhook url refused", self.branch_id)
             return 0
         rows = await self._pending(limit)
         synced = 0

@@ -110,45 +110,6 @@ async def settings_panel(request: Request) -> HTMLResponse:
     return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
 
 
-@router.post("/settings/{setting_id}/save", response_class=HTMLResponse)
-async def settings_save(
-    setting_id: int, request: Request, value: str = Form(default=""),
-) -> HTMLResponse:
-    apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    async with session_scope() as session:
-        if branch_ids:
-            await session.execute(
-                text(
-                    "UPDATE app_setting SET value=:v"
-                    " WHERE id=:id AND branch_id=ANY(:bids)"
-                ),
-                {"v": value.strip(), "id": setting_id, "bids": branch_ids},
-            )
-        else:
-            await session.execute(
-                text("UPDATE app_setting SET value=:v WHERE id=:id"),
-                {"v": value.strip(), "id": setting_id},
-            )
-        row = (
-            await session.execute(
-                text("SELECT id, branch_id, key, value FROM app_setting WHERE id=:id"),
-                {"id": setting_id},
-            )
-        ).first()
-    if not row:
-        return HTMLResponse("—")
-    val = str(row[3])
-    save_lbl = _h.escape(t("set.save"))
-    saved_lbl = _h.escape(t("set.saved"))
-    return HTMLResponse(
-        f'<form hx-post="/ui/settings/{setting_id}/save" hx-target="this"'
-        f' hx-swap="outerHTML" style="display:flex;gap:.35rem;align-items:center">'
-        f'<input class="set-val" name="value" value="{_h.escape(val)}">'
-        f'<button class="btn-sm btn-p">{save_lbl}</button>'
-        f'<span style="color:#51cf66;font-size:.75rem">{saved_lbl}</span>'
-        f'</form>'
-    )
 
 
 @router.post("/settings/save", response_class=HTMLResponse)
