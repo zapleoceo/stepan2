@@ -15,7 +15,9 @@ from app.ports.notify import NotifierPort
 class AlertService:
     """Records and dispatches manager hand-offs for one branch."""
 
-    def __init__(self, session: AsyncSession, branch_id: int, notifier: NotifierPort) -> None:
+    def __init__(
+        self, session: AsyncSession, branch_id: int, notifier: NotifierPort | None
+    ) -> None:
         self.session = session
         self.branch_id = branch_id
         self._notifier = notifier
@@ -44,11 +46,12 @@ class AlertService:
                 summary_ru=summary_ru,
             )
         )
-        await self._notifier.notify_manager(
-            branch_id=self.branch_id,
-            lead_id=lead_id,
-            kind=kind,
-            summary_en=summary_en,
-            summary_ru=summary_ru,
-        )
+        if self._notifier is not None:  # row is the CRM record; the ping is best-effort
+            await self._notifier.notify_manager(
+                branch_id=self.branch_id,
+                lead_id=lead_id,
+                kind=kind,
+                summary_en=summary_en,
+                summary_ru=summary_ru,
+            )
         return alert

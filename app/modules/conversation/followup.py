@@ -113,6 +113,11 @@ class FollowupService:
     async def _queue_followup(
         self, thread_id: int, product_slug: str | None, sent_so_far: int, now: datetime,
     ) -> bool:
+        from app.modules.budget import BudgetService  # noqa: PLC0415 (avoid module cycle)
+        budget = BudgetService(self.session, self.branch_id)
+        if await budget.over_budget():
+            logger.warning("branch=%d over daily LLM budget — followups held", self.branch_id)
+            return False
         dialog = await self.messages.dialog(thread_id)
         if not dialog:
             return False
@@ -128,6 +133,7 @@ class FollowupService:
         raw, meta = await self.llm.chat(
             messages, capability="chat:smart", require_json_schema=True
         )
+        await budget.record(float(meta.get("cost_usd") or 0.0))
         from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
         try:
             decision = parse_decision(raw)

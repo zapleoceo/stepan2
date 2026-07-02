@@ -151,6 +151,22 @@ async def _send_thread(
     return 1 if await sender.send_next(thread_id) is not None else 0
 
 
+async def sync_crm(ctx: dict[str, Any]) -> int:
+    """Push unsynced manager alerts to each branch's CRM webhook (crm_enabled gates)."""
+    from app.adapters.crm import CrmWebhook  # noqa: PLC0415
+    from app.modules.crm import CrmSyncService  # noqa: PLC0415
+    synced = 0
+    transport = CrmWebhook()
+    async with session_scope() as session:
+        for branch in await wiring.active_branches(session):
+            assert branch.id is not None
+            try:
+                synced += await CrmSyncService(session, branch.id, transport).sync_pending()
+            except Exception:
+                logger.exception("crm sync failed branch=%d", branch.id)
+    return synced
+
+
 def _redis_settings() -> RedisSettings:
     """ARQ broker connection from the app's redis_url (parsed, never reconstructed)."""
     return RedisSettings.from_dsn(settings().redis_url)
@@ -160,7 +176,9 @@ class WorkerSettings:
     """ARQ worker config. Cron drives the three orchestration tasks on a steady cadence;
     they are staggered so each minute ingests, then replies, then sends in order."""
 
-    functions = [ingest_active_channels, reply_pending, send_outbox, schedule_followups]
+    functions = [
+        ingest_active_channels, reply_pending, send_outbox, schedule_followups, sync_crm,
+    ]
     cron_jobs = [
         cron(ingest_active_channels, second=0, run_at_startup=False),
         cron(reply_pending, second=20, run_at_startup=False),
@@ -168,6 +186,8 @@ class WorkerSettings:
         # Follow-ups run every 10 minutes (minute divisible by 10, second=50)
         cron(schedule_followups, minute={0, 10, 20, 30, 40, 50}, second=50,
              run_at_startup=False),
+        # CRM push every 5 minutes (only branches with crm_enabled + webhook URL)
+        cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
     ]
     redis_settings = _redis_settings()
     max_jobs = 10

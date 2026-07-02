@@ -4,12 +4,16 @@ LLM stays behind LLMPort (injected, so tests use a fake) and all DB access goes 
 BranchScoped repos. No branch_id filtering by hand; no sending here — only enqueue."""
 from __future__ import annotations
 
+import logging
 import random
 from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, Outbox
+from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
+from app.adapters.meta_capi import MetaCapi
+from app.domain.enums import Stage
+from app.modules.budget import BudgetService
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import BranchSettings
@@ -19,6 +23,8 @@ from app.ports.notify import NotifierPort
 from .decision import Decision, parse_decision
 from .prompt import build_messages
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
+
+logger = logging.getLogger(__name__)
 
 
 def _fmt_llm_meta(meta: dict) -> str | None:
@@ -69,6 +75,11 @@ class ReplyService:
         if not dialog:
             return None
 
+        budget = BudgetService(self.session, self.branch_id)
+        if await budget.over_budget():
+            logger.warning("branch=%d over daily LLM budget — reply skipped", self.branch_id)
+            return None
+
         context = await self.knowledge.knowledge_context(thread.product_slug)
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(context, dialog, await self._lang(), coaching_notes=notes)
@@ -76,6 +87,7 @@ class ReplyService:
             messages, capability="chat:smart", require_json_schema=True
         )
         self._last_llm_meta = meta
+        await budget.record(float(meta.get("cost_usd") or 0.0))
         return parse_decision(raw)
 
     async def _lang(self) -> str:
@@ -84,11 +96,11 @@ class ReplyService:
         return branch.lang if branch is not None else "id"
 
     async def enqueue_reply(self, thread_id: int, decision: Decision) -> Outbox | None:
-        """Queue the decided reply; None for a foreign thread.
+        """Queue the decided reply AND apply the decision to the lead (S1 semantics).
 
-        Also fires a manager alert when needs_manager=True (if a notifier is wired).
-        scheduled_at respects reply_delay from BranchSettings (random window).
-        """
+        In one transaction with the outbox row: stage transition + stage_event journal,
+        product attribution, hand-off (agent off, handed_off_at, alert card, Meta CAPI).
+        scheduled_at respects reply_delay from BranchSettings (random window)."""
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
@@ -102,12 +114,77 @@ class ReplyService:
                 llm_info=_fmt_llm_meta(self._last_llm_meta),
             )
         )
-        if decision.needs_manager and self._notifier is not None:
-            await self._raise_manager_alert(thread_id, thread.lead_id, decision)
+        lead = await self.session.get(Lead, thread.lead_id)
+        if lead is not None:
+            await self._apply_decision(lead, thread, decision)
+        if decision.needs_manager:
+            await self._raise_manager_alert(
+                thread_id, thread.lead_id, decision,
+                lead.phone_e164 if lead is not None else None,
+            )
         return outbox
 
+    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> None:
+        """Move the funnel: stage priority ready+contact → READY, needs_manager →
+        MANAGER, ready w/o contact → PRESENTING, else the model's stage."""
+        if decision.product_slug and thread.product_slug is None:
+            thread.product_slug = decision.product_slug
+            self.session.add(thread)
+        new_stage = self._stage_for(decision, lead)
+        if new_stage == lead.stage:
+            return
+        self.session.add(StageEvent(
+            branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+            from_stage=str(lead.stage), to_stage=str(new_stage), actor="bot",
+            reason="needs_manager" if decision.needs_manager else
+                   ("ready" if decision.ready else "model decision"),
+        ))
+        lead.stage = new_stage
+        if new_stage == Stage.MANAGER:
+            lead.agent_enabled = False  # human takes over; manager may re-enable
+        if new_stage == Stage.READY:
+            await self._handoff(lead, thread)
+        self.session.add(lead)
+        logger.info("branch=%d lead=%d stage → %s", self.branch_id, lead.id, new_stage)
+
+    def _stage_for(self, decision: Decision, lead: Lead) -> Stage:
+        if decision.ready and lead.phone_e164:
+            return Stage.READY
+        if decision.needs_manager:
+            return Stage.MANAGER
+        if decision.ready:  # ready without a contact — keep selling until we have one
+            return Stage.PRESENTING
+        return decision.stage
+
+    async def _handoff(self, lead: Lead, thread) -> None:
+        """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        lead.agent_enabled = False
+        lead.handed_off_at = now
+        lead.ready_subtype = lead.ready_subtype or "deal"
+        alerts = AlertService(self.session, self.branch_id, self._notifier)
+        try:
+            await alerts.raise_alert(
+                lead_id=lead.id,
+                kind="ready_deal",
+                summary_en=f"Lead is ready to enroll · phone {lead.phone_e164}",
+                summary_ru=f"Лид готов записаться · телефон {lead.phone_e164}",
+                thread_id=thread.id,
+                lead_phone=lead.phone_e164,
+            )
+        except Exception:
+            logger.warning("handoff alert failed lead=%s", lead.id, exc_info=True)
+        cfg = self.settings
+        if cfg is not None and cfg.meta_pixel_id and cfg.meta_capi_token:
+            await MetaCapi().send_lead(
+                cfg.meta_pixel_id, cfg.meta_capi_token,
+                event_id=f"handoff-{self.branch_id}-{lead.id}",
+                phone=lead.phone_e164,
+            )
+
     async def _raise_manager_alert(
-        self, thread_id: int, lead_id: int, decision: Decision
+        self, thread_id: int, lead_id: int, decision: Decision,
+        lead_phone: str | None = None,
     ) -> None:
         q = decision.manager_question or ""
         gap = decision.kb_gap or ""
@@ -123,10 +200,10 @@ class ReplyService:
                 summary_en=summary_en,
                 summary_ru=summary_ru,
                 thread_id=thread_id,
+                lead_phone=lead_phone,
             )
         except Exception:
-            import logging  # noqa: PLC0415
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "manager alert failed thread=%s lead=%s", thread_id, lead_id, exc_info=True
             )
 

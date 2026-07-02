@@ -34,9 +34,10 @@ class SessionStatus(StrEnum):
     CHALLENGE = "challenge"  # требуется ре-логин/верификация
 
 
-# Стадии, в которых бот молчит (ведёт человек / завершено).
+# Стадии, в которых бот молчит безусловно. `manager` сюда НЕ входит (S1-семантика):
+# молчание там задаёт per-lead agent_enabled, менеджер может вернуть бота под надзором.
 BOT_SILENT_STAGES: frozenset[Stage] = frozenset(
-    {Stage.READY, Stage.HANDED_OFF, Stage.DORMANT, Stage.MANAGER}
+    {Stage.READY, Stage.HANDED_OFF, Stage.DORMANT}
 )
 
 # Стадии, где ведёт человек — свежий входящий НЕ включает бота обратно
