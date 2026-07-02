@@ -151,6 +151,37 @@ async def _send_thread(
     return 1 if await sender.send_next(thread_id) is not None else 0
 
 
+async def process_deletions(ctx: dict[str, Any]) -> int:
+    """Carry out requested IG unsends: revoke in IG first, delete locally on success."""
+    from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
+    done = 0
+    async with session_scope() as session:
+        for branch in await wiring.active_branches(session):
+            assert branch.id is not None
+            channels = {c.id: c for c in await wiring.active_channels(session, branch.id)}
+            svc = DeletionService(session, branch.id)
+            for channel_id, channel in channels.items():
+                pending = await svc.pending(channel_id)
+                if not pending:
+                    continue
+                try:
+                    port = await wiring.build_channel_port(session, channel)
+                except (NotImplementedError, KeyError, RuntimeError) as exc:
+                    logger.warning("skip unsend channel=%s: %s", channel_id, exc)
+                    continue
+                if not hasattr(port, "revoke"):
+                    continue  # channel doesn't support unsend
+                by_thread: dict[int, str] = {}
+                for msg in pending:
+                    if msg.thread_id not in by_thread:
+                        thread = await ThreadRepo(session, branch.id).by_id(msg.thread_id)
+                        if thread is not None:
+                            by_thread[msg.thread_id] = thread.external_thread_id
+                for ext_thread in set(by_thread.values()):
+                    done += await svc.process(channel_id, ext_thread, port)  # type: ignore[arg-type]
+    return done
+
+
 async def sync_crm(ctx: dict[str, Any]) -> int:
     """Push unsynced manager alerts to each branch's CRM webhook (crm_enabled gates)."""
     from app.adapters.crm import CrmWebhook  # noqa: PLC0415
@@ -177,12 +208,15 @@ class WorkerSettings:
     they are staggered so each minute ingests, then replies, then sends in order."""
 
     functions = [
-        ingest_active_channels, reply_pending, send_outbox, schedule_followups, sync_crm,
+        ingest_active_channels, reply_pending, send_outbox, schedule_followups,
+        process_deletions, sync_crm,
     ]
     cron_jobs = [
         cron(ingest_active_channels, second=0, run_at_startup=False),
         cron(reply_pending, second=20, run_at_startup=False),
         cron(send_outbox, second=40, run_at_startup=False),
+        # Unsend requests every minute (second=30, between reply and send)
+        cron(process_deletions, second=30, run_at_startup=False),
         # Follow-ups run every 10 minutes (minute divisible by 10, second=50)
         cron(schedule_followups, minute={0, 10, 20, 30, 40, 50}, second=50,
              run_at_startup=False),

@@ -252,10 +252,29 @@ async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HT
 
 @router.post("/chat/{thread_id}/msg/{mid}/delete", response_class=HTMLResponse)
 async def msg_delete(thread_id: int, mid: int) -> HTMLResponse:
-    """Delete a message from DB; HTMX removes the bubble via outerHTML swap to empty."""
+    """Retract a message. Outgoing → request an IG unsend (worker revokes, then the
+    row disappears); inbound → we can't unsend the lead's message, so only our local
+    copy is removed. Never claims a retraction that didn't happen in IG."""
     async with session_scope() as session:
+        row = (
+            await session.execute(
+                text("SELECT direction FROM message WHERE id=:mid AND thread_id=:tid"),
+                {"mid": mid, "tid": thread_id},
+            )
+        ).first()
+        if row is None:
+            return HTMLResponse("")
+        if row[0] == "out":
+            await session.execute(
+                text("UPDATE message SET delete_requested=true WHERE id=:mid"),
+                {"mid": mid},
+            )
+            return HTMLResponse(
+                '<div class="bb bb-o" style="opacity:.5;font-style:italic;font-size:.78rem">'
+                "⏳ отзывается…</div>"
+            )
         await session.execute(
-            text("DELETE FROM message WHERE id = :mid AND thread_id = :tid"),
+            text("DELETE FROM message WHERE id=:mid AND thread_id=:tid"),
             {"mid": mid, "tid": thread_id},
         )
     return HTMLResponse("")

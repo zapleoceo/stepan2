@@ -104,6 +104,11 @@ class InstagrapiTransport:
         )
         return {"item_id": message.id}
 
+    async def revoke_direct(self, thread_id: str, item_id: str) -> None:
+        """Unsend our own message in IG (raises on failure — caller keeps the flag)."""
+        client = self._ensure_client()
+        await asyncio.to_thread(client.direct_message_delete, int(thread_id), item_id)
+
     async def account_health(self) -> str:
         client = self._ensure_client()
         try:

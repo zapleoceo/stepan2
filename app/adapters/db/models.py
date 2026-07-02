@@ -171,6 +171,7 @@ class Message(SQLModel, table=True):
     text: str = Field(default="")
     occurred_at: datetime = Field(default_factory=_utcnow)
     llm_info: str | None = Field(default=None)
+    delete_requested: bool = Field(default=False, index=True, description="ждёт IG-unsend")
 
 
 class Outbox(SQLModel, table=True):

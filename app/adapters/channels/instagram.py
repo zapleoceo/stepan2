@@ -21,6 +21,9 @@ class IGTransport(Protocol):
     async def send_direct(self, thread_id: str, text: str) -> dict[str, Any]:
         ...
 
+    async def revoke_direct(self, thread_id: str, item_id: str) -> None:
+        ...
+
     async def account_health(self) -> str:
         ...
 
@@ -44,6 +47,14 @@ class InstagramAdapter:
         except Exception as exc:  # transport failure → caller decides retry/hand-off
             return SendResult(ok=False, error=str(exc))
         return SendResult(ok=True, external_message_id=str(raw.get("item_id", "")))
+
+    async def revoke(self, external_thread_id: str, external_message_id: str) -> bool:
+        """Unsend one of our messages in IG; False on transport failure (keep + retry)."""
+        try:
+            await self._t.revoke_direct(external_thread_id, external_message_id)
+        except Exception:  # noqa: BLE001 — worker logs, keeps the flag, retries next tick
+            return False
+        return True
 
     async def session_status(self) -> SessionStatus:
         return _map_health(await self._t.account_health())
