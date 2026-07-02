@@ -2,18 +2,23 @@
 
 record() accumulates the broker's cost_usd per branch-local day; over_budget() answers
 "may this branch spend more today?" against the daily_budget_usd setting (0 = off).
-Single worker process → select-then-upsert is race-safe enough; a duplicate-day insert
-loses to the unique constraint and is retried as an update."""
+Accumulation is a single atomic INSERT … ON CONFLICT DO UPDATE — no select-then-insert
+race and (critically) no rollback on a caller-owned session."""
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import LlmSpend
 from app.modules.settings.service import get_settings
+
+_UPSERT = (
+    "INSERT INTO llm_spend (branch_id, day, used_usd, calls)"
+    " VALUES (:b, :d, :c, 1)"
+    " ON CONFLICT (branch_id, day) DO UPDATE"
+    " SET used_usd = used_usd + excluded.used_usd, calls = calls + 1"
+)
 
 
 def _branch_today(tz_offset_h: int) -> date:
@@ -28,30 +33,25 @@ class BudgetService:
         self.branch_id = branch_id
 
     async def record(self, cost_usd: float) -> None:
-        """Add one call's cost to today's ledger row (creates it on first call)."""
-        if cost_usd < 0:
+        """Add one call's cost to today's ledger row — atomic upsert, never rolls back."""
+        if cost_usd <= 0:
             return
         day = await self._today()
-        row = await self._row(day)
-        if row is None:
-            row = LlmSpend(branch_id=self.branch_id, day=day)
-            try:
-                self.session.add(row)
-                await self.session.flush()
-            except IntegrityError:  # lost a same-day insert race — fall back to update
-                await self.session.rollback()
-                row = await self._row(day)
-                if row is None:  # pragma: no cover — rollback removed it; re-create
-                    row = LlmSpend(branch_id=self.branch_id, day=day)
-                    self.session.add(row)
-        row.used_usd = (row.used_usd or 0.0) + cost_usd
-        row.calls = (row.calls or 0) + 1
-        self.session.add(row)
+        await self.session.execute(
+            text(_UPSERT), {"b": self.branch_id, "d": day, "c": cost_usd}
+        )
         await self.session.flush()
 
     async def spent_today(self) -> float:
-        row = await self._row(await self._today())
-        return row.used_usd if row is not None else 0.0
+        """Today's accumulated spend — raw read so it reflects the latest upsert."""
+        day = await self._today()
+        val = (
+            await self.session.execute(
+                text("SELECT used_usd FROM llm_spend WHERE branch_id=:b AND day=:d"),
+                {"b": self.branch_id, "d": day},
+            )
+        ).scalar()
+        return float(val) if val is not None else 0.0
 
     async def over_budget(self) -> bool:
         """True when today's spend reached daily_budget_usd (setting ≤ 0 = gate off)."""
@@ -64,12 +64,6 @@ class BudgetService:
     async def _today(self) -> date:
         cfg = await get_settings(self.session, self.branch_id)
         return _branch_today(cfg.tz_offset_h)
-
-    async def _row(self, day: date) -> LlmSpend | None:
-        q = select(LlmSpend).where(
-            LlmSpend.branch_id == self.branch_id, LlmSpend.day == day
-        )
-        return (await self.session.exec(q)).first()
 
 
 def _to_float(raw: object) -> float:

@@ -114,6 +114,8 @@ class OutboxSender:
         Manager sends do not touch the cycle."""
         if row.source not in ("agent", "followup"):
             return
+        if row.source == "followup":
+            thread.followups_sent += 1  # this nudge counts now that it actually went out
         schedule = cfg.followup_schedule_h
         if cfg.followup_enabled and schedule and thread.followups_sent < len(schedule):
             thread.next_followup_at = now + timedelta(

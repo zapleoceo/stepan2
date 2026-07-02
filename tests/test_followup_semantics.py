@@ -138,6 +138,16 @@ async def test_manager_send_does_not_touch_followup_cycle(db_session) -> None:
     assert thread.next_followup_at is None  # cycle untouched
 
 
+async def test_followup_send_bumps_step_and_arms_next(db_session) -> None:
+    bid, tid, _lead, thread = await _world(db_session, followups_sent=0)
+    db_session.add(Outbox(branch_id=bid, thread_id=tid, text="nudge", source="followup",
+                          scheduled_at=_NOW - timedelta(seconds=5)))
+    await db_session.flush()
+    await OutboxSender(db_session, bid, FakeChannel()).send_next(tid)
+    assert thread.followups_sent == 1  # step counted on the actual send
+    assert thread.next_followup_at is not None  # next step armed
+
+
 async def test_last_followup_send_puts_lead_dormant(db_session) -> None:
     bid, tid, lead, thread = await _world(db_session, followups_sent=3)  # sched exhausted
     db_session.add(Outbox(branch_id=bid, thread_id=tid, text="nudge", source="followup",
@@ -152,15 +162,15 @@ async def test_last_followup_send_puts_lead_dormant(db_session) -> None:
 
 # ─── followup service ─────────────────────────────────────────────────────────
 
-async def test_due_thread_queues_nudge_and_burns_step(db_session) -> None:
+async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_session) -> None:
     bid, tid, _lead, thread = await _world(db_session, timer_due=True)
     assert await _svc(db_session, bid).run() == 1
     row = await _pending(db_session, tid)
     assert row is not None and row.source == "followup" and row.llm_info
     refreshed = (await db_session.exec(
         select(ChannelThread).where(ChannelThread.id == tid))).first()
-    assert refreshed.followups_sent == 1
-    assert refreshed.next_followup_at is None  # consumed; re-armed after send
+    assert refreshed.followups_sent == 0  # step burns only on a successful send, not here
+    assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
 async def test_lead_spoke_last_not_followed_up(db_session) -> None:

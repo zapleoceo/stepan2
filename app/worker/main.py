@@ -104,35 +104,47 @@ def _build_notifier(branch_cfg: object) -> NotifierPort | None:
 
 
 async def reply_pending(ctx: dict[str, Any]) -> int:
-    """Decide and enqueue the agent reply for every thread awaiting one. Returns enqueued."""
+    """Decide and enqueue the agent reply for every thread awaiting one. Returns enqueued.
+
+    Each thread runs in its OWN transaction so a poison thread (bad LLM JSON, DB error)
+    can't roll back replies already committed for other threads/branches this tick."""
     enqueued = 0
     llm = BrokerLLM()
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            branch_cfg = await get_settings(session, branch.id)
-
-            if not branch_cfg.agent_enabled:
+        branches = await wiring.active_branches(session)
+    for branch in branches:
+        assert branch.id is not None
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch.id)
+            if not cfg.agent_enabled:
                 logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
                 continue
-
-            if branch_cfg.is_quiet_hour():
+            if cfg.is_quiet_hour():
                 logger.info("branch %s: quiet hours — skip reply_pending", branch.id)
                 continue
-
-            knowledge = KnowledgeService(session, branch.id)
-            notifier = _build_notifier(branch_cfg)
-            reply = ReplyService(
-                session, branch.id, llm, knowledge,
-                branch_settings=branch_cfg, notifier=notifier,
-            )
-            for thread_id in await wiring.threads_awaiting_reply(session, branch.id):
-                decision = await reply.decide(thread_id)
-                if decision is None:
-                    continue
-                if await reply.enqueue_reply(thread_id, decision) is not None:
-                    enqueued += 1
+            thread_ids = await wiring.threads_awaiting_reply(session, branch.id)
+        for thread_id in thread_ids:
+            if await _reply_thread(branch.id, thread_id, llm):
+                enqueued += 1
     return enqueued
+
+
+async def _reply_thread(branch_id: int, thread_id: int, llm: BrokerLLM) -> bool:
+    """One thread's decide+enqueue in its own transaction; isolate failures per thread."""
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            reply = ReplyService(
+                session, branch_id, llm, KnowledgeService(session, branch_id),
+                branch_settings=cfg, notifier=_build_notifier(cfg),
+            )
+            decision = await reply.decide(thread_id)
+            if decision is None:
+                return False
+            return await reply.enqueue_reply(thread_id, decision) is not None
+    except Exception:
+        logger.exception("reply failed branch=%d thread=%d", branch_id, thread_id)
+        return False
 
 
 async def schedule_followups(ctx: dict[str, Any]) -> int:
@@ -157,14 +169,24 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
 
 
 async def send_outbox(ctx: dict[str, Any]) -> int:
-    """Drain one pending outbox line per thread through its channel. Returns rows attempted."""
+    """Drain one pending outbox line per thread through its channel. Returns rows attempted.
+
+    Per-thread transaction: an already-delivered IG send is committed before the next
+    thread runs, so a later failure can never roll back a 'sent' row into a re-send."""
     attempted = 0
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
+        branches = await wiring.active_branches(session)
+    for branch in branches:
+        assert branch.id is not None
+        async with session_scope() as session:
             channels = {c.id: c for c in await wiring.active_channels(session, branch.id)}
-            for thread_id in await wiring.threads_with_pending_outbox(session, branch.id):
-                attempted += await _send_thread(session, branch.id, thread_id, channels)
+            thread_ids = await wiring.threads_with_pending_outbox(session, branch.id)
+        for thread_id in thread_ids:
+            try:
+                async with session_scope() as session:
+                    attempted += await _send_thread(session, branch.id, thread_id, channels)
+            except Exception:
+                logger.exception("send failed branch=%d thread=%d", branch.id, thread_id)
     return attempted
 
 

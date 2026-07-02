@@ -156,11 +156,11 @@ class FollowupService:
             scheduled_at=now,
             llm_info=_fmt_llm_meta(meta),
         ))
-        # consume the timer + burn the attempt; OutboxSender re-arms after the send
+        # consume the timer so run() won't re-pick it; the step count is bumped only
+        # when the row actually sends (OutboxSender), so a failed send never burns a step
         thread = await self.threads.by_id(thread_id)
         if thread is not None:
             thread.next_followup_at = None
-            thread.followups_sent = sent_so_far + 1
             self.session.add(thread)
             await self.session.flush()
         return True
