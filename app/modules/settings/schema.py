@@ -93,10 +93,13 @@ SCHEMA: list[SettingSection] = [
            help=_l("direct — текст · rag — вектор · canary:N — A/B",
                    "direct — text · rag — vector · canary:N — A/B", "direct · rag · canary:N"),
            width="210px"),
+        # hidden until the RAG / tech-context / web-search features are ported — the
+        # keys are still parsed + seeded, but showing dead toggles misleads the operator.
         _f("tech_usecase_enabled", "bool", "true",
-           _l("Кейсы под лида", "Tailor use-cases", "Kasus sesuai lead"), width="130px"),
+           _l("Кейсы под лида", "Tailor use-cases", "Kasus sesuai lead"),
+           width="130px", hidden=True),
         _f("tech_search_enabled", "bool", "false",
-           _l("Веб-поиск", "Web search", "Pencarian web"), width="130px"),
+           _l("Веб-поиск", "Web search", "Pencarian web"), width="130px", hidden=True),
     ]),
     SettingSection("fa-solid fa-bell",
                    _l("Уведомления", "Notifications", "Notifikasi"), [

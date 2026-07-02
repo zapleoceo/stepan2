@@ -121,6 +121,13 @@ def test_no_llm_provider_token_keys() -> None:
     assert not (keys & {"llm_backend", "openai_key", "gemini_key", "provider_key"})
 
 
+def test_unconsumed_tech_toggles_hidden_but_still_seeded() -> None:
+    """tech_* do nothing yet → not rendered, but kept in defaults so nothing regresses."""
+    html = settings_form_html({}, "en")
+    assert "Tailor use-cases" not in html and "Web search" not in html
+    assert "tech_usecase_enabled" in S.defaults() and "tech_search_enabled" in S.defaults()
+
+
 def test_current_value_overrides_default() -> None:
     html = settings_form_html({"hourly_cap": "7"}, "en")
     assert 'value="7"' in html
