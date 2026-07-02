@@ -139,3 +139,44 @@ class _FakeLLM:
 
     async def embed(self, texts):  # noqa: ANN001, ANN201
         return [[0.0] for _ in texts]
+
+
+# ─── ||| multi-bubble split ───────────────────────────────────────────────────
+
+def test_split_bubbles() -> None:
+    from app.modules.conversation.reply import _split_bubbles
+    assert _split_bubbles("hello") == ["hello"]
+    assert _split_bubbles("a ||| b ||| c") == ["a", "b", "c"]
+    assert _split_bubbles("a|||b|||c|||d") == ["a", "b", "c d"]  # overflow merged into last
+    assert _split_bubbles("   |||   ") == []
+
+
+async def test_enqueue_splits_into_staggered_bubbles(db_session) -> None:
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    db_session.add(ch)
+    db_session.add(lead)
+    await db_session.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    db_session.add(thread)
+    await db_session.flush()
+    db_session.add(Message(branch_id=b.id, thread_id=thread.id, channel_id=ch.id,
+                           external_id="m1", direction="in", sent_by="lead", text="halo",
+                           occurred_at=_NOW))
+    await db_session.flush()
+
+    svc = ReplyService(db_session, b.id, _FakeLLM(), KnowledgeService(db_session, b.id),
+                       branch_settings=_parse({}), notifier=None)
+    svc._last_llm_meta = {"model": "m", "cost_usd": 0.01}  # normally set by decide()
+    decision = Decision(reply="Halo kak|||Ada info menarik", stage=Stage.QUALIFYING,
+                        product_slug=None, ready=False, needs_manager=False)
+    await svc.enqueue_reply(thread.id, decision)
+    rows = list((await db_session.exec(
+        select(Outbox).where(Outbox.thread_id == thread.id).order_by(Outbox.scheduled_at)
+    )).all())
+    assert [r.text for r in rows] == ["Halo kak", "Ada info menarik"]
+    assert rows[1].scheduled_at > rows[0].scheduled_at  # staggered
+    assert rows[0].llm_info is not None and rows[1].llm_info is None  # cost on first only

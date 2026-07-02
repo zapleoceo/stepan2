@@ -26,6 +26,18 @@ from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 logger = logging.getLogger(__name__)
 
+_BUBBLE_GAP_S = 6  # stagger between split reply bubbles (human typing cadence)
+_MAX_BUBBLES = 3
+
+
+def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
+    """Split the model's reply on '|||' into ≤max_parts non-empty bubbles; overflow is
+    merged into the last one so we never send more than max_parts messages."""
+    parts = [p.strip() for p in reply.split("|||") if p.strip()]
+    if len(parts) <= max_parts:
+        return parts
+    return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
+
 
 def _fmt_llm_meta(meta: dict) -> str | None:
     model = (meta.get("model") or "").split("/")[-1]
@@ -104,16 +116,18 @@ class ReplyService:
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
-        scheduled_at = self._scheduled_at()
-        outbox = await self.outbox.add(
-            Outbox(
-                branch_id=self.branch_id,
-                thread_id=thread_id,
-                text=decision.reply,
-                scheduled_at=scheduled_at,
-                llm_info=_fmt_llm_meta(self._last_llm_meta),
+        base = self._scheduled_at()
+        outbox: Outbox | None = None
+        for i, bubble in enumerate(_split_bubbles(decision.reply)):
+            outbox = await self.outbox.add(
+                Outbox(
+                    branch_id=self.branch_id,
+                    thread_id=thread_id,
+                    text=bubble,
+                    scheduled_at=base + timedelta(seconds=i * _BUBBLE_GAP_S),
+                    llm_info=_fmt_llm_meta(self._last_llm_meta) if i == 0 else None,
+                )
             )
-        )
         lead = await self.session.get(Lead, thread.lead_id)
         if lead is not None:
             await self._apply_decision(lead, thread, decision)

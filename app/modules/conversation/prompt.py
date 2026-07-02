@@ -10,11 +10,15 @@ from typing import Any
 from app.adapters.db.models import Message
 
 _DECISION_CONTRACT = (
-    "Reply to the lead in language '{lang}'. Then return ONLY a JSON object: "
+    "Reply to the lead in language '{lang}'. Write like a human texting: split the reply "
+    "into 1-3 SHORT chat bubbles separated by '|||' (not one wall of text). "
+    "Then return ONLY a JSON object: "
     '{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, '
-    '"needs_manager": bool, '
-    '"manager_question": str|null, '
-    '"kb_gap": str|null}}. '
+    '"ready_subtype": str|null, "needs_manager": bool, '
+    '"manager_question": str|null, "kb_gap": str|null}}. '
+    "reply: the message text, with '|||' between bubbles when you split it. "
+    "ready_subtype: 'deal' (ready to enroll/pay) or 'openhouse' (wants the open-house/trial) "
+    "— only when ready=true, else null. "
     "manager_question: the specific thing the lead needs a human to resolve (null if not needed). "
     "kb_gap: knowledge or info you lacked to answer (null if KB was sufficient). "
     "No prose outside the JSON."
