@@ -26,6 +26,8 @@ class InboundMessage:
     ad_media_id: str | None = None       # IG media ID of the ad creative
     ad_preview_url: str | None = None    # creative thumbnail URL
     lead_source: str | None = None       # 'story'|'ad_clicktomsg'|None
+    direction: str = "in"                # 'in' | 'out' (наш ответ из приложения IG)
+    external_id: str | None = None       # реальный id сообщения канала (дедуп)
 
 
 @dataclass(frozen=True)

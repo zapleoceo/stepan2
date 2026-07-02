@@ -1,0 +1,109 @@
+"""Ingest message-loss fixes: bursts kept, own replies recorded as out/manager with
+last_out_at, real-id dedup vs OutboxSender rows, out never revives the bot."""
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+from sqlmodel import select
+
+from app.adapters.channels.instagram import InstagramAdapter
+from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
+from app.domain.enums import ChannelKind, Stage
+from app.modules.leads.ingest import IngestService
+from app.ports.channel import InboundMessage
+
+_NOW = datetime.now(UTC).replace(tzinfo=None)
+
+
+class FakeIGTransport:
+    """Raw thread payload shaped like transports.InstagrapiTransport emits."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self._rows = rows
+
+    async def fetch_threads(self) -> list[dict]:
+        return self._rows
+
+    async def send_direct(self, thread_id: str, text: str) -> dict:
+        return {"item_id": "x"}
+
+    async def account_health(self) -> str:
+        return "ok"
+
+
+async def _world(s) -> tuple[int, int, Lead, ChannelThread]:
+    b = Branch(name="T", lang="id")
+    s.add(b)
+    await s.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    s.add(ch)
+    await s.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    s.add(lead)
+    await s.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    s.add(thread)
+    await s.flush()
+    return b.id, ch.id, lead, thread
+
+
+def _in(text: str, *, ext: str, minutes_ago: int = 0, direction: str = "in") -> InboundMessage:
+    return InboundMessage(
+        external_thread_id="ig-1", sender_id="lead9" if direction == "in" else "own1",
+        text=text, occurred_at=_NOW - timedelta(minutes=minutes_ago),
+        direction=direction, external_id=ext,
+    )
+
+
+async def test_burst_of_lead_messages_all_ingested(db_session) -> None:
+    bid, cid, _, _ = await _world(db_session)
+    burst = [_in("раз", ext="i1", minutes_ago=3), _in("два", ext="i2", minutes_ago=2),
+             _in("три", ext="i3", minutes_ago=1)]
+    created = await IngestService(db_session, bid).ingest(cid, burst)
+    assert [m.text for m in created] == ["раз", "два", "три"]
+
+
+async def test_own_reply_recorded_as_manager_and_moves_last_out(db_session) -> None:
+    bid, cid, lead, thread = await _world(db_session)
+    lead.agent_enabled = False
+    thread.followups_sent = 2
+    await db_session.flush()
+    rows = [_in("уже ответил с телефона", ext="i2", minutes_ago=1, direction="out")]
+    created = await IngestService(db_session, bid).ingest(cid, rows)
+    assert len(created) == 1 and created[0].sent_by == "manager"
+    assert created[0].direction == "out"
+    assert thread.last_out_at is not None  # bot no longer 'owes' a reply
+    # out-messages never touch bot state / followup cycle:
+    assert lead.agent_enabled is False
+    assert thread.followups_sent == 2
+
+
+async def test_dedup_by_real_id_vs_outbox_recorded_row(db_session) -> None:
+    bid, cid, _, thread = await _world(db_session)
+    db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,
+                           external_id="real-77", direction="out", sent_by="agent",
+                           text="бот уже записал", occurred_at=_NOW))
+    await db_session.flush()
+    created = await IngestService(db_session, bid).ingest(
+        cid, [_in("бот уже записал", ext="real-77", direction="out")]
+    )
+    assert created == []
+    n = len((await db_session.exec(
+        select(Message).where(Message.external_id == "real-77"))).all())
+    assert n == 1
+
+
+async def test_out_for_unknown_thread_is_skipped(db_session) -> None:
+    bid, cid, _, _ = await _world(db_session)
+    orphan = InboundMessage(external_thread_id="ig-UNKNOWN", sender_id="own1",
+                            text="x", occurred_at=_NOW, direction="out", external_id="z1")
+    assert await IngestService(db_session, bid).ingest(cid, [orphan]) == []
+
+
+async def test_adapter_maps_direction_and_item_id() -> None:
+    adapter = InstagramAdapter(FakeIGTransport([{
+        "thread_id": "ig-1", "item_id": "it-5", "direction": "out",
+        "sender_id": "own1", "text": "hi", "timestamp": 1_700_000_000_000_000,
+    }]), handle="acc")
+    (msg,) = await adapter.fetch_inbound()
+    assert msg.direction == "out" and msg.external_id == "it-5"

@@ -68,27 +68,33 @@ class InstagrapiTransport:
                 items = t.get("items") or []
                 if not items:
                     continue
-                last = items[0]
-                last_uid = str(last.get("user_id", ""))
-                if own_id and last_uid == own_id:
-                    continue  # last msg is ours — no new inbound
                 users = t.get("users") or []
                 lead_u = next((u for u in users if str(u.get("pk", "")) != own_id), None)
                 acd = t.get("ad_context_data") or {}
                 pm = t.get("professional_metadata") or {}
-                out.append({
-                    "thread_id": str(t.get("thread_id", "")),
-                    "sender_id": last_uid,
-                    "sender_username": (lead_u or {}).get("username") or None,
-                    "sender_name": (lead_u or {}).get("full_name") or None,
-                    "sender_avatar": str((lead_u or {}).get("profile_pic_url") or "") or None,
-                    "text": last.get("text") or "",
-                    "timestamp": last.get("timestamp"),
-                    "ad_id": str(acd["ad_id"]) if acd.get("ad_id") else None,
-                    "ad_media_id": str(pm["ad_ig_media_id"]) if pm.get("ad_ig_media_id") else None,
-                    "ad_preview_url": acd.get("ad_picture_url") or None,
-                    "lead_source": _detect_lead_source(t, (lead_u or {}).get("pk")),
-                })
+                # ALL items, oldest first — a burst of lead messages between polls, and
+                # lead messages sitting behind our own reply, must not be lost. Our own
+                # items come through too (direction=out): a manual reply from the IG app
+                # moves last_out_at so the bot never answers over a human.
+                for item in reversed(items):
+                    uid = str(item.get("user_id", ""))
+                    out.append({
+                        "thread_id": str(t.get("thread_id", "")),
+                        "item_id": str(item.get("item_id", "")) or None,
+                        "direction": "out" if (own_id and uid == own_id) else "in",
+                        "sender_id": uid,
+                        "sender_username": (lead_u or {}).get("username") or None,
+                        "sender_name": (lead_u or {}).get("full_name") or None,
+                        "sender_avatar": str((lead_u or {}).get("profile_pic_url") or "")
+                        or None,
+                        "text": item.get("text") or "",
+                        "timestamp": item.get("timestamp"),
+                        "ad_id": str(acd["ad_id"]) if acd.get("ad_id") else None,
+                        "ad_media_id": str(pm["ad_ig_media_id"])
+                        if pm.get("ad_ig_media_id") else None,
+                        "ad_preview_url": acd.get("ad_picture_url") or None,
+                        "lead_source": _detect_lead_source(t, (lead_u or {}).get("pk")),
+                    })
         return out
 
     async def send_direct(self, thread_id: str, text: str) -> dict[str, Any]:

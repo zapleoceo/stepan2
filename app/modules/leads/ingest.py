@@ -39,9 +39,18 @@ class IngestService:
         """Persist each new inbound; skip duplicates. Returns the rows it created."""
         created: list[Message] = []
         for inbound in messages:
-            external_id = _external_id(inbound)
+            external_id = inbound.external_id or _external_id(inbound)
             if await self.messages.by_external(channel_id, external_id) is not None:
-                continue  # already ingested — idempotent
+                continue  # already ingested — idempotent (incl. rows OutboxSender recorded)
+            if inbound.external_id and await self.messages.by_external(
+                channel_id, _external_id(inbound)
+            ) is not None:
+                continue  # legacy row stored under the synthetic id — don't duplicate
+            if inbound.direction == "out":
+                row = await self._store_outgoing(channel_id, external_id, inbound)
+                if row is not None:
+                    created.append(row)
+                continue
             phone = extract_phone(inbound.text)  # merge key when the lead shares a number
             lead, thread = await self.identity.resolve_or_create(
                 inbound.external_thread_id, channel_id,
@@ -53,6 +62,34 @@ class IngestService:
             )
             created.append(await self._store(lead, thread, channel_id, external_id, inbound))
         return created
+
+    async def _store_outgoing(
+        self, channel_id: int, external_id: str, inbound: InboundMessage
+    ) -> Message | None:
+        """Record OUR message seen in the channel (manual reply from the IG app).
+
+        Moves last_out_at so the bot never answers over a human. Skipped when the
+        thread is unknown (inbound-only business — we never open conversations)."""
+        thread = await self.identity.threads.by_external(
+            channel_id, inbound.external_thread_id
+        )
+        if thread is None:
+            return None
+        msg = await self.messages.add(
+            Message(
+                branch_id=self.branch_id,
+                thread_id=thread.id,
+                channel_id=channel_id,
+                external_id=external_id,
+                direction="out",
+                sent_by="manager",
+                text=inbound.text,
+                occurred_at=inbound.occurred_at,
+            )
+        )
+        if thread.last_out_at is None or inbound.occurred_at > thread.last_out_at:
+            thread.last_out_at = inbound.occurred_at
+        return msg
 
     async def _store(
         self, lead, thread, channel_id: int, external_id: str, inbound: InboundMessage

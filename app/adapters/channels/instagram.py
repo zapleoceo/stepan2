@@ -62,6 +62,8 @@ class InstagramAdapter:
             ad_media_id=thread.get("ad_media_id") or None,
             ad_preview_url=thread.get("ad_preview_url") or None,
             lead_source=thread.get("lead_source") or None,
+            direction=thread.get("direction") or "in",
+            external_id=thread.get("item_id") or None,
         )
 
 
