@@ -699,6 +699,8 @@ def _clear_ctx_btn(tid: int) -> str:
     return (
         f'<button class="act-btn" hx-post="/ui/chat/{tid}/clear" hx-swap="none"'
         f' hx-confirm="{_h.escape(t("chat.clear_confirm"))}"'
+        f' hx-on::after-request="if(event.detail.successful){{this.textContent=\'✓\';'
+        f'setTimeout(()=>{{this.textContent=\'🧹\'}},1500)}}"'
         f' title="{_h.escape(t("chat.clear"))}">🧹</button>'
     )
 
