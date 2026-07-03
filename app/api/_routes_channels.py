@@ -10,12 +10,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
 from app.adapters.crypto import encrypt
+from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
 from app.admin._branch import allowed_branch_ids
 from app.domain.enums import ChannelKind
 
 from ._i18n import apply_lang
 from ._ui_panels import (
+    _ch_form_for,
     _ch_ig_form,
     _ch_meta_form,
     _ch_wa_form,
@@ -102,18 +104,14 @@ async def channel_create(
         return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
     kind_val = kind if kind in (k.value for k in ChannelKind) else ChannelKind.INSTAGRAM.value
     async with session_scope() as session:
-        await session.execute(
-            text(
-                "INSERT INTO channel (branch_id, kind, handle, account_id, is_active)"
-                " VALUES (:bid, :kind, :handle, :acct, :active)"
-            ),
-            {
-                "bid": branch_id, "kind": kind_val,
-                "handle": handle.strip() or None,
-                "acct": account_id.strip() or None,
-                "active": bool(is_active),
-            },
-        )
+        session.add(Channel(
+            branch_id=branch_id,
+            kind=ChannelKind(kind_val),
+            handle=handle.strip() or None,
+            account_id=account_id.strip() or None,
+            is_active=bool(is_active),
+        ))
+        await session.flush()
         html = await _ch_list_html(session, branch_id)
     resp = HTMLResponse(html)
     resp.headers["HX-Trigger"] = "refreshChannelList"
@@ -227,6 +225,21 @@ async def channel_credential(ch_id: int, request: Request) -> HTMLResponse:
         )).first()
     status = st_row[0] if st_row else "none"
     return HTMLResponse(channel_credential_html(ch_id, row[1], status))
+
+
+@router.get("/channels/{ch_id}/form", response_class=HTMLResponse)
+async def channel_form(ch_id: int, request: Request) -> HTMLResponse:
+    """Force the kind-specific entry form (reconnect on an already-active channel)."""
+    apply_lang(request)
+    async with session_scope() as session:
+        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
+            return HTMLResponse(_FORBIDDEN, status_code=403)
+        row = (await session.execute(
+            text("SELECT kind FROM channel WHERE id=:id"), {"id": ch_id},
+        )).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    return HTMLResponse(_ch_form_for(ch_id, row[0]))
 
 
 # ─── Instagram login flow ─────────────────────────────────────────────────────

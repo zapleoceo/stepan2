@@ -222,6 +222,40 @@ async def test_meta_business_session_status(valid: bool, expected: SessionStatus
     assert await adapter.session_status() is expected
 
 
+# --- Persistence (channel_create insert) -----------------------------------
+
+async def test_channel_row_persists_with_created_at(db_session) -> None:
+    """channel.created_at is NOT NULL in Postgres with no server default; the create
+    route must go through the model so default_factory fills it (raw INSERT omitted it
+    and 500'd on prod, while SQLite silently allowed NULL)."""
+    from app.adapters.db.models import Branch, Channel
+
+    b = Branch(name="M", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind("instagram"), handle="@x", is_active=True)
+    db_session.add(ch)
+    await db_session.flush()
+    await db_session.refresh(ch)
+    assert ch.id is not None
+    assert ch.created_at is not None
+
+
+def test_credential_panel_shows_session_after_connect() -> None:
+    """Active session → connected view (not a blank login form again); otherwise form."""
+    from app.api._i18n import _lang
+    from app.api._ui_panels import channel_credential_html
+
+    _lang.set("en")
+    active = channel_credential_html(5, "instagram", "active")
+    assert "Session active" in active
+    assert "/ui/channels/5/form" in active  # reconnect button
+    assert 'name="password"' not in active  # login form not re-shown
+
+    fresh = channel_credential_html(5, "instagram", "none")
+    assert 'name="password"' in fresh  # entry form shown when not connected
+
+
 # --- Registry --------------------------------------------------------------
 
 def test_registry_maps_every_kind_to_its_adapter() -> None:

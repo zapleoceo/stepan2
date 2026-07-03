@@ -770,22 +770,29 @@ def channel_credential_html(ch_id: int, kind: str, status: str) -> str:
         f'<span style="font-weight:600;color:#e8eef4;font-size:.82rem">'
         f'{_h.escape(t("ch.connect"))}</span>{st_pill}</div>'
     )
-    if kind == "instagram":
-        body = _ch_ig_form(ch_id)
-    elif kind == "meta_business":
-        body = _ch_meta_form(ch_id)
-    elif kind == "whatsapp":
-        body = _ch_wa_form(ch_id)
-    else:
-        body = '<div class="emp">Unknown channel kind</div>'
+    body = _ch_connected(ch_id) if status == "active" else _ch_form_for(ch_id, kind)
     return header + body
 
 
-def channel_ig_login_form_html(
-    ch_id: int, step: str = "login", flow_id: str = "", error: str = "",
-) -> str:
-    """Standalone IG login form (returned after 2FA challenge or on error)."""
-    return channel_credential_html.__wrapped_ig__(ch_id, step, flow_id, error)  # type: ignore[attr-defined]
+def _ch_form_for(ch_id: int, kind: str) -> str:
+    if kind == "instagram":
+        return _ch_ig_form(ch_id)
+    if kind == "meta_business":
+        return _ch_meta_form(ch_id)
+    if kind == "whatsapp":
+        return _ch_wa_form(ch_id)
+    return '<div class="emp">Unknown channel kind</div>'
+
+
+def _ch_connected(ch_id: int) -> str:
+    """Post-login state: session is active — confirm it and offer a reconnect."""
+    return (
+        f'<div style="color:#51cf66;font-size:.8rem;margin-bottom:.55rem">'
+        f'{_h.escape(t("ch.session_ok"))}</div>'
+        f'<button class="btn-sm" hx-get="/ui/channels/{ch_id}/form"'
+        f' hx-target="#ch-form" hx-swap="innerHTML">'
+        f'{_h.escape(t("ch.reconnect"))}</button>'
+    )
 
 
 def _ch_err(error: str) -> str:

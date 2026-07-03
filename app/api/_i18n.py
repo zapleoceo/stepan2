@@ -272,6 +272,10 @@ _TR: dict[str, dict[str, str]] = {
     "ch.st_exp":   {"ru": "истёк",             "en": "expired",           "id": "kedaluwarsa"},
     "ch.st_chal":  {"ru": "требует входа",     "en": "challenge",         "id": "perlu login"},
     "ch.st_none":  {"ru": "не подключён",      "en": "not connected",     "id": "belum terhubung"},
+    "ch.session_ok": {"ru": "Сессия активна — канал подключён.",
+                      "en": "Session active — channel connected.",
+                      "id": "Sesi aktif — kanal terhubung."},
+    "ch.reconnect": {"ru": "Переподключить",   "en": "Reconnect",         "id": "Sambungkan ulang"},
     "ch.or_login": {"ru": "— или войти напрямую —",
                     "en": "— or login directly —", "id": "— atau login langsung —"},
     # branch selector
