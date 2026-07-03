@@ -43,7 +43,7 @@ router.include_router(_branches_router)
 
 _THREAD_TMPL = (
     "SELECT ct.id, l.display_name, l.stage,"
-    " GREATEST(ct.last_in_at, ct.last_out_at, ct.created_at) AS last_act,"
+    " COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) AS last_act,"
     " l.phone_e164, ct.product_slug, l.ig_username, l.avatar_url,"
     " l.follower_count, l.following_count,"
     " (SELECT m.text FROM message m WHERE m.thread_id = ct.id"
@@ -58,7 +58,8 @@ _THREAD_TMPL = (
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " JOIN branch b ON b.id = l.branch_id"
     " {where}"
-    " ORDER BY GREATEST(ct.last_in_at, ct.last_out_at, ct.created_at) DESC NULLS LAST LIMIT 100"
+    " ORDER BY COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at)"
+    " DESC NULLS LAST LIMIT 100"
 )
 
 _STAGE_COUNTS_Q = (  # noqa: S608
