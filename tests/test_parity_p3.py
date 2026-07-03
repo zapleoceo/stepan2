@@ -127,6 +127,53 @@ async def test_dialog_capped_to_recent(db_session) -> None:
     assert dialog[0].text == "msg15"  # oldest 15 dropped
 
 
+async def test_decide_appends_user_turn_when_dialog_ends_on_assistant(db_session) -> None:
+    """REGRESSION: a re-triggered reply_pending tick can call decide() with a dialog
+    whose newest message is the bot's OWN previous reply (threads_awaiting_reply is
+    meant to prevent this, but wiring.try_lock_thread's own docstring documents the
+    race it closes only on Postgres). Mistral hard-rejects an assistant-trailing
+    messages array ("Expected last role User or Tool ... but got assistant", code
+    3230) — 285 such errors/24h were observed live, all from this path. decide()
+    must append a synthetic user turn so every provider gets a valid shape."""
+    class _SpyLLM:
+        def __init__(self) -> None:
+            self.seen_messages: list[dict] | None = None
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+            self.seen_messages = messages
+            return '{"reply":"ok","stage":"presenting"}', {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001, ANN201
+            return [[0.0] for _ in texts]
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id)
+    db_session.add(ch)
+    db_session.add(lead)
+    await db_session.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    db_session.add(thread)
+    await db_session.flush()
+    db_session.add(Message(branch_id=b.id, thread_id=thread.id, channel_id=ch.id,
+                           external_id="m1", direction="in", sent_by="lead", text="hi",
+                           occurred_at=_NOW - timedelta(minutes=2)))
+    db_session.add(Message(branch_id=b.id, thread_id=thread.id, channel_id=ch.id,
+                           external_id="m2", direction="out", sent_by="bot", text="hello!",
+                           occurred_at=_NOW - timedelta(minutes=1)))
+    await db_session.flush()
+
+    llm = _SpyLLM()
+    svc = ReplyService(db_session, b.id, llm, KnowledgeService(db_session, b.id),
+                       branch_settings=_parse({}), notifier=None)
+    await svc.decide(thread.id)
+    assert llm.seen_messages is not None
+    assert llm.seen_messages[-2]["role"] == "assistant"   # the bot's real last reply
+    assert llm.seen_messages[-1]["role"] == "user"         # synthetic nudge appended
+
+
 # ─── outbox source priority ───────────────────────────────────────────────────
 
 async def test_oldest_pending_prioritizes_manager_then_agent_then_followup(db_session) -> None:

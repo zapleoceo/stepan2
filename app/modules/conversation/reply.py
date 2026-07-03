@@ -111,6 +111,22 @@ class ReplyService:
         lead = await self.session.get(Lead, thread.lead_id)
         messages = build_messages(
             context, dialog, await self._lang(lead), coaching_notes=notes)
+        if messages[-1]["role"] == "assistant":
+            # Defensive: threads_awaiting_reply() only selects threads where the
+            # lead spoke last, so dialog should always end "in" — but a re-triggered
+            # tick (see wiring.try_lock_thread) can still land here with the bot's
+            # own last message trailing. Mistral hard-rejects that shape outright
+            # ("Expected last role User or Tool ... but got assistant", code 3230);
+            # other providers silently treat it as a continuation of that message,
+            # which isn't the intent either. Nudge a fresh turn instead — same
+            # pattern FollowupService already uses for its own assistant-last case.
+            messages.append({
+                "role": "user",
+                "content": "[System: no new message from the lead since your last "
+                            "reply. Write a short natural continuation or check-in "
+                            "if warranted; otherwise keep this turn minimal. Return "
+                            "the JSON as usual.]",
+            })
         raw, meta = await self.llm.chat(
             messages, capability="chat:smart", require_json_schema=True,
             workflow="reply", thread_id=thread_id, branch_id=self.branch_id,
