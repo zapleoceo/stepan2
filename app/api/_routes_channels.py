@@ -17,6 +17,7 @@ from app.adapters.db.session import session_scope
 from app.admin._branch import allowed_branch_ids
 from app.config import settings
 from app.domain.enums import ChannelKind
+from app.modules.channels.service import ChannelService
 
 from ._i18n import apply_lang
 from ._ui_panels import (
@@ -180,23 +181,16 @@ async def channel_save(
 
 @router.post("/channels/{ch_id}/delete", response_class=HTMLResponse)
 async def channel_delete(ch_id: int, request: Request) -> HTMLResponse:
+    """Delete a channel AND cascade its conversation data (threads/messages/media/…),
+    dropping only leads left with no thread on any other channel (see ChannelService)."""
     apply_lang(request)
     async with session_scope() as session:
-        br_row = (await session.execute(
-            text("SELECT branch_id FROM channel WHERE id=:id"), {"id": ch_id}
-        )).first()
-        if not br_row:
+        branch_id = await _channel_branch(session, ch_id, allowed_branch_ids(request))
+        if branch_id is None:
+            return HTMLResponse(_FORBIDDEN, status_code=403)
+        result = await ChannelService(session, branch_id).purge(ch_id)
+        if result is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-        branch_id = br_row[0]
-        branch_ids = allowed_branch_ids(request)
-        if branch_ids and branch_id not in branch_ids:
-            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
-        await session.execute(
-            text("DELETE FROM channel_session WHERE channel_id=:id"), {"id": ch_id}
-        )
-        await session.execute(
-            text("DELETE FROM channel WHERE id=:id"), {"id": ch_id}
-        )
         html = await _ch_list_html(session, branch_id)
     resp = HTMLResponse(html)
     resp.headers["HX-Trigger"] = "refreshChannelList"
