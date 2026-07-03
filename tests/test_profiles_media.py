@@ -82,6 +82,21 @@ async def test_expired_ttl_lead_refreshed(db_session) -> None:
     assert await ProfileService(db_session, bid).refresh(FakeProfileFetcher(), limit=20) == 1
 
 
+async def test_refresh_backfills_missing_name_and_avatar(db_session) -> None:
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid)  # no display_name / ig_username / avatar
+
+    class _NamedFetcher:
+        async def fetch_profile(self, _id: str) -> dict[str, Any]:
+            return {"follower_count": 1, "following_count": 2, "username": "budi",
+                    "full_name": "Budi S", "avatar_url": "https://cdn/x.jpg"}
+
+    await ProfileService(db_session, bid).refresh(_NamedFetcher(), limit=20)
+    got = (await db_session.exec(select(Lead).where(Lead.id == lead.id))).first()
+    assert got.display_name == "Budi S" and got.ig_username == "budi"
+    assert got.avatar_url == "https://cdn/x.jpg"
+
+
 async def test_bot_silent_stage_lead_skipped(db_session) -> None:
     bid = await _branch(db_session)
     await _lead(db_session, bid, stage=Stage.HANDED_OFF)  # bot-silent → not active funnel

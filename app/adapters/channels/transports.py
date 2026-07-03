@@ -186,6 +186,9 @@ class InstagrapiTransport:
         return {
             "follower_count": getattr(info, "follower_count", None),
             "following_count": getattr(info, "following_count", None),
+            "username": getattr(info, "username", None) or None,
+            "full_name": getattr(info, "full_name", None) or None,
+            "avatar_url": str(getattr(info, "profile_pic_url", "") or "") or None,
         }
 
     async def download_media(self, url: str) -> bytes:

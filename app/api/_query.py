@@ -55,12 +55,20 @@ _MSG_COLS = (
 )
 
 
+# A cleared thread hides pre-cutoff messages from the chat window too (not just the LLM
+# prompt) — the rows stay in the DB and in IG, they're just filtered from the view.
+_NOT_CLEARED = (
+    " AND (ct.context_cleared_at IS NULL OR m.occurred_at > ct.context_cleared_at)"
+)
+
+
 async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
     return (
         await session.execute(
             text(
                 f"SELECT {_MSG_COLS} FROM message m"  # noqa: S608
-                " WHERE m.thread_id = :tid ORDER BY m.occurred_at, m.id"
+                " JOIN channel_thread ct ON ct.id = m.thread_id"
+                f" WHERE m.thread_id = :tid{_NOT_CLEARED} ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id},
         )
@@ -72,7 +80,9 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
         await session.execute(
             text(
                 f"SELECT {_MSG_COLS} FROM message m"  # noqa: S608
-                " WHERE m.thread_id = :tid AND m.id > :after ORDER BY m.occurred_at, m.id"
+                " JOIN channel_thread ct ON ct.id = m.thread_id"
+                f" WHERE m.thread_id = :tid AND m.id > :after{_NOT_CLEARED}"
+                " ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id, "after": after_id},
         )

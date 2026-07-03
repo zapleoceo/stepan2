@@ -91,6 +91,9 @@ class InstagramAdapter:
         return {
             "follower_count": raw.get("follower_count"),
             "following_count": raw.get("following_count"),
+            "username": raw.get("username"),
+            "full_name": raw.get("full_name"),
+            "avatar_url": raw.get("avatar_url"),
         }
 
     async def download_media(self, url: str) -> bytes:

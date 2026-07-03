@@ -368,3 +368,35 @@ def test_fmt_time_uses_branch_offset() -> None:
     assert _fmt_time(dt) == "12:00:00"
     set_render_tz(0)
     assert _fmt_time(dt) == "05:00:00"
+
+
+# ─── context-clear hides pre-cutoff messages from the chat window ──────────────
+
+async def test_clear_filters_display(db_session) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
+    from app.api._query import fetch_messages
+    from app.domain.enums import ChannelKind
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1",
+                       context_cleared_at=now)
+    db_session.add(th)
+    await db_session.flush()
+    for i, when in enumerate((now - timedelta(hours=1), now + timedelta(minutes=1))):
+        db_session.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id,
+                               external_id=f"m{i}", direction="in", sent_by="lead",
+                               text=f"msg{i}", occurred_at=when))
+    await db_session.flush()
+
+    rows = await fetch_messages(db_session, th.id)
+    texts = [r[3] for r in rows]
+    assert texts == ["msg1"]  # pre-clear msg0 hidden, post-clear msg1 kept

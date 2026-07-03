@@ -33,7 +33,8 @@ class ProfileService:
         self.branch_id = branch_id
 
     async def stale_leads(self, limit: int) -> list[Lead]:
-        """Active-funnel leads with an IG id whose profile is unsynced or older than TTL."""
+        """Active-funnel leads with an IG id whose profile is unsynced or older than TTL.
+        The refresh also backfills name/username/avatar when the lead still lacks them."""
         cutoff = _utcnow() - PROFILE_TTL
         q = (
             select(Lead)
@@ -59,6 +60,12 @@ class ProfileService:
             now = _utcnow()
             lead.follower_count = profile.get("follower_count")
             lead.following_count = profile.get("following_count")
+            if profile.get("full_name") and lead.display_name is None:
+                lead.display_name = profile["full_name"]
+            if profile.get("username") and lead.ig_username is None:
+                lead.ig_username = profile["username"]
+            if profile.get("avatar_url"):
+                lead.avatar_url = profile["avatar_url"]  # CDN url expires — always refresh
             lead.last_active_at = now
             lead.profile_synced_at = now
             self.session.add(lead)
