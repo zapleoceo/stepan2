@@ -339,7 +339,8 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     ]
     llm = BrokerLLM()
     try:
-        draft, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=300)
+        draft, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=300,
+                                  workflow="suggest", thread_id=thread_id)
     except Exception as exc:
         _log.warning("suggest LLM error tid=%s: %s", thread_id, exc)
         draft = ""
@@ -382,7 +383,8 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     ]
     llm = BrokerLLM()
     try:
-        translation, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=400)
+        translation, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=400,
+                                        workflow="translate", thread_id=thread_id)
     except Exception as exc:
         _log.warning("translate LLM error tid=%s: %s", thread_id, exc)
         translation = ""

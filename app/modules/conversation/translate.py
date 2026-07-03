@@ -18,7 +18,8 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
          "content": f"Translate the following message to {target}. Return ONLY the translation."},
         {"role": "user", "content": body[:800]},
     ]
-    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=400)
+    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=400,
+                            workflow="translate")
     return out.strip() or None
 
 

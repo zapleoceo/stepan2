@@ -133,7 +133,8 @@ class FollowupService:
             "content": _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total),
         })
         raw, meta = await self.llm.chat(
-            messages, capability="chat:smart", require_json_schema=True
+            messages, capability="chat:smart", require_json_schema=True,
+            workflow="followup", thread_id=thread_id, branch_id=self.branch_id,
         )
         await budget.record(float(meta.get("cost_usd") or 0.0))
         from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)

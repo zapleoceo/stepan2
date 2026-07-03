@@ -13,8 +13,9 @@ from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
 
 from ._i18n import apply_lang, t
-from ._query import _branch_where, fetch_ad_funnel
+from ._query import _branch_where, fetch_ad_funnel, fetch_broker_log
 from ._ui_panels import (
+    broker_log_panel_html,
     leads_panel_html,
     members_panel_html,
     outbox_panel_html,
@@ -111,6 +112,19 @@ async def settings_panel(request: Request) -> HTMLResponse:
     return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
 
 
+
+
+_LOG_PAGE_SIZE = 50
+
+
+@router.get("/settings/log", response_class=HTMLResponse)
+async def broker_log_page(request: Request, page: int = 0) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    page = max(0, page)
+    async with session_scope() as session:
+        rows, total = await fetch_broker_log(session, branch_ids, page, _LOG_PAGE_SIZE)
+    return HTMLResponse(broker_log_panel_html(rows, page, _LOG_PAGE_SIZE, total))
 
 
 @router.post("/settings/save", response_class=HTMLResponse)

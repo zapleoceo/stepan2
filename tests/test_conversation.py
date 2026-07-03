@@ -32,6 +32,7 @@ class FakeLLM:
         require_json_schema: bool = False,
         max_tokens: int = 2000,
         temperature: float = 0.7,
+        **_kw: Any,
     ) -> tuple[str, dict[str, Any]]:
         self.seen = messages
         self.json_required = require_json_schema

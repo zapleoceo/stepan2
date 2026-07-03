@@ -294,3 +294,26 @@ class LlmSpend(SQLModel, table=True):
     day: date = Field(index=True, description="локальный день филиала (tz_offset_h)")
     used_usd: float = Field(default=0.0)
     calls: int = Field(default=0)
+
+
+class BrokerLog(SQLModel, table=True):
+    """Одна строка на КАЖДЫЙ вызов брокера (reply/translate/embed/suggest). Точка записи
+    одна — BrokerLLM: у брокера есть цена/латентность/провайдер, но нет thread_id и типа
+    вызова — их знает только Степан. Смотрится на /settings/log. 15-дневная ретенция."""
+    __tablename__ = "broker_log"
+
+    id: int | None = Field(default=None, primary_key=True)
+    request_id: str | None = Field(default=None, description="broker request_id — для сверки")
+    branch_id: int | None = Field(default=None, index=True)
+    thread_id: int | None = Field(default=None)
+    kind: str | None = Field(default=None, description="workflow: reply/translate/embed/…")
+    capability: str | None = Field(default=None)
+    provider: str | None = Field(default=None)
+    model: str | None = Field(default=None)
+    tokens_in: int = Field(default=0)
+    tokens_out: int = Field(default=0)
+    cost_usd: float = Field(default=0.0)
+    latency_ms: int | None = Field(default=None)
+    ok: bool = Field(default=True)
+    error: str | None = Field(default=None, description="сообщение ошибки при ok=false")
+    created_at: datetime = Field(default_factory=_utcnow, index=True)

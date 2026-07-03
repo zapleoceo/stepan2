@@ -214,6 +214,28 @@ _TR: dict[str, dict[str, str]] = {
     "outbox.scheduled": {"ru": "Запланир.",    "en": "Scheduled",   "id": "Dijadwalkan"},
     "outbox.chat":      {"ru": "Чат",          "en": "Chat",        "id": "Chat"},
     "outbox.sent":      {"ru": "Отправлено",   "en": "Sent",        "id": "Terkirim"},
+    # broker log page
+    "nav.log":          {"ru": "Лог брокера",  "en": "Broker log",  "id": "Log broker"},
+    "log.title":        {"ru": "Лог вызовов брокера", "en": "Broker call log",
+                         "id": "Log panggilan broker"},
+    "log.intro": {
+        "ru": "Каждый вызов брокера — ответы, follow-up, перевод, эмбеддинг, coach. "
+              "request_id — для сверки с брокером.",
+        "en": "Every broker call — replies, follow-ups, translation, embedding, coach. "
+              "request_id maps to the broker's own log.",
+        "id": "Setiap panggilan broker — balasan, follow-up, terjemahan, embedding, coach.",
+    },
+    "log.when":         {"ru": "Время",        "en": "Time",        "id": "Waktu"},
+    "log.kind":         {"ru": "Тип",          "en": "Kind",        "id": "Jenis"},
+    "log.chat":         {"ru": "Чат",          "en": "Chat",        "id": "Chat"},
+    "log.model":        {"ru": "Модель",       "en": "Model",       "id": "Model"},
+    "log.cost":         {"ru": "Цена",         "en": "Cost",        "id": "Biaya"},
+    "log.dur":          {"ru": "Время",        "en": "Latency",     "id": "Durasi"},
+    "log.empty":        {"ru": "Пока пусто",   "en": "No calls yet", "id": "Belum ada"},
+    "log.prev":         {"ru": "Назад",        "en": "Prev",        "id": "Sebelumnya"},
+    "log.next":         {"ru": "Вперёд",       "en": "Next",        "id": "Berikutnya"},
+    "log.page":         {"ru": "Стр.",         "en": "Page",        "id": "Hal."},
+    "log.total":        {"ru": "всего",        "en": "total",       "id": "total"},
     "help.outbox": {
         "ru": (
             "Очередь исходящих сообщений."

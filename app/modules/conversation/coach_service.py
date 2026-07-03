@@ -48,7 +48,8 @@ async def propose_edit(
     ]
     try:
         raw, _meta = await llm.chat(
-            messages, capability="chat:edit", max_tokens=800, temperature=0.1
+            messages, capability="chat:edit", max_tokens=800, temperature=0.1,
+            workflow="coach", branch_id=branch_id,
         )
         cleaned = (
             raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

@@ -993,6 +993,7 @@ def app_shell(
         + '<div class="nav-sep"></div>'
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox")
+        + _hna("nav.log", "/ui/settings/log", "fa-solid fa-list", "log")
     )
 
     def _lb(code: str) -> str:

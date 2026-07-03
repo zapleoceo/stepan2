@@ -1,15 +1,19 @@
 """Broker LLM adapter — the ONLY LLM path. Implements LLMPort over AIbroker HTTP.
 
 No provider keys in this app: the broker holds them and returns cost_usd, so per-branch
-budgeting uses the real broker price."""
+budgeting uses the real broker price. Every call (reply/translate/embed/suggest) is logged
+to broker_log — the single write point — for the /settings/log audit page."""
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
 import httpx
 
 from app.config import settings
+
+_log = logging.getLogger(__name__)
 
 
 class BrokerLLM:
@@ -28,6 +32,9 @@ class BrokerLLM:
         require_json_schema: bool = False,
         max_tokens: int = 2000,
         temperature: float = 0.7,
+        workflow: str | None = None,
+        thread_id: int | None = None,
+        branch_id: int | None = None,
     ) -> tuple[str, dict[str, Any]]:
         body: dict[str, Any] = {
             "messages": messages,
@@ -37,15 +44,20 @@ class BrokerLLM:
         if require_json_schema:
             body["response_format"] = {"type": "json_object"}
         start = time.perf_counter()
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post(
-                f"{self._url}/v1/chat",
-                params={"capability": capability},
-                headers={"X-Project-Key": self._key},
-                json=body,
-            )
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        r.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=60) as c:
+                r = await c.post(
+                    f"{self._url}/v1/chat",
+                    params={"capability": capability},
+                    headers={"X-Project-Key": self._key},
+                    json=body,
+                )
+            r.raise_for_status()
+        except Exception as exc:
+            await _log_call(capability, workflow or "chat", thread_id, branch_id,
+                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
+                            ok=False, error=_err_text(exc))
+            raise
         d = r.json()
         meta = {
             "model": d["model"],
@@ -53,20 +65,71 @@ class BrokerLLM:
             "tokens_out": d["tokens_out"],
             "provider": d["provider"],
             "cost_usd": d["cost_usd"],
-            "elapsed_ms": elapsed_ms,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
             "request_id": d.get("request_id") or d.get("id") or r.headers.get("x-request-id"),
         }
+        await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
         return d["text"], meta
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        thread_id: int | None = None,
+        branch_id: int | None = None,
+    ) -> list[list[float]]:
         if not texts:
             return []
-        async with httpx.AsyncClient(timeout=60) as c:
-            r = await c.post(
-                f"{self._url}/v1/embed",
-                params={"provider": "voyage"},
-                headers={"X-Project-Key": self._key},
-                json={"input": texts},
-            )
-        r.raise_for_status()
-        return r.json()["embeddings"]
+        start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=60) as c:
+                r = await c.post(
+                    f"{self._url}/v1/embed",
+                    params={"provider": "voyage"},
+                    headers={"X-Project-Key": self._key},
+                    json={"input": texts},
+                )
+            r.raise_for_status()
+        except Exception as exc:
+            await _log_call("embedding", "embed", thread_id, branch_id,
+                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
+                            ok=False, error=_err_text(exc))
+            raise
+        d = r.json()
+        await _log_call("embedding", "embed", thread_id, branch_id, {
+            "model": d.get("model"), "provider": d.get("provider"),
+            "tokens_in": d.get("tokens_in") or 0, "cost_usd": d.get("cost_usd") or 0,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
+            "request_id": d.get("request_id") or d.get("id"),
+        }, ok=True)
+        return d["embeddings"]
+
+
+def _err_text(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{exc.response.status_code} {exc.response.text[:200]}"
+    return f"{type(exc).__name__}: {exc}"[:200]
+
+
+async def _log_call(
+    capability: str, workflow: str, thread_id: int | None, branch_id: int | None,
+    meta: dict[str, Any], *, ok: bool, error: str | None = None,
+) -> None:
+    """Write one broker_log row. Fail-safe: a logging error must NEVER break a reply."""
+    try:
+        from app.adapters.db.models import BrokerLog
+        from app.adapters.db.session import session_scope
+        rid = meta.get("request_id")
+        async with session_scope() as s:
+            s.add(BrokerLog(
+                request_id=str(rid) if rid is not None else None,
+                branch_id=branch_id, thread_id=thread_id,
+                kind=workflow, capability=capability,
+                provider=meta.get("provider"), model=meta.get("model"),
+                tokens_in=meta.get("tokens_in") or 0,
+                tokens_out=meta.get("tokens_out") or 0,
+                cost_usd=meta.get("cost_usd") or 0.0,
+                latency_ms=meta.get("elapsed_ms"), ok=ok, error=error,
+            ))
+    except Exception as exc:  # noqa: BLE001 — logging must never break a reply
+        _log.warning("broker_log write failed: %s", str(exc)[:120])

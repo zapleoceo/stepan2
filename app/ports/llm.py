@@ -15,9 +15,15 @@ class LLMPort(Protocol):
         require_json_schema: bool = False,
         max_tokens: int = 2000,
         temperature: float = 0.7,
+        workflow: str | None = None,
+        thread_id: int | None = None,
+        branch_id: int | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        """Returns (text, meta). meta carries cost_usd / model / tokens for budgeting."""
+        """Returns (text, meta). meta carries cost_usd / model / tokens for budgeting.
+        workflow/thread_id/branch_id are audit context for broker_log (optional)."""
         ...
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(
+        self, texts: list[str], *, thread_id: int | None = None, branch_id: int | None = None
+    ) -> list[list[float]]:
         ...

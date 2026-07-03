@@ -1138,3 +1138,95 @@ def reports_panel_html(
         f'</div>'
         f'</div>'
     )
+
+
+# ─── broker log page ──────────────────────────────────────────────────────────
+
+_LOG_KIND = {
+    "reply": {"ru": "ответ", "en": "reply"},
+    "followup": {"ru": "follow-up", "en": "follow-up"},
+    "translate": {"ru": "перевод", "en": "translate"},
+    "embed": {"ru": "эмбеддинг", "en": "embedding"},
+    "coach": {"ru": "правка базы (Coach)", "en": "KB edit (Coach)"},
+    "suggest": {"ru": "черновик менеджеру", "en": "draft for manager"},
+    "chat": {"ru": "chat", "en": "chat"},
+}
+
+
+def _log_kind_label(kind: str | None) -> str:
+    if not kind:
+        return "—"
+    row = _LOG_KIND.get(kind)
+    return row.get(current_lang(), row.get("en", kind)) if row else kind
+
+
+def _log_row(r: object) -> str:
+    req, tid, kind, cap = r.request_id, r.thread_id, r.kind, r.capability
+    model, ti, to, cost = r.model, r.tokens_in, r.tokens_out, r.cost_usd
+    lat, ok, err, created = r.latency_ms, r.ok, r.error, r.created_at
+    when = str(created)[5:19].replace("T", " ") if created else "—"  # MM-DD HH:MM:SS (UTC)
+    rid = f'#{_h.escape(str(req))}' if req else "—"
+    chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}/panel" hx-target="#main"'
+            f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">#{tid}</a>'
+            if tid else '<span style="color:#4a5568">—</span>')
+    tok = int(ti or 0) + int(to or 0)
+    cost_s = "free" if not cost else f"${float(cost):.4f}"
+    lat_s = f"{int(lat) / 1000:.1f}s" if lat else "—"
+    model_s = _h.escape((model or "—").split("/")[-1])
+    fail = "" if ok else ' <span class="st-pill s-fail">fail</span>'
+    title = f' title="{_h.escape(str(err)[:300])}"' if err else ""
+    dim = "" if ok else ' style="opacity:.6"'
+    return (
+        f'<tr{dim}{title}>'
+        f'<td style="font-family:ui-monospace,monospace;font-size:.68rem">{rid}</td>'
+        f'<td style="color:#6b7685;font-size:.7rem;white-space:nowrap">{_h.escape(when)}</td>'
+        f'<td style="font-size:.74rem">{_h.escape(_log_kind_label(kind))}{fail}</td>'
+        f'<td style="font-size:.74rem">{chat}</td>'
+        f'<td style="font-family:ui-monospace,monospace;font-size:.68rem;color:#8899aa">'
+        f'{_h.escape(cap or "—")}</td>'
+        f'<td style="font-family:ui-monospace,monospace;font-size:.68rem">{model_s}</td>'
+        f'<td style="text-align:right;font-size:.7rem;color:#8899aa">{tok}</td>'
+        f'<td style="text-align:right;font-size:.7rem">{_h.escape(cost_s)}</td>'
+        f'<td style="text-align:right;font-size:.7rem;color:#6b7685">{_h.escape(lat_s)}</td>'
+        f'</tr>'
+    )
+
+
+def _log_pager(page: int, size: int, total: int) -> str:
+    pages = max(1, (total + size - 1) // size)
+    cur = page + 1
+    prev = (f'<button class="btn-sm" hx-get="/ui/settings/log?page={page - 1}"'
+            f' hx-target="#main">← {_h.escape(t("log.prev"))}</button>' if page > 0
+            else f'<span class="btn-sm" style="opacity:.35">← {_h.escape(t("log.prev"))}</span>')
+    nxt = (f'<button class="btn-sm" hx-get="/ui/settings/log?page={page + 1}"'
+           f' hx-target="#main">{_h.escape(t("log.next"))} →</button>' if cur < pages
+           else f'<span class="btn-sm" style="opacity:.35">{_h.escape(t("log.next"))} →</span>')
+    return (
+        f'<div style="display:flex;gap:.6rem;align-items:center;margin:.6rem 0">'
+        f'{prev}<span style="color:#6b7685;font-size:.72rem">{_h.escape(t("log.page"))} '
+        f'{cur} / {pages} · {total} {_h.escape(t("log.total"))}</span>{nxt}</div>'
+    )
+
+
+def broker_log_panel_html(rows: list, page: int, size: int, total: int) -> str:
+    title = _h.escape(t("log.title"))
+    intro = _h.escape(t("log.intro"))
+    body = "".join(_log_row(r) for r in rows) or (
+        f'<tr><td colspan="9" style="color:#4a5568">{_h.escape(t("log.empty"))}</td></tr>')
+    head = (
+        f'<tr><th>ID</th><th>{_h.escape(t("log.when"))}</th>'
+        f'<th>{_h.escape(t("log.kind"))}</th><th>{_h.escape(t("log.chat"))}</th>'
+        f'<th>cap</th><th>{_h.escape(t("log.model"))}</th>'
+        f'<th style="text-align:right">tok</th>'
+        f'<th style="text-align:right">{_h.escape(t("log.cost"))}</th>'
+        f'<th style="text-align:right">{_h.escape(t("log.dur"))}</th></tr>'
+    )
+    return (
+        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="pnl-body">'
+        f'<div class="hint">{intro}</div>'
+        f'{_log_pager(page, size, total)}'
+        f'<table class="tbl"><thead>{head}</thead><tbody>{body}</tbody></table>'
+        f'{_log_pager(page, size, total)}'
+        f'</div>'
+    )

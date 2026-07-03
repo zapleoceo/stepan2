@@ -102,7 +102,8 @@ class ReplyService:
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(context, dialog, await self._lang(), coaching_notes=notes)
         raw, meta = await self.llm.chat(
-            messages, capability="chat:smart", require_json_schema=True
+            messages, capability="chat:smart", require_json_schema=True,
+            workflow="reply", thread_id=thread_id, branch_id=self.branch_id,
         )
         self._last_llm_meta = meta
         await budget.record(float(meta.get("cost_usd") or 0.0))

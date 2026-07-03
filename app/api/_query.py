@@ -91,6 +91,27 @@ async def fetch_pending(session: AsyncSession, thread_id: int) -> list:
     ).all()
 
 
+async def fetch_broker_log(
+    session: AsyncSession, branch_ids: list[int] | None, page: int, size: int,
+) -> tuple[list, int]:
+    """One page of broker_log (newest first) + total count, branch-scoped for non-owners.
+
+    ORM select (not raw ANY) so it runs on SQLite too. Rows are BrokerLog instances."""
+    from app.adapters.db.models import BrokerLog  # noqa: PLC0415 (avoid import cycle)
+    base = select(BrokerLog)
+    count_q = select(func.count()).select_from(BrokerLog)
+    if branch_ids:
+        base = base.where(BrokerLog.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+        count_q = count_q.where(BrokerLog.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    total = (await session.execute(count_q)).scalar() or 0
+    rows = (
+        await session.execute(
+            base.order_by(BrokerLog.id.desc()).limit(size).offset(page * size)  # type: ignore[attr-defined]
+        )
+    ).scalars().all()
+    return list(rows), int(total)
+
+
 async def fetch_coach_data(session: AsyncSession, branch_id: int) -> tuple[list, list]:
     """Fetch coaching edits (ASC) and active notes for a branch."""
     edits = (

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from datetime import UTC, datetime
 from typing import Any
 
 from arq import cron
@@ -335,6 +336,22 @@ async def backfill_media(ctx: dict[str, Any]) -> int:
     return done
 
 
+_BROKER_LOG_RETENTION_DAYS = 15
+
+
+async def prune_broker_log(ctx: dict[str, Any]) -> int:
+    """Drop broker_log rows older than the retention window (keeps the table bounded)."""
+    from datetime import timedelta  # noqa: PLC0415
+
+    from sqlalchemy import text  # noqa: PLC0415
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=_BROKER_LOG_RETENTION_DAYS)
+    async with session_scope() as session:
+        res = await session.execute(
+            text("DELETE FROM broker_log WHERE created_at < :c"), {"c": cutoff}
+        )
+    return res.rowcount or 0
+
+
 def _redis_settings() -> RedisSettings:
     """ARQ broker connection from the app's redis_url (parsed, never reconstructed)."""
     return RedisSettings.from_dsn(settings().redis_url)
@@ -346,7 +363,7 @@ class WorkerSettings:
 
     functions = [
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
-        process_deletions, sync_crm, refresh_profiles, backfill_media,
+        process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
     ]
     cron_jobs = [
         # Ingest every 2 min: an IG poll costs several private-API calls each with a
@@ -368,6 +385,8 @@ class WorkerSettings:
         cron(refresh_profiles, minute={0, 30}, second=15, run_at_startup=False),
         # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
+        # Broker-log retention: prune rows older than 15 days, once a day at 03:30
+        cron(prune_broker_log, hour={3}, minute={30}, second=0, run_at_startup=False),
     ]
     redis_settings = _redis_settings()
     max_jobs = 10
