@@ -20,6 +20,11 @@ class KnowledgeRepo(BranchScoped[KnowledgeDoc]):
         q = self._q().where(KnowledgeDoc.slug == slug)
         return (await self.session.exec(q)).first()
 
+    async def all(self) -> list[KnowledgeDoc]:
+        """Every doc of the branch (persona + playbooks + stories) for the prompt block."""
+        q = self._q().order_by(KnowledgeDoc.slug)  # type: ignore[arg-type]
+        return list((await self.session.exec(q)).all())
+
 
 class ProductRepo(BranchScoped[Product]):
     """Product cards of one branch — the only source of price/details in answers."""

@@ -11,6 +11,8 @@ from app.adapters.db.models import Branch, Product
 from .repository import KnowledgeRepo, ProductRepo
 
 PERSONA_SLUG = "persona"
+# Docs that carry the core identity/voice — always first in the assembled block.
+_PERSONA_FIRST = ("persona", "persona_core")
 
 
 class KnowledgeService:
@@ -23,9 +25,14 @@ class KnowledgeService:
         self.products = ProductRepo(session, branch_id)
 
     async def persona_block(self) -> str:
-        """Branch persona doc content, or "" when the branch has no persona."""
-        doc = await self.docs.by_slug(PERSONA_SLUG)
-        return doc.content if doc is not None else ""
+        """The branch's full ruleset for the prompt: every knowledge doc concatenated
+        (persona/persona_core first, then playbooks/stories by slug), each under a [slug]
+        header. "" when the branch has no docs. This is S1's 'direct' knowledge mode —
+        all rules in-context; RAG chunk-selection is a separate future backend."""
+        docs = await self.docs.all()
+        docs.sort(key=lambda d: (d.slug not in _PERSONA_FIRST, d.slug))
+        parts = [f"[{d.slug}]\n{d.content.strip()}" for d in docs if d.content.strip()]
+        return "\n\n".join(parts)
 
     async def product_card(self, slug: str) -> str | None:
         """A single product's content within the branch, or None if absent."""

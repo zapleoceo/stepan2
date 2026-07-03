@@ -26,7 +26,8 @@ async def test_service_isolates_persona_and_products(db_session):
     await _seed(s, b, "persona-B", [("data", "Data B", "card-B")])
 
     svc_a = KnowledgeService(s, a)
-    assert await svc_a.persona_block() == "persona-A"
+    block_a = await svc_a.persona_block()  # all docs, each under a [slug] header
+    assert "persona-A" in block_a and "persona-B" not in block_a
     assert [p.slug for p in await svc_a.products.active()] == ["vibe"]
 
     ctx_a = await svc_a.knowledge_context(None)
