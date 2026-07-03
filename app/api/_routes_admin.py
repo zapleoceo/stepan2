@@ -48,7 +48,7 @@ async def outbox_panel(request: Request) -> HTMLResponse:
     where, params = _branch_where(branch_ids)
     async with session_scope() as session:
         q = (
-            "SELECT id, thread_id, status, source, text, scheduled_at"  # noqa: S608
+            "SELECT id, thread_id, status, source, text, scheduled_at, sent_at"  # noqa: S608
             f" FROM outbox {where} ORDER BY id DESC LIMIT 100"
         )
         rows = (await session.execute(text(q), params)).all()

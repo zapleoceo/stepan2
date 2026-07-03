@@ -235,6 +235,8 @@ _CSS = (
     ".ti-br{color:#8b98a5;font-size:.6rem;margin-left:.3rem;"
     "background:rgba(255,255,255,.07);border-radius:3px;padding:0 .28rem}"
     ".ti-off{font-size:.62rem;margin-left:.3rem;opacity:.85;filter:grayscale(.3)}"
+    ".oq-chat{color:#4da3ff;text-decoration:none;font-family:ui-monospace,monospace;"
+    "font-size:.74rem}.oq-chat:hover{text-decoration:underline}"
     ".kdoc{background:#1a1f2e;border:1px solid #2d3748;border-radius:7px;"
     "padding:.5rem .7rem;margin-bottom:.3rem;cursor:pointer}"
     ".kdoc:hover{border-color:#4a5568}"
@@ -392,13 +394,13 @@ def _ago(dt: datetime | None) -> str:
 
 
 def _fmt_time(dt: datetime | None) -> str:
-    """Exact HH:MM; includes date (DD.MM) if message is older than 24 hours."""
+    """Exact HH:MM:SS; includes date (DD.MM) if the message is older than 24 hours."""
     if dt is None:
         return ""
     now = datetime.now(UTC).replace(tzinfo=None)
     if (now - dt).total_seconds() > 86400:
-        return dt.strftime("%d.%m %H:%M")
-    return dt.strftime("%H:%M")
+        return dt.strftime("%d.%m %H:%M:%S")
+    return dt.strftime("%H:%M:%S")
 
 
 def _badge(stage: str) -> str:
@@ -638,26 +640,45 @@ def poll_sentinel_html(tid: int, after_id: int) -> str:
     )
 
 
+def _pending_bubble(row: object, idx: int) -> str:
+    _pid, ptxt, sched = row  # (outbox id, text, scheduled_at)
+    meta = f'⏳ {_h.escape(t("chat.pending"))} · №{idx + 1}'
+    when = str(sched)[11:19] if sched else ""  # HH:MM:SS (str or datetime both work)
+    if when:
+        meta += f' · ~{when}'  # estimated send time
+    return (
+        f'<div class="bb bb-p"><div class="bt">{_h.escape(str(ptxt or ""))}</div>'
+        f'<div class="bm">{meta}</div></div>'
+    )
+
+
+def pending_block_html(pending: list, tid: int, oob: bool = False) -> str:
+    """Queued (unsent) replies, pinned at the bottom. Re-rendered via an OOB swap on each
+    poll so a just-sent line drops out and the queue №/time stay fresh — and new real
+    messages (inserted at the sentinel ABOVE this block) never shove pending bubbles up."""
+    oob_attr = ' hx-swap-oob="true"' if oob else ""
+    inner = "".join(_pending_bubble(r, i) for i, r in enumerate(pending))
+    return f'<div id="pend-{tid}"{oob_attr}>{inner}</div>'
+
+
 def since_bubbles_html(
-    msgs: list, tid: int, after_id: int, lead_seen_at: datetime | None = None
+    msgs: list, tid: int, after_id: int, lead_seen_at: datetime | None = None,
+    pending: list | None = None,
 ) -> str:
-    """Bubbles for messages newer than after_id plus a fresh poll sentinel."""
+    """New bubbles + fresh sentinel, plus an OOB refresh of the pending block."""
     bubbles = "".join(_bubble(r, tid, lead_seen_at) for r in msgs)
-    return bubbles + poll_sentinel_html(tid, _last_msg_id(msgs) or after_id)
+    out = bubbles + poll_sentinel_html(tid, _last_msg_id(msgs) or after_id)
+    if pending is not None:
+        out += pending_block_html(pending, tid, oob=True)
+    return out
 
 
 def messages_html(
     msgs: list, pending: list, tid: int, lead_seen_at: datetime | None = None
 ) -> str:
     parts = [_bubble(r, tid, lead_seen_at) for r in msgs]
-    pend_label = _h.escape(t("chat.pending"))
-    for row in pending:
-        _, ptxt, _ = row  # type: ignore[misc]
-        parts.append(
-            f'<div class="bb bb-p"><div class="bt">{_h.escape(str(ptxt or ""))}</div>'
-            f'<div class="bm">{pend_label}</div></div>'
-        )
-    parts.append(poll_sentinel_html(tid, _last_msg_id(msgs)))
+    parts.append(poll_sentinel_html(tid, _last_msg_id(msgs)))  # sentinel ABOVE pending
+    parts.append(pending_block_html(pending, tid))  # queued replies pinned at the bottom
     return "".join(parts)
 
 

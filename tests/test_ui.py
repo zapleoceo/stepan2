@@ -414,14 +414,16 @@ def test_outbox_panel_html_statuses() -> None:
     _set_lang("en")
     now = datetime.now(UTC).replace(tzinfo=None)
     rows = [
-        (1, 10, "sent", "agent", "Hello!", now),
-        (2, 10, "pending", "manager", "Wait…", now),
-        (3, 10, "failed", "followup", "Error", now),
+        (1, 10, "sent", "agent", "Hello!", now, now),
+        (2, 77, "pending", "manager", "Wait…", now, None),
+        (3, 10, "failed", "followup", "Error", now, None),
     ]
     html = outbox_panel_html(rows)
     assert "s-sent" in html
     assert "s-pend" in html
     assert "s-fail" in html
+    assert 'hx-get="/ui/chat/77/panel"' in html  # chat number links to the chat
+    assert ">#77<" in html
 
 
 def test_product_edit_html_new() -> None:

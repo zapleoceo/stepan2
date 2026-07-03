@@ -83,15 +83,26 @@ def outbox_panel_html(rows: list) -> str:
         css = {"pending": "s-pend", "sent": "s-sent", "failed": "s-fail"}.get(s, "s-pend")
         return f'<span class="st-pill {css}">{_h.escape(s)}</span>'
 
+    def _chat_link(tid: object) -> str:
+        return (
+            f'<a class="oq-chat" hx-get="/ui/chat/{tid}/panel" hx-target="#main"'
+            f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">'
+            f'#{_h.escape(str(tid))}</a>'
+        )
+
+    def _ts(v: object) -> str:
+        return str(v)[11:19] if v else "—"  # HH:MM:SS
+
     trows = "".join(
         f'<tr>'
+        f'<td>{_chat_link(r[1])}</td>'
         f'<td>{_spill(str(r[2]))}</td>'
         f'<td style="color:#6b7685;font-size:.72rem">{_h.escape(str(r[3]))}</td>'
-        f'<td style="color:#d0d7de;font-size:.77rem">{_h.escape(str(r[4] or "")[:80])}</td>'
-        f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">'
-        f'{str(r[5])[:16] if r[5] else "—"}</td>'
+        f'<td style="color:#d0d7de;font-size:.77rem">{_h.escape(str(r[4] or "")[:70])}</td>'
+        f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">{_ts(r[5])}</td>'
+        f'<td style="color:#6b7685;font-size:.7rem;white-space:nowrap">{_ts(r[6])}</td>'
         f'</tr>'
-        for r in rows  # (id, thread_id, status, source, text, scheduled_at)
+        for r in rows  # (id, thread_id, status, source, text, scheduled_at, sent_at)
     )
     return (
         f'<div class="ch"><span class="ch-n">{title}</span>'
@@ -99,11 +110,13 @@ def outbox_panel_html(rows: list) -> str:
         f'<div class="pnl-body">'
         f'<div class="hint">{hint}</div>'
         f'<table class="tbl">'
-        f'<thead><tr><th>{_h.escape(t("outbox.status"))}</th>'
+        f'<thead><tr><th>{_h.escape(t("outbox.chat"))}</th>'
+        f'<th>{_h.escape(t("outbox.status"))}</th>'
         f'<th>{_h.escape(t("outbox.source"))}</th>'
         f'<th>Text</th>'
-        f'<th>{_h.escape(t("outbox.scheduled"))}</th></tr></thead>'
-        f'<tbody>{trows or "<tr><td colspan=4 style=color:#4a5568>—</td></tr>"}</tbody>'
+        f'<th>{_h.escape(t("outbox.scheduled"))}</th>'
+        f'<th>{_h.escape(t("outbox.sent"))}</th></tr></thead>'
+        f'<tbody>{trows or "<tr><td colspan=6 style=color:#4a5568>—</td></tr>"}</tbody>'
         f'</table></div>'
     )
 

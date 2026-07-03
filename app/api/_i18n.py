@@ -212,6 +212,8 @@ _TR: dict[str, dict[str, str]] = {
     "outbox.status":    {"ru": "Статус",       "en": "Status",      "id": "Status"},
     "outbox.source":    {"ru": "Источник",     "en": "Source",      "id": "Sumber"},
     "outbox.scheduled": {"ru": "Запланир.",    "en": "Scheduled",   "id": "Dijadwalkan"},
+    "outbox.chat":      {"ru": "Чат",          "en": "Chat",        "id": "Chat"},
+    "outbox.sent":      {"ru": "Отправлено",   "en": "Sent",        "id": "Terkirim"},
     "help.outbox": {
         "ru": (
             "Очередь исходящих сообщений."

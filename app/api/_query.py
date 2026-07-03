@@ -84,7 +84,7 @@ async def fetch_pending(session: AsyncSession, thread_id: int) -> list:
         await session.execute(
             text(
                 "SELECT id, text, scheduled_at FROM outbox"
-                " WHERE thread_id = :tid AND status = 'pending' ORDER BY id"
+                " WHERE thread_id = :tid AND status = 'pending' ORDER BY scheduled_at, id"
             ),
             {"tid": thread_id},
         )

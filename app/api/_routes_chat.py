@@ -161,7 +161,9 @@ async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLRes
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
         rows = await fetch_messages_since(session, thread_id, after_id)
-    return HTMLResponse(since_bubbles_html(list(rows), thread_id, after_id))
+        pending = await fetch_pending(session, thread_id)
+    return HTMLResponse(
+        since_bubbles_html(list(rows), thread_id, after_id, pending=pending))
 
 
 @router.post("/chat/{thread_id}/bot-toggle", response_class=HTMLResponse)

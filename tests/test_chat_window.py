@@ -257,6 +257,20 @@ def test_bubble_renders_media_link_preview_and_receipt() -> None:
     assert "🖼 media" not in html                  # placeholder caption hidden
 
 
+def test_pending_bubble_shows_queue_number_and_time_and_is_oob() -> None:
+    from app.api._ui_html import messages_html, since_bubbles_html
+    _set_lang("en")
+    pending = [(1, "first reply", "2026-07-03 08:15:30"),
+               (2, "second reply", "2026-07-03 08:15:36")]
+    html = messages_html([], pending, 4)
+    assert 'id="pend-4"' in html          # pending pinned in its own bottom container
+    assert "№1" in html and "№2" in html   # queue positions
+    assert "08:15:30" in html              # estimated send time (HH:MM:SS)
+    # the 4s poll re-renders pending out-of-band so it stays below new messages
+    since = since_bubbles_html([], 4, 9, pending=pending)
+    assert 'id="pend-4" hx-swap-oob="true"' in since
+
+
 def test_since_bubbles_empty_keeps_cursor() -> None:
     from app.api._ui_html import since_bubbles_html
     _set_lang("en")
