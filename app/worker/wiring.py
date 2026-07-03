@@ -132,8 +132,10 @@ async def build_channel_port(session: AsyncSession, channel: Channel) -> Channel
         if dump is None:
             raise RuntimeError(f"no active session for channel {channel.id}")
         proxy = dump.pop("proxy", None) or settings().ig_proxy  # per-channel proxy first
+        branch = await session.get(Branch, channel.branch_id)
         transport = InstagrapiTransport(
-            username=channel.handle or "", session_settings=dump, proxy=proxy)
+            username=channel.handle or "", session_settings=dump, proxy=proxy,
+            lang=branch.lang if branch else "", tz_offset_h=branch.tz_offset_h if branch else None)
         return InstagramAdapter(transport, handle=channel.handle or "")
     if channel.kind == ChannelKind.META_BUSINESS:
         dump = await _active_session_settings(session, channel.id or 0)

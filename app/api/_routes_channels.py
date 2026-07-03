@@ -1,6 +1,7 @@
 """Channel management routes — CRUD and per-kind credential flows."""
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 from typing import Any
@@ -9,10 +10,12 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
+from app.adapters.channels.ig_client import build_ig_client
 from app.adapters.crypto import encrypt
 from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
 from app.admin._branch import allowed_branch_ids
+from app.config import settings
 from app.domain.enums import ChannelKind
 
 from ._i18n import apply_lang
@@ -256,6 +259,7 @@ async def ig_login_start(
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
+        lang, tz = await _channel_geo(session, ch_id)
     if session_json.strip():
         try:
             dump = json.loads(session_json.strip())
@@ -267,7 +271,6 @@ async def ig_login_start(
         return HTMLResponse(_ch_ig_form(ch_id, error="Username and password required"))
 
     try:
-        from instagrapi import Client  # noqa: PLC0415 (lazy)
         from instagrapi.exceptions import (  # noqa: PLC0415
             ChallengeRequired,
             TwoFactorRequired,
@@ -275,10 +278,12 @@ async def ig_login_start(
     except ImportError:
         return HTMLResponse(_ch_ig_form(ch_id, error="instagrapi not installed on server"))
 
-    cl = Client()
+    # Same proxy+geo as the worker (build_channel_port) — a login geo that differs from
+    # the polling geo triggers an instant checkpoint. See ig_client.build_ig_client.
+    cl = build_ig_client(proxy=settings().ig_proxy, lang=lang, tz_offset_h=tz)
     user, pw = username.strip(), password.strip()
     try:
-        cl.login(user, pw)
+        await asyncio.to_thread(cl.login, user, pw)
     except TwoFactorRequired:
         fid = secrets.token_hex(8)
         _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "2fa",
@@ -291,6 +296,16 @@ async def ig_login_start(
     except Exception as exc:
         return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:160]))
     return await _ig_save(ch_id, cl.get_settings())
+
+
+async def _channel_geo(session: Any, ch_id: int) -> tuple[str, int]:
+    """(branch lang, tz_offset_h) for a channel — drives instagrapi geo alignment."""
+    row = (await session.execute(
+        text("SELECT b.lang, b.tz_offset_h FROM channel c"
+             " JOIN branch b ON b.id = c.branch_id WHERE c.id = :id"),
+        {"id": ch_id},
+    )).first()
+    return (row[0], int(row[1])) if row else ("en", 0)
 
 
 def _resolve_ig_code(cl: Any, flow: dict[str, Any], code: str) -> None:
@@ -320,7 +335,7 @@ async def ig_login_verify(
         return HTMLResponse(_ch_ig_form(ch_id, error="Flow expired — please login again"))
     cl = flow["client"]
     try:
-        _resolve_ig_code(cl, flow, code.strip())
+        await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())
     except Exception as exc:  # keep the flow so the user can retry the code
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=flow_id, error=str(exc)[:160]))
     _ig_flows.pop(flow_id, None)

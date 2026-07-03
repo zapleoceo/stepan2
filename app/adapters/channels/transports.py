@@ -32,21 +32,22 @@ class InstagrapiTransport:
     """Implements channels.instagram.IGTransport by wrapping a logged-in instagrapi client."""
 
     def __init__(self, *, username: str, session_settings: dict[str, Any],
-                 proxy: str = "") -> None:
+                 proxy: str = "", lang: str = "", tz_offset_h: int | None = None) -> None:
         self._username = username
         self._session_settings = session_settings
         self._proxy = proxy
+        self._lang = lang
+        self._tz_offset_h = tz_offset_h
         self._client: Any | None = None
 
     def _ensure_client(self) -> Any:
         if self._client is None:
-            from instagrapi import Client  # lazy: keep instagrapi out of import path/tests
+            # Same factory as the login route → identical proxy+geo, no checkpoint.
+            from app.adapters.channels.ig_client import build_ig_client  # noqa: PLC0415
 
-            client = Client()
-            if self._proxy:
-                client.set_proxy(self._proxy)  # та же гео, что при логине — иначе checkpoint
-            client.set_settings(self._session_settings)
-            self._client = client
+            self._client = build_ig_client(
+                self._session_settings, proxy=self._proxy,
+                lang=self._lang, tz_offset_h=self._tz_offset_h)
         return self._client
 
     async def fetch_threads(self) -> list[dict[str, Any]]:
