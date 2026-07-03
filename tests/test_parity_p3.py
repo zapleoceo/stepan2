@@ -226,4 +226,4 @@ async def test_enqueue_splits_into_staggered_bubbles(db_session) -> None:
     )).all())
     assert [r.text for r in rows] == ["Halo kak", "Ada info menarik"]
     assert rows[1].scheduled_at > rows[0].scheduled_at  # staggered
-    assert rows[0].llm_info is not None and rows[1].llm_info is None  # cost on first only
+    assert rows[0].llm_info is None and rows[1].llm_info is not None  # cost on last bubble only
