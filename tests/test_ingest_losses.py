@@ -103,6 +103,31 @@ async def test_media_message_flags_pending_stubs_asset_and_records_seen(db_sessi
     assert thread.lead_seen_at == seen  # read-receipt captured
 
 
+async def test_content_dedup_catches_pending_to_main_drift(db_session) -> None:
+    """Same message reappears under a new external id (pending→main inbox) — item-level
+    dedup misses it, content dedup (same text, same 2s window, same thread) catches it."""
+    bid, cid, _, _ = await _world(db_session)
+    a = _in("Привет, Дмитрий!", ext="340282...:2026-07-03T01:08:49:764")  # pending synthetic
+    b = InboundMessage(external_thread_id="ig-1", sender_id="lead9",
+                       text="Привет, Дмитрий!", occurred_at=a.occurred_at,
+                       external_id="32891299694350702848")  # same msg, real IG item id
+    created = await IngestService(db_session, bid).ingest(cid, [a, b])
+    assert len(created) == 1  # the drift-dupe is dropped
+
+
+async def test_media_not_content_deduped(db_session) -> None:
+    """Two distinct photos share the placeholder text '🖼 media' — must both survive."""
+    bid, cid, _, _ = await _world(db_session)
+    m1 = InboundMessage(external_thread_id="ig-1", sender_id="lead9", text="🖼 media",
+                        occurred_at=_NOW, external_id="m1",
+                        media_url="http://cdn/a.jpg", media_kind="image")
+    m2 = InboundMessage(external_thread_id="ig-1", sender_id="lead9", text="🖼 media",
+                        occurred_at=_NOW, external_id="m2",
+                        media_url="http://cdn/b.jpg", media_kind="image")
+    created = await IngestService(db_session, bid).ingest(cid, [m1, m2])
+    assert len(created) == 2  # media excluded from content dedup
+
+
 async def test_dedup_by_real_id_vs_outbox_recorded_row(db_session) -> None:
     bid, cid, _, thread = await _world(db_session)
     db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,

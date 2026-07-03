@@ -6,7 +6,9 @@ lives in the modules. Importing this module touches no Redis and no DB — the w
 profile-gated and started only by `arq app.worker.main.WorkerSettings`."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from typing import Any
 
 from arq import cron
@@ -32,9 +34,14 @@ from . import wiring
 
 logger = logging.getLogger(__name__)
 
+# Anti-ban: the cron fires at a fixed second; poll IG a random moment into the minute
+# instead so the private-API calls don't hit on a machine-regular tick (S1 jitter).
+_INGEST_JITTER_S = 12.0
+
 
 async def ingest_active_channels(ctx: dict[str, Any]) -> int:
     """Pull new inbound for every active channel of every active branch. Returns rows stored."""
+    await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
     stored = 0
     async with session_scope() as session:
         for branch in await wiring.active_branches(session):

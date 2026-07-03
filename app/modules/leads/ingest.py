@@ -60,7 +60,9 @@ class IngestService:
                 ig_username=inbound.sender_username,
                 avatar_url=inbound.sender_avatar,
             )
-            created.append(await self._store(lead, thread, channel_id, external_id, inbound))
+            row = await self._store(lead, thread, channel_id, external_id, inbound)
+            if row is not None:
+                created.append(row)
         return created
 
     async def _store_outgoing(
@@ -93,7 +95,11 @@ class IngestService:
 
     async def _store(
         self, lead, thread, channel_id: int, external_id: str, inbound: InboundMessage
-    ) -> Message:
+    ) -> Message | None:
+        if inbound.media_url is None and await self.messages.duplicate_by_content(
+            thread.id, "in", inbound.text, inbound.occurred_at
+        ):
+            return None  # same text already in thread within 2s (pending→main id drift)
         msg = await self.messages.add(
             Message(
                 branch_id=self.branch_id,

@@ -109,6 +109,45 @@ async def test_under_cap_sends(db_session) -> None:
     assert len(channel.sent) == 1
 
 
+class _SeenChannel(FakeChannel):
+    """FakeChannel that also supports a read receipt, recording call order."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.order: list[str] = []
+
+    async def mark_seen(self, external_thread_id: str) -> None:
+        self.order.append("seen")
+
+    async def send_text(self, external_thread_id, text):
+        self.order.append("send")
+        return await super().send_text(external_thread_id, text)
+
+
+async def test_marks_seen_and_pauses_before_send(db_session, monkeypatch) -> None:
+    import app.modules.conversation.outbox as ob
+    slept: list[float] = []
+
+    async def _no_sleep(secs: float) -> None:
+        slept.append(secs)
+
+    monkeypatch.setattr(ob.asyncio, "sleep", _no_sleep)
+    bid, tid = await _setup(db_session, hourly_cap=999, daily_cap=999, sent_now=0)
+    ch = _SeenChannel()
+    row = await OutboxSender(db_session, bid, ch).send_next(tid)
+    assert row is not None and row.status == "sent"
+    assert ch.order == ["seen", "send"]          # read BEFORE replying (anti-ban)
+    assert slept and 2.0 <= slept[0] <= 5.0      # humanlike pause between
+
+
+async def test_no_mark_seen_channel_still_sends(db_session) -> None:
+    # channels without a read receipt (WA/MBS) send without the pause, no error
+    bid, tid = await _setup(db_session, hourly_cap=999, daily_cap=999, sent_now=0)
+    ch = FakeChannel()  # no mark_seen attribute
+    row = await OutboxSender(db_session, bid, ch).send_next(tid)
+    assert row is not None and row.status == "sent"
+
+
 async def test_manager_line_bypasses_cap(db_session) -> None:
     bid, tid = await _setup(
         db_session, hourly_cap=1, daily_cap=1, sent_now=5, pending_source="manager",

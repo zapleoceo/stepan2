@@ -25,6 +25,9 @@ class IGTransport(Protocol):
     async def revoke_direct(self, thread_id: str, item_id: str) -> None:
         ...
 
+    async def mark_seen(self, thread_id: str) -> None:
+        ...
+
     async def account_health(self) -> str:
         ...
 
@@ -62,6 +65,15 @@ class InstagramAdapter:
         except Exception:  # noqa: BLE001 — worker logs, keeps the flag, retries next tick
             return False
         return True
+
+    async def mark_seen(self, external_thread_id: str) -> None:
+        """Best-effort read receipt before replying; never blocks a send on failure."""
+        try:
+            await self._t.mark_seen(external_thread_id)
+        except Exception as exc:  # noqa: BLE001
+            import logging  # noqa: PLC0415
+
+            logging.getLogger(__name__).debug("mark_seen failed: %s", exc)
 
     async def session_status(self) -> SessionStatus:
         return _map_health(await self._t.account_health())

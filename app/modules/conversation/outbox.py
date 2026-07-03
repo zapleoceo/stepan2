@@ -7,7 +7,9 @@ enforced here (the single egress) for anti-ban — automated lines are held back
 branch is over budget; manager-sent lines bypass the cap (human override)."""
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -31,6 +33,8 @@ _SOFT_BLOCK = (
     "rate", "429", "spam", "blocked", "try again", "throttl", "temporarily",
 )
 _RETRY_AFTER = timedelta(minutes=15)
+# Humanlike pause after opening a chat before replying (anti-ban) — S1 parity.
+_SEEN_DELAY_S = (2.0, 5.0)
 
 
 def _is_soft_block(error: str | None) -> bool:
@@ -72,6 +76,7 @@ class OutboxSender:
         if thread is None:
             return None
 
+        await self._humanize(thread.external_thread_id)
         result = await self.channel.send_text(thread.external_thread_id, row.text)
         if result.ok:
             row.status = "sent"
@@ -101,6 +106,18 @@ class OutboxSender:
         self.session.add(row)
         await self.session.flush()
         return row
+
+    async def _humanize(self, external_thread_id: str) -> None:
+        """Read the chat, then pause like a human before replying (anti-ban).
+
+        Only for channels that support a read receipt (IG); a no-op elsewhere. The pause
+        is deliberate — a reply that lands the same instant we 'saw' the message is a bot
+        tell. mark_seen failures never block the send."""
+        seen = getattr(self.channel, "mark_seen", None)
+        if seen is None:
+            return
+        await seen(external_thread_id)
+        await asyncio.sleep(random.uniform(*_SEEN_DELAY_S))  # noqa: S311 — timing, not crypto
 
     async def _plan_followup(self, thread, row: Outbox, cfg, now: datetime) -> None:
         """After a bot send: arm the next follow-up step, or close the cycle.

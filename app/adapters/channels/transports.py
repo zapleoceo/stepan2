@@ -133,7 +133,11 @@ class InstagrapiTransport:
                     uid = str(item.get("user_id", ""))
                     out.append({
                         **base,
-                        "item_id": str(item.get("item_id", "")) or None,
+                        # client_context is IG's own idempotency key — fall back to it so
+                        # an item without item_id still gets a STABLE id (else the synthetic
+                        # fallback drifts by timestamp precision and dupes the message).
+                        "item_id": str(item.get("item_id") or item.get("client_context") or "")
+                        or None,
                         "direction": "out" if (own_id and uid == own_id) else "in",
                         "sender_id": uid,
                         "timestamp": item.get("timestamp"),
@@ -147,6 +151,11 @@ class InstagrapiTransport:
             client.direct_send, text, thread_ids=[int(thread_id)]
         )
         return {"item_id": message.id}
+
+    async def mark_seen(self, thread_id: str) -> None:
+        """Mark the thread read (humanlike: a person reads before replying)."""
+        client = self._ensure_client()
+        await asyncio.to_thread(client.direct_send_seen, int(thread_id))
 
     async def revoke_direct(self, thread_id: str, item_id: str) -> None:
         """Unsend our own message in IG (raises on failure — caller keeps the flag)."""

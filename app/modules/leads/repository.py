@@ -1,10 +1,14 @@
 """Lead/thread/message repos — thin BranchScoped subclasses; isolation stays in base."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, Lead, Message
 from app.adapters.db.repository import BranchScoped
+
+_DEDUP_WINDOW = timedelta(seconds=2)
 
 
 class LeadRepo(BranchScoped[Lead]):
@@ -71,3 +75,18 @@ class MessageRepo(BranchScoped[Message]):
             Message.external_id == external_id,
         )
         return (await self.session.exec(q)).first()
+
+    async def duplicate_by_content(
+        self, thread_id: int, direction: str, text: str, occurred_at: datetime
+    ) -> bool:
+        """Same-text message already in this thread within a 2s window — the pending→main
+        inbox id drift reappears the same message under a new external id, so item-level
+        dedup misses it. Text-only (callers exclude media: placeholders collide)."""
+        q = self._q().where(
+            Message.thread_id == thread_id,
+            Message.direction == direction,
+            Message.text == text,
+            Message.occurred_at >= occurred_at - _DEDUP_WINDOW,
+            Message.occurred_at <= occurred_at + _DEDUP_WINDOW,
+        ).limit(1)
+        return (await self.session.exec(q)).first() is not None
