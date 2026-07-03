@@ -21,6 +21,7 @@ from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
 from .decision import Decision, parse_decision
+from .needs import merge_needs, needs_summary, parse_needs
 from .prompt import build_messages
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
@@ -109,8 +110,10 @@ class ReplyService:
             thread.product_slug, query=_retrieval_query(dialog))
         notes = await self.coaching.active_manager_notes()
         lead = await self.session.get(Lead, thread.lead_id)
+        stored_needs = parse_needs(lead.needs if lead is not None else None)
         messages = build_messages(
-            context, dialog, await self._lang(lead), coaching_notes=notes)
+            context, dialog, await self._lang(lead), coaching_notes=notes,
+            needs_block=needs_summary(stored_needs))
         if messages[-1]["role"] == "assistant":
             # Defensive: threads_awaiting_reply() only selects threads where the
             # lead spoke last, so dialog should always end "in" — but a re-triggered
@@ -133,7 +136,13 @@ class ReplyService:
         )
         self._last_llm_meta = meta
         await budget.record(float(meta.get("cost_usd") or 0.0))
-        return parse_decision(raw)
+        decision = parse_decision(raw)
+        if lead is not None:
+            merged = merge_needs(stored_needs, decision.jobs, decision.pains,
+                                 decision.gains, decision.discovery_complete)
+            lead.needs = merged.to_json()
+            self.session.add(lead)
+        return decision
 
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.
@@ -205,7 +214,20 @@ class ReplyService:
             return Stage.MANAGER
         if decision.ready:  # ready without a contact — keep selling until we have one
             return Stage.PRESENTING
+        # Discovery gate: never present until we've captured a real need (a pain or gain),
+        # even when the lead opened with a direct product question. Force one more
+        # discovery turn instead — the code backstop behind the prompt's discover-first rule.
+        if decision.stage in (Stage.PRESENTING, Stage.OBJECTION) and not self._needs_captured(
+            decision, lead
+        ):
+            return Stage.QUALIFYING
         return decision.stage
+
+    @staticmethod
+    def _needs_captured(decision: Decision, lead: Lead) -> bool:
+        if decision.discovery_complete or decision.has_needs():
+            return True
+        return parse_needs(lead.needs).has_needs()
 
     async def _handoff(self, lead: Lead, thread, subtype: str | None) -> None:
         """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event.

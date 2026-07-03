@@ -15,9 +15,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, Outbox
+from app.adapters.db.models import Branch, Lead, Outbox
 from app.modules.settings.service import BranchSettings
 
+from .needs import needs_summary, parse_needs
 from .prompt import build_messages
 from .reply import _retrieval_query
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
@@ -128,7 +129,10 @@ class FollowupService:
         context = await self.knowledge.knowledge_context(
             product_slug, query=_retrieval_query(dialog))
         notes = await self.coaching.active_manager_notes()
-        messages = build_messages(context, dialog, lang, coaching_notes=notes)
+        lead = await self.session.get(Lead, thread.lead_id) if thread is not None else None
+        needs_block = needs_summary(parse_needs(lead.needs if lead is not None else None))
+        messages = build_messages(context, dialog, lang, coaching_notes=notes,
+                                  needs_block=needs_block)
         total = len(self.settings.followup_schedule_h)
         messages.append({
             "role": "user",

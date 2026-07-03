@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.domain.enums import Stage
 
@@ -37,6 +37,16 @@ class Decision:
     kb_gap: str | None = None
     ready_subtype: str | None = None  # 'deal' | 'openhouse' when ready
     reply_language: str | None = None  # lead's language code when they wrote in another
+    # Discovered customer profile (Value Proposition Canvas): what the lead is trying to
+    # achieve (jobs), their obstacles/fears (pains), and the outcomes they want (gains).
+    jobs: list[str] = field(default_factory=list)
+    pains: list[str] = field(default_factory=list)
+    gains: list[str] = field(default_factory=list)
+    discovery_complete: bool = False
+
+    def has_needs(self) -> bool:
+        """At least one pain or gain captured — the minimum to present against a need."""
+        return bool(self.pains or self.gains)
 
 
 def _strip_fences(raw: str) -> str:
@@ -79,4 +89,22 @@ def parse_decision(raw_json: str) -> Decision:
         kb_gap=data.get("kb_gap") or None,
         ready_subtype=subtype if subtype in ("deal", "openhouse") else None,
         reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
+        jobs=_str_list(data.get("jobs")),
+        pains=_str_list(data.get("pains")),
+        gains=_str_list(data.get("gains")),
+        discovery_complete=bool(data.get("discovery_complete", False)),
     )
+
+
+def _str_list(value: object, max_items: int = 6, max_len: int = 160) -> list[str]:
+    """Clean a model-returned list into ≤max_items short non-empty strings."""
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value:
+        s = str(item).strip()[:max_len]
+        if s:
+            out.append(s)
+        if len(out) >= max_items:
+            break
+    return out

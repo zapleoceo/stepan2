@@ -71,6 +71,8 @@ class Lead(SQLModel, table=True):
     ready_subtype: str | None = Field(default=None)
     preferred_language: str | None = Field(
         default=None, description="если лид попросил другой язык — отвечаем на нём")
+    needs: str | None = Field(
+        default=None, description="JSON-профиль потребности: jobs/pains/gains + discovery_complete")
     agent_enabled: bool = Field(default=True, description="per-lead бот-тумблер (manager takeover)")
     is_blocked: bool = Field(default=False, index=True, description="спам/бан — бот игнорит")
     handed_off_at: datetime | None = Field(default=None)
