@@ -32,7 +32,7 @@ def client() -> TestClient:
 
 def _thread_row(tid: int) -> tuple:
     return (tid, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
-            "+62811", "course-a", "alice", None, 500, 200, "Hi", "in", 1, 0, "Jakarta")
+            "+62811", "course-a", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta")
 
 
 def test_thread_list_marks_active_row() -> None:
@@ -49,6 +49,15 @@ def test_thread_list_no_active_marks_none() -> None:
     _set_lang("en")
     html = thread_list_html([_thread_row(7)], active_tid=None)
     assert 'class="ti on"' not in html
+
+
+def test_thread_card_shows_bot_off_indicator() -> None:
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    off = list(_thread_row(5))
+    off[10] = False  # agent_enabled column
+    assert "🤖⛔" in thread_list_html([tuple(off)])       # disabled → indicator
+    assert "🤖⛔" not in thread_list_html([_thread_row(5)])  # enabled → none
 
 
 def test_thread_card_has_lowercase_search_index() -> None:

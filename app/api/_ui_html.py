@@ -234,6 +234,7 @@ _CSS = (
     ".pres.on{color:#51cf66}.ti-fl{color:#6b7685;font-size:.62rem}"
     ".ti-br{color:#8b98a5;font-size:.6rem;margin-left:.3rem;"
     "background:rgba(255,255,255,.07);border-radius:3px;padding:0 .28rem}"
+    ".ti-off{font-size:.62rem;margin-left:.3rem;opacity:.85;filter:grayscale(.3)}"
     ".kdoc{background:#1a1f2e;border:1px solid #2d3748;border-radius:7px;"
     "padding:.5rem .7rem;margin-bottom:.3rem;cursor:pointer}"
     ".kdoc:hover{border-color:#4a5568}"
@@ -478,7 +479,7 @@ def _source_bar(
 
 def _thread_item(row: object, active_tid: int | None, show_branch: bool = False) -> str:
     (tid, name, stage, last_act, phone, product_slug,
-     ig_username, avatar_url, follower_count, following_count,
+     ig_username, avatar_url, follower_count, following_count, agent_enabled,
      last_msg, last_dir, cnt_in, cnt_out, branch_name) = row  # type: ignore[misc]
     on = " on" if tid == active_tid else ""
     arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
@@ -507,6 +508,10 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         f'<span class="ti-br" title="Branch">🏢 {_h.escape(str(branch_name))}</span>'
         if show_branch and branch_name else ""
     )
+    bot_off = (
+        f'<span class="ti-off" title="{_h.escape(t("chat.bot_off_hint"))}">🤖⛔</span>'
+        if not agent_enabled else ""
+    )
     search_idx = _h.escape(f"{name or ''} {ig_username or ''}".lower())
     return (
         f'<a class="ti{on}" data-search="{search_idx}"'
@@ -516,7 +521,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
-        f'{br_badge}'
+        f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_ago(last_act)}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge} {preview}</div>'
         f'{handle_row}'
@@ -950,11 +955,14 @@ def app_shell(
         "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
         "var s=e.getAttribute('data-search')||'';"
         "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
+        "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
         "document.addEventListener('htmx:afterSettle',function(e){"
-        "var m=e.target&&e.target.classList&&e.target.classList.contains('msgs')?e.target"
-        ":e.target.querySelector&&e.target.querySelector('.msgs');"
-        "if(m)m.scrollTop=m.scrollHeight;"
-        "if(e.target&&e.target.id==='tl')filterTi();});"
+        "var t=e.target;var m=(t&&t.classList&&t.classList.contains('msgs'))?t"
+        ":(t&&t.querySelector&&t.querySelector('.msgs'));"
+        "if(!m&&t&&t.closest)m=t.closest('.msgs');"  # poll bubbles land inside .msgs
+        "if(m){scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
+        "if(!g.complete)g.addEventListener('load',function(){scrollBot(m);},{once:true});});}"
+        "if(t&&t.id==='tl')filterTi();});"
         "function showThr(v){"
         "var el=document.querySelector('.thr');"
         "if(el)el.style.display=v?'':'none';}"

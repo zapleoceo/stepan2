@@ -52,6 +52,9 @@ _TR: dict[str, dict[str, str]] = {
     "inbox.search": {"ru": "🔍 Поиск по имени / @нику",
                      "en": "🔍 Search name / @handle",
                      "id": "🔍 Cari nama / @handle"},
+    "chat.bot_off_hint": {"ru": "Бот выключен для этого лида",
+                          "en": "Bot off for this lead",
+                          "id": "Bot mati untuk lead ini"},
     # chat
     "chat.send":    {"ru": "Отправить",   "en": "Send",        "id": "Kirim"},
     "chat.ph":      {"ru": "Ваше сообщение…","en": "Your message…","id": "Pesan Anda…"},
