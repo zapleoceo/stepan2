@@ -118,24 +118,19 @@ _CSS = (
     ".sp{background:#1f3a2a;color:#4adb7a}.so{background:#3a2a1f;color:#ffa94d}"
     ".sr{background:#1f3a2a;color:#51cf66}.sh{background:#163030;color:#22b8cf}"
     ".sd{background:#2a2a2a;color:#868e96}.sm{background:#3a1f1f;color:#ff6b6b}"
-    # funnel widget
-    ".fnl{padding:.4rem .6rem .5rem;border-bottom:1px solid #1e2636;flex-shrink:0}"
-    ".fnl-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem}"
-    ".fnl-cap{font-size:.6rem;font-weight:800;letter-spacing:.07em;color:#4a5568}"
-    ".fnl-tot{font-size:.68rem;color:#6b7685}"
-    ".fnl-tot b{color:#c8d6e5}"
-    ".fnl-track{display:flex;height:20px;border-radius:3px;overflow:hidden;gap:1px}"
-    ".fseg{display:flex;align-items:center;justify-content:center;cursor:pointer;"
-    "min-width:12px;color:rgba(0,0,0,.7);font-size:.58rem;font-weight:800;"
-    "text-decoration:none;transition:filter .1s}"
-    ".fseg:hover,.fchip:hover,.fnl-all:hover{filter:brightness(1.2)}"
-    ".fseg.on{box-shadow:inset 0 0 0 2px rgba(255,255,255,.85)}"
-    ".fchip.on,.fnl-all.on{text-decoration:underline}"
-    ".fnl-bot{display:flex;gap:.3rem;margin-top:.35rem;flex-wrap:wrap;align-items:center}"
-    ".fchip{display:inline-flex;align-items:center;gap:.18rem;padding:.12rem .38rem;"
-    "border-radius:3px;font-size:.63rem;font-weight:700;cursor:pointer;"
-    "text-decoration:none;border:1px solid transparent}"
-    ".fnl-all{font-size:.62rem;color:#4a5568;cursor:pointer;text-decoration:none;"
+    # funnel: stage filter chips (colour dot + label + count)
+    ".fnl{display:flex;flex-wrap:wrap;gap:.25rem;padding:.4rem .5rem;"
+    "border-bottom:1px solid #1e2636;flex-shrink:0}"
+    ".fpill{display:inline-flex;align-items:center;gap:.28rem;padding:.16rem .42rem;"
+    "border-radius:6px;font-size:.7rem;color:#93a1b3;cursor:pointer;text-decoration:none;"
+    "background:#161b26;border:1px solid transparent;transition:background .1s,border .1s}"
+    ".fpill:hover{background:#1c2230;color:#c8d6e5}"
+    ".fpill.on{background:#1e2b40;border-color:#31527a;color:#e8eef4}"
+    ".fdot{width:.5rem;height:.5rem;border-radius:50%;flex-shrink:0}"
+    ".fpl-l{font-weight:500}"
+    ".fpl-n{font-weight:700;color:#c8d6e5;min-width:1ch;text-align:right}"
+    ".fpill.on .fpl-n{color:#fff}"
+    "._legacy-fnl{font-size:.62rem;color:#4a5568;cursor:pointer;text-decoration:none;"
     "padding:.12rem .3rem;border-radius:3px}"
     # reports panel
     ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
@@ -369,49 +364,25 @@ _SIDE_ICON = {"dormant": "😴", "manager": "👤"}
 
 
 def funnel_html(counts: dict[str, int]) -> str:
-    """Compact funnel bar for the inbox .thr column."""
+    """Stage filter for the inbox .thr column: a clean wrap of stage chips (colour dot +
+    label + count), each filters the thread list; the active one is highlighted."""
     total = sum(counts.values())
-    cap = _h.escape(t("fnl.title"))
-    tot_lbl = _h.escape(t("fnl.total"))
     all_lbl = _h.escape(t("fnl.all"))
 
-    segs = []
-    for s in _PIPELINE:
-        n = counts.get(s, 0)
-        color = _STAGE_COLOR[s]
-        label = _h.escape(t(f"stage.{s}"))
-        segs.append(
-            f'<a class="fseg" style="flex-grow:{max(n,1)};background:{color}"'
-            f' hx-get="/ui/threads?stage={s}" hx-target="#tl" hx-swap="innerHTML"'
-            f' onclick="setFnl(this)" title="{label}: {n}">'
-            f'{"<b>" + str(n) + "</b>" if n > 0 else ""}</a>'
+    def chip(stage: str | None, label: str, n: int, color: str | None) -> str:
+        dot = (f'<span class="fdot" style="background:{color}"></span>' if color else "")
+        url = f"/ui/threads?stage={stage}" if stage else "/ui/threads"
+        on = " on" if stage is None else ""  # 'All' active by default
+        return (
+            f'<a class="fpill{on}" hx-get="{url}" hx-target="#tl" hx-swap="innerHTML"'
+            f' onclick="setFnl(this)" title="{label}">{dot}'
+            f'<span class="fpl-l">{label}</span><span class="fpl-n">{n}</span></a>'
         )
 
-    chips = []
-    for s in _SIDE_STAGES:
-        n = counts.get(s, 0)
-        color = _STAGE_COLOR[s]
-        icon = _SIDE_ICON.get(s, "")
-        label = _h.escape(t(f"stage.{s}"))
-        chips.append(
-            f'<a class="fchip" style="color:{color};border-color:{color}"'
-            f' hx-get="/ui/threads?stage={s}" hx-target="#tl" hx-swap="innerHTML"'
-            f' onclick="setFnl(this)" title="{label}: {n}">{icon} {n}</a>'
-        )
-    chips.append(
-        f'<a class="fnl-all on"'
-        f' hx-get="/ui/threads" hx-target="#tl" hx-swap="innerHTML"'
-        f' onclick="setFnl(this)">{all_lbl}</a>'
-    )
-
-    return (
-        f'<div class="fnl">'
-        f'<div class="fnl-hd"><span class="fnl-cap">{cap}</span>'
-        f'<span class="fnl-tot">{tot_lbl}: <b>{total}</b></span></div>'
-        f'<div class="fnl-track">{"".join(segs)}</div>'
-        f'<div class="fnl-bot">{"".join(chips)}</div>'
-        f'</div>'
-    )
+    pills = [chip(None, all_lbl, total, None)]
+    for s in (*_PIPELINE, *_SIDE_STAGES):
+        pills.append(chip(s, _h.escape(t(f"stage.{s}")), counts.get(s, 0), _STAGE_COLOR[s]))
+    return f'<div class="fnl">{"".join(pills)}</div>'
 
 _IG_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
