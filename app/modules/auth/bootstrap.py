@@ -1,12 +1,12 @@
-"""One-time user bootstrap — seeds platform users from Stepan-1 admins.
+"""User bootstrap — seeds/reconciles platform users from the Stepan-1 admin list.
 
-Run inside the API container (idempotent — safe to re-run):
+Run inside the API container (idempotent + self-correcting — safe to re-run):
   docker exec -e PYTHONPATH=/app stepan2-api python -m app.modules.auth.bootstrap
 
-Mapping from Stepan-1 `admins` table (snapshotted 2026-06-28):
-  admin  → BRANCH_ADMIN  for Indonesia branch (id=1)
-  viewer → SUPER_ADMIN   (platform-wide; only role with cross-branch access)
-"""
+Everyone except the owner is scoped to the Indonesia branch for now (more branches can be
+granted later). Mapping from Stepan-1 `admins` (2026-07-04): admin → BRANCH_ADMIN,
+viewer → BRANCH_VIEWER, both on Indonesia; the owner is the only SUPER_ADMIN.
+Reconcile ensures EXACTLY one membership per user (no duplicates, fixes stale roles)."""
 from __future__ import annotations
 
 import asyncio
@@ -20,53 +20,43 @@ from app.domain.enums import Role
 
 log = logging.getLogger(__name__)
 
-# Stepan-1 `admin` role → BRANCH_ADMIN for Indonesia
-_INDONESIA_ADMINS: list[tuple[int, str]] = [
-    (6254765060, "Citra"),
-    (7630115388, "Excel"),
-    (7844258246, "Lisa"),
-    (1084508593, "Maya"),
-]
+_OWNER: tuple[int, str] = (169510539, "Дима")  # platform owner → SUPER_ADMIN
 
-# Stepan-1 `viewer` role (HQ) → SUPER_ADMIN platform-wide
-# No platform-viewer role exists yet; SUPER_ADMIN is the only cross-branch option.
-_HQ_SUPER_ADMINS: list[tuple[int, str]] = [
-    (382669163,  "@mastermiks Алексей"),
-    (6376632328, "Александр CRM"),
-    (192365781,  "Виктор CRM Team Lead"),
-    (457022581,  "Шаболдас"),
-    (169510539,  "Дима"),  # platform owner
+# All Indonesia staff: (telegram_id, name, role) — scoped to the Indonesia branch.
+_INDONESIA_STAFF: list[tuple[int, str, Role]] = [
+    (6254765060, "Citra", Role.BRANCH_ADMIN),
+    (7630115388, "Excel", Role.BRANCH_ADMIN),
+    (7844258246, "Lisa", Role.BRANCH_ADMIN),
+    (1084508593, "Maya", Role.BRANCH_ADMIN),
+    (382669163, "@mastermiks Алексей", Role.BRANCH_VIEWER),
+    (6376632328, "Александр CRM", Role.BRANCH_VIEWER),
+    (192365781, "Виктор CRM Team Lead", Role.BRANCH_VIEWER),
+    (457022581, "Шаболдас", Role.BRANCH_VIEWER),
 ]
 
 
 async def _upsert_user(s, tg_id: int, name: str) -> User:
-    user = (
-        await s.exec(select(User).where(User.telegram_id == tg_id))
-    ).one_or_none()
+    user = (await s.exec(select(User).where(User.telegram_id == tg_id))).one_or_none()
     if not user:
         user = User(telegram_id=tg_id, name=name)
         s.add(user)
         await s.flush()
-        log.info("  created user %-30s tg=%d", name, tg_id)
+        log.info("  created user %-24s tg=%d", name, tg_id)
     return user
 
 
-async def _ensure_membership(
-    s, user_id: int, branch_id: int | None, role: Role,
-) -> None:
-    exists = (
-        await s.exec(
-            select(Membership).where(
-                Membership.user_id == user_id,
-                Membership.branch_id == branch_id,
-            )
-        )
-    ).one_or_none()
-    if exists:
-        return
-    s.add(Membership(user_id=user_id, branch_id=branch_id, role=role))
+async def _set_only_membership(s, user_id: int, branch_id: int | None, role: Role) -> None:
+    """Make the user's memberships be EXACTLY {(branch_id, role)} — drop the rest."""
+    rows = (await s.exec(select(Membership).where(Membership.user_id == user_id))).all()
+    keep = None
+    for m in rows:
+        if keep is None and m.branch_id == branch_id and m.role == role:
+            keep = m
+        else:
+            await s.delete(m)  # duplicate or stale (e.g. an old super_admin grant)
+    if keep is None:
+        s.add(Membership(user_id=user_id, branch_id=branch_id, role=role))
     await s.flush()
-    log.info("  membership user=%d branch=%s role=%s", user_id, branch_id, role)
 
 
 async def main() -> None:
@@ -80,18 +70,16 @@ async def main() -> None:
         if not indonesia:
             log.error("Indonesia branch not found — run seed first (see docs/deploy.md)")
             return
-
         log.info("Indonesia branch id=%d", indonesia.id)
 
-        log.info("--- Indonesia sales staff (BRANCH_ADMIN) ---")
-        for tg_id, name in _INDONESIA_ADMINS:
-            user = await _upsert_user(s, tg_id, name)
-            await _ensure_membership(s, user.id, indonesia.id, Role.BRANCH_ADMIN)
+        owner = await _upsert_user(s, *_OWNER)
+        await _set_only_membership(s, owner.id, None, Role.SUPER_ADMIN)
+        log.info("owner %s → SUPER_ADMIN", _OWNER[1])
 
-        log.info("--- HQ / platform staff (SUPER_ADMIN) ---")
-        for tg_id, name in _HQ_SUPER_ADMINS:
+        for tg_id, name, role in _INDONESIA_STAFF:
             user = await _upsert_user(s, tg_id, name)
-            await _ensure_membership(s, user.id, None, Role.SUPER_ADMIN)
+            await _set_only_membership(s, user.id, indonesia.id, role)
+            log.info("  %-24s → %s @ Indonesia", name, role)
 
     log.info("=== Done ===")
 

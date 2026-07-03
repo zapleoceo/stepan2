@@ -338,7 +338,7 @@ async def backfill_media(ctx: dict[str, Any]) -> int:
     return done
 
 
-_BROKER_LOG_RETENTION_DAYS = 15
+_BROKER_LOG_RETENTION_DAYS = 30
 
 
 async def prune_broker_log(ctx: dict[str, Any]) -> int:
