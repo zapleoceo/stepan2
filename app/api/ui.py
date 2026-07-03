@@ -45,6 +45,7 @@ _THREAD_TMPL = (
     "SELECT ct.id, l.display_name, l.stage,"
     " GREATEST(ct.last_in_at, ct.last_out_at, ct.created_at) AS last_act,"
     " l.phone_e164, ct.product_slug, l.ig_username, l.avatar_url,"
+    " l.follower_count, l.following_count,"
     " (SELECT m.text FROM message m WHERE m.thread_id = ct.id"
     "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_msg,"
     " (SELECT m.direction FROM message m WHERE m.thread_id = ct.id"

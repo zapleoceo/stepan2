@@ -45,14 +45,36 @@ def _branch_where(
     return "", {}
 
 
+_MSG_COLS = (
+    "m.id, m.direction, m.sent_by, m.text, m.occurred_at, m.llm_info,"
+    " m.link_url, m.preview_url,"
+    " (SELECT ma.id FROM media_asset ma WHERE ma.message_id = m.id"
+    "  AND ma.data IS NOT NULL ORDER BY ma.id LIMIT 1) AS media_id,"
+    " (SELECT ma.kind FROM media_asset ma WHERE ma.message_id = m.id"
+    "  AND ma.data IS NOT NULL ORDER BY ma.id LIMIT 1) AS media_kind"
+)
+
+
 async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
     return (
         await session.execute(
             text(
-                "SELECT id, direction, sent_by, text, occurred_at, llm_info FROM message"
-                " WHERE thread_id = :tid ORDER BY occurred_at, id"
+                f"SELECT {_MSG_COLS} FROM message m"  # noqa: S608
+                " WHERE m.thread_id = :tid ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id},
+        )
+    ).all()
+
+
+async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: int) -> list:
+    return (
+        await session.execute(
+            text(
+                f"SELECT {_MSG_COLS} FROM message m"  # noqa: S608
+                " WHERE m.thread_id = :tid AND m.id > :after ORDER BY m.occurred_at, m.id"
+            ),
+            {"tid": thread_id, "after": after_id},
         )
     ).all()
 

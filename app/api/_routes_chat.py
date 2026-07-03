@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import text
 
 from app.adapters.db.models import Outbox
@@ -16,7 +16,7 @@ from app.admin._branch import allowed_branch_ids
 from app.modules.conversation.translate import translate_message
 
 from ._i18n import apply_lang, t
-from ._query import fetch_messages, fetch_pending
+from ._query import fetch_messages, fetch_messages_since, fetch_pending
 from ._ui_html import (
     chat_block_pill_html,
     chat_bot_pill_html,
@@ -70,7 +70,8 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled, l.is_blocked"
+                    " l.agent_enabled, l.is_blocked,"
+                    " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -84,7 +85,8 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
-     lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked) = info
+     lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
+     follower_count, following_count, last_active_at, lead_seen_at) = info
     return HTMLResponse(
         chat_panel_html(
             thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -94,8 +96,33 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             lead_source=lead_source, ad_id=ad_id,
             ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
             agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
+            follower_count=follower_count, following_count=following_count,
+            last_active_at=last_active_at, lead_seen_at=lead_seen_at,
         )
     )
+
+
+_MIME_FOR_KIND = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/mp4"}
+
+
+@router.get("/media/{asset_id}")
+async def chat_media(asset_id: int, request: Request) -> Response:
+    """Serve a downloaded MediaAsset's bytes (branch-guarded; private cache)."""
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text("SELECT data, mime, kind, branch_id FROM media_asset WHERE id = :id"),
+                {"id": asset_id},
+            )
+        ).first()
+    if row is None or row[0] is None:
+        return Response(status_code=404)
+    if allowed is not None and row[3] not in allowed:
+        return Response(status_code=404)
+    mime = row[1] or _MIME_FOR_KIND.get(row[2], "application/octet-stream")
+    return Response(content=row[0], media_type=mime,
+                    headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.post("/chat/{thread_id}/send", response_class=HTMLResponse)
@@ -133,15 +160,7 @@ async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLRes
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-        rows = (
-            await session.execute(
-                text(
-                    "SELECT id, direction, sent_by, text, occurred_at, llm_info FROM message"
-                    " WHERE thread_id = :tid AND id > :after ORDER BY occurred_at, id"
-                ),
-                {"tid": thread_id, "after": after_id},
-            )
-        ).all()
+        rows = await fetch_messages_since(session, thread_id, after_id)
     return HTMLResponse(since_bubbles_html(list(rows), thread_id, after_id))
 
 
@@ -242,7 +261,8 @@ async def chat_stage(
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled, l.is_blocked"
+                    " l.agent_enabled, l.is_blocked,"
+                    " l.follower_count, l.following_count, l.last_active_at"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " WHERE ct.id = :tid"
                 ),
@@ -254,7 +274,8 @@ async def chat_stage(
         (_, name, lead_id, product_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
-         lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked) = info
+         lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
+         follower_count, following_count, last_active_at) = info
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
             {"s": stage, "id": lead_id},
@@ -266,7 +287,9 @@ async def chat_stage(
                          ig_username=ig_username, avatar_url=avatar_url,
                          lead_source=lead_source, ad_id=ad_id,
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked))
+                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
+                         follower_count=follower_count, following_count=following_count,
+                         last_active_at=last_active_at)
     )
 
 

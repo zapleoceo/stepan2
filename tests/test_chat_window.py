@@ -32,7 +32,7 @@ def client() -> TestClient:
 
 def _thread_row(tid: int) -> tuple:
     return (tid, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
-            "+62811", "course-a", "alice", None, "Hi", "in", 1, 0)
+            "+62811", "course-a", "alice", None, 500, 200, "Hi", "in", 1, 0)
 
 
 def test_thread_list_marks_active_row() -> None:
@@ -191,7 +191,8 @@ async def test_bot_toggle_flips_lead_agent_enabled(db_session) -> None:
 def test_messages_html_embeds_poll_sentinel() -> None:
     from app.api._ui_html import messages_html
     _set_lang("en")
-    row = (5, "in", "lead", "Hello", datetime.now(UTC).replace(tzinfo=None), None)
+    row = (5, "in", "lead", "Hello", datetime.now(UTC).replace(tzinfo=None),
+           None, None, None, None, None)
     html = messages_html([row], [], 4)
     assert 'id="poll-4"' in html
     assert 'hx-get="/ui/chat/4/since/5"' in html  # cursor at last id
@@ -200,14 +201,35 @@ def test_messages_html_embeds_poll_sentinel() -> None:
 def test_since_bubbles_only_render_given_rows_plus_sentinel() -> None:
     from app.api._ui_html import since_bubbles_html
     _set_lang("en")
+    now = datetime.now(UTC).replace(tzinfo=None)
     rows = [
-        (10, "in", "lead", "New one", datetime.now(UTC).replace(tzinfo=None), None),
-        (11, "out", "agent", "Reply", datetime.now(UTC).replace(tzinfo=None), None),
+        (10, "in", "lead", "New one", now, None, None, None, None, None),
+        (11, "out", "agent", "Reply", now, None, None, None, None, None),
     ]
     html = since_bubbles_html(rows, 4, after_id=9)
     assert "New one" in html
     assert "Reply" in html
     assert 'hx-get="/ui/chat/4/since/11"' in html  # cursor advanced to newest
+
+
+def test_bubble_renders_media_link_preview_and_receipt() -> None:
+    from app.api._ui_html import messages_html
+    _set_lang("en")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    rows = [
+        # out image message, lead has read it → ✓✓; placeholder caption suppressed
+        (20, "out", "agent", "🖼 media", now, None, None, None, 77, "image"),
+        # inbound shared link with preview + a bare url to linkify
+        (21, "in", "lead", "see https://x.com/p", now, None,
+         "https://x.com/p", "https://cdn/prev.jpg", None, None),
+    ]
+    html = messages_html(rows, [], 4, lead_seen_at=now)
+    assert 'src="/ui/media/77"' in html          # image served from media route
+    assert "msg-prev" in html
+    assert "✓✓" in html                           # read receipt on the out message
+    assert 'href="https://x.com/p"' in html       # linkified url + preview anchor
+    assert 'referrerpolicy="no-referrer"' in html  # preview thumbnail
+    assert "🖼 media" not in html                  # placeholder caption hidden
 
 
 def test_since_bubbles_empty_keeps_cursor() -> None:

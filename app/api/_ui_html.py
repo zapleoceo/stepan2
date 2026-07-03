@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html as _h
+import re
 from datetime import UTC, datetime
 
 from ._i18n import t
@@ -225,6 +226,9 @@ _CSS = (
     ".btn-g:hover{background:rgba(255,255,255,.14)}"
     ".htmx-indicator{display:none}"
     ".htmx-request .htmx-indicator,.htmx-request.htmx-indicator{display:inline-block}"
+    ".msg-prev{max-width:220px;max-height:280px;border-radius:8px;display:block;margin-top:.25rem}"
+    ".rcpt{opacity:.55;font-size:.7rem}.rcpt.seen{color:#4da3ff;opacity:.95}"
+    ".pres.on{color:#51cf66}.ti-fl{color:#6b7685;font-size:.62rem}"
     ".kdoc{background:#1a1f2e;border:1px solid #2d3748;border-radius:7px;"
     "padding:.5rem .7rem;margin-bottom:.3rem;cursor:pointer}"
     ".kdoc:hover{border-color:#4a5568}"
@@ -395,6 +399,27 @@ def _badge(stage: str) -> str:
     return f'<span class="bg {_STC.get(stage, "sd")}">{_h.escape(t(f"stage.{stage}"))}</span>'
 
 
+def _compact(n: int | None) -> str:
+    """Compact follower count: 1234 → 1.2k, 1_200_000 → 1.2M."""
+    if n is None:
+        return "—"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k".replace(".0k", "k")
+    return str(n)
+
+
+def _presence(last_active_at: datetime | None) -> str:
+    """🟢 online (≤5 min) / ⚫ active Xh ago, or '' when unknown."""
+    if last_active_at is None:
+        return ""
+    secs = (datetime.now(UTC).replace(tzinfo=None) - last_active_at).total_seconds()
+    if secs < 300:
+        return '<span class="pres on" title="online">🟢 online</span>'
+    return f'<span class="pres" title="last active">⚫ {_ago(last_active_at)}</span>'
+
+
 def _avatar(name: str | None, avatar_url: str | None, size_cls: str = "ti-av") -> str:
     initial = _h.escape(((name or "?")[0]).upper())
     if avatar_url and avatar_url.lower().startswith(("http://", "https://")):
@@ -448,7 +473,7 @@ def _source_bar(
 
 def _thread_item(row: object, active_tid: int | None) -> str:
     (tid, name, stage, last_act, phone, product_slug,
-     ig_username, avatar_url,
+     ig_username, avatar_url, follower_count, following_count,
      last_msg, last_dir, cnt_in, cnt_out) = row  # type: ignore[misc]
     on = " on" if tid == active_tid else ""
     arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
@@ -468,6 +493,10 @@ def _thread_item(row: object, active_tid: int | None) -> str:
     total = (cnt_in or 0) + (cnt_out or 0)
     if total:
         sub_parts.append(f'<span class="ti-cnt">💬 {cnt_in or 0}/{cnt_out or 0}</span>')
+    if follower_count is not None or following_count is not None:
+        sub_parts.append(
+            f'<span class="ti-fl">👥 {_compact(follower_count)}·{_compact(following_count)}</span>'
+        )
     sub_row = f'<div class="ti-sub">{"  ·  ".join(sub_parts)}</div>' if sub_parts else ""
     return (
         f'<a class="ti{on}"'
@@ -490,12 +519,65 @@ def thread_list_html(threads: list, active_tid: int | None = None) -> str:
     return "".join(_thread_item(r, active_tid) for r in threads)
 
 
-def _bubble(row: object, tid: int) -> str:
-    mid, direction, sent_by, text, ts, llm_info = row  # type: ignore[misc]
+_LINK_RE = re.compile(r"(https?://[^\s<]+)")
+_MEDIA_PH = {"🖼 media", "🎤 voice", "GIF", "🖼 медиа", "🎤 голосовое"}
+
+
+def _linkify(text: str) -> str:
+    """Escape text, then turn bare URLs into clickable links."""
+    esc = _h.escape(str(text or ""))
+    return _LINK_RE.sub(
+        lambda m: f'<a href="{m.group(1)}" target="_blank" rel="noreferrer">{m.group(1)}</a>',
+        esc,
+    )
+
+
+def _media_html(media_id: int, media_kind: str | None) -> str:
+    src = f"/ui/media/{media_id}"
+    if media_kind == "video":
+        return f'<video class="msg-prev" src="{src}" controls preload="metadata"></video>'
+    if media_kind == "audio":
+        return f'<audio src="{src}" controls preload="none" style="max-width:220px"></audio>'
+    return (
+        f'<a href="{src}" target="_blank" rel="noreferrer">'
+        f'<img class="msg-prev" src="{src}" loading="lazy" alt=""></a>'
+    )
+
+
+def _link_preview_html(link_url: str | None, preview_url: str | None) -> str:
+    """Preview thumbnail for a shared post/link (fbcdn URL degrades gracefully)."""
+    if not (preview_url and preview_url.lower().startswith(("http://", "https://"))):
+        return ""
+    href = _h.escape(link_url or preview_url)
+    src = _h.escape(preview_url)
+    return (
+        f'<a href="{href}" target="_blank" rel="noreferrer">'
+        f'<img class="msg-prev" src="{src}" referrerpolicy="no-referrer" loading="lazy"'
+        f' alt="" onerror="this.closest(\'a\').remove()"></a>'
+    )
+
+
+def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str:
+    """✓✓ if the lead has read up to this out-message, ✓ if merely sent."""
+    if lead_seen_at is not None and occurred_at is not None and lead_seen_at >= occurred_at:
+        return ' <span class="rcpt seen" title="Seen">✓✓</span>'
+    return ' <span class="rcpt" title="Sent">✓</span>'
+
+
+def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
+    (mid, direction, sent_by, text, ts, llm_info,
+     link_url, preview_url, media_id, media_kind) = row  # type: ignore[misc]
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
-    txt = _h.escape(str(text or ""))
     time_str = _fmt_time(ts)
+    caption = "" if (media_id and str(text or "").strip() in _MEDIA_PH) else _linkify(text)
+    att = ""
+    if media_id:
+        att += _media_html(int(media_id), media_kind)
+    att += _link_preview_html(link_url, preview_url)
+    body = (
+        f'<div class="bt" id="bt-{mid}">{caption}</div>' if caption else ""
+    ) + att
 
     tr_btn = (
         f'<button class="trx" title="Translate" tabindex="-1"'
@@ -505,8 +587,7 @@ def _bubble(row: object, tid: int) -> str:
         return (
             f'<div class="bb bb-i" id="bb-{mid}">'
             f'<div class="bm">{who} · {time_str} {tr_btn}</div>'
-            f'<div class="bt" id="bt-{mid}">{txt}</div>'
-            f'</div>'
+            f'{body}</div>'
         )
     mgr = " mgr" if sent_by == "manager" else ""
     del_btn = (
@@ -521,10 +602,8 @@ def _bubble(row: object, tid: int) -> str:
     )
     return (
         f'<div class="bb bb-o{mgr}" id="bb-{mid}">'
-        f'<div class="bm">{who} · {time_str} {tr_btn} {del_btn}</div>'
-        f'<div class="bt" id="bt-{mid}">{txt}</div>'
-        f'{llm_chip}'
-        f'</div>'
+        f'<div class="bm">{who} · {time_str}{_receipt(ts, lead_seen_at)} {tr_btn} {del_btn}</div>'
+        f'{body}{llm_chip}</div>'
     )
 
 
@@ -541,14 +620,18 @@ def poll_sentinel_html(tid: int, after_id: int) -> str:
     )
 
 
-def since_bubbles_html(msgs: list, tid: int, after_id: int) -> str:
+def since_bubbles_html(
+    msgs: list, tid: int, after_id: int, lead_seen_at: datetime | None = None
+) -> str:
     """Bubbles for messages newer than after_id plus a fresh poll sentinel."""
-    bubbles = "".join(_bubble(r, tid) for r in msgs)
+    bubbles = "".join(_bubble(r, tid, lead_seen_at) for r in msgs)
     return bubbles + poll_sentinel_html(tid, _last_msg_id(msgs) or after_id)
 
 
-def messages_html(msgs: list, pending: list, tid: int) -> str:
-    parts = [_bubble(r, tid) for r in msgs]
+def messages_html(
+    msgs: list, pending: list, tid: int, lead_seen_at: datetime | None = None
+) -> str:
+    parts = [_bubble(r, tid, lead_seen_at) for r in msgs]
     pend_label = _h.escape(t("chat.pending"))
     for row in pending:
         _, ptxt, _ = row  # type: ignore[misc]
@@ -624,6 +707,9 @@ def chat_header_html(
     ad_preview_url: str | None = None,
     agent_enabled: bool = True,
     is_blocked: bool = False,
+    follower_count: int | None = None,
+    following_count: int | None = None,
+    last_active_at: datetime | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -669,6 +755,14 @@ def chat_header_html(
         short = ig_id[:14] + "…" if len(ig_id) > 16 else ig_id
         ig_chip = f' <span class="ch-sub" title="{_h.escape(ig_id)}">{_h.escape(short)}</span>'
     meta_parts = []
+    if follower_count is not None or following_count is not None:
+        meta_parts.append(
+            f'<span title="followers · following">👥 {_compact(follower_count)}'
+            f' · {_compact(following_count)}</span>'
+        )
+    presence = _presence(last_active_at)
+    if presence:
+        meta_parts.append(presence)
     if phone:
         meta_parts.append(f'<a href="tel:{_h.escape(phone)}">📞 {_h.escape(phone)}</a>')
     if created_at:
@@ -717,6 +811,10 @@ def chat_panel_html(
     ad_preview_url: str | None = None,
     agent_enabled: bool = True,
     is_blocked: bool = False,
+    follower_count: int | None = None,
+    following_count: int | None = None,
+    last_active_at: datetime | None = None,
+    lead_seen_at: datetime | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -730,10 +828,13 @@ def chat_panel_html(
         lead_source=lead_source, ad_id=ad_id,
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
         agent_enabled=agent_enabled, is_blocked=is_blocked,
+        follower_count=follower_count, following_count=following_count,
+        last_active_at=last_active_at,
     )
     return (
         f'{header}'
-        f'<div class="msgs" id="msgs-{tid}">{messages_html(msgs, pending, tid)}</div>'
+        f'<div class="msgs" id="msgs-{tid}">'
+        f'{messages_html(msgs, pending, tid, lead_seen_at)}</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
         f'<div class="fin">'

@@ -183,6 +183,8 @@ class Message(SQLModel, table=True):
     tr_text: str | None = Field(default=None, description="кэш перевода (не биллить повторно)")
     delete_requested: bool = Field(default=False, index=True, description="ждёт IG-unsend")
     media_pending: bool = Field(default=False, index=True, description="медиа ждёт backfill")
+    link_url: str | None = Field(default=None, description="кликабельная цель (шэр поста/ссылки)")
+    preview_url: str | None = Field(default=None, description="превью карточки (CDN, протухает)")
 
 
 class Outbox(SQLModel, table=True):

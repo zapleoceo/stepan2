@@ -104,6 +104,8 @@ class IngestService:
                 sent_by="lead",
                 text=inbound.text,
                 occurred_at=inbound.occurred_at,
+                link_url=inbound.link_url,
+                preview_url=inbound.preview_url,
             )
         )
         if inbound.media_url:
