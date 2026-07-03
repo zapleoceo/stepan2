@@ -125,14 +125,16 @@ class ReplyService:
             return None
         base = self._scheduled_at()
         outbox: Outbox | None = None
-        for i, bubble in enumerate(_split_bubbles(decision.reply)):
+        bubbles = list(_split_bubbles(decision.reply))
+        last_i = len(bubbles) - 1
+        for i, bubble in enumerate(bubbles):
             outbox = await self.outbox.add(
                 Outbox(
                     branch_id=self.branch_id,
                     thread_id=thread_id,
                     text=bubble,
                     scheduled_at=base + timedelta(seconds=i * _BUBBLE_GAP_S),
-                    llm_info=_fmt_llm_meta(self._last_llm_meta) if i == 0 else None,
+                    llm_info=_fmt_llm_meta(self._last_llm_meta) if i == last_i else None,
                 )
             )
         lead = await self.session.get(Lead, thread.lead_id)
