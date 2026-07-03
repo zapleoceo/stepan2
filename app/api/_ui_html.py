@@ -223,6 +223,8 @@ _CSS = (
     "border-radius:4px;text-decoration:none;font-size:.75rem;padding:.22rem .55rem;"
     "font-weight:600;cursor:pointer}"
     ".btn-g:hover{background:rgba(255,255,255,.14)}"
+    ".htmx-indicator{display:none}"
+    ".htmx-request .htmx-indicator,.htmx-request.htmx-indicator{display:inline-block}"
     ".kdoc{background:#1a1f2e;border:1px solid #2d3748;border-radius:7px;"
     "padding:.5rem .7rem;margin-bottom:.3rem;cursor:pointer}"
     ".kdoc:hover{border-color:#4a5568}"

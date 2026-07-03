@@ -806,23 +806,29 @@ def _ch_err(error: str) -> str:
 
 def _ch_ig_form(ch_id: int, step: str = "login", flow_id: str = "", error: str = "") -> str:
     err = _ch_err(error)
+    spin = (
+        f'<span class="htmx-indicator" style="margin-left:.5rem;color:#8b98a5;'
+        f'font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
+    )
     if step == "2fa":
         return (
             f'{err}'
-            f'<form hx-post="/ui/channels/{ch_id}/ig/verify"'
-            f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:320px">'
+            f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
+            f' hx-swap="innerHTML" hx-disabled-elt="find button"'
+            f' hx-indicator="find .htmx-indicator" style="max-width:320px">'
             f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
             f'<div class="frm-grp">'
             f'<label class="frm-lbl">{_h.escape(t("ch.code_2fa"))}</label>'
             f'<input class="frm-inp" name="code" autocomplete="one-time-code" autofocus></div>'
             f'<button type="submit" class="btn-sm btn-p">'
-            f'{_h.escape(t("ch.verify"))}</button>'
+            f'{_h.escape(t("ch.verify"))}</button>{spin}'
             f'</form>'
         )
     return (
         f'{err}'
-        f'<form hx-post="/ui/channels/{ch_id}/ig/start"'
-        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:340px">'
+        f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
+        f' hx-swap="innerHTML" hx-disabled-elt="find button"'
+        f' hx-indicator="find .htmx-indicator" style="max-width:340px">'
         f'<div class="frm-grp">'
         f'<label class="frm-lbl">{_h.escape(t("ch.ig_json"))}</label>'
         f'<textarea class="frm-ta" name="session_json" rows="3"'
@@ -836,7 +842,7 @@ def _ch_ig_form(ch_id: int, step: str = "login", flow_id: str = "", error: str =
         f'<label class="frm-lbl">{_h.escape(t("ch.password"))}</label>'
         f'<input class="frm-inp" name="password" type="password"></div>'
         f'<button type="submit" class="btn-sm btn-p">'
-        f'{_h.escape(t("ch.ig_login"))}</button>'
+        f'{_h.escape(t("ch.ig_login"))}</button>{spin}'
         f'</form>'
     )
 

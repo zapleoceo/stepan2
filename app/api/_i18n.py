@@ -276,6 +276,9 @@ _TR: dict[str, dict[str, str]] = {
                       "en": "Session active — channel connected.",
                       "id": "Sesi aktif — kanal terhubung."},
     "ch.reconnect": {"ru": "Переподключить",   "en": "Reconnect",         "id": "Sambungkan ulang"},
+    "ch.logging_in": {"ru": "входим в Instagram… (до 30 сек)",
+                      "en": "logging in to Instagram… (up to 30s)",
+                      "id": "masuk ke Instagram… (hingga 30 dtk)"},
     "ch.or_login": {"ru": "— или войти напрямую —",
                     "en": "— or login directly —", "id": "— atau login langsung —"},
     # branch selector
