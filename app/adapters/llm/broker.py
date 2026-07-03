@@ -15,6 +15,17 @@ from app.config import settings
 
 _log = logging.getLogger(__name__)
 
+# chat:smart (lead replies) and chat:edit (Coach) return a large JSON and the broker may
+# fall back across providers — they need a long read timeout. Fast caps fail fast so one
+# stuck call doesn't wedge the worker. Mirrors Stepan-1's broker_client timeouts.
+_DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0)
+_SLOW_TIMEOUT = httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0)
+_SLOW_CAPS = frozenset({"chat:smart", "chat:edit"})
+
+
+def _chat_timeout(capability: str) -> httpx.Timeout:
+    return _SLOW_TIMEOUT if capability in _SLOW_CAPS else _DEFAULT_TIMEOUT
+
 
 class BrokerLLM:
     """Implements app.ports.llm.LLMPort."""
@@ -45,7 +56,7 @@ class BrokerLLM:
             body["response_format"] = {"type": "json_object"}
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=60) as c:
+            async with httpx.AsyncClient(timeout=_chat_timeout(capability)) as c:
                 r = await c.post(
                     f"{self._url}/v1/chat",
                     params={"capability": capability},
@@ -82,7 +93,7 @@ class BrokerLLM:
             return []
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=60) as c:
+            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
                 r = await c.post(
                     f"{self._url}/v1/embed",
                     params={"provider": "voyage"},
