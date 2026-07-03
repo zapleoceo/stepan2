@@ -162,6 +162,16 @@ _CSS = (
     ".msgs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
     ".bb{display:flex;flex-direction:column;max-width:72%}"
     ".bb-i{align-self:flex-start}.bb-o{align-self:flex-end}.bb-p{opacity:.6;align-self:flex-end}"
+    ".bb-ex{opacity:.4;filter:grayscale(.7)}"  # cleared: greyed, out of Stepan's context
+    ".bb-ex .bt{background:#20242c!important;border:1px dashed #3a4453}"
+    ".delx-pop{display:inline-flex;gap:.2rem;align-items:center;margin-left:.2rem}"
+    ".delx-pop button{border:none;border-radius:3px;cursor:pointer;font-size:.7rem;"
+    "padding:.02rem .3rem;line-height:1.3}"
+    ".delx-y{background:#862e2e;color:#fff}.delx-n{background:#2d3748;color:#c3cede}"
+    ".emo-bar{display:flex;flex-wrap:wrap;gap:.15rem;padding:.25rem .1rem 0}"
+    ".emo-bar button{background:none;border:none;cursor:pointer;font-size:1.05rem;"
+    "line-height:1;padding:.1rem .18rem;border-radius:4px}"
+    ".emo-bar button:hover{background:#222836}"
     ".bt{padding:.4rem .56rem;border-radius:9px;font-size:.8rem;"
     "white-space:pre-wrap;word-break:break-word}"
     ".bb-i .bt{background:#232a3b;border:1px solid #2d3748}"
@@ -654,8 +664,10 @@ def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str
 
 
 def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
-    (mid, direction, sent_by, text, ts, llm_info,
-     link_url, preview_url, media_id, media_kind) = row  # type: ignore[misc]
+    mid, direction, sent_by, text, ts, llm_info, link_url, preview_url, media_id, media_kind = \
+        row[:10]  # type: ignore[misc]
+    excluded = bool(row[10]) if len(row) > 10 else False  # greyed, out of Stepan's context
+    ex = " bb-ex" if excluded else ""
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
     time_str = _fmt_time(ts)
@@ -674,23 +686,21 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     )
     if direction == "in":
         return (
-            f'<div class="bb bb-i" id="bb-{mid}">'
+            f'<div class="bb bb-i{ex}" id="bb-{mid}">'
             f'<div class="bm">{who} · {time_str} {tr_btn}</div>'
             f'{body}</div>'
         )
     mgr = " mgr" if sent_by == "manager" else ""
     del_btn = (
         f'<button class="delx" title="Delete" tabindex="-1"'
-        f' hx-post="/ui/chat/{tid}/msg/{mid}/delete"'
-        f' hx-target="#bb-{mid}" hx-swap="outerHTML"'
-        f' hx-confirm="">×</button>'
+        f' onclick="delAsk(this,{tid},{mid})">×</button>'
     )
     llm_chip = (
         f'<div class="b-llm">🤖 {_h.escape(str(llm_info))}</div>'
         if llm_info else ""
     )
     return (
-        f'<div class="bb bb-o{mgr}" id="bb-{mid}">'
+        f'<div class="bb bb-o{mgr}{ex}" id="bb-{mid}">'
         f'<div class="bm">{who} · {time_str}{_receipt(ts, lead_seen_at)} {tr_btn} {del_btn}</div>'
         f'{body}{llm_chip}</div>'
     )
@@ -808,13 +818,20 @@ def chat_block_pill_html(tid: int, blocked: bool) -> str:
 
 
 def _clear_ctx_btn(tid: int) -> str:
-    return (
-        f'<button class="act-btn" hx-post="/ui/chat/{tid}/clear" hx-swap="none"'
+    """Clear (grey out, drop from Stepan's context) + Load (bring the full context back).
+    Both re-render the message feed so the greyed state updates without a reload."""
+    clear = (
+        f'<button class="act-btn" hx-post="/ui/chat/{tid}/clear"'
+        f' hx-target="#msgs-{tid}" hx-swap="innerHTML"'
         f' hx-confirm="{_h.escape(t("chat.clear_confirm"))}"'
-        f' hx-on::after-request="if(event.detail.successful){{this.textContent=\'✓\';'
-        f'setTimeout(()=>{{this.textContent=\'🧹\'}},1500)}}"'
         f' title="{_h.escape(t("chat.clear"))}">🧹</button>'
     )
+    load = (
+        f'<button class="act-btn" hx-post="/ui/chat/{tid}/load-context"'
+        f' hx-target="#msgs-{tid}" hx-swap="innerHTML"'
+        f' title="{_h.escape(t("chat.load_ctx"))}">📥</button>'
+    )
+    return clear + load
 
 
 def chat_header_html(
@@ -996,29 +1013,48 @@ def chat_panel_html(
         f' hx-post="/ui/chat/{tid}/translate"'
         f' hx-target="#tr-{tid}" hx-swap="innerHTML">{tr_lbl}</button>'
         f'</div>'
+        f'{_emoji_bar(f"cmp-{tid}")}'
         f'<form class="fin-row"'
         f' hx-post="/ui/chat/{tid}/send"'
         f' hx-target="#msgs-{tid}"'
         f' hx-swap="innerHTML"'
         f' hx-on::after-request="this.reset();scrollMsgs({tid})">'
-        f'<textarea name="text" rows="2" placeholder="{ph}"></textarea>'
+        f'<textarea id="cmp-{tid}" name="text" rows="2" placeholder="{ph}"'
+        f' onkeydown="entSend(event)"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
         f'</div>'
     )
+
+
+_EMOJI = ("😊", "🙏", "👍", "🔥", "✅", "🎉", "😅", "🚀", "💡", "❤️", "😉", "🤝")
+
+
+def _emoji_bar(target_id: str) -> str:
+    """Emoji picker that inserts into the textarea `target_id` at the cursor."""
+    btns = "".join(
+        f'<button type="button" tabindex="-1" '
+        f"onclick=\"insEmo(document.getElementById('{target_id}'),'{e}')\">{e}</button>"
+        for e in _EMOJI
+    )
+    return f'<div class="emo-bar">{btns}</div>'
 
 
 def suggest_box_html(tid: int, draft: str) -> str:
     """HTML for the suggest box that appears below messages after clicking Suggest."""
     send_lbl = _h.escape(t("chat.send_stepan"))
     discard_lbl = _h.escape(t("chat.discard"))
+    tr_lbl = _h.escape(t("chat.translate"))
     ph = _h.escape(t("chat.suggest_ph"))
     return (
         f'<div class="sug-box">'
         f'<textarea class="sug-ta" id="sug-ta-{tid}"'
-        f' placeholder="{ph}">{_h.escape(draft)}</textarea>'
+        f' placeholder="{ph}" onkeydown="entSend(event)">{_h.escape(draft)}</textarea>'
+        f'{_emoji_bar(f"sug-ta-{tid}")}'
+        f'<div class="b-tr" id="sug-tr-{tid}"></div>'
         f'<div class="sug-acts">'
         f'<button class="act-btn primary"'
         f' onclick="sendSuggest({tid})">{send_lbl}</button>'
+        f'<button class="act-btn" onclick="trDraft({tid})">🌐 {tr_lbl}</button>'
         f'<button class="act-btn"'
         f' onclick="document.getElementById(\'sug-{tid}\').innerHTML=\'\'">'
         f'{discard_lbl}</button>'
@@ -1139,6 +1175,31 @@ def app_shell(
         "el.dataset.tr=html;el.innerHTML=html;"
         "el.dataset.state='tr';el.classList.add('trview');}})"
         ".catch(function(){el.style.opacity='';});}"
+        # delete: inline micro-confirm popup right at the × (no browser dialog)
+        "function delAsk(btn,tid,mid){"
+        "if(btn.dataset.armed)return;btn.dataset.armed=1;btn.style.display='none';"
+        "var p=document.createElement('span');p.className='delx-pop';"
+        "p.innerHTML='<button class=delx-y>\\u2713</button><button class=delx-n>\\u2717</button>';"
+        "btn.after(p);"
+        "p.querySelector('.delx-y').onclick=function(){htmx.ajax('POST','/ui/chat/'+tid+"
+        "'/msg/'+mid+'/delete',{target:'#bb-'+mid,swap:'outerHTML'});};"
+        "p.querySelector('.delx-n').onclick=function(){p.remove();btn.style.display='';"
+        "delete btn.dataset.armed;};}"
+        # Enter sends, Shift+Enter = newline
+        "function entSend(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();"
+        "var f=e.target.closest('form');if(f)f.requestSubmit();}}"
+        # insert an emoji at the cursor in a chat composer / suggest textarea
+        "function insEmo(ta,em){if(!ta)return;var s=ta.selectionStart;"
+        "if(s==null)s=ta.value.length;var e=ta.selectionEnd!=null?ta.selectionEnd:s;"
+        "ta.value=ta.value.slice(0,s)+em+ta.value.slice(e);ta.focus();"
+        "ta.selectionStart=ta.selectionEnd=s+em.length;}"
+        # translate the Suggest draft (shows the manager what Stepan's reply says)
+        "function trDraft(tid){var ta=document.getElementById('sug-ta-'+tid);"
+        "var out=document.getElementById('sug-tr-'+tid);if(!ta||!ta.value.trim())return;"
+        "out.textContent='...';var fd=new FormData();fd.append('text',ta.value);"
+        "fetch('/ui/chat/'+tid+'/tr-draft',{method:'POST',headers:{'HX-Request':'true'},"
+        "body:fd}).then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
+        ".catch(function(){out.textContent='';});}"
         # resize + collapse init (runs once after DOM ready)
         "(function(){"
         "var sb=document.querySelector('.sid');"

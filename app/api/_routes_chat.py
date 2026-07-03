@@ -233,10 +233,16 @@ async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
     return HTMLResponse(chat_block_pill_html(thread_id, new_val))
 
 
+async def _rerender_feed(session, thread_id: int) -> HTMLResponse:
+    msgs = await fetch_messages(session, thread_id)
+    pending = await fetch_pending(session, thread_id)
+    return HTMLResponse(messages_html(msgs, pending, thread_id))
+
+
 @router.post("/chat/{thread_id}/clear", response_class=HTMLResponse)
 async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
-    """Set context_cleared_at=now — dialog before it stops entering the prompt (local
-    reset; IG history untouched)."""
+    """Clear context: mark everything up to now as OUT of Stepan's context. Messages stay
+    in the DB and in the chat window (greyed) — Stepan just stops feeding them to the LLM."""
     apply_lang(request)
     allowed = allowed_branch_ids(request)
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -247,7 +253,24 @@ async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
             text("UPDATE channel_thread SET context_cleared_at=:t WHERE id=:tid"),
             {"t": now, "tid": thread_id},
         )
-    return HTMLResponse("")
+        return await _rerender_feed(session, thread_id)
+
+
+@router.post("/chat/{thread_id}/load-context", response_class=HTMLResponse)
+async def chat_load_context(thread_id: int, request: Request) -> HTMLResponse:
+    """Bring the full context back: un-grey every message (context_cleared_at=NULL) so it
+    re-enters Stepan's context. Stored rows are only un-flagged — nothing is re-fetched or
+    duplicated; new IG messages keep arriving via the normal ingest."""
+    apply_lang(request)
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
+        await session.execute(
+            text("UPDATE channel_thread SET context_cleared_at=NULL WHERE id=:tid"),
+            {"tid": thread_id},
+        )
+        return await _rerender_feed(session, thread_id)
 
 
 @router.post("/chat/{thread_id}/stage", response_class=HTMLResponse)
@@ -346,6 +369,25 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
         _log.warning("suggest LLM error tid=%s: %s", thread_id, exc)
         draft = ""
     return HTMLResponse(suggest_box_html(thread_id, draft.strip()))
+
+
+@router.post("/chat/{thread_id}/tr-draft", response_class=HTMLResponse)
+async def chat_tr_draft(
+    thread_id: int, request: Request, text_body: str = Form(alias="text"),
+) -> HTMLResponse:
+    """Translate an arbitrary draft (the Suggest textarea) to the manager's language."""
+    lang_code = apply_lang(request)
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
+    target = {"ru": "Russian", "en": "English", "id": "Indonesian"}.get(lang_code, "Russian")
+    try:
+        tr = await translate_text(BrokerLLM(), text_body, target=target)
+    except Exception as exc:
+        _log.warning("draft translate error tid=%s: %s", thread_id, exc)
+        return HTMLResponse("")
+    return HTMLResponse(f"🌐 {_h.escape(tr)}" if tr else "")
 
 
 @router.post("/chat/{thread_id}/translate", response_class=HTMLResponse)

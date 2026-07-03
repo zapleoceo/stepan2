@@ -198,6 +198,9 @@ _TR: dict[str, dict[str, str]] = {
                            "en": "Clear conversation context?", "id": "Bersihkan konteks?"},
     "chat.cleared":     {"ru": "Контекст очищен", "en": "Context cleared",
                          "id": "Konteks dibersihkan"},
+    "chat.load_ctx":    {"ru": "Загрузить весь контекст", "en": "Load full context",
+                         "id": "Muat semua konteks"},
+    "chat.del_confirm": {"ru": "Удалить?", "en": "Delete?", "id": "Hapus?"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

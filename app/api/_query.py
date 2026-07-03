@@ -55,12 +55,12 @@ _MSG_COLS = (
 )
 
 
-# A cleared thread hides pre-cutoff messages from the chat window too (not just the LLM
-# prompt) — the rows stay in the DB and in IG, they're just filtered from the view. Strict
-# `>` (not `>=`) matches MessageRepo.dialog()'s `since` boundary so the window shown to the
-# manager and the window sent to the LLM never disagree on a message landing exactly on cutoff.
-_NOT_CLEARED = (
-    " AND (ct.context_cleared_at IS NULL OR m.occurred_at > ct.context_cleared_at)"
+# Cleared messages stay visible in the window but greyed and OUT of Stepan's context.
+# `excluded` = the row sits before the thread's context_cleared_at cutoff (strict `<=`
+# mirrors MessageRepo.dialog()'s `since` so the greyed view and the LLM window agree).
+_EXCLUDED_COL = (
+    ", (ct.context_cleared_at IS NOT NULL AND m.occurred_at <= ct.context_cleared_at)"
+    " AS excluded"
 )
 
 
@@ -68,9 +68,9 @@ async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
     return (
         await session.execute(
             text(
-                f"SELECT {_MSG_COLS} FROM message m"  # noqa: S608
+                f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
-                f" WHERE m.thread_id = :tid{_NOT_CLEARED} ORDER BY m.occurred_at, m.id"
+                " WHERE m.thread_id = :tid ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id},
         )
@@ -81,9 +81,9 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
     return (
         await session.execute(
             text(
-                f"SELECT {_MSG_COLS} FROM message m"  # noqa: S608
+                f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
-                f" WHERE m.thread_id = :tid AND m.id > :after{_NOT_CLEARED}"
+                " WHERE m.thread_id = :tid AND m.id > :after"
                 " ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id, "after": after_id},

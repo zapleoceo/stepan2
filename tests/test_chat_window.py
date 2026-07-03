@@ -142,7 +142,7 @@ def test_chat_bot_pill_reflects_on_state() -> None:
     from app.api._ui_html import chat_bot_pill_html
     _set_lang("en")
     html = chat_bot_pill_html(3, enabled=True)
-    assert "Bot ON" in html
+    assert "ON" in html
     assert 'hx-post="/ui/chat/3/bot-toggle"' in html
 
 
@@ -150,14 +150,14 @@ def test_chat_bot_pill_reflects_off_state() -> None:
     from app.api._ui_html import chat_bot_pill_html
     _set_lang("en")
     html = chat_bot_pill_html(3, enabled=False)
-    assert "Bot OFF" in html
+    assert "OFF" in html
 
 
 def test_chat_header_includes_bot_pill() -> None:
     from app.api._ui_html import chat_header_html
     _set_lang("en")
     html = chat_header_html(8, "Bob", "new", agent_enabled=False)
-    assert "Bot OFF" in html
+    assert "OFF" in html
     assert 'hx-post="/ui/chat/8/bot-toggle"' in html
 
 
@@ -398,14 +398,15 @@ async def test_clear_filters_display(db_session) -> None:
     await db_session.flush()
 
     rows = await fetch_messages(db_session, th.id)
-    texts = [r[3] for r in rows]
-    assert texts == ["msg1"]  # pre-clear msg0 hidden, post-clear msg1 kept
+    shown = [(r[3], bool(r[10])) for r in rows]  # (text, excluded)
+    # both stay visible; the pre-clear one is greyed (excluded), the post-clear one is live
+    assert shown == [("msg0", True), ("msg1", False)]
 
 
 async def test_clear_boundary_matches_llm_dialog_cutoff(db_session) -> None:
-    """A message timestamped exactly at context_cleared_at must be hidden from the chat
-    window the same way MessageRepo.dialog() hides it from the LLM prompt — otherwise the
-    manager sees a message the bot never had in context, or vice versa."""
+    """A message timestamped exactly at context_cleared_at is marked excluded (greyed) in
+    the chat window the same way MessageRepo.dialog() drops it from the LLM prompt — so the
+    manager's greyed view and the bot's context agree on the boundary."""
     from datetime import UTC, datetime
 
     from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
@@ -432,5 +433,5 @@ async def test_clear_boundary_matches_llm_dialog_cutoff(db_session) -> None:
 
     rows = await fetch_messages(db_session, th.id)
     dialog = await MessageRepo(db_session, b.id).dialog(th.id, since=cutoff)
-    assert rows == []  # UI hides the boundary message …
-    assert dialog == []  # … exactly like the LLM prompt does
+    assert len(rows) == 1 and bool(rows[0][10]) is True  # shown but greyed (excluded)
+    assert dialog == []  # … and dropped from the LLM prompt, same boundary
