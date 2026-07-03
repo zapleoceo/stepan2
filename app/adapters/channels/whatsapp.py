@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from app.domain.clock import naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
 from app.ports.channel import InboundMessage, SendResult
 
@@ -68,11 +69,11 @@ def _map_state(state: str) -> SessionStatus:
 
 
 def _as_dt(value: Any) -> datetime:
-    """Evolution epoch seconds or ISO → aware datetime; missing → epoch (never crash)."""
+    """Evolution epoch seconds or ISO → naive UTC datetime; missing → epoch."""
     if isinstance(value, datetime):
-        return value
+        return naive_utc(value)
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=UTC)
+        return naive_utc(datetime.fromtimestamp(value, tz=UTC))
     if isinstance(value, str) and value:
-        return datetime.fromisoformat(value)
-    return datetime.fromtimestamp(0, tz=UTC)
+        return naive_utc(datetime.fromisoformat(value))
+    return datetime.fromtimestamp(0, tz=UTC).replace(tzinfo=None)

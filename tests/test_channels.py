@@ -107,10 +107,20 @@ async def test_instagram_fetch_maps_to_inbound() -> None:
             external_thread_id="111",
             sender_id="42",
             text="hi from ig",
-            occurred_at=datetime(2026, 6, 1, tzinfo=UTC),
+            occurred_at=datetime(2026, 6, 1),
             product_hint="vibe_coding",
         )
     ]
+
+
+def test_ig_timestamp_is_naive_utc() -> None:
+    """IG sends epoch microseconds; occurred_at must be naive UTC or asyncpg rejects the
+    INSERT into a TIMESTAMP WITHOUT TIME ZONE column (the first live-ingest crash)."""
+    from app.adapters.channels.instagram import _as_dt
+
+    dt = _as_dt(1_750_000_000_000_000)  # microseconds
+    assert dt.tzinfo is None
+    assert dt == datetime.fromtimestamp(1_750_000_000, tz=UTC).replace(tzinfo=None)
 
 
 async def test_instagram_send_maps_to_send_result() -> None:
@@ -150,7 +160,7 @@ async def test_whatsapp_fetch_maps_to_inbound() -> None:
     m = msgs[0]
     assert m.external_thread_id == "628@s.whatsapp.net"
     assert m.text == "hi from wa"
-    assert m.occurred_at == datetime.fromtimestamp(1_750_000_000, tz=UTC)
+    assert m.occurred_at == datetime.fromtimestamp(1_750_000_000, tz=UTC).replace(tzinfo=None)
 
 
 async def test_whatsapp_send_maps_to_send_result() -> None:
@@ -190,7 +200,7 @@ async def test_meta_business_fetch_maps_to_inbound() -> None:
             external_thread_id="t_55",
             sender_id="user_88",
             text="hi from mbs",
-            occurred_at=datetime(2026, 6, 1, 10, 0, tzinfo=UTC),
+            occurred_at=datetime(2026, 6, 1, 10, 0),
             product_hint="data_science",
         )
     ]

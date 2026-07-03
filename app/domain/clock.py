@@ -10,6 +10,13 @@ def utc_now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def naive_utc(dt: datetime) -> datetime:
+    """Convert to naive UTC — DB columns are TIMESTAMP WITHOUT TIME ZONE, and asyncpg
+    rejects tz-aware values for them. Channel adapters build tz-aware timestamps from
+    IG/WA/MBS payloads; this normalizes them at the domain boundary."""
+    return dt.astimezone(UTC).replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
 def branch_now(tz_offset_h: int) -> datetime:
     """Wall-clock time in the branch's timezone (naive)."""
     return utc_now() + timedelta(hours=tz_offset_h)
