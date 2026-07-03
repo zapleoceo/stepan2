@@ -55,6 +55,6 @@ def _render(*, kind: str, lead_id: int, summary_en: str, summary_ru: str) -> str
     """Bilingual EN/RU manager message — one block per language under a kind header."""
     return (
         f"<b>{kind}</b> · lead #{lead_id}\n\n"
-        f"🇬🇧 {summary_en}\n"
-        f"🇷🇺 {summary_ru}"
+        f"EN: {summary_en}\n"
+        f"RU: {summary_ru}"
     )
