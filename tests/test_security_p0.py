@@ -13,12 +13,33 @@ from cryptography.fernet import Fernet  # noqa: E402
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
 from fastapi.testclient import TestClient  # noqa: E402
+from starlette.requests import Request  # noqa: E402
 
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead  # noqa: E402
+from app.admin._branch import allowed_branch_ids  # noqa: E402
 from app.api._routes_channels import _channel_branch  # noqa: E402
 from app.api._routes_chat import _guarded_branch  # noqa: E402
 from app.api.main import app  # noqa: E402
 from app.modules.crm.service import is_safe_webhook_url  # noqa: E402
+
+# ─── act-on permission ignores the view-filter cookie ─────────────────────────
+
+def _req(cookie: str = "", allowed=...):
+    scope = {"type": "http", "headers": [(b"cookie", f"stepan2_branch={cookie}".encode())]}
+    req = Request(scope)
+    if allowed is not ...:
+        req.state.allowed_branch_ids = allowed
+    return req
+
+
+def test_allowed_branch_ids_ignores_view_cookie_when_no_auth() -> None:
+    # auth disabled: cookie filters the *view* but must not restrict *actions*
+    assert allowed_branch_ids(_req(cookie="1")) is None       # can manage any branch
+    assert allowed_branch_ids(_req(cookie="")) is None
+    # scoped user: membership drives permission, not the cookie
+    assert allowed_branch_ids(_req(cookie="1", allowed=[7])) == [7]
+    assert allowed_branch_ids(_req(cookie="", allowed=None)) is None
+
 
 # ─── per-thread tenant guard (chat IDOR) ──────────────────────────────────────
 

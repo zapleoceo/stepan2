@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.adapters.db.models import Outbox
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
-from app.admin._branch import branch_ids_from_request
+from app.admin._branch import allowed_branch_ids
 from app.modules.conversation.translate import translate_message
 
 from ._i18n import apply_lang, t
@@ -60,7 +60,7 @@ async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) ->
 @router.get("/chat/{thread_id}/panel", response_class=HTMLResponse)
 async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -109,7 +109,7 @@ async def chat_send(
     apply_lang(request)
     text_body = text_body.strip()
     src = source if source in _AGENT_SOURCES else "manager"
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None or not text_body:
@@ -129,7 +129,7 @@ async def chat_send(
 async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLResponse:
     """Return only message bubbles newer than after_id plus a fresh poll sentinel."""
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
@@ -149,7 +149,7 @@ async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLRes
 async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
     """Flip the per-lead agent_enabled flag for this thread's lead; re-render the pill."""
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -177,7 +177,7 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
 async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
     """Toggle the lead's is_blocked flag; blocking also mutes the bot. Re-render the pill."""
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -211,7 +211,7 @@ async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
     """Set context_cleared_at=now — dialog before it stops entering the prompt (local
     reset; IG history untouched)."""
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     now = datetime.now(UTC).replace(tzinfo=None)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
@@ -230,7 +230,7 @@ async def chat_stage(
     apply_lang(request)
     if stage not in _VALID_STAGES:
         stage = "new"
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
@@ -273,7 +273,7 @@ async def chat_stage(
 @router.post("/chat/{thread_id}/suggest", response_class=HTMLResponse)
 async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
@@ -317,7 +317,7 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
 async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     """Translate the last inbound message (global toolbar button)."""
     lang_code = apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
@@ -367,7 +367,7 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
 @router.get("/chat/{thread_id}/msg/{mid}/tr", response_class=HTMLResponse)
 async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HTMLResponse:
     """Translate a message bubble to Russian (cached in message.tr_text — no re-billing)."""
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
@@ -389,7 +389,7 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
     """Retract a message. Outgoing → request an IG unsend (worker revokes, then the
     row disappears); inbound → we can't unsend the lead's message, so only our local
     copy is removed. Never claims a retraction that didn't happen in IG."""
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")

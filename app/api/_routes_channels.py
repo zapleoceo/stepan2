@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from app.adapters.crypto import encrypt
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request
+from app.admin._branch import allowed_branch_ids
 from app.domain.enums import ChannelKind
 
 from ._i18n import apply_lang
@@ -73,7 +73,7 @@ _FORBIDDEN = '<div class="emp">Forbidden</div>'
 async def channels_list(branch_id: int, request: Request) -> HTMLResponse:
     """HTMX partial: channel table for #ch-list in branch edit page."""
     apply_lang(request)
-    if _branch_forbidden(branch_id, branch_ids_from_request(request)):
+    if _branch_forbidden(branch_id, allowed_branch_ids(request)):
         return HTMLResponse(_FORBIDDEN, status_code=403)
     async with session_scope() as session:
         return HTMLResponse(await _ch_list_html(session, branch_id))
@@ -82,7 +82,7 @@ async def channels_list(branch_id: int, request: Request) -> HTMLResponse:
 @router.get("/channels/branch/{branch_id}/new", response_class=HTMLResponse)
 async def channel_new(branch_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
-    if _branch_forbidden(branch_id, branch_ids_from_request(request)):
+    if _branch_forbidden(branch_id, allowed_branch_ids(request)):
         return HTMLResponse(_FORBIDDEN, status_code=403)
     return HTMLResponse(channel_new_form_html(branch_id))
 
@@ -97,7 +97,7 @@ async def channel_create(
     is_active: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
+    branch_ids = allowed_branch_ids(request)
     if branch_ids and branch_id not in branch_ids:
         return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
     kind_val = kind if kind in (k.value for k in ChannelKind) else ChannelKind.INSTAGRAM.value
@@ -125,7 +125,7 @@ async def channel_create(
 @router.get("/channels/{ch_id}/edit", response_class=HTMLResponse)
 async def channel_edit(ch_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, allowed) is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
@@ -149,7 +149,7 @@ async def channel_save(
     is_active: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, allowed) is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
@@ -187,7 +187,7 @@ async def channel_delete(ch_id: int, request: Request) -> HTMLResponse:
         if not br_row:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
         branch_id = br_row[0]
-        branch_ids = branch_ids_from_request(request)
+        branch_ids = allowed_branch_ids(request)
         if branch_ids and branch_id not in branch_ids:
             return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         await session.execute(
@@ -208,7 +208,7 @@ async def channel_delete(ch_id: int, request: Request) -> HTMLResponse:
 async def channel_credential(ch_id: int, request: Request) -> HTMLResponse:
     """Show the kind-specific credential form in #ch-form."""
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, allowed) is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
@@ -241,7 +241,7 @@ async def ig_login_start(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, branch_ids_from_request(request)) is None:
+        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
     if session_json.strip():
         try:
@@ -281,7 +281,7 @@ async def ig_login_verify(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, branch_ids_from_request(request)) is None:
+        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
     flow = _ig_flows.pop(flow_id, None)
     if not flow or flow["channel_id"] != ch_id:
@@ -323,7 +323,7 @@ async def meta_connect(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, branch_ids_from_request(request)) is None:
+        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
             return HTMLResponse(_ch_meta_form(ch_id, error="Forbidden"))
     if not token.strip():
         return HTMLResponse(_ch_meta_form(ch_id, error="Access token is required"))
@@ -366,7 +366,7 @@ async def wa_connect(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, branch_ids_from_request(request)) is None:
+        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
             return HTMLResponse(_ch_wa_form(ch_id, error="Forbidden"))
     if not base_url.strip() or not instance.strip() or not api_key.strip():
         return HTMLResponse(_ch_wa_form(ch_id, error="All three fields are required"))

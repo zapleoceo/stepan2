@@ -26,3 +26,11 @@ def branch_ids_from_request(request: Request) -> list[int] | None:
     if selected:  # narrow the selection to what the user is allowed to see
         return [b for b in selected if b in allowed] or allowed
     return allowed
+
+
+def allowed_branch_ids(request: Request) -> list[int] | None:
+    """Branches the caller may ACT on (write/manage): None = act on any branch
+    (super_admin, or auth disabled). Unlike branch_ids_from_request this ignores the
+    view-filter cookie — a super-admin filtering their inbox to one branch must still
+    be able to manage channels/chats of any other branch."""
+    return getattr(getattr(request, "state", None), "allowed_branch_ids", None)
