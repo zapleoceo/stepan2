@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import html as _h
+from datetime import timedelta
 
 from ._i18n import current_lang, t
-from ._ui_html import _ago, ig_post_url
+from ._ui_html import _ago, _as_dt, ig_post_url
 
 _ST_ECSS: dict[str, str] = {
     "proposed": "es-p", "applied": "es-a",
@@ -1047,11 +1048,14 @@ def _log_kind_label(kind: str | None) -> str:
     return row.get(current_lang(), row.get("en", kind)) if row else kind
 
 
-def _log_row(r: object) -> str:
+def _log_row(r: object, tz_by_branch: dict[int, int]) -> str:
     req, tid, kind, cap = r.request_id, r.thread_id, r.kind, r.capability
     model, ti, to, cost = r.model, r.tokens_in, r.tokens_out, r.cost_usd
     lat, ok, err, created = r.latency_ms, r.ok, r.error, r.created_at
-    when = str(created)[5:19].replace("T", " ") if created else "—"  # MM-DD HH:MM:SS (UTC)
+    dt = _as_dt(created)
+    if dt is not None:
+        dt += timedelta(hours=tz_by_branch.get(r.branch_id, 0))
+    when = dt.strftime("%m-%d %H:%M:%S") if dt else "—"  # MM-DD HH:MM:SS, branch-local
     rid = f'#{_h.escape(str(req))}' if req else "—"
     chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}/panel" hx-target="#main"'
             f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">#{tid}</a>'
@@ -1095,10 +1099,13 @@ def _log_pager(page: int, size: int, total: int) -> str:
     )
 
 
-def broker_log_panel_html(rows: list, page: int, size: int, total: int) -> str:
+def broker_log_panel_html(
+    rows: list, page: int, size: int, total: int, tz_by_branch: dict[int, int] | None = None,
+) -> str:
     title = _h.escape(t("log.title"))
     intro = _h.escape(t("log.intro"))
-    body = "".join(_log_row(r) for r in rows) or (
+    tz = tz_by_branch or {}
+    body = "".join(_log_row(r, tz) for r in rows) or (
         f'<tr><td colspan="9" style="color:#4a5568">{_h.escape(t("log.empty"))}</td></tr>')
     head = (
         f'<tr><th>ID</th><th>{_h.escape(t("log.when"))}</th>'

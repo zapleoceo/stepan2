@@ -13,7 +13,7 @@ from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
 
 from ._i18n import apply_lang, t
-from ._query import _branch_where, fetch_ad_funnel, fetch_broker_log
+from ._query import _branch_where, fetch_ad_funnel, fetch_branch_tz, fetch_broker_log
 from ._ui_panels import (
     broker_log_panel_html,
     leads_panel_html,
@@ -124,7 +124,9 @@ async def broker_log_page(request: Request, page: int = 0) -> HTMLResponse:
     page = max(0, page)
     async with session_scope() as session:
         rows, total = await fetch_broker_log(session, branch_ids, page, _LOG_PAGE_SIZE)
-    return HTMLResponse(broker_log_panel_html(rows, page, _LOG_PAGE_SIZE, total))
+        seen_ids = {r.branch_id for r in rows if r.branch_id is not None}
+        tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
+    return HTMLResponse(broker_log_panel_html(rows, page, _LOG_PAGE_SIZE, total, tz_by_branch))
 
 
 @router.post("/settings/save", response_class=HTMLResponse)

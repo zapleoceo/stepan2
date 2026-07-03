@@ -14,9 +14,9 @@ from typing import Any  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.adapters.db.models import BrokerLog  # noqa: E402
+from app.adapters.db.models import Branch, BrokerLog  # noqa: E402
 from app.adapters.llm import broker as broker_mod  # noqa: E402
-from app.api._query import fetch_broker_log  # noqa: E402
+from app.api._query import fetch_branch_tz, fetch_broker_log  # noqa: E402
 from app.api._ui_panels import broker_log_panel_html  # noqa: E402
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
@@ -114,3 +114,27 @@ async def test_fetch_and_render_broker_log(db_session) -> None:
     assert "free" in html                    # zero cost → free
     assert "1.5s" in html                     # latency in seconds
     assert "fail" in html                     # failure row flagged
+
+
+async def test_log_renders_each_branch_in_its_own_local_time(db_session) -> None:
+    """Owner viewing the log across branches must see each row in ITS branch's tz, not a
+    single global offset — a Jakarta (+7) call and a UTC (+0) call side by side."""
+    jakarta = Branch(name="Jakarta", tz_offset_h=7)
+    utc_branch = Branch(name="UTC", tz_offset_h=0)
+    db_session.add_all([jakarta, utc_branch])
+    await db_session.flush()
+
+    when = datetime(2026, 7, 3, 10, 0, 0)
+    db_session.add(BrokerLog(branch_id=jakarta.id, kind="reply", capability="chat:smart",
+                             ok=True, created_at=when))
+    db_session.add(BrokerLog(branch_id=utc_branch.id, kind="reply", capability="chat:smart",
+                             ok=True, created_at=when))
+    await db_session.flush()
+
+    rows, total = await fetch_broker_log(db_session, None, page=0, size=50)
+    tz_by_branch = await fetch_branch_tz(db_session, [jakarta.id, utc_branch.id])
+    assert tz_by_branch == {jakarta.id: 7, utc_branch.id: 0}
+
+    html = broker_log_panel_html(list(rows), 0, 50, total, tz_by_branch)
+    assert "07-03 17:00:00" in html  # Jakarta: 10:00 UTC + 7h
+    assert "07-03 10:00:00" in html  # UTC branch: unshifted

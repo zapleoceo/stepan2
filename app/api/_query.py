@@ -4,7 +4,7 @@ from __future__ import annotations
 from sqlalchemy import case, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import ChannelThread, Lead
+from app.adapters.db.models import Branch, ChannelThread, Lead
 
 _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
@@ -122,6 +122,19 @@ async def fetch_broker_log(
         )
     ).scalars().all()
     return list(rows), int(total)
+
+
+async def fetch_branch_tz(session: AsyncSession, branch_ids: list[int]) -> dict[int, int]:
+    """tz_offset_h per branch id — lets a multi-branch view (e.g. the broker log, which
+    spans every branch for the owner) render each row in ITS OWN branch-local time."""
+    if not branch_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Branch.id, Branch.tz_offset_h).where(Branch.id.in_(branch_ids))  # type: ignore[attr-defined]
+        )
+    ).all()
+    return {bid: int(offset) for bid, offset in rows}
 
 
 async def fetch_coach_data(session: AsyncSession, branch_id: int) -> tuple[list, list]:
