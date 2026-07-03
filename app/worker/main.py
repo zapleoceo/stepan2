@@ -165,7 +165,7 @@ async def _reply_thread(branch_id: int, thread_id: int, llm: BrokerLLM) -> bool:
                 return False  # another tick already owns this thread right now
             cfg = await get_settings(session, branch_id)
             reply = ReplyService(
-                session, branch_id, llm, KnowledgeService(session, branch_id),
+                session, branch_id, llm, KnowledgeService(session, branch_id, llm),
                 branch_settings=cfg, notifier=_build_notifier(cfg),
             )
             decision = await reply.decide(thread_id)
@@ -192,7 +192,7 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
                 continue
             if branch_cfg.is_quiet_hour():
                 continue
-            knowledge = KnowledgeService(session, branch.id)
+            knowledge = KnowledgeService(session, branch.id, llm)
             svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)
             sent += await svc.run()  # timers are armed by OutboxSender after bot sends
     return sent
@@ -354,6 +354,29 @@ async def prune_broker_log(ctx: dict[str, Any]) -> int:
     return res.rowcount or 0
 
 
+async def reindex_knowledge(ctx: dict[str, Any]) -> int:
+    """Watcher: reindex the RAG store for any branch whose KB changed since its last index.
+
+    Each branch reindexes in its own transaction so one embedding failure doesn't drop the
+    others. Returns the number of branches reindexed this tick."""
+    from app.modules.knowledge.reindex import branch_needs_reindex, reindex_branch  # noqa: PLC0415
+
+    llm = BrokerLLM()
+    async with session_scope() as session:
+        branch_ids = [b.id for b in await wiring.active_branches(session)]
+    done = 0
+    for branch_id in branch_ids:
+        try:
+            async with session_scope() as session:
+                if not await branch_needs_reindex(session, branch_id):
+                    continue
+                await reindex_branch(session, branch_id, llm)
+                done += 1
+        except Exception:
+            logger.exception("reindex failed branch=%d", branch_id)
+    return done
+
+
 def _redis_settings() -> RedisSettings:
     """ARQ broker connection from the app's redis_url (parsed, never reconstructed)."""
     return RedisSettings.from_dsn(settings().redis_url)
@@ -366,6 +389,7 @@ class WorkerSettings:
     functions = [
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
+        reindex_knowledge,
     ]
     cron_jobs = [
         # Ingest every 2 min: an IG poll costs several private-API calls each with a
@@ -389,6 +413,9 @@ class WorkerSettings:
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
         # Broker-log retention: prune rows older than 15 days, once a day at 03:30
         cron(prune_broker_log, hour={3}, minute={30}, second=0, run_at_startup=False),
+        # RAG reindex watcher every 5 min: rebuilds only branches whose KB changed
+        cron(reindex_knowledge, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
+             second=45, run_at_startup=False),
     ]
     redis_settings = _redis_settings()
     max_jobs = 10

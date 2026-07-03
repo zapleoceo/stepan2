@@ -36,6 +36,7 @@ class Decision:
     manager_question: str | None = None
     kb_gap: str | None = None
     ready_subtype: str | None = None  # 'deal' | 'openhouse' when ready
+    reply_language: str | None = None  # lead's language code when they wrote in another
 
 
 def _strip_fences(raw: str) -> str:
@@ -67,6 +68,7 @@ def parse_decision(raw_json: str) -> Decision:
         raise ValueError("'reply' must be a string")
 
     subtype = str(data.get("ready_subtype") or "").lower().strip()
+    lang = str(data.get("reply_language") or "").lower().strip()
     return Decision(
         reply=clean_reply(reply),
         stage=stage,
@@ -76,4 +78,5 @@ def parse_decision(raw_json: str) -> Decision:
         manager_question=data.get("manager_question") or None,
         kb_gap=data.get("kb_gap") or None,
         ready_subtype=subtype if subtype in ("deal", "openhouse") else None,
+        reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
     )

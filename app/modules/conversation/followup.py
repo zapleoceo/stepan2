@@ -19,6 +19,7 @@ from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
 from .prompt import build_messages
+from .reply import _retrieval_query
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -124,7 +125,8 @@ class FollowupService:
         if not dialog:
             return False
         lang = await self._lang()
-        context = await self.knowledge.knowledge_context(product_slug)
+        context = await self.knowledge.knowledge_context(
+            product_slug, query=_retrieval_query(dialog))
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(context, dialog, lang, coaching_notes=notes)
         total = len(self.settings.followup_schedule_h)

@@ -39,6 +39,13 @@ def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
 
 
+def _retrieval_query(dialog: list, limit: int = 6) -> str:
+    """Recent dialog text used as the RAG retrieval query — the index is searched by what
+    the conversation is about right now, not the whole (capped) history."""
+    return "\n".join(
+        (m.text or "").strip() for m in dialog[-limit:] if (m.text or "").strip())
+
+
 def _fmt_llm_meta(meta: dict) -> str | None:
     model = (meta.get("model") or "").split("/")[-1]
     t_in = meta.get("tokens_in", 0)
@@ -98,9 +105,12 @@ class ReplyService:
             logger.warning("branch=%d over daily LLM budget — reply skipped", self.branch_id)
             return None
 
-        context = await self.knowledge.knowledge_context(thread.product_slug)
+        context = await self.knowledge.knowledge_context(
+            thread.product_slug, query=_retrieval_query(dialog))
         notes = await self.coaching.active_manager_notes()
-        messages = build_messages(context, dialog, await self._lang(), coaching_notes=notes)
+        lead = await self.session.get(Lead, thread.lead_id)
+        messages = build_messages(
+            context, dialog, await self._lang(lead), coaching_notes=notes)
         raw, meta = await self.llm.chat(
             messages, capability="chat:smart", require_json_schema=True,
             workflow="reply", thread_id=thread_id, branch_id=self.branch_id,
@@ -109,8 +119,11 @@ class ReplyService:
         await budget.record(float(meta.get("cost_usd") or 0.0))
         return parse_decision(raw)
 
-    async def _lang(self) -> str:
-        """Branch reply language; Branch is the tenant root, so read it by its own id."""
+    async def _lang(self, lead: Lead | None = None) -> str:
+        """Reply language ladder: the lead's stated preference wins, else the branch default.
+        The KB may be written in any language — this only controls what the bot replies in."""
+        if lead is not None and lead.preferred_language:
+            return lead.preferred_language
         branch = await self.session.get(Branch, self.branch_id)
         return branch.lang if branch is not None else "id"
 
@@ -149,6 +162,9 @@ class ReplyService:
         if decision.product_slug and thread.product_slug is None:
             thread.product_slug = decision.product_slug
             self.session.add(thread)
+        if decision.reply_language and decision.reply_language != lead.preferred_language:
+            lead.preferred_language = decision.reply_language  # lead switched language — remember
+            self.session.add(lead)
         new_stage = self._stage_for(decision, lead)
         if new_stage == lead.stage:
             return
