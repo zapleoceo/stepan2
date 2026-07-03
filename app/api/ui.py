@@ -30,7 +30,8 @@ from ._routes_coach import router as _coach_router
 from ._routes_knowledge import router as _knowledge_router
 from ._routes_products import router as _products_router
 from ._ui_html import app_shell, funnel_html, thread_list_html
-from ._ui_panels import coach_chat_html, knowledge_list_html, reports_panel_html
+from ._ui_kb import kb_tree_html
+from ._ui_panels import coach_chat_html, reports_panel_html
 
 router = APIRouter(prefix="/ui")
 router.include_router(_channels_router)
@@ -99,11 +100,11 @@ async def knowledge_page(request: Request) -> HTMLResponse:
     where, params = _branch_where(branch_ids)
     async with session_scope() as session:
         q = (
-            "SELECT id, slug, title, content"  # noqa: S608
-            f" FROM knowledge_doc {where} ORDER BY id"
+            "SELECT id, slug, title, content, category, sort_order, updated_by"  # noqa: S608
+            f" FROM knowledge_doc {where} ORDER BY sort_order, id"
         )
         docs = (await session.execute(text(q), params)).all()
-    thr = knowledge_list_html(list(docs))
+    thr = kb_tree_html(list(docs))
     empty = f'<div class="emp">{_h.escape(t("know.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="know", thr_html=thr))
 

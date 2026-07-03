@@ -11,6 +11,7 @@ Stepan-1.
 | [multitenant-design.md](multitenant-design.md) | Архитектура мультиарендности, каналы, личность лида, миграция, фазы |
 | [lead-identity-and-deletion.md](lead-identity-and-deletion.md) | Объединение лидов по телефону, каскад удаления канала, инвариант лида-сироты |
 | [broker-log.md](broker-log.md) | Лог вызовов брокера: что логируется, поля, страница `/settings/log`, ретенция |
+| [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
 | [architecture.md](architecture.md) | Сервисы, БД, broker-only LLM, деплой *(по мере реализации)* |
 | [domain-model.md](domain-model.md) | Схема БД, branch/channel/lead, изоляция *(по мере реализации)* |
 

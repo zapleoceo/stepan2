@@ -204,20 +204,20 @@ def test_coach_chat_html_renders_form() -> None:
     assert "coach-msgs" in html
 
 
-def test_knowledge_panel_html_empty() -> None:
-    from app.api._ui_panels import knowledge_panel_html
+def test_kb_tree_html_empty() -> None:
+    from app.api._ui_kb import kb_tree_html
     _set_lang("en")
-    html = knowledge_panel_html([])
-    assert "Knowledge" in html
+    html = kb_tree_html([])
+    assert "Persona" in html and "Products" in html  # tabs always present
 
 
-def test_knowledge_panel_html_with_docs() -> None:
-    from app.api._ui_panels import knowledge_panel_html
+def test_kb_tree_html_groups_by_category() -> None:
+    from app.api._ui_kb import kb_tree_html
     _set_lang("en")
-    docs = [(1, "persona", "Persona", "I am Stepan...")]
-    html = knowledge_panel_html(docs)
-    assert "persona" in html
-    assert "Persona" in html
+    docs = [(1, "persona_core", "Persona core", "hi", "persona", 0, None),
+            (2, "playbook_price", "Price", "x", "playbook", 1, None)]
+    html = kb_tree_html(docs)
+    assert "Persona" in html and "Playbooks" in html  # category group headers
     assert 'hx-get="/ui/knowledge/1/edit"' in html
 
 
@@ -309,8 +309,8 @@ def test_coach_panel_partial_exists(client: TestClient) -> None:
     assert resp.status_code in (200, 500)
 
 
-def test_knowledge_panel_exists(client: TestClient) -> None:
-    resp = client.get("/ui/knowledge/panel")
+def test_knowledge_tree_exists(client: TestClient) -> None:
+    resp = client.get("/ui/knowledge/tree")
     assert resp.status_code in (200, 500)
 
 
@@ -364,10 +364,9 @@ def test_products_new_form_exists(client: TestClient) -> None:
     assert "slug" in resp.text
 
 
-def test_knowledge_new_form_exists(client: TestClient) -> None:
-    resp = client.get("/ui/knowledge/new")
-    assert resp.status_code == 200
-    assert "slug" in resp.text
+def test_knowledge_products_tab_exists(client: TestClient) -> None:
+    resp = client.get("/ui/knowledge/products")
+    assert resp.status_code in (200, 500)
 
 
 def test_inbox_has_leads_nav(client: TestClient) -> None:
@@ -443,12 +442,21 @@ def test_product_edit_html_existing() -> None:
     assert "vibe-coding" in html
 
 
-def test_knowledge_new_html() -> None:
-    from app.api._ui_panels import knowledge_new_html
+def test_kb_editor_section_skeleton_for_empty_canonical_doc() -> None:
+    from app.api._ui_kb import kb_editor_html
     _set_lang("en")
-    html = knowledge_new_html()
-    assert "/ui/knowledge/create" in html
-    assert "slug" in html
+    html = kb_editor_html(1, "persona_core", "Persona core", "")
+    assert 'name="body_0"' in html and 'name="nsec"' in html  # section editor
+    assert "Identity" in html                                  # localized section title
+    assert "/ui/knowledge/1/history" in html                   # history button
+
+
+def test_kb_editor_parses_existing_sections() -> None:
+    from app.api._ui_kb import kb_editor_html
+    _set_lang("en")
+    html = kb_editor_html(2, "faq", "FAQ", "## Payment\nWe take cards.\n\n## Hours\n9-5")
+    assert "Payment" in html and "Hours" in html
+    assert "We take cards" in html
 
 
 def test_chat_header_html() -> None:
@@ -476,11 +484,11 @@ def test_products_panel_html_has_create_button() -> None:
     assert "/ui/products/new" in html
 
 
-def test_knowledge_panel_html_has_create_button() -> None:
-    from app.api._ui_panels import knowledge_panel_html
+def test_kb_products_tab_has_create_button() -> None:
+    from app.api._ui_kb import kb_products_html
     _set_lang("en")
-    html = knowledge_panel_html([])
-    assert "/ui/knowledge/new" in html
+    html = kb_products_html([])
+    assert "/ui/products/new" in html
 
 
 def test_coach_pair_applied_shows_revert() -> None:
@@ -678,9 +686,9 @@ def test_all_sub_routers_reachable(client: TestClient) -> None:
         "/ui/outbox/panel",
         "/ui/members/panel",
         "/ui/settings/panel",
-        "/ui/knowledge/panel",
+        "/ui/knowledge/tree",
+        "/ui/knowledge/products",
         "/ui/products/panel",
-        "/ui/knowledge/new",
         "/ui/products/new",
         "/ui/branches/panel",
         "/ui/branches/new",

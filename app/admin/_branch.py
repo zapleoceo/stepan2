@@ -28,6 +28,13 @@ def branch_ids_from_request(request: Request) -> list[int] | None:
     return allowed
 
 
+def actor_from_request(request: Request) -> str:
+    """Who is editing — the authenticated owner's id, or 'owner' when auth is disabled.
+    Used as the `actor` on knowledge/product revisions."""
+    user = getattr(getattr(request, "state", None), "user", None) or {}
+    return str(user.get("uid") or user.get("tg") or "owner")
+
+
 def allowed_branch_ids(request: Request) -> list[int] | None:
     """Branches the caller may ACT on (write/manage): None = act on any branch
     (super_admin, or auth disabled). Unlike branch_ids_from_request this ignores the

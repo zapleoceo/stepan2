@@ -84,6 +84,19 @@ _TR: dict[str, dict[str, str]] = {
     "know.save":    {"ru": "Сохранить",   "en": "Save",        "id": "Simpan"},
     "know.back":    {"ru": "← База знаний","en": "← Knowledge","id": "← Basis Pengetahuan"},
     "know.saved":   {"ru": "Сохранено ✓", "en": "Saved ✓",    "id": "Tersimpan ✓"},
+    # knowledge-base tree / editor / history / reindex
+    "kb.tab_persona": {"ru": "Персона",   "en": "Persona",     "id": "Persona"},
+    "kb.reindex":   {"ru": "Переиндексировать RAG", "en": "Reindex RAG", "id": "Reindex RAG"},
+    "kb.reindexed": {"ru": "Проиндексировано чанков", "en": "Chunks indexed",
+                     "id": "Chunk terindeks"},
+    "kb.reindex_pick": {"ru": "Выбери филиал в шапке", "en": "Pick a branch first",
+                        "id": "Pilih cabang dulu"},
+    "kb.preamble":  {"ru": "Вступление",  "en": "Intro",       "id": "Intro"},
+    "kb.history":   {"ru": "История",      "en": "History",     "id": "Riwayat"},
+    "kb.edited_by": {"ru": "правил:",      "en": "edited by",   "id": "diedit oleh"},
+    "kb.restore":   {"ru": "Восстановить", "en": "Restore",     "id": "Pulihkan"},
+    "kb.no_history": {"ru": "Правок пока нет", "en": "No edits yet", "id": "Belum ada edit"},
+    "kb.back":      {"ru": "Назад",        "en": "Back",        "id": "Kembali"},
     # products panel
     "prod.sort_hint": {
         "ru": "Порядок в промпте ИИ: 0 = первый. Чем меньше — тем раньше продукт упоминается.",

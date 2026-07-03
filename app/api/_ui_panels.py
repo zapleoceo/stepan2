@@ -214,125 +214,6 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
     )
 
 
-# ─── knowledge sidebar & panel ───────────────────────────────────────────────
-
-def _knowledge_items_html(docs: list, active_id: int | None = None) -> str:
-    """Plain <a> items for #know-list — reused in full list and HTMX refresh."""
-    items = "".join(
-        f'<a class="ti{"  on" if doc[0] == active_id else ""}"'
-        f' hx-get="/ui/knowledge/{doc[0]}/edit" hx-target="#main"'
-        f' hx-push-url="/ui/knowledge/{doc[0]}/edit"'
-        f' onclick="setOn(this)">'
-        f'<div class="ti-t"><span class="ti-n">{_h.escape(str(doc[2] or doc[1]))}</span></div>'
-        f'<div class="ti-p">{_h.escape(str(doc[1]))}</div>'
-        f'</a>'
-        for doc in docs
-    )
-    return items if items else '<div class="emp">—</div>'
-
-
-def knowledge_list_html(docs: list) -> str:
-    """Sidebar list of knowledge docs for .thr column (like thread_list_html)."""
-    know_lbl = _h.escape(t("nav.know"))
-    create_lbl = _h.escape(t("know.create"))
-    return (
-        f'<div class="thr-h" style="display:flex;align-items:center;'
-        f'justify-content:space-between">'
-        f'<span>{know_lbl}</span>'
-        f'<a class="btn-sm btn-p" hx-get="/ui/knowledge/new" hx-target="#main"'
-        f' hx-push-url="/ui/knowledge/new"'
-        f' style="text-decoration:none;font-size:.7rem;padding:.18rem .45rem">'
-        f'{create_lbl}</a>'
-        f'</div>'
-        f'<div id="know-list"'
-        f' hx-trigger="refreshKnowledgeList from:body"'
-        f' hx-get="/ui/knowledge/list" hx-swap="innerHTML"'
-        f' style="flex:1;overflow-y:auto">'
-        f'{_knowledge_items_html(docs)}'
-        f'</div>'
-    )
-
-
-def knowledge_panel_html(docs: list) -> str:
-    """List of KB docs; each card loads the edit view via HTMX."""
-    title = _h.escape(t("nav.know"))
-    create_lbl = _h.escape(t("know.create"))
-    cards = "".join(
-        f'<div class="kdoc"'
-        f' hx-get="/ui/knowledge/{doc[0]}/edit" hx-target="#main"'
-        f' hx-push-url="/ui/knowledge/{doc[0]}/edit">'
-        f'<div class="kdoc-slug">{_h.escape(str(doc[1]))}</div>'
-        f'<div class="kdoc-title">{_h.escape(str(doc[2] or doc[1]))}</div>'
-        f'<div class="kdoc-preview">{_h.escape((doc[3] or "")[:120])}</div>'
-        f'</div>'
-        for doc in docs  # (id, slug, title, content)
-    )
-    if not docs:
-        cards = '<div class="emp">—</div>'
-    return (
-        f'<div class="ch"><span class="ch-n">{title}</span>'
-        f'<div style="margin-left:auto">'
-        f'<a class="btn-sm btn-p" hx-get="/ui/knowledge/new" hx-target="#main"'
-        f' hx-push-url="/ui/knowledge/new" style="text-decoration:none">'
-        f'{create_lbl}</a></div></div>'
-        f'<div class="pnl-body">{cards}</div>'
-    )
-
-
-def knowledge_new_html() -> str:
-    """Create form for a new KB doc."""
-    slug_lbl = _h.escape(t("know.slug_lbl"))
-    title_lbl = _h.escape(t("know.title"))
-    content_lbl = _h.escape(t("know.content"))
-    save_lbl = _h.escape(t("know.save"))
-    new_lbl = _h.escape(t("know.new_doc"))
-    return (
-        f'<div class="ch"><span class="ch-n">{new_lbl}</span></div>'
-        f'<div class="pnl-body">'
-        f'<form hx-post="/ui/knowledge/create" hx-target="#main" hx-swap="innerHTML">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{slug_lbl}</label>'
-        f'<input class="frm-inp" name="slug" placeholder="e.g. faq_pricing"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{title_lbl}</label>'
-        f'<input class="frm-inp" name="title"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{content_lbl}</label>'
-        f'<textarea class="frm-ta" name="content" rows="18"></textarea></div>'
-        f'<div style="display:flex;gap:.5rem;margin-top:.4rem">'
-        f'<button class="btn-sm btn-p">{save_lbl}</button>'
-        f'</div></form></div>'
-    )
-
-
-def knowledge_edit_html(doc_id: int, slug: str, title: str, content: str) -> str:
-    """Edit form for a single KB doc (navigation via sidebar)."""
-    title_lbl = _h.escape(t("know.title"))
-    content_lbl = _h.escape(t("know.content"))
-    save_lbl = _h.escape(t("know.save"))
-    return (
-        f'<div class="ch">'
-        f'<span class="ch-n">{_h.escape(title or slug)}</span>'
-        f'<span style="margin-left:.4rem;font-size:.74rem;color:#6b7685">{_h.escape(slug)}</span>'
-        f'</div>'
-        f'<div class="pnl-body">'
-        f'<form hx-post="/ui/knowledge/{doc_id}/save" hx-target="#main" hx-swap="innerHTML">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{title_lbl}</label>'
-        f'<input class="frm-inp" name="title" value="{_h.escape(title or "")}">'
-        f'</div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{content_lbl}</label>'
-        f'<textarea class="frm-ta" name="content" rows="22">{_h.escape(content or "")}</textarea>'
-        f'</div>'
-        f'<div style="display:flex;gap:.5rem;align-items:center;margin-top:.4rem">'
-        f'<button class="btn-sm btn-p">{save_lbl}</button>'
-        f'</div>'
-        f'</form>'
-        f'</div>'
-    )
-
-
 # ─── products panel ───────────────────────────────────────────────────────────
 
 def products_panel_html(products: list) -> str:
@@ -390,10 +271,16 @@ def product_edit_html(
             f'</form>'
         )
     chk = "checked" if is_active else ""
+    hist_btn = (
+        f'<a class="btn-sm" hx-get="/ui/products/{prod_id}/history" hx-target="#main"'
+        f' hx-push-url="/ui/products/{prod_id}/history" style="margin-left:auto">'
+        f'🕘 {_h.escape(t("kb.history"))}</a>' if prod_id else ""
+    )
     return (
         f'<div class="ch">'
-        f'<a class="btn-g" hx-get="/ui/products/panel" hx-target="#main"'
-        f' hx-push-url="/ui/products/panel" style="text-decoration:none">{back_lbl}</a>'
+        f'<span class="ch-n">{_h.escape(title or slug or back_lbl)}</span>'
+        f'{f"<span class=ch-slug>{_h.escape(slug)}</span>" if slug else ""}'
+        f'{hist_btn}'
         f'</div>'
         f'<div class="pnl-body">'
         f'<form hx-post="{action}" hx-target="#main" hx-swap="innerHTML">'

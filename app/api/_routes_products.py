@@ -6,10 +6,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request
+from app.admin._branch import actor_from_request, branch_ids_from_request
+from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 
 from ._i18n import apply_lang
 from ._query import _branch_where
+from ._ui_kb import kb_history_html
 from ._ui_panels import product_edit_html, products_panel_html
 
 router = APIRouter()
@@ -68,26 +70,25 @@ async def products_save(
 ) -> HTMLResponse:
     apply_lang(request)
     active = bool(is_active)
+    actor = actor_from_request(request)
     branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
-        if branch_ids:
-            await session.execute(
-                text(
-                    "UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s"
-                    " WHERE id=:id AND branch_id=ANY(:bids)"
-                ),
-                {"t": title.strip(), "c": content.strip(), "a": active,
-                 "s": sort_order, "id": prod_id, "bids": branch_ids},
-            )
-        else:
-            await session.execute(
-                text(
-                    "UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s"
-                    " WHERE id=:id"
-                ),
-                {"t": title.strip(), "c": content.strip(), "a": active,
-                 "s": sort_order, "id": prod_id},
-            )
+        prev = (await session.execute(
+            text("SELECT branch_id, slug, content FROM product WHERE id=:id"),
+            {"id": prod_id})).first()
+        if prev is None:
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        if branch_ids and prev[0] not in branch_ids:
+            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+        await session.execute(
+            text("UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s,"
+                 " updated_by=:by, updated_at=NOW() WHERE id=:id"),
+            {"t": title.strip(), "c": content.strip(), "a": active,
+             "s": sort_order, "id": prod_id, "by": actor},
+        )
+        await record_revision(
+            session, branch_id=prev[0], entity_type="product", slug=str(prev[1]),
+            old_content=prev[2], new_content=content.strip(), actor=actor)
         row = (
             await session.execute(
                 text(
@@ -152,6 +153,39 @@ async def products_create(
             str(row[3] or ""), bool(row[4]), int(row[5] or 0),
         )
     )
+
+
+@router.get("/products/{prod_id}/history", response_class=HTMLResponse)
+async def products_history(prod_id: int, request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    async with session_scope() as session:
+        row = (await session.execute(
+            text("SELECT branch_id, slug FROM product WHERE id=:id"), {"id": prod_id})).first()
+        if not row:
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        bid = row[0] if branch_ids else None
+        revs = await list_revisions(session, bid, "product", str(row[1]))
+    return HTMLResponse(kb_history_html(
+        f"/ui/products/{prod_id}/edit", str(row[1]), revs, restore_url="/ui/products/restore"))
+
+
+@router.post("/products/restore", response_class=HTMLResponse)
+async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLResponse:
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    bid = branch_ids[0] if branch_ids else None
+    async with session_scope() as session:
+        out = await restore_revision(session, bid, rev_id, actor=actor_from_request(request))
+        if out is None:
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        row = (await session.execute(
+            text("SELECT id, slug, title, content, is_active, sort_order"
+                 " FROM product WHERE slug=:s"), {"s": out[1]})).first()
+    if not row:
+        return HTMLResponse('<div class="emp">Restored</div>')
+    return HTMLResponse(product_edit_html(
+        row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""), bool(row[4]), int(row[5] or 0)))
 
 
 @router.post("/products/{prod_id}/delete")
