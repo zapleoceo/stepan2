@@ -13,6 +13,7 @@ Stepan-1.
 | [broker-log.md](broker-log.md) | Лог вызовов брокера: что логируется, поля, страница `/settings/log`, ретенция |
 | [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
+| [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |
 | [architecture.md](architecture.md) | Сервисы, БД, broker-only LLM, деплой *(по мере реализации)* |
 | [domain-model.md](domain-model.md) | Схема БД, branch/channel/lead, изоляция *(по мере реализации)* |
 
