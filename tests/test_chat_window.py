@@ -346,3 +346,25 @@ async def test_send_unknown_source_falls_back_to_manager(db_session) -> None:
         _text("SELECT source FROM outbox WHERE text = 'Sneaky'")
     )).scalar()
     assert src == "manager"
+
+
+# ─── poll cursor + branch timezone (pure) ─────────────────────────────────────
+
+def test_last_msg_id_is_max_not_last_by_time() -> None:
+    """A late-arriving row (higher id, earlier timestamp) must not drop the cursor —
+    else the poll re-fetches already-shown rows and the order jitters."""
+    from app.api._ui_html import _last_msg_id
+    rows = [(5,), (9,), (7,)]  # ordered by occurred_at; id 9 is not last
+    assert _last_msg_id(rows) == 9
+    assert _last_msg_id([]) == 0
+
+
+def test_fmt_time_uses_branch_offset() -> None:
+    from datetime import datetime
+
+    from app.api._ui_html import _fmt_time, set_render_tz
+    dt = datetime(2026, 7, 3, 5, 0, 0)  # naive UTC
+    set_render_tz(7)                     # Jakarta
+    assert _fmt_time(dt) == "12:00:00"
+    set_render_tz(0)
+    assert _fmt_time(dt) == "05:00:00"

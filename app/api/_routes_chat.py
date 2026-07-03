@@ -23,6 +23,7 @@ from ._ui_html import (
     chat_header_html,
     chat_panel_html,
     messages_html,
+    set_render_tz,
     since_bubbles_html,
     suggest_box_html,
 )
@@ -44,8 +45,9 @@ async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) ->
     row = (
         await session.execute(
             text(
-                "SELECT l.branch_id FROM channel_thread ct"
-                " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+                "SELECT l.branch_id, b.tz_offset_h FROM channel_thread ct"
+                " JOIN lead l ON l.id = ct.lead_id"
+                " JOIN branch b ON b.id = l.branch_id WHERE ct.id = :tid"
             ),
             {"tid": thread_id},
         )
@@ -54,6 +56,7 @@ async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) ->
         return None
     if allowed is not None and row[0] not in allowed:
         return None
+    set_render_tz(row[1])
     return row[0]
 
 
@@ -71,8 +74,10 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at"
+                    " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
+                    " b.tz_offset_h"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                    " JOIN branch b ON b.id = l.branch_id"
                     " WHERE ct.id = :tid"
                 ),
                 {"tid": thread_id},
@@ -80,13 +85,14 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
         ).first()
         if not info or (allowed is not None and info[3] not in allowed):
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        set_render_tz(info[21])
         msgs = await fetch_messages(session, thread_id)
         pending = await fetch_pending(session, thread_id)
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-     follower_count, following_count, last_active_at, lead_seen_at) = info
+     follower_count, following_count, last_active_at, lead_seen_at, _tz) = info
     return HTMLResponse(
         chat_panel_html(
             thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -264,8 +270,9 @@ async def chat_stage(
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at"
+                    " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                    " JOIN branch b ON b.id = l.branch_id"
                     " WHERE ct.id = :tid"
                 ),
                 {"tid": thread_id},
@@ -277,7 +284,8 @@ async def chat_stage(
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at) = info
+         follower_count, following_count, last_active_at, _tz) = info
+        set_render_tz(_tz)
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
             {"s": stage, "id": lead_id},

@@ -3,9 +3,18 @@ from __future__ import annotations
 
 import html as _h
 import re
-from datetime import UTC, datetime
+from contextvars import ContextVar
+from datetime import UTC, datetime, timedelta
 
 from ._i18n import t
+
+# Branch tz offset (hours) for the current render — chat timestamps show branch-local time.
+_render_tz_h: ContextVar[int] = ContextVar("render_tz_h", default=0)
+
+
+def set_render_tz(offset_h: int) -> None:
+    """Set the branch tz offset for timestamp rendering in this request/task."""
+    _render_tz_h.set(int(offset_h or 0))
 
 _HTMX = "https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"
 _FA = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
@@ -395,14 +404,26 @@ def _ago(dt: datetime | None) -> str:
     return f"{secs // 86400}{t('time.d')}"
 
 
+def _as_dt(v: object) -> datetime | None:
+    """Coerce a raw SQL value (datetime on Postgres, ISO str on SQLite) to naive datetime."""
+    if v is None or isinstance(v, datetime):
+        return v  # type: ignore[return-value]
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
 def _fmt_time(dt: datetime | None) -> str:
-    """Exact HH:MM:SS; includes date (DD.MM) if the message is older than 24 hours."""
+    """Branch-local HH:MM:SS; adds date (DD.MM) when older than 24h. Age is judged in UTC,
+    the label is rendered in the branch tz (set via set_render_tz)."""
     if dt is None:
         return ""
     now = datetime.now(UTC).replace(tzinfo=None)
+    local = dt + timedelta(hours=_render_tz_h.get())
     if (now - dt).total_seconds() > 86400:
-        return dt.strftime("%d.%m %H:%M:%S")
-    return dt.strftime("%H:%M:%S")
+        return local.strftime("%d.%m %H:%M:%S")
+    return local.strftime("%H:%M:%S")
 
 
 def _badge(stage: str) -> str:
@@ -630,7 +651,10 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
 
 
 def _last_msg_id(msgs: list) -> int:
-    return int(msgs[-1][0]) if msgs else 0
+    """Highest message id shown — the poll cursor. MUST be max(id), not the last row by
+    occurred_at: a late-arriving message can carry a higher id but an earlier timestamp,
+    and a last-by-time cursor would re-fetch already-shown rows and reorder the view."""
+    return max((int(m[0]) for m in msgs), default=0)
 
 
 def poll_sentinel_html(tid: int, after_id: int) -> str:
@@ -644,7 +668,7 @@ def poll_sentinel_html(tid: int, after_id: int) -> str:
 
 def _pending_bubble(row: object, tid: int, idx: int) -> str:
     oid, ptxt, sched, llm_info, tr_text = row  # (outbox id, text, scheduled_at, llm_info, tr)
-    when = str(sched)[11:19] if sched else ""  # HH:MM:SS (str or datetime both work)
+    when = _fmt_time(_as_dt(sched))  # branch-local HH:MM:SS (tolerates str or datetime)
     meta = f'⏳ {_h.escape(t("chat.pending"))} · №{idx + 1}' + (f' · ~{when}' if when else "")
     tr_btn = (
         f'<button class="trx" title="Translate" tabindex="-1"'
