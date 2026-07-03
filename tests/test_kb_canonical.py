@@ -3,6 +3,7 @@ and never clobbers existing content."""
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
 
@@ -48,3 +49,18 @@ async def test_ensure_is_idempotent_and_keeps_content(db_session) -> None:
     faq = await KnowledgeRepo(db_session, bid).by_slug("faq")
     assert faq.content == "real answers"  # content untouched
     assert faq.category == "reference"    # but category stamped
+
+
+async def test_ensure_bumps_updated_at_on_existing_doc(db_session) -> None:
+    """Stamping category/sort_order on a pre-existing doc must also refresh updated_at —
+    otherwise a UI sorted by recency shows a doc as untouched right after this ran."""
+    bid = await _branch(db_session)
+    old = datetime(2020, 1, 1)
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="faq", title="FAQ",
+                                content="real answers", updated_at=old))
+    await db_session.flush()
+
+    await ensure_canonical_docs(db_session, bid, "en")
+
+    faq = await KnowledgeRepo(db_session, bid).by_slug("faq")
+    assert faq.updated_at > old

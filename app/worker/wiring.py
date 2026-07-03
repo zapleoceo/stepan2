@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels import REGISTRY
@@ -73,6 +73,18 @@ async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[
         )
     )
     return [tid for tid in rows.scalars().all() if tid is not None]
+
+
+async def try_lock_thread(session: AsyncSession, thread_id: int) -> bool:
+    """Postgres advisory xact lock scoped to thread_id — released automatically when the
+    caller's transaction ends (commit/rollback), no explicit unlock needed. Closes the gap
+    the NOT-EXISTS pending guard leaves open: two overlapping reply_pending ticks can both
+    pass that guard before either commits its outbox row, so both call the LLM for the same
+    thread. No-op (always True) off Postgres — sqlite tests aren't concurrent."""
+    if not settings().database_url.startswith("postgresql"):
+        return True
+    row = await session.exec(select(func.pg_try_advisory_xact_lock(thread_id)))  # type: ignore[arg-type]
+    return bool(row.scalar_one())
 
 
 async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> list[int]:

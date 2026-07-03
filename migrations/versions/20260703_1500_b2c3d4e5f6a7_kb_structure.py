@@ -83,12 +83,29 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("knowledge_revision")
-    op.drop_table("knowledge_chunk")
-    op.drop_column("lead", "preferred_language")
-    op.drop_column("product", "updated_by")
-    op.drop_column("product", "updated_at")
-    op.drop_column("knowledge_doc", "updated_by")
-    op.drop_column("knowledge_doc", "updated_at")
-    op.drop_column("knowledge_doc", "sort_order")
-    op.drop_column("knowledge_doc", "category")
+    bind = op.get_bind()
+    tables = set(sa.inspect(bind).get_table_names())
+
+    if "knowledge_revision" in tables:
+        op.drop_table("knowledge_revision")
+    if "knowledge_chunk" in tables:
+        op.drop_table("knowledge_chunk")
+
+    if "preferred_language" in _cols(bind, "lead"):
+        op.drop_column("lead", "preferred_language")
+
+    prod = _cols(bind, "product")
+    if "updated_by" in prod:
+        op.drop_column("product", "updated_by")
+    if "updated_at" in prod:
+        op.drop_column("product", "updated_at")
+
+    kdoc = _cols(bind, "knowledge_doc")
+    if "updated_by" in kdoc:
+        op.drop_column("knowledge_doc", "updated_by")
+    if "updated_at" in kdoc:
+        op.drop_column("knowledge_doc", "updated_at")
+    if "sort_order" in kdoc:
+        op.drop_column("knowledge_doc", "sort_order")
+    if "category" in kdoc:
+        op.drop_column("knowledge_doc", "category")

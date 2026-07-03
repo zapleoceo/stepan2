@@ -38,6 +38,22 @@ def test_upgrade_head_creates_tables(tmp_path, monkeypatch):
     assert "alembic_version" in tables  # migration actually ran and stamped
 
 
+def test_kb_structure_migration_downgrades_cleanly(tmp_path, monkeypatch):
+    """downgrade() must mirror upgrade()'s existence guards — a downgrade from head must
+    not crash with 'column does not exist', and re-upgrading afterwards must still work."""
+    db_file = tmp_path / "kb_downgrade.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("STEPAN2_DATABASE_URL", db_url)
+    settings.cache_clear()
+    cfg = _alembic_config(db_url)
+
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "a1b2c3d4e5f6")
+    command.upgrade(cfg, "head")
+
+    settings.cache_clear()
+
+
 def test_worker_settings_exposes_tasks():
     from app.worker.main import (
         WorkerSettings,

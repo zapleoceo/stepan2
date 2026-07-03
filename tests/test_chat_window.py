@@ -400,3 +400,37 @@ async def test_clear_filters_display(db_session) -> None:
     rows = await fetch_messages(db_session, th.id)
     texts = [r[3] for r in rows]
     assert texts == ["msg1"]  # pre-clear msg0 hidden, post-clear msg1 kept
+
+
+async def test_clear_boundary_matches_llm_dialog_cutoff(db_session) -> None:
+    """A message timestamped exactly at context_cleared_at must be hidden from the chat
+    window the same way MessageRepo.dialog() hides it from the LLM prompt — otherwise the
+    manager sees a message the bot never had in context, or vice versa."""
+    from datetime import UTC, datetime
+
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
+    from app.api._query import fetch_messages
+    from app.domain.enums import ChannelKind
+    from app.modules.conversation.repository import MessageRepo
+
+    cutoff = datetime.now(UTC).replace(tzinfo=None)
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-2",
+                       context_cleared_at=cutoff)
+    db_session.add(th)
+    await db_session.flush()
+    db_session.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id,
+                           external_id="m-boundary", direction="in", sent_by="lead",
+                           text="on-the-tick", occurred_at=cutoff))
+    await db_session.flush()
+
+    rows = await fetch_messages(db_session, th.id)
+    dialog = await MessageRepo(db_session, b.id).dialog(th.id, since=cutoff)
+    assert rows == []  # UI hides the boundary message …
+    assert dialog == []  # … exactly like the LLM prompt does

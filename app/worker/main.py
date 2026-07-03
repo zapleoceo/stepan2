@@ -161,6 +161,8 @@ async def _reply_thread(branch_id: int, thread_id: int, llm: BrokerLLM) -> bool:
     """One thread's decide+enqueue in its own transaction; isolate failures per thread."""
     try:
         async with session_scope() as session:
+            if not await wiring.try_lock_thread(session, thread_id):
+                return False  # another tick already owns this thread right now
             cfg = await get_settings(session, branch_id)
             reply = ReplyService(
                 session, branch_id, llm, KnowledgeService(session, branch_id),

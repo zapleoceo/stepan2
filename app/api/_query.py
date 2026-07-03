@@ -56,7 +56,9 @@ _MSG_COLS = (
 
 
 # A cleared thread hides pre-cutoff messages from the chat window too (not just the LLM
-# prompt) — the rows stay in the DB and in IG, they're just filtered from the view.
+# prompt) — the rows stay in the DB and in IG, they're just filtered from the view. Strict
+# `>` (not `>=`) matches MessageRepo.dialog()'s `since` boundary so the window shown to the
+# manager and the window sent to the LLM never disagree on a message landing exactly on cutoff.
 _NOT_CLEARED = (
     " AND (ct.context_cleared_at IS NULL OR m.occurred_at > ct.context_cleared_at)"
 )

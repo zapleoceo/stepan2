@@ -115,11 +115,7 @@ class ReplyService:
         return branch.lang if branch is not None else "id"
 
     async def enqueue_reply(self, thread_id: int, decision: Decision) -> Outbox | None:
-        """Queue the decided reply AND apply the decision to the lead (S1 semantics).
-
-        In one transaction with the outbox row: stage transition + stage_event journal,
-        product attribution, hand-off (agent off, handed_off_at, alert card, Meta CAPI).
-        scheduled_at respects reply_delay from BranchSettings (random window)."""
+        """Queue the decided reply bubbles and apply the decision to the lead (S1 semantics)."""
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
