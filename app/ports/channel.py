@@ -28,6 +28,11 @@ class InboundMessage:
     lead_source: str | None = None       # 'story'|'ad_clicktomsg'|None
     direction: str = "in"                # 'in' | 'out' (наш ответ из приложения IG)
     external_id: str | None = None       # реальный id сообщения канала (дедуп)
+    link_url: str | None = None          # кликабельная цель (шэр ссылки/поста)
+    preview_url: str | None = None       # превью карточки (CDN)
+    media_url: str | None = None         # in-DM медиа (фото/видео/гиф/голос) для backfill
+    media_kind: str | None = None        # image|video|audio
+    lead_seen_at: datetime | None = None # read-receipt лида по треду (last_seen_at)
 
 
 @dataclass(frozen=True)

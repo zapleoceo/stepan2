@@ -9,6 +9,41 @@ import asyncio
 from typing import Any
 
 
+def _paged_threads(client: Any, endpoint: str, amount: int = 50) -> list[dict]:
+    """Raw inbox threads with cursor pagination — instagrapi extractor bypassed."""
+    out: list[dict] = []
+    cursor = None
+    for _ in range(max(3, amount // 20 + 2)):
+        params = {"visual_message_return_type": "unseen",
+                  "thread_message_limit": "10", "persistentBadging": "true", "limit": "20"}
+        if cursor:
+            params["cursor"] = cursor
+            params["direction"] = "older"
+        res = client.private_request(endpoint, params=params)
+        inbox = res.get("inbox", {})
+        out.extend(inbox.get("threads", []))
+        if len(out) >= amount or not inbox.get("has_older"):
+            break
+        cursor = inbox.get("oldest_cursor")
+        if not cursor:
+            break
+    return out[:amount]
+
+
+def _lead_seen(thread: dict, lead_pk: str | None) -> int | None:
+    """Lead's read-receipt for this thread (last_seen_at[pk].timestamp, µs) or None."""
+    lsa = thread.get("last_seen_at") or {}
+    entry = lsa.get(lead_pk) if lead_pk and isinstance(lsa, dict) else None
+    if isinstance(entry, dict):
+        ts = entry.get("timestamp")
+        if ts is not None:
+            try:
+                return int(ts)
+            except (ValueError, TypeError):
+                return None
+    return None
+
+
 def _detect_lead_source(thread: dict, lead_pk: Any) -> str | None:
     """Infer how the lead found us from IG thread send_attribution metadata."""
     attrs = thread.get("send_attribution") or {}
@@ -51,50 +86,58 @@ class InstagrapiTransport:
         return self._client
 
     async def fetch_threads(self) -> list[dict[str, Any]]:
+        from .ig_parse import item_content  # noqa: PLC0415
+
         client = self._ensure_client()
         own_id = str(client.user_id) if client.user_id else None
         out: list[dict[str, Any]] = []
-        # Raw private API gives ad_context_data / send_attribution not in the pydantic model
+        # Raw private API gives ad_context_data / send_attribution not in the pydantic
+        # model, and survives shared-media items that crash instagrapi's own extractor.
+        # inbox/ = accepted chats; pending_inbox/ = message requests (cold ad leads).
         for endpoint in ("direct_v2/inbox/", "direct_v2/pending_inbox/"):
             try:
-                raw = await asyncio.to_thread(
-                    client.private_request, endpoint,
-                    params={"visual_message_return_type": "unseen", "limit": "20"},
-                )
+                threads = await asyncio.to_thread(_paged_threads, client, endpoint)
             except Exception as exc:  # noqa: BLE001
                 import logging  # noqa: PLC0415
                 logging.getLogger(__name__).warning("IG %s failed: %s", endpoint, exc)
                 continue
-            for t in (raw.get("inbox") or {}).get("threads", []):
+            for t in threads:
                 items = t.get("items") or []
-                if not items:
+                if t.get("is_group") or not items:
                     continue
                 users = t.get("users") or []
                 lead_u = next((u for u in users if str(u.get("pk", "")) != own_id), None)
+                lead_pk = str((lead_u or {}).get("pk") or "") or None
                 acd = t.get("ad_context_data") or {}
                 pm = t.get("professional_metadata") or {}
+                base = {
+                    "thread_id": str(t.get("thread_id", "")),
+                    "sender_username": (lead_u or {}).get("username") or None,
+                    "sender_name": (lead_u or {}).get("full_name") or None,
+                    "sender_avatar": str((lead_u or {}).get("profile_pic_url") or "") or None,
+                    "ad_id": str(acd["ad_id"]) if acd.get("ad_id") else None,
+                    "ad_media_id": str(pm["ad_ig_media_id"]) if pm.get("ad_ig_media_id")
+                    else None,
+                    "ad_preview_url": acd.get("ad_picture_url") or None,
+                    "lead_source": _detect_lead_source(t, lead_pk),
+                    "lead_seen_at": _lead_seen(t, lead_pk),
+                }
                 # ALL items, oldest first — a burst of lead messages between polls, and
                 # lead messages sitting behind our own reply, must not be lost. Our own
-                # items come through too (direction=out): a manual reply from the IG app
-                # moves last_out_at so the bot never answers over a human.
+                # items come through too (direction=out) so a manual reply from the IG app
+                # moves last_out_at and the bot never answers over a human.
                 for item in reversed(items):
+                    content = item_content(item)
+                    if content is None:
+                        continue
                     uid = str(item.get("user_id", ""))
                     out.append({
-                        "thread_id": str(t.get("thread_id", "")),
+                        **base,
                         "item_id": str(item.get("item_id", "")) or None,
                         "direction": "out" if (own_id and uid == own_id) else "in",
                         "sender_id": uid,
-                        "sender_username": (lead_u or {}).get("username") or None,
-                        "sender_name": (lead_u or {}).get("full_name") or None,
-                        "sender_avatar": str((lead_u or {}).get("profile_pic_url") or "")
-                        or None,
-                        "text": item.get("text") or "",
                         "timestamp": item.get("timestamp"),
-                        "ad_id": str(acd["ad_id"]) if acd.get("ad_id") else None,
-                        "ad_media_id": str(pm["ad_ig_media_id"])
-                        if pm.get("ad_ig_media_id") else None,
-                        "ad_preview_url": acd.get("ad_picture_url") or None,
-                        "lead_source": _detect_lead_source(t, (lead_u or {}).get("pk")),
+                        **content,
                     })
         return out
 

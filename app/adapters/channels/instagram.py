@@ -99,6 +99,12 @@ class InstagramAdapter:
             lead_source=thread.get("lead_source") or None,
             direction=thread.get("direction") or "in",
             external_id=thread.get("item_id") or None,
+            link_url=thread.get("link_url") or None,
+            preview_url=thread.get("preview_url") or None,
+            media_url=thread.get("media_url") or None,
+            media_kind=thread.get("media_kind") or None,
+            lead_seen_at=_as_dt(thread["lead_seen_at"]) if thread.get("lead_seen_at")
+            else None,
         )
 
 
