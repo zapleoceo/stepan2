@@ -1018,12 +1018,15 @@ def app_shell(
         "var s=e.getAttribute('data-search')||'';"
         "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
+        "function smartScroll(m){if(!m)return;"
+        "var near=m.scrollHeight-m.scrollTop-m.clientHeight<150;"
+        "if(near)m.scrollTop=m.scrollHeight;}"
         "document.addEventListener('htmx:afterSettle',function(e){"
         "var t=e.target;var m=(t&&t.classList&&t.classList.contains('msgs'))?t"
         ":(t&&t.querySelector&&t.querySelector('.msgs'));"
         "if(!m&&t&&t.closest)m=t.closest('.msgs');"  # poll bubbles land inside .msgs
-        "if(m){scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
-        "if(!g.complete)g.addEventListener('load',function(){scrollBot(m);},{once:true});});}"
+        "if(m){smartScroll(m);m.querySelectorAll('img').forEach(function(g){"
+        "if(!g.complete)g.addEventListener('load',function(){smartScroll(m);},{once:true});});}"
         "if(t&&t.id==='tl')filterTi();});"
         # F5 / direct load: afterSettle never fires, so pin every .msgs to the bottom on load
         "function scrollAllBot(){document.querySelectorAll('.msgs').forEach(function(m){"
