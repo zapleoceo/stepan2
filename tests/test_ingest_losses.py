@@ -143,6 +143,28 @@ async def test_dedup_by_real_id_vs_outbox_recorded_row(db_session) -> None:
     assert n == 1
 
 
+async def test_echo_of_own_reply_mislabeled_as_in_is_dropped(db_session) -> None:
+    """IG can echo our own outgoing message back on a poll before/instead of tagging it
+    'out' (own-id resolution flakiness) — the text lands as a synthetic 'in' row that
+    reads as the lead repeating our reply. Same text, same thread, moments after our real
+    'out' row → dropped, not stored as a second lead message."""
+    bid, cid, _, thread = await _world(db_session)
+    db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,
+                           external_id="real-99", direction="out", sent_by="manager",
+                           text="Investasinya 13jt, cicilan 4x", occurred_at=_NOW))
+    await db_session.flush()
+    echoed = InboundMessage(
+        external_thread_id="ig-1", sender_id="lead9",
+        text="Investasinya 13jt, cicilan 4x", occurred_at=_NOW,
+        external_id="synthetic-echo-1",  # no real item_id — the observed failure shape
+    )
+    created = await IngestService(db_session, bid).ingest(cid, [echoed])
+    assert created == []
+    n = len((await db_session.exec(
+        select(Message).where(Message.thread_id == thread.id))).all())
+    assert n == 1  # only the original 'out' row
+
+
 async def test_out_for_unknown_thread_is_skipped(db_session) -> None:
     bid, cid, _, _ = await _world(db_session)
     orphan = InboundMessage(external_thread_id="ig-UNKNOWN", sender_id="own1",

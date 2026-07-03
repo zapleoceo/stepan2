@@ -95,7 +95,16 @@ class InstagrapiTransport:
         from .ig_parse import item_content  # noqa: PLC0415
 
         client = self._ensure_client()
-        own_id = str(client.user_id) if client.user_id else None
+        # client.user_id is set by instagrapi's login() flow, NOT by set_settings() — a
+        # client rebuilt from a stored session dump (the only path here, we never call
+        # login() again) leaves it unset, so items we sent ourselves get misread as
+        # direction="in" (the lead's own words echoed back, corrupting dialog history and
+        # the LLM's turn-taking). authorization_data.ds_user_id survives set_settings() and
+        # is the same id IG assigns the sender_id of our own polled items — always prefer it.
+        own_id = (
+            str((self._session_settings.get("authorization_data") or {}).get("ds_user_id") or "")
+            or (str(client.user_id) if client.user_id else None)
+        )
         out: list[dict[str, Any]] = []
         seen_threads: set[str] = set()
         # Raw private API gives ad_context_data / send_attribution not in the pydantic

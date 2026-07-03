@@ -100,6 +100,10 @@ class IngestService:
             thread.id, "in", inbound.text, inbound.occurred_at
         ):
             return None  # same text already in thread within 2s (pending→main id drift)
+        if inbound.media_url is None and await self.messages.echo_of_our_own(
+            thread.id, inbound.text, inbound.occurred_at
+        ):
+            return None  # IG echoed our own outgoing message back as if the lead sent it
         msg = await self.messages.add(
             Message(
                 branch_id=self.branch_id,

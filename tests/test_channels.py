@@ -309,6 +309,56 @@ def test_credential_panel_shows_session_after_connect() -> None:
 
 # --- Registry --------------------------------------------------------------
 
+# --- InstagrapiTransport own-id resolution ----------------------------------
+
+class _FakeInstagrapiClient:
+    """Simulates a Client rebuilt from set_settings() — user_id unset (login() never ran)."""
+
+    def __init__(self) -> None:
+        self.user_id = None
+
+
+def test_transport_prefers_stored_ds_user_id_over_unset_client_user_id() -> None:
+    """A client rebuilt from a stored session dump (the only path — we never call login()
+    again) leaves client.user_id unset. Before the fix, own_id fell back to None and our
+    own sent items were misread as direction='in', corrupting the dialog history with the
+    bot's replies posing as the lead. authorization_data.ds_user_id (restored by
+    set_settings()) must be used instead so our own items are always tagged 'out'."""
+    from app.adapters.channels.transports import InstagrapiTransport
+
+    transport = InstagrapiTransport(
+        username="acc",
+        session_settings={"authorization_data": {"ds_user_id": "76431725497"}},
+    )
+    transport._client = _FakeInstagrapiClient()  # bypass build_ig_client/instagrapi import
+    import asyncio
+
+    async def _run():
+        from unittest.mock import patch
+
+        with patch(
+            "app.adapters.channels.ig_parse.item_content",
+            return_value={"text": "hi", "link_url": None, "preview_url": None,
+                          "media_url": None, "media_kind": None},
+        ):
+            with patch(
+                "app.adapters.channels.transports._paged_threads",
+                return_value=[{
+                    "thread_id": "t1", "is_group": False,
+                    "users": [{"pk": "76431725497"}, {"pk": "lead9"}],
+                    "items": [{"item_type": "text", "text": "hi", "item_id": "it1",
+                               "user_id": "76431725497", "timestamp": 1}],
+                }],
+            ):
+                return await transport.fetch_threads()
+
+    rows = asyncio.run(_run())
+    assert rows[0]["direction"] == "out"
+
+
+# --- Registry ----------------------------------------------------------------
+
+
 def test_registry_maps_every_kind_to_its_adapter() -> None:
     assert REGISTRY == {
         ChannelKind.INSTAGRAM: InstagramAdapter,

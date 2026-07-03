@@ -90,3 +90,21 @@ class MessageRepo(BranchScoped[Message]):
             Message.occurred_at <= occurred_at + _DEDUP_WINDOW,
         ).limit(1)
         return (await self.session.exec(q)).first() is not None
+
+    async def echo_of_our_own(
+        self, thread_id: int, text: str, occurred_at: datetime
+    ) -> bool:
+        """True if TEXT matches something WE sent in this thread moments earlier.
+
+        Belt-and-suspenders against IG's own-message echo landing as a fresh "in" row
+        (e.g. when the channel's own-id can't be resolved for one polled item) — such a
+        row would otherwise read as the lead repeating our own reply back to us and
+        confuse both the dialog history and the LLM's next turn."""
+        q = self._q().where(
+            Message.thread_id == thread_id,
+            Message.direction == "out",
+            Message.text == text,
+            Message.occurred_at >= occurred_at - _DEDUP_WINDOW,
+            Message.occurred_at <= occurred_at + _DEDUP_WINDOW,
+        ).limit(1)
+        return (await self.session.exec(q)).first() is not None
