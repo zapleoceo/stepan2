@@ -99,7 +99,7 @@ def test_thread_list_html_with_row() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")
     row = (42, "Alice Test", "new", datetime.now(UTC).replace(tzinfo=None),
-           "+62812345", "course-a", "alicetest", None, 1200, 340, "Hello", "in", 5, 3)
+           "+62812345", "course-a", "alicetest", None, 1200, 340, "Hello", "in", 5, 3, "KL")
     html = thread_list_html([row])
     assert "Alice Test" in html
     assert "@alicetest" in html

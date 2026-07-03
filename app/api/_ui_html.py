@@ -229,6 +229,8 @@ _CSS = (
     ".msg-prev{max-width:220px;max-height:280px;border-radius:8px;display:block;margin-top:.25rem}"
     ".rcpt{opacity:.55;font-size:.7rem}.rcpt.seen{color:#4da3ff;opacity:.95}"
     ".pres.on{color:#51cf66}.ti-fl{color:#6b7685;font-size:.62rem}"
+    ".ti-br{color:#8b98a5;font-size:.6rem;margin-left:.3rem;"
+    "background:rgba(255,255,255,.07);border-radius:3px;padding:0 .28rem}"
     ".kdoc{background:#1a1f2e;border:1px solid #2d3748;border-radius:7px;"
     "padding:.5rem .7rem;margin-bottom:.3rem;cursor:pointer}"
     ".kdoc:hover{border-color:#4a5568}"
@@ -471,10 +473,10 @@ def _source_bar(
     return f'<div class="srcbar">{thumb}{lbl}</div>'
 
 
-def _thread_item(row: object, active_tid: int | None) -> str:
+def _thread_item(row: object, active_tid: int | None, show_branch: bool = False) -> str:
     (tid, name, stage, last_act, phone, product_slug,
      ig_username, avatar_url, follower_count, following_count,
-     last_msg, last_dir, cnt_in, cnt_out) = row  # type: ignore[misc]
+     last_msg, last_dir, cnt_in, cnt_out, branch_name) = row  # type: ignore[misc]
     on = " on" if tid == active_tid else ""
     arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
     preview = _h.escape((arr + (last_msg or ""))[:80])
@@ -498,6 +500,10 @@ def _thread_item(row: object, active_tid: int | None) -> str:
             f'<span class="ti-fl">👥 {_compact(follower_count)}·{_compact(following_count)}</span>'
         )
     sub_row = f'<div class="ti-sub">{"  ·  ".join(sub_parts)}</div>' if sub_parts else ""
+    br_badge = (
+        f'<span class="ti-br" title="Branch">🏢 {_h.escape(str(branch_name))}</span>'
+        if show_branch and branch_name else ""
+    )
     return (
         f'<a class="ti{on}"'
         f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
@@ -506,6 +512,7 @@ def _thread_item(row: object, active_tid: int | None) -> str:
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
+        f'{br_badge}'
         f'<span class="ti-ts">{_ago(last_act)}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge} {preview}</div>'
         f'{handle_row}'
@@ -513,10 +520,12 @@ def _thread_item(row: object, active_tid: int | None) -> str:
     )
 
 
-def thread_list_html(threads: list, active_tid: int | None = None) -> str:
+def thread_list_html(
+    threads: list, active_tid: int | None = None, show_branch: bool = False
+) -> str:
     if not threads:
         return f'<div class="emp">{_h.escape(t("inbox.empty"))}</div>'
-    return "".join(_thread_item(r, active_tid) for r in threads)
+    return "".join(_thread_item(r, active_tid, show_branch) for r in threads)
 
 
 _LINK_RE = re.compile(r"(https?://[^\s<]+)")

@@ -32,7 +32,7 @@ def client() -> TestClient:
 
 def _thread_row(tid: int) -> tuple:
     return (tid, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
-            "+62811", "course-a", "alice", None, 500, 200, "Hi", "in", 1, 0)
+            "+62811", "course-a", "alice", None, 500, 200, "Hi", "in", 1, 0, "Jakarta")
 
 
 def test_thread_list_marks_active_row() -> None:
@@ -49,6 +49,15 @@ def test_thread_list_no_active_marks_none() -> None:
     _set_lang("en")
     html = thread_list_html([_thread_row(7)], active_tid=None)
     assert 'class="ti on"' not in html
+
+
+def test_thread_card_branch_badge_only_in_multibranch_view() -> None:
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    with_badge = thread_list_html([_thread_row(1)], show_branch=True)
+    assert "🏢 Jakarta" in with_badge
+    without = thread_list_html([_thread_row(1)], show_branch=False)
+    assert "Jakarta" not in without  # single-branch view stays clean
 
 
 def test_thread_item_sets_open_thread_cookie_onclick() -> None:

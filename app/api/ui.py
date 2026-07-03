@@ -53,8 +53,10 @@ _THREAD_TMPL = (
     " (SELECT COUNT(*) FROM message m WHERE m.thread_id = ct.id"
     "  AND m.direction = 'in') cnt_in,"
     " (SELECT COUNT(*) FROM message m WHERE m.thread_id = ct.id"
-    "  AND m.direction = 'out') cnt_out"
+    "  AND m.direction = 'out') cnt_out,"
+    " b.name AS branch_name"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+    " JOIN branch b ON b.id = l.branch_id"
     " {where}"
     " ORDER BY GREATEST(ct.last_in_at, ct.last_out_at, ct.created_at) DESC NULLS LAST LIMIT 100"
 )
@@ -153,7 +155,10 @@ async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
         ).all()
     raw_open = request.cookies.get("stepan2_open_thread", "")
     active_tid = int(raw_open) if raw_open.isdigit() else None
-    return HTMLResponse(thread_list_html(rows, active_tid))
+    # Show the branch on each card only when the view spans more than one branch,
+    # so cross-branch inboxes stay visually distinct (single-branch view stays clean).
+    show_branch = not branch_ids or len(branch_ids) > 1
+    return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch))
 
 
 @router.get("/reports", response_class=HTMLResponse)
