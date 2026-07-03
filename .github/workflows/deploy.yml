@@ -82,6 +82,16 @@ jobs:
             "set -e; cd ${REMOTE_DIR}/infra \
              && docker compose run --rm api alembic upgrade head"
 
+      - name: Refresh worker (only if already running)
+        run: |
+          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
+            "set -e; cd ${REMOTE_DIR}/infra \
+             && if [ -n \"\$(docker ps -q -f name=stepan2-worker -f status=running)\" ]; then \
+                  echo 'worker running → rebuild + restart on new code'; \
+                  docker compose --profile worker build worker \
+                  && docker compose --profile worker up -d --force-recreate worker; \
+                else echo 'worker off (profile-gated) → left untouched'; fi"
+
       - name: Healthcheck
         run: |
           ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
