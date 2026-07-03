@@ -108,11 +108,15 @@ async def _channel(s, bid) -> int:
     return ch.id
 
 
-async def _media_msg(s, bid, cid, *, ext, text="https://cdn/x.jpg", pending=True) -> Message:
+async def _media_msg(s, bid, cid, *, ext, url="https://cdn/x.jpg", kind="image",
+                     pending=True, stub=True) -> Message:
     m = Message(branch_id=bid, thread_id=1, channel_id=cid, external_id=ext,
-                direction="in", sent_by="lead", text=text, media_pending=pending)
+                direction="in", sent_by="lead", text="🖼 media", media_pending=pending)
     s.add(m)
     await s.flush()
+    if stub:  # ingest attaches a not-yet-downloaded MediaAsset (url set, data NULL)
+        s.add(MediaAsset(branch_id=bid, message_id=m.id, kind=kind, url=url))
+        await s.flush()
     return m
 
 
@@ -144,7 +148,8 @@ async def test_backfill_failure_keeps_pending(db_session) -> None:
     assert await MediaService(db_session, bid).backfill(cid, FakeDownloader(fail=True), 20) == 0
     refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
     assert refreshed.media_pending is True  # stays flagged for retry
-    assert (await db_session.exec(select(MediaAsset))).first() is None
+    asset = (await db_session.exec(select(MediaAsset))).first()
+    assert asset is not None and asset.data is None  # stub kept, undownloaded
 
 
 async def test_backfill_noop_when_nothing_flagged(db_session) -> None:
@@ -156,10 +161,10 @@ async def test_backfill_noop_when_nothing_flagged(db_session) -> None:
     assert dl.calls == []
 
 
-async def test_backfill_clears_flag_when_no_url(db_session) -> None:
+async def test_backfill_clears_flag_when_no_stub(db_session) -> None:
     bid = await _branch(db_session)
     cid = await _channel(db_session, bid)
-    msg = await _media_msg(db_session, bid, cid, ext="m1", text="just a caption")
+    msg = await _media_msg(db_session, bid, cid, ext="m1", stub=False)
     dl = FakeDownloader()
     assert await MediaService(db_session, bid).backfill(cid, dl, limit=20) == 0
     assert dl.calls == []

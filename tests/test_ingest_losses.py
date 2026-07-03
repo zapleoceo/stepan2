@@ -7,7 +7,14 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel import select
 
 from app.adapters.channels.instagram import InstagramAdapter
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
+from app.adapters.db.models import (
+    Branch,
+    Channel,
+    ChannelThread,
+    Lead,
+    MediaAsset,
+    Message,
+)
 from app.domain.enums import ChannelKind, Stage
 from app.modules.leads.ingest import IngestService
 from app.ports.channel import InboundMessage
@@ -76,6 +83,24 @@ async def test_own_reply_recorded_as_manager_and_moves_last_out(db_session) -> N
     # out-messages never touch bot state / followup cycle:
     assert lead.agent_enabled is False
     assert thread.followups_sent == 2
+
+
+async def test_media_message_flags_pending_stubs_asset_and_records_seen(db_session) -> None:
+    bid, cid, _, _ = await _world(db_session)
+    seen = _NOW - timedelta(minutes=1)
+    msg = InboundMessage(
+        external_thread_id="ig-1", sender_id="lead9", text="🖼 media",
+        occurred_at=_NOW, external_id="m1",
+        media_url="https://cdn/x.jpg", media_kind="image", lead_seen_at=seen)
+    created = await IngestService(db_session, bid).ingest(cid, [msg])
+    assert created[0].media_pending is True
+    asset = (await db_session.exec(select(MediaAsset))).first()
+    assert asset is not None and asset.url == "https://cdn/x.jpg"
+    assert asset.kind == "image" and asset.data is None
+    assert asset.message_id == created[0].id
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.external_thread_id == "ig-1"))).first()
+    assert thread.lead_seen_at == seen  # read-receipt captured
 
 
 async def test_dedup_by_real_id_vs_outbox_recorded_row(db_session) -> None:

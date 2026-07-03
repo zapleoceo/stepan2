@@ -11,7 +11,7 @@ from datetime import timedelta
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Message, StageEvent
+from app.adapters.db.models import MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.ports.channel import InboundMessage
 
@@ -106,6 +106,17 @@ class IngestService:
                 occurred_at=inbound.occurred_at,
             )
         )
+        if inbound.media_url:
+            # ingest can't download inline; stash a stub the backfill worker fills later
+            msg.media_pending = True
+            self.session.add(MediaAsset(
+                branch_id=self.branch_id, message_id=msg.id,
+                kind=inbound.media_kind or "image", url=inbound.media_url,
+            ))
+        if inbound.lead_seen_at and (
+            thread.lead_seen_at is None or inbound.lead_seen_at > thread.lead_seen_at
+        ):
+            thread.lead_seen_at = inbound.lead_seen_at
         if thread.last_in_at is None or inbound.occurred_at > thread.last_in_at:
             thread.last_in_at = inbound.occurred_at
             thread.window_until = inbound.occurred_at + WINDOW

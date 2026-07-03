@@ -58,25 +58,29 @@ class MediaService:
         return list((await self.session.exec(q)).all())
 
     async def backfill(self, channel_id: int, downloader: MediaDownloader, limit: int) -> int:
-        """Download media for pending messages of a channel; returns assets attached."""
+        """Download bytes for the media stub ingest attached to each pending message.
+
+        Ingest records a MediaAsset stub (url set, data NULL) and flags the message; here
+        we fill the stub's bytes. A stub without a live url just clears the flag; a
+        download failure keeps the flag so the next tick retries — nothing is lost."""
         done = 0
         for msg in await self.pending(channel_id, limit):
-            url = self._media_url(msg)
-            if not url:
+            stub = await self._pending_stub(msg.id)
+            if stub is None or not stub.url:
                 msg.media_pending = False  # nothing to fetch — don't retry forever
                 self.session.add(msg)
                 await self.session.flush()
                 continue
             try:
-                data = await downloader.download_media(url)
+                data = await downloader.download_media(stub.url)
             except Exception as exc:  # noqa: BLE001 — keep flag, retry next tick
                 logger.warning(
                     "media download failed branch=%d msg=%d: %s",
                     self.branch_id, msg.id, exc)
                 continue
-            await self.store(msg.id, self._kind(msg), None, url, data)
+            stub.data = data
             msg.media_pending = False
-            self.session.add(msg)
+            self.session.add_all([stub, msg])
             await self.session.flush()
             done += 1
         if done:
@@ -84,15 +88,11 @@ class MediaService:
                         self.branch_id, channel_id, done)
         return done
 
-    def _media_url(self, msg: Message) -> str | None:
-        # ingest stores the CDN url as the message text for a media item (empty caption)
-        text = (msg.text or "").strip()
-        return text if text.startswith("http") else None
-
-    def _kind(self, msg: Message) -> str:
-        low = (msg.text or "").lower()
-        if ".mp4" in low or "video" in low:
-            return "video"
-        if ".mp3" in low or ".m4a" in low or "audio" in low or "voice" in low:
-            return "audio"
-        return "image"
+    async def _pending_stub(self, message_id: int | None) -> MediaAsset | None:
+        """The not-yet-downloaded MediaAsset for a message (data NULL, url set)."""
+        q = (
+            select(MediaAsset)
+            .where(MediaAsset.message_id == message_id, MediaAsset.data.is_(None))  # type: ignore[union-attr]
+            .limit(1)
+        )
+        return (await self.session.exec(q)).first()

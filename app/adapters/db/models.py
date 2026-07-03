@@ -92,6 +92,8 @@ class ChannelThread(SQLModel, table=True):
     window_until: datetime | None = Field(default=None, description="окно ответа канала")
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
+    lead_seen_at: datetime | None = Field(
+        default=None, description="read-receipt лида (IG last_seen_at)")
     next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
     followups_sent: int = Field(default=0, description="сколько фолоапов уже ушло по расписанию")
     context_cleared_at: datetime | None = Field(
