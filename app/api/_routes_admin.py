@@ -171,69 +171,93 @@ async def settings_save_by_key(
     return HTMLResponse(field_html(field, val, lang, saved=True))
 
 
+_PLATFORM_KEY = "agent_enabled_platform"  # branch_id IS NULL row = whole-platform switch
+_BRANCH_KEY = "agent_enabled_global"      # per-branch switch (legacy key name)
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "true").strip().lower() in ("true", "1", "yes")
+
+
+async def _read_flag(session, branch_id: int | None, key: str) -> bool:
+    clause = "branch_id = :bid" if branch_id is not None else "branch_id IS NULL"
+    row = (await session.execute(
+        text(f"SELECT value FROM app_setting WHERE {clause} AND key=:k"),  # noqa: S608
+        {"bid": branch_id, "k": key})).first()
+    return _truthy(row[0]) if row else True
+
+
+async def _write_flag(session, branch_id: int | None, key: str, on: bool) -> None:
+    if branch_id is not None:
+        await session.execute(
+            text("INSERT INTO app_setting (branch_id, key, value) VALUES (:bid, :k, :v)"
+                 " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"),
+            {"bid": branch_id, "k": key, "v": "true" if on else "false"})
+    else:
+        # branch_id NULL can't use the (branch_id,key) unique-constraint upsert cleanly
+        upd = await session.execute(
+            text("UPDATE app_setting SET value=:v WHERE branch_id IS NULL AND key=:k"),
+            {"k": key, "v": "true" if on else "false"})
+        if not upd.rowcount:
+            await session.execute(
+                text("INSERT INTO app_setting (branch_id, key, value) VALUES (NULL, :k, :v)"),
+                {"k": key, "v": "true" if on else "false"})
+
+
 @router.get("/agent-status", response_class=HTMLResponse)
 async def agent_status(request: Request) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     branch_id = branch_ids[0] if branch_ids else 1
     async with session_scope() as session:
-        row = (
-            await session.execute(
-                text(
-                    "SELECT value FROM app_setting"
-                    " WHERE branch_id=:bid AND key='agent_enabled_global'"
-                ),
-                {"bid": branch_id},
-            )
-        ).first()
-    enabled = (row[0].lower() in ("true", "1", "yes")) if row else True
-    return HTMLResponse(_agent_toggle_html(branch_id, enabled))
+        platform_on = await _read_flag(session, None, _PLATFORM_KEY)
+        branch_on = await _read_flag(session, branch_id, _BRANCH_KEY)
+    return HTMLResponse(_agent_toggles_html(branch_id, platform_on, branch_on))
 
 
 @router.post("/agent-toggle", response_class=HTMLResponse)
 async def agent_toggle(
-    request: Request, branch_id: int = Form(default=1),
+    request: Request, scope: str = Form(default="branch"), branch_id: int = Form(default=1),
 ) -> HTMLResponse:
     apply_lang(request)
     allowed = branch_ids_from_request(request)
     if allowed and branch_id not in allowed:
         branch_id = allowed[0]
     async with session_scope() as session:
-        row = (
-            await session.execute(
-                text(
-                    "SELECT value FROM app_setting"
-                    " WHERE branch_id=:bid AND key='agent_enabled_global'"
-                ),
-                {"bid": branch_id},
-            )
-        ).first()
-        enabled = (row[0].lower() in ("true", "1", "yes")) if row else True
-        new_val = "false" if enabled else "true"
-        await session.execute(
-            text(
-                "INSERT INTO app_setting (branch_id, key, value)"
-                " VALUES (:bid, 'agent_enabled_global', :v)"
-                " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"
-            ),
-            {"bid": branch_id, "v": new_val},
-        )
-    return HTMLResponse(_agent_toggle_html(branch_id, not enabled))
+        if scope == "platform":
+            new = not await _read_flag(session, None, _PLATFORM_KEY)
+            await _write_flag(session, None, _PLATFORM_KEY, new)
+        else:
+            new = not await _read_flag(session, branch_id, _BRANCH_KEY)
+            await _write_flag(session, branch_id, _BRANCH_KEY, new)
+            invalidate(branch_id)
+        platform_on = await _read_flag(session, None, _PLATFORM_KEY)
+        branch_on = await _read_flag(session, branch_id, _BRANCH_KEY)
+    return HTMLResponse(_agent_toggles_html(branch_id, platform_on, branch_on))
 
 
-def _agent_toggle_html(branch_id: int, enabled: bool) -> str:
-    lbl = _h.escape(t("bot.on" if enabled else "bot.off"))
-    color = "#51cf66" if enabled else "#ff6b6b"
-    bg = "rgba(31,58,31,.9)" if enabled else "rgba(58,31,31,.9)"
+def _switch(scope: str, branch_id: int, label: str, on: bool) -> str:
+    knob = "translateX(1.05rem)" if on else "translateX(0)"
+    track = "#51cf66" if on else "#4a5568"
+    status = _h.escape(t("bot.on" if on else "bot.off"))
+    st_color = "#7ee2a8" if on else "#ff9b9b"
     return (
-        f'<form id="bot-tog" hx-post="/ui/agent-toggle" hx-target="#bot-tog"'
-        f' hx-swap="outerHTML" style="margin-top:.35rem">'
+        f'<form hx-post="/ui/agent-toggle" hx-target="#bot-tog-wrap" hx-swap="innerHTML"'
+        f' class="tgl-row"><input type="hidden" name="scope" value="{scope}">'
         f'<input type="hidden" name="branch_id" value="{branch_id}">'
-        f'<button type="submit" style="width:100%;padding:.28rem .5rem;'
-        f'background:{bg};border:1px solid {color};border-radius:5px;'
-        f'color:{color};font-size:.72rem;font-weight:700;cursor:pointer;'
-        f'text-align:center">{lbl}</button>'
-        f'</form>'
+        f'<button type="submit" class="tgl-btn" title="{_h.escape(label)}">'
+        f'<span class="tgl-lbl">{_h.escape(label)}</span>'
+        f'<span class="tgl-status" style="color:{st_color}">{status}</span>'
+        f'<span class="tgl-track" style="background:{track}">'
+        f'<span class="tgl-knob" style="transform:{knob}"></span></span>'
+        f'</button></form>'
+    )
+
+
+def _agent_toggles_html(branch_id: int, platform_on: bool, branch_on: bool) -> str:
+    return (
+        _switch("platform", branch_id, t("bot.platform"), platform_on)
+        + _switch("branch", branch_id, t("bot.branch"), branch_on)
     )
 
 

@@ -506,21 +506,14 @@ def test_coach_pair_applied_shows_revert() -> None:
 
 # ─── agent toggle unit tests ──────────────────────────────────────────────────
 
-def test_agent_toggle_html_shows_on_state() -> None:
-    from app.api.ui import _agent_toggle_html
+def test_agent_toggles_html_shows_both_switches() -> None:
+    from app.api.ui import _agent_toggles_html
     _set_lang("en")
-    html = _agent_toggle_html(1, enabled=True)
-    assert "Bot ON" in html
-    assert "bot-tog" in html
+    html = _agent_toggles_html(1, platform_on=True, branch_on=False)
+    assert "whole platform" in html and "this branch" in html  # both scopes
+    assert 'name="scope" value="platform"' in html and 'name="scope" value="branch"' in html
+    assert "ON" in html and "OFF" in html  # platform ON, branch OFF
     assert "/ui/agent-toggle" in html
-
-
-def test_agent_toggle_html_shows_off_state() -> None:
-    from app.api.ui import _agent_toggle_html
-    _set_lang("en")
-    html = _agent_toggle_html(1, enabled=False)
-    assert "Bot OFF" in html
-    assert "bot-tog" in html
 
 
 def test_agent_status_route_responds(client: TestClient) -> None:

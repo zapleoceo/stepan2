@@ -21,7 +21,7 @@ from app.admin._branch import branch_ids_from_request
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import _branch_where, fetch_ad_funnel, fetch_coach_data
-from ._routes_admin import _agent_toggle_html  # noqa: F401 (re-exported for tests)
+from ._routes_admin import _agent_toggles_html  # noqa: F401 (re-exported for tests)
 from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
 from ._routes_channels import router as _channels_router

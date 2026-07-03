@@ -368,8 +368,12 @@ _TR: dict[str, dict[str, str]] = {
         ),
     },
     # agent toggle
-    "bot.on":        {"ru": "Бот ON",  "en": "Bot ON",  "id": "Bot ON"},
-    "bot.off":       {"ru": "Бот OFF", "en": "Bot OFF", "id": "Bot OFF"},
+    "bot.on":        {"ru": "ON",  "en": "ON",  "id": "ON"},
+    "bot.off":       {"ru": "OFF", "en": "OFF", "id": "OFF"},
+    "bot.platform":  {"ru": "Степан — вся платформа", "en": "Stepan — whole platform",
+                      "id": "Stepan — semua"},
+    "bot.branch":    {"ru": "Степан — этот филиал", "en": "Stepan — this branch",
+                      "id": "Stepan — cabang ini"},
     # time abbreviations
     "time.m":        {"ru": "м",  "en": "m",  "id": "m"},
     "time.h":        {"ru": "ч",  "en": "h",  "id": "j"},

@@ -131,6 +131,16 @@ def _build_notifier(branch_cfg: object) -> NotifierPort | None:
         return None
 
 
+async def _platform_agent_on(session: AsyncSession) -> bool:
+    """Whole-platform kill switch (app_setting branch_id IS NULL). Default ON."""
+    from sqlalchemy import text  # noqa: PLC0415
+
+    row = (await session.execute(
+        text("SELECT value FROM app_setting"
+             " WHERE branch_id IS NULL AND key='agent_enabled_platform'"))).first()
+    return (row[0] or "true").strip().lower() in ("true", "1", "yes") if row else True
+
+
 async def reply_pending(ctx: dict[str, Any]) -> int:
     """Decide and enqueue the agent reply for every thread awaiting one. Returns enqueued.
 
@@ -139,6 +149,9 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
     enqueued = 0
     llm = BrokerLLM()
     async with session_scope() as session:
+        if not await _platform_agent_on(session):
+            logger.info("platform agent OFF — skip reply_pending for all branches")
+            return 0
         branches = await wiring.active_branches(session)
     for branch in branches:
         assert branch.id is not None
@@ -185,6 +198,8 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
     sent = 0
     llm = BrokerLLM()
     async with session_scope() as session:
+        if not await _platform_agent_on(session):
+            return 0
         for branch in await wiring.active_branches(session):
             assert branch.id is not None
             branch_cfg = await get_settings(session, branch.id)
