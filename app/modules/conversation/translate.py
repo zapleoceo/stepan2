@@ -9,6 +9,19 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.ports.llm import LLMPort
 
 
+async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> str | None:
+    """One-shot translation of raw text (no cache) — for unsent/queued content."""
+    if not (body or "").strip():
+        return None
+    messages = [
+        {"role": "system",
+         "content": f"Translate the following message to {target}. Return ONLY the translation."},
+        {"role": "user", "content": body[:800]},
+    ]
+    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=400)
+    return out.strip() or None
+
+
 async def translate_message(
     session: AsyncSession, mid: int, llm: LLMPort, target: str = "Russian"
 ) -> str | None:
@@ -24,13 +37,7 @@ async def translate_message(
         return None
     if row[1]:  # cache hit — no LLM call
         return row[1]
-    messages = [
-        {"role": "system",
-         "content": f"Translate the following message to {target}. Return ONLY the translation."},
-        {"role": "user", "content": (row[0] or "")[:800]},
-    ]
-    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=400)
-    clean = out.strip()
+    clean = await translate_text(llm, row[0] or "", target)
     if clean:
         await session.execute(
             text("UPDATE message SET tr_text=:t WHERE id=:mid"), {"t": clean, "mid": mid}

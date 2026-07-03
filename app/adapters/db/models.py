@@ -201,6 +201,7 @@ class Outbox(SQLModel, table=True):
     sent_at: datetime | None = Field(default=None)
     error: str | None = Field(default=None)
     llm_info: str | None = Field(default=None)
+    tr_text: str | None = Field(default=None, description="кэш перевода очередной реплики")
 
 
 class ManagerAlert(SQLModel, table=True):

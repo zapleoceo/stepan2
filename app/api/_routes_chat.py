@@ -13,7 +13,7 @@ from app.adapters.db.models import Outbox
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import allowed_branch_ids
-from app.modules.conversation.translate import translate_message
+from app.modules.conversation.translate import translate_message, translate_text
 
 from ._i18n import apply_lang, t
 from ._query import fetch_messages, fetch_messages_since, fetch_pending
@@ -440,3 +440,44 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
             {"mid": mid, "tid": thread_id},
         )
     return HTMLResponse("")
+
+
+@router.post("/chat/{thread_id}/pending/{oid}/delete", response_class=HTMLResponse)
+async def pending_delete(thread_id: int, oid: int, request: Request) -> HTMLResponse:
+    """Cancel a queued (unsent) reply — mark the outbox row skipped so the sender drops it."""
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
+        await session.execute(
+            text("UPDATE outbox SET status='skipped'"
+                 " WHERE id=:oid AND thread_id=:tid AND status='pending'"),
+            {"oid": oid, "tid": thread_id},
+        )
+    return HTMLResponse("")  # bubble removed; OOB refresh won't re-add a skipped row
+
+
+@router.post("/chat/{thread_id}/pending/{oid}/tr", response_class=HTMLResponse)
+async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLResponse:
+    """Translate a queued reply to Russian; cache it on outbox.tr_text so the poll keeps it."""
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
+        row = (await session.execute(
+            text("SELECT text, tr_text FROM outbox WHERE id=:oid AND thread_id=:tid"),
+            {"oid": oid, "tid": thread_id},
+        )).first()
+        if not row or not row[0]:
+            return HTMLResponse("")
+        if row[1]:  # already translated (cache) — no LLM call
+            return HTMLResponse(f"🌐 {_h.escape(row[1])}")
+        try:
+            tr = await translate_text(BrokerLLM(), row[0])
+        except Exception as exc:
+            _log.warning("pending translate error tid=%s oid=%s: %s", thread_id, oid, exc)
+            return HTMLResponse("")
+        if tr:
+            await session.execute(
+                text("UPDATE outbox SET tr_text=:t WHERE id=:oid"), {"t": tr, "oid": oid})
+    return HTMLResponse(f"🌐 {_h.escape(tr)}" if tr else "")

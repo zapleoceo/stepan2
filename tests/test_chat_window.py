@@ -257,15 +257,19 @@ def test_bubble_renders_media_link_preview_and_receipt() -> None:
     assert "🖼 media" not in html                  # placeholder caption hidden
 
 
-def test_pending_bubble_shows_queue_number_and_time_and_is_oob() -> None:
+def test_pending_bubble_queue_time_buttons_and_oob() -> None:
     from app.api._ui_html import messages_html, since_bubbles_html
     _set_lang("en")
-    pending = [(1, "first reply", "2026-07-03 08:15:30"),
-               (2, "second reply", "2026-07-03 08:15:36")]
+    pending = [(11, "first reply", "2026-07-03 08:15:30", "mistral · free", None),
+               (12, "second reply", "2026-07-03 08:15:36", None, "перевод")]
     html = messages_html([], pending, 4)
-    assert 'id="pend-4"' in html          # pending pinned in its own bottom container
-    assert "№1" in html and "№2" in html   # queue positions
-    assert "08:15:30" in html              # estimated send time (HH:MM:SS)
+    assert 'id="pend-4"' in html                    # pending pinned in its own container
+    assert 'id="ppb-11"' in html and "№1" in html   # queued bubble + queue position
+    assert "08:15:30" in html                        # estimated send time (HH:MM:SS)
+    assert "bb-o bb-p" in html                        # styled like outgoing (right side)
+    assert "/ui/chat/4/pending/11/delete" in html    # cancel-send button
+    assert "/ui/chat/4/pending/11/tr" in html         # translate button
+    assert "🌐 перевод" in html                        # cached translation shown
     # the 4s poll re-renders pending out-of-band so it stays below new messages
     since = since_bubbles_html([], 4, 9, pending=pending)
     assert 'id="pend-4" hx-swap-oob="true"' in since

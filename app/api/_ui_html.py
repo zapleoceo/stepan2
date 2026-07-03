@@ -157,6 +157,8 @@ _CSS = (
     "white-space:pre-wrap;word-break:break-word}"
     ".bb-i .bt{background:#232a3b;border:1px solid #2d3748}"
     ".bb-o .bt{background:#1e3a5f}.bb-o.mgr .bt{background:#2a1f3a}"
+    ".bb-p .bt{border:1px dashed #3a5578}"  # queued (unsent) look
+    ".b-tr{font-size:.75rem;color:#5aa2ff;margin-top:.12rem}.bb-o .b-tr{text-align:right}"
     ".bt.trview{color:#5aa2ff}"
     ".bm{font-size:.63rem;color:#4a5568;margin-bottom:.1rem;display:flex;"
     "align-items:center;gap:.2rem}"
@@ -640,24 +642,38 @@ def poll_sentinel_html(tid: int, after_id: int) -> str:
     )
 
 
-def _pending_bubble(row: object, idx: int) -> str:
-    _pid, ptxt, sched = row  # (outbox id, text, scheduled_at)
-    meta = f'⏳ {_h.escape(t("chat.pending"))} · №{idx + 1}'
+def _pending_bubble(row: object, tid: int, idx: int) -> str:
+    oid, ptxt, sched, llm_info, tr_text = row  # (outbox id, text, scheduled_at, llm_info, tr)
     when = str(sched)[11:19] if sched else ""  # HH:MM:SS (str or datetime both work)
-    if when:
-        meta += f' · ~{when}'  # estimated send time
+    meta = f'⏳ {_h.escape(t("chat.pending"))} · №{idx + 1}' + (f' · ~{when}' if when else "")
+    tr_btn = (
+        f'<button class="trx" title="Translate" tabindex="-1"'
+        f' hx-post="/ui/chat/{tid}/pending/{oid}/tr"'
+        f' hx-target="#ptr-{oid}" hx-swap="innerHTML">🌐</button>'
+    )
+    del_btn = (
+        f'<button class="delx" title="Cancel send" tabindex="-1"'
+        f' hx-post="/ui/chat/{tid}/pending/{oid}/delete"'
+        f' hx-target="#ppb-{oid}" hx-swap="outerHTML" hx-confirm="">×</button>'
+    )
+    tr_line = f'🌐 {_h.escape(tr_text)}' if tr_text else ""
+    chip = f'<div class="b-llm">🤖 {_h.escape(str(llm_info))}</div>' if llm_info else ""
     return (
-        f'<div class="bb bb-p"><div class="bt">{_h.escape(str(ptxt or ""))}</div>'
-        f'<div class="bm">{meta}</div></div>'
+        f'<div class="bb bb-o bb-p" id="ppb-{oid}">'
+        f'<div class="bm">{meta} {tr_btn} {del_btn}</div>'
+        f'<div class="bt">{_h.escape(str(ptxt or ""))}</div>'
+        f'<div class="b-tr" id="ptr-{oid}">{tr_line}</div>'
+        f'{chip}</div>'
     )
 
 
 def pending_block_html(pending: list, tid: int, oob: bool = False) -> str:
-    """Queued (unsent) replies, pinned at the bottom. Re-rendered via an OOB swap on each
-    poll so a just-sent line drops out and the queue №/time stay fresh — and new real
-    messages (inserted at the sentinel ABOVE this block) never shove pending bubbles up."""
+    """Queued (unsent) replies, pinned at the bottom, styled like outgoing (right side).
+    Re-rendered via an OOB swap on each poll so a just-sent line drops out and the queue
+    №/time stay fresh — and new real messages (inserted at the sentinel ABOVE this block)
+    never shove pending bubbles up. Manager can translate or cancel a queued line."""
     oob_attr = ' hx-swap-oob="true"' if oob else ""
-    inner = "".join(_pending_bubble(r, i) for i, r in enumerate(pending))
+    inner = "".join(_pending_bubble(r, tid, i) for i, r in enumerate(pending))
     return f'<div id="pend-{tid}"{oob_attr}>{inner}</div>'
 
 
