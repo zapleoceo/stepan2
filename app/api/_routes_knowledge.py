@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
+from app.modules.knowledge.history import record_revision
 
 from ._i18n import apply_lang
 from ._query import _branch_where
@@ -20,6 +21,11 @@ from ._ui_panels import (
 router = APIRouter()
 
 _KNOW_Q = "SELECT id, slug, title, content FROM knowledge_doc {where} ORDER BY id"  # noqa: S608
+
+
+def _actor(request: Request) -> str:
+    user = getattr(getattr(request, "state", None), "user", None) or {}
+    return str(user.get("uid") or user.get("tg") or "owner")
 
 
 @router.get("/knowledge/panel", response_class=HTMLResponse)
@@ -75,20 +81,34 @@ async def knowledge_save(
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
+    actor = _actor(request)
     async with session_scope() as session:
+        prev = (
+            await session.execute(
+                text("SELECT branch_id, slug, content FROM knowledge_doc WHERE id=:id"),
+                {"id": doc_id},
+            )
+        ).first()
         if branch_ids:
             await session.execute(
                 text(
-                    "UPDATE knowledge_doc SET title=:t, content=:c"
+                    "UPDATE knowledge_doc SET title=:t, content=:c,"
+                    " updated_by=:a, updated_at=NOW()"
                     " WHERE id=:id AND branch_id=ANY(:bids)"
                 ),
-                {"t": title.strip(), "c": content.strip(), "id": doc_id, "bids": branch_ids},
+                {"t": title.strip(), "c": content.strip(), "id": doc_id,
+                 "bids": branch_ids, "a": actor},
             )
         else:
             await session.execute(
-                text("UPDATE knowledge_doc SET title=:t, content=:c WHERE id=:id"),
-                {"t": title.strip(), "c": content.strip(), "id": doc_id},
+                text("UPDATE knowledge_doc SET title=:t, content=:c,"
+                     " updated_by=:a, updated_at=NOW() WHERE id=:id"),
+                {"t": title.strip(), "c": content.strip(), "id": doc_id, "a": actor},
             )
+        if prev is not None:
+            await record_revision(
+                session, branch_id=prev[0], entity_type="doc", slug=str(prev[1]),
+                old_content=prev[2], new_content=content.strip(), actor=actor)
         row = (
             await session.execute(
                 text("SELECT id, slug, title, content FROM knowledge_doc WHERE id=:id"),
@@ -126,6 +146,10 @@ async def knowledge_create(
             ),
             {"bid": branch_id, "slug": slug, "t": title.strip(), "c": content.strip()},
         )
+        if content.strip():
+            await record_revision(
+                session, branch_id=branch_id, entity_type="doc", slug=slug,
+                old_content=None, new_content=content.strip(), actor=_actor(request))
         row = (
             await session.execute(
                 text(
