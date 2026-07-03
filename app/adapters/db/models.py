@@ -69,6 +69,8 @@ class Lead(SQLModel, table=True):
     email: str | None = Field(default=None)
     stage: Stage = Field(default=Stage.NEW, sa_type=String)
     ready_subtype: str | None = Field(default=None)
+    preferred_language: str | None = Field(
+        default=None, description="если лид попросил другой язык — отвечаем на нём")
     agent_enabled: bool = Field(default=True, description="per-lead бот-тумблер (manager takeover)")
     is_blocked: bool = Field(default=False, index=True, description="спам/бан — бот игнорит")
     handed_off_at: datetime | None = Field(default=None)
@@ -129,7 +131,8 @@ class Membership(SQLModel, table=True):
 # ─── доменные таблицы филиала (все несут branch_id; изоляция — в репозитории) ───
 
 class KnowledgeDoc(SQLModel, table=True):
-    """Документ базы знаний филиала (persona / faq / market_facts / stories)."""
+    """Документ базы знаний филиала (persona / faq / playbook / …). category группирует
+    их в дерево UI; content — markdown с `## ` секциями (границы чанков для RAG)."""
     __tablename__ = "knowledge_doc"
     __table_args__ = (UniqueConstraint("branch_id", "slug", name="uq_kdoc_branch_slug"),)
 
@@ -137,7 +140,11 @@ class KnowledgeDoc(SQLModel, table=True):
     branch_id: int = Field(foreign_key="branch.id", index=True)
     slug: str
     title: str | None = Field(default=None)
+    category: str | None = Field(default=None, description="группа дерева: persona/playbook/…")
+    sort_order: int = Field(default=0)
     content: str = Field(default="")
+    updated_at: datetime = Field(default_factory=_utcnow)
+    updated_by: str | None = Field(default=None, description="кто правил (owner id)")
 
 
 class Product(SQLModel, table=True):
@@ -152,6 +159,8 @@ class Product(SQLModel, table=True):
     content: str = Field(default="")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    updated_by: str | None = Field(default=None)
 
 
 class AppSetting(SQLModel, table=True):
@@ -316,4 +325,39 @@ class BrokerLog(SQLModel, table=True):
     latency_ms: int | None = Field(default=None)
     ok: bool = Field(default=True)
     error: str | None = Field(default=None, description="сообщение ошибки при ok=false")
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
+class KnowledgeChunk(SQLModel, table=True):
+    """Кусок базы знаний с эмбеддингом для RAG-поиска. Пересобирается целиком при
+    переиндексации (DELETE+INSERT, без UPDATE). embedding — JSON-массив float (cosine
+    в Python, чтобы работать и на SQLite-тестах, и на Postgres-проде)."""
+    __tablename__ = "knowledge_chunk"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    source_type: str = Field(default="doc", description="doc | product")
+    source_slug: str = Field(default="")
+    title: str = Field(default="")
+    seq: int = Field(default=0)
+    text: str = Field(default="")
+    embedding: str = Field(default="[]", description="JSON-массив float (Voyage-вектор)")
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class KnowledgeRevision(SQLModel, table=True):
+    """История правок базы знаний (doc + product). Пишется триггером БД на любое изменение
+    content — UI, восстановление, seed. Ничего не теряется; любую версию видно и можно
+    восстановить. actor = updated_by источника."""
+    __tablename__ = "knowledge_revision"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int | None = Field(default=None, index=True)
+    entity_type: str = Field(default="doc", description="doc | product")
+    slug: str = Field(default="")
+    old_content: str | None = Field(default=None)
+    new_content: str = Field(default="")
+    old_len: int | None = Field(default=None)
+    new_len: int = Field(default=0)
+    actor: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow, index=True)

@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
+from app.modules.knowledge.canonical import ensure_canonical_docs
 from app.modules.settings.schema import defaults as _schema_defaults
 
 from ._i18n import apply_lang
@@ -92,8 +93,9 @@ async def branches_create(
                 ),
                 {"bid": new_id, "key": key, "val": value},
             )
-        _log.info("created branch id=%s name=%r; seeded %d settings",
-                  new_id, name, len(_SEED_SETTINGS))
+        created = await ensure_canonical_docs(session, new_id, lang)
+        _log.info("created branch id=%s name=%r; seeded %d settings + %d KB docs",
+                  new_id, name, len(_SEED_SETTINGS), created)
     return HTMLResponse(branch_edit_html(new_id, name, lang, tz_offset_h, active, seeded=True))
 
 

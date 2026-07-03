@@ -38,6 +38,8 @@ async def seed_branch(
                              content=p.get("content", ""),
                              is_active=p.get("is_active", True),
                              sort_order=p.get("sort_order", 0)))
+    from .canonical import ensure_canonical_docs  # noqa: PLC0415 (avoid import cycle)
+    await ensure_canonical_docs(session, branch.id, lang)
     return branch.id
 
 
