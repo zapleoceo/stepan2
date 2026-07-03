@@ -13,6 +13,7 @@ from typing import Any
 
 from arq import cron
 from arq.connections import RedisSettings
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Channel
@@ -40,29 +41,48 @@ _INGEST_JITTER_S = 12.0
 
 
 async def ingest_active_channels(ctx: dict[str, Any]) -> int:
-    """Pull new inbound for every active channel of every active branch. Returns rows stored."""
+    """Pull new inbound for every active channel of every active branch. Returns rows stored.
+
+    Each channel ingests in its OWN transaction: a slow poll that overruns the cron can
+    overlap the next run, and two runs racing past the dedup check would hit the
+    (channel_id, external_id) unique constraint — that must abort only the racing
+    channel, not the whole cycle. The constraint itself is the backstop that makes the
+    concurrent insert harmless."""
     await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
-    stored = 0
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            ingest = IngestService(session, branch.id)
-            for channel in await wiring.active_channels(session, branch.id):
-                assert channel.id is not None
-                try:
-                    port = await wiring.build_channel_port(session, channel)
-                except (NotImplementedError, KeyError, RuntimeError) as exc:
-                    logger.warning("skip ingest channel %s: %s", channel.id, exc)
-                    continue
-                if not await _healthy(session, branch.id, channel, port):
-                    continue  # checkpoint/expired session — frozen until re-login
-                try:
-                    inbound = await port.fetch_inbound()
-                except Exception:
-                    logger.exception("ingest fetch failed channel %s", channel.id)
-                    continue
-                stored += len(await ingest.ingest(channel.id, inbound))
+        work = [
+            (branch.id, channel.id)
+            for branch in await wiring.active_branches(session)
+            for channel in await wiring.active_channels(session, branch.id)
+        ]
+    stored = 0
+    for branch_id, channel_id in work:
+        stored += await _ingest_channel(branch_id, channel_id)
     return stored
+
+
+async def _ingest_channel(branch_id: int, channel_id: int) -> int:
+    """Ingest one channel in its own transaction; a concurrent-run race is a no-op."""
+    try:
+        async with session_scope() as session:
+            channel = await session.get(Channel, channel_id)
+            if channel is None or not channel.is_active:
+                return 0
+            try:
+                port = await wiring.build_channel_port(session, channel)
+            except (NotImplementedError, KeyError, RuntimeError) as exc:
+                logger.warning("skip ingest channel %s: %s", channel_id, exc)
+                return 0
+            if not await _healthy(session, branch_id, channel, port):
+                return 0  # checkpoint/expired session — frozen until re-login
+            inbound = await port.fetch_inbound()
+            return len(await IngestService(session, branch_id).ingest(channel_id, inbound))
+    except IntegrityError:
+        logger.info("ingest channel %s: rows already stored by a concurrent run", channel_id)
+        return 0
+    except Exception:
+        logger.exception("ingest failed channel %s", channel_id)
+        return 0
 
 
 async def _healthy(session: AsyncSession, branch_id: int, channel: Channel, port) -> bool:

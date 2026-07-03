@@ -8,12 +8,18 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+# Live polling only needs the most-recent threads (new messages surface at the top);
+# deep pagination every minute is slow (each page costs an IG call + 2-5s delay) and
+# would push a poll cycle past the cron interval → overlapping runs. Backfill of old
+# history is a separate, on-demand path.
+_LIVE_THREADS = 20
 
-def _paged_threads(client: Any, endpoint: str, amount: int = 50) -> list[dict]:
+
+def _paged_threads(client: Any, endpoint: str, amount: int = _LIVE_THREADS) -> list[dict]:
     """Raw inbox threads with cursor pagination — instagrapi extractor bypassed."""
     out: list[dict] = []
     cursor = None
-    for _ in range(max(3, amount // 20 + 2)):
+    for _ in range(max(1, (amount + 19) // 20)):
         params = {"visual_message_return_type": "unseen",
                   "thread_message_limit": "10", "persistentBadging": "true", "limit": "20"}
         if cursor:
@@ -91,6 +97,7 @@ class InstagrapiTransport:
         client = self._ensure_client()
         own_id = str(client.user_id) if client.user_id else None
         out: list[dict[str, Any]] = []
+        seen_threads: set[str] = set()
         # Raw private API gives ad_context_data / send_attribution not in the pydantic
         # model, and survives shared-media items that crash instagrapi's own extractor.
         # inbox/ = accepted chats; pending_inbox/ = message requests (cold ad leads).
@@ -103,8 +110,10 @@ class InstagrapiTransport:
                 continue
             for t in threads:
                 items = t.get("items") or []
-                if t.get("is_group") or not items:
-                    continue
+                tid = str(t.get("thread_id", ""))
+                if t.get("is_group") or not items or tid in seen_threads:
+                    continue  # a thread mid pending→accepted appears in both — process once
+                seen_threads.add(tid)
                 users = t.get("users") or []
                 lead_u = next((u for u in users if str(u.get("pk", "")) != own_id), None)
                 lead_pk = str((lead_u or {}).get("pk") or "") or None
