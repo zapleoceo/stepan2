@@ -984,6 +984,11 @@ def app_shell(
         "if(m){scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
         "if(!g.complete)g.addEventListener('load',function(){scrollBot(m);},{once:true});});}"
         "if(t&&t.id==='tl')filterTi();});"
+        # F5 / direct load: afterSettle never fires, so pin every .msgs to the bottom on load
+        "function scrollAllBot(){document.querySelectorAll('.msgs').forEach(function(m){"
+        "scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
+        "if(!g.complete)g.addEventListener('load',function(){scrollBot(m);},{once:true});});});}"
+        "window.addEventListener('load',scrollAllBot);"
         "function showThr(v){"
         "var el=document.querySelector('.thr');"
         "if(el)el.style.display=v?'':'none';}"
