@@ -161,8 +161,8 @@ _CSS = (
     ".bm{font-size:.63rem;color:#4a5568;margin-bottom:.1rem;display:flex;"
     "align-items:center;gap:.2rem}"
     ".bb-o .bm{justify-content:flex-end}"
-    ".b-llm{font-size:.59rem;color:#4a5568;opacity:.6;margin-top:.12rem;"
-    "font-family:ui-monospace,monospace}"
+    ".b-llm{font-size:.66rem;color:#93a1b3;opacity:.95;margin-top:.2rem;"
+    "font-family:ui-monospace,monospace;letter-spacing:.1px}"
     ".bb-o .b-llm{text-align:right}"
     # per-message translate and delete buttons — hidden until bubble hover
     ".trx,.delx{background:none;border:none;color:#4a5568;cursor:pointer;"
