@@ -137,6 +137,42 @@ async def fetch_branch_tz(session: AsyncSession, branch_ids: list[int]) -> dict[
     return {bid: int(offset) for bid, offset in rows}
 
 
+async def fetch_discovery_metrics(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> dict[str, float | int]:
+    """Discovery-before-presentation KPIs from stage_event: of leads that reached
+    'presenting', how many had a 'qualifying' (discovery) event first, and the average
+    number of inbound messages before the first presentation. Portable (SQLite + Postgres)."""
+    if branch_ids:
+        keys = ",".join(f":b{i}" for i in range(len(branch_ids)))
+        branch_and = f" AND se.branch_id IN ({keys})"
+        params = {f"b{i}": b for i, b in enumerate(branch_ids)}
+    else:
+        branch_and, params = "", {}
+    # branch_and holds only fixed :bN placeholders; all values are bound params
+    sql = (
+        "WITH fp AS (SELECT se.lead_id, MIN(se.created_at) AS t FROM stage_event se"  # noqa: S608
+        " WHERE se.to_stage=:pres" + branch_and + " GROUP BY se.lead_id),"
+        " dl AS ("
+        "  SELECT fp.lead_id, count(m.id) AS cnt FROM fp"
+        "  JOIN channel_thread ct ON ct.lead_id = fp.lead_id"
+        "  JOIN message m ON m.thread_id = ct.id AND m.direction='in' AND m.occurred_at < fp.t"
+        "  GROUP BY fp.lead_id)"
+        " SELECT (SELECT count(*) FROM fp) AS reached,"
+        "  (SELECT count(*) FROM fp WHERE lead_id IN ("
+        "     SELECT se.lead_id FROM stage_event se JOIN fp f2 ON f2.lead_id=se.lead_id"
+        "     WHERE se.to_stage=:qual AND se.created_at <= f2.t)) AS discovered,"
+        "  (SELECT avg(cnt) FROM dl) AS avg_msgs"
+    )
+    params.update(pres="presenting", qual="qualifying")
+    row = (await session.execute(text(sql), params)).first()
+    reached = int(row[0] or 0) if row else 0
+    discovered = int(row[1] or 0) if row else 0
+    avg_msgs = round(float(row[2]), 1) if row and row[2] is not None else 0.0
+    pct = round(discovered / reached * 100, 0) if reached else 0.0
+    return {"reached": reached, "discovered": discovered, "pct": pct, "avg_msgs": avg_msgs}
+
+
 async def fetch_coach_data(session: AsyncSession, branch_id: int) -> tuple[list, list]:
     """Fetch coaching edits (ASC) and active notes for a branch."""
     edits = (

@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 
 from sqlmodel import select
 
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
+from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message, StageEvent
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
 from app.modules.conversation.decision import Decision, parse_decision
@@ -138,3 +138,40 @@ async def test_decide_persists_captured_needs(db_session) -> None:
     await svc.decide(th.id)
     got = parse_needs((await db_session.exec(select(Lead).where(Lead.id == lead.id))).first().needs)
     assert "tried before, gave up" in got.pains and "a real job" in got.gains
+
+
+# ─── discovery metric ─────────────────────────────────────────────────────────
+
+async def test_discovery_metrics(db_session) -> None:
+    from datetime import timedelta
+
+    from app.api._query import fetch_discovery_metrics
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    good = Lead(branch_id=b.id)   # discovered before presenting
+    bad = Lead(branch_id=b.id)    # jumped straight to presenting
+    db_session.add_all([ch, good, bad])
+    await db_session.flush()
+    tg = ChannelThread(lead_id=good.id, channel_id=ch.id, external_thread_id="g")
+    db_session.add(tg)
+    await db_session.flush()
+    t0 = _NOW - timedelta(minutes=10)
+    # good lead: qualifying then presenting, with 2 inbound messages before presenting
+    db_session.add(StageEvent(branch_id=b.id, lead_id=good.id, from_stage="new",
+                              to_stage="qualifying", created_at=t0))
+    db_session.add(StageEvent(branch_id=b.id, lead_id=good.id, from_stage="qualifying",
+                              to_stage="presenting", created_at=t0 + timedelta(minutes=5)))
+    for i in range(2):
+        db_session.add(Message(branch_id=b.id, thread_id=tg.id, channel_id=ch.id,
+                               external_id=f"g{i}", direction="in", sent_by="lead",
+                               text="q", occurred_at=t0 + timedelta(minutes=1 + i)))
+    # bad lead: straight to presenting, no qualifying
+    db_session.add(StageEvent(branch_id=b.id, lead_id=bad.id, from_stage="new",
+                              to_stage="presenting", created_at=t0))
+    await db_session.flush()
+
+    m = await fetch_discovery_metrics(db_session, [b.id])
+    assert m["reached"] == 2 and m["discovered"] == 1
+    assert m["pct"] == 50 and m["avg_msgs"] == 2.0  # only the good lead had inbound msgs

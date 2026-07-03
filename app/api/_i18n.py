@@ -84,6 +84,10 @@ _TR: dict[str, dict[str, str]] = {
     "know.save":    {"ru": "Сохранить",   "en": "Save",        "id": "Simpan"},
     "know.back":    {"ru": "← База знаний","en": "← Knowledge","id": "← Basis Pengetahuan"},
     "know.saved":   {"ru": "Сохранено ✓", "en": "Saved ✓",    "id": "Tersimpan ✓"},
+    # captured needs (VPC) in chat header
+    "needs.jobs":   {"ru": "Цель",    "en": "Jobs",   "id": "Tujuan"},
+    "needs.pains":  {"ru": "Боли",    "en": "Pains",  "id": "Masalah"},
+    "needs.gains":  {"ru": "Выгоды",  "en": "Gains",  "id": "Manfaat"},
     # knowledge-base tree / editor / history / reindex
     "kb.tab_persona": {"ru": "Персона",   "en": "Persona",     "id": "Persona"},
     "kb.reindex":   {"ru": "Переиндексировать RAG", "en": "Reindex RAG", "id": "Reindex RAG"},
@@ -392,6 +396,10 @@ _TR: dict[str, dict[str, str]] = {
     "rep.won":     {"ru": "Закрытые",       "en": "Won",          "id": "Berhasil"},
     "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},
     "rep.dormant": {"ru": "Спящие",         "en": "Dormant",      "id": "Tidak aktif"},
+    "rep.discovered": {"ru": "Выявлено до презент.", "en": "Discovered 1st",
+                       "id": "Gali dulu"},
+    "rep.disc_len": {"ru": "Ср. глубина выявл.", "en": "Avg discovery msgs",
+                     "id": "Rata2 gali"},
     "rep.by_stage":{"ru": "По стадиям",     "en": "By stage",     "id": "Per tahap"},
     "rep.stage":   {"ru": "Стадия",         "en": "Stage",        "id": "Tahap"},
     "rep.count":   {"ru": "Кол-во",         "en": "Count",        "id": "Jumlah"},

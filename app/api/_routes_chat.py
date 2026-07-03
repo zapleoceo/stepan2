@@ -75,7 +75,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                    " b.tz_offset_h"
+                    " b.tz_offset_h, l.needs"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"
                     " WHERE ct.id = :tid"
@@ -92,7 +92,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
      phone, created_at, last_in_at,
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-     follower_count, following_count, last_active_at, lead_seen_at, _tz) = info
+     follower_count, following_count, last_active_at, lead_seen_at, _tz, needs) = info
     return HTMLResponse(
         chat_panel_html(
             thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -103,7 +103,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
             agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
             follower_count=follower_count, following_count=following_count,
-            last_active_at=last_active_at, lead_seen_at=lead_seen_at,
+            last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs,
         )
     )
 
@@ -270,7 +270,8 @@ async def chat_stage(
                     " l.ig_username, l.avatar_url,"
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h"
+                    " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
+                    " l.needs"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"
                     " WHERE ct.id = :tid"
@@ -284,7 +285,7 @@ async def chat_stage(
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at, _tz) = info
+         follower_count, following_count, last_active_at, _tz, needs) = info
         set_render_tz(_tz)
         await session.execute(
             text("UPDATE lead SET stage = :s WHERE id = :id"),
@@ -299,7 +300,7 @@ async def chat_stage(
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at)
+                         last_active_at=last_active_at, needs=needs)
     )
 
 

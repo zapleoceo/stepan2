@@ -915,6 +915,7 @@ def reports_panel_html(
     hour_in: dict[int, int],
     hour_out: dict[int, int],
     ad_funnel: list | None = None,
+    discovery: dict | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -939,6 +940,11 @@ def reports_panel_html(
         + _kpi("rep.conv", f"{conv}%", "#ffa94d")
         + _kpi("rep.dormant", str(dormant), "#868e96")
     )
+    if discovery is not None:
+        kpis += (
+            _kpi("rep.discovered", f"{discovery.get('pct', 0):g}%", "#4da6ff")
+            + _kpi("rep.disc_len", f"{discovery.get('avg_msgs', 0):g}", "#4da6ff")
+        )
 
     # distribution bar (pipeline / won / dormant / manager)
     bar_parts = [

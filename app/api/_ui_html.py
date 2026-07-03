@@ -282,6 +282,16 @@ _CSS = (
     ".kb-diff{font-family:ui-monospace,monospace;font-size:.68rem;padding:.3rem .55rem;"
     "max-height:14rem;overflow-y:auto}"
     ".d-add{color:#7ee2a8}.d-del{color:#ff9b9b}.d-ctx{color:#5a6675}"
+    # ── captured needs (VPC) box in chat header ──
+    ".nd-box{padding:.3rem .7rem;border-top:1px solid #222836;display:flex;"
+    "flex-direction:column;gap:.2rem}"
+    ".nd-row{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}"
+    ".nd-lbl{font-size:.66rem;color:#6b7685;min-width:3.6rem}"
+    ".nd-chip{font-size:.68rem;padding:.08rem .4rem;border-radius:10px;"
+    "border:1px solid #2d3748}"
+    ".nd-job{background:#12233b;color:#7db8ff}"
+    ".nd-pain{background:#301a1a;color:#ffb0a3}"
+    ".nd-gain{background:#132a1e;color:#8fe3ac}"
     ".help-btn{width:1.45rem;height:1.45rem;border-radius:50%;background:#206bc4;"
     "color:#fff;border:none;font-size:.72rem;font-weight:700;cursor:pointer;"
     "flex-shrink:0;line-height:1}"
@@ -816,6 +826,7 @@ def chat_header_html(
     follower_count: int | None = None,
     following_count: int | None = None,
     last_active_at: datetime | None = None,
+    needs: str | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -893,8 +904,29 @@ def chat_header_html(
         f'{meta_row}'
         f'</div>'
         f'{src_bar}'
+        f'{_needs_block(needs)}'
         f'</div>'
     )
+
+
+def _needs_block(needs: str | None) -> str:
+    """Render the captured Value-Proposition-Canvas profile (jobs/pains/gains) so the
+    manager sees what Stepan discovered. Empty when nothing captured yet."""
+    from app.modules.conversation.needs import parse_needs  # noqa: PLC0415 (avoid cycle)
+    p = parse_needs(needs)
+    rows = []
+    for icon, label, items, cls in (
+        ("🎯", t("needs.jobs"), p.jobs, "nd-job"),
+        ("⚠️", t("needs.pains"), p.pains, "nd-pain"),
+        ("✨", t("needs.gains"), p.gains, "nd-gain"),
+    ):
+        if items:
+            chips = "".join(f'<span class="nd-chip {cls}">{_h.escape(i)}</span>' for i in items)
+            rows.append(f'<div class="nd-row"><span class="nd-lbl">{icon} '
+                        f'{_h.escape(label)}</span>{chips}</div>')
+    if not rows:
+        return ""
+    return f'<div class="nd-box">{"".join(rows)}</div>'
 
 
 def chat_panel_html(
@@ -921,6 +953,7 @@ def chat_panel_html(
     following_count: int | None = None,
     last_active_at: datetime | None = None,
     lead_seen_at: datetime | None = None,
+    needs: str | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -935,7 +968,7 @@ def chat_panel_html(
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
         agent_enabled=agent_enabled, is_blocked=is_blocked,
         follower_count=follower_count, following_count=following_count,
-        last_active_at=last_active_at,
+        last_active_at=last_active_at, needs=needs,
     )
     return (
         f'{header}'
