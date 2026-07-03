@@ -53,6 +53,26 @@ def test_parse_decision_ready_subtype() -> None:
     assert parse_decision(json.dumps(base)).ready_subtype is None
 
 
+def test_build_messages_merges_consecutive_same_role() -> None:
+    from types import SimpleNamespace
+
+    from app.modules.conversation.prompt import build_messages
+    dialog = [
+        SimpleNamespace(direction="in", text="hi"),
+        SimpleNamespace(direction="in", text="are you there?"),    # consecutive user
+        SimpleNamespace(direction="out", text="yes"),
+        SimpleNamespace(direction="out", text="how can I help?"),  # consecutive assistant
+        SimpleNamespace(direction="in", text="  "),                # empty → dropped
+        SimpleNamespace(direction="in", text="price?"),
+    ]
+    msgs = build_messages("persona", dialog, "en")
+    # strict user/assistant alternation after the system message (Anthropic requirement)
+    assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
+    assert "hi\nare you there?" in msgs[1]["content"]
+    assert "yes\nhow can I help?" in msgs[2]["content"]
+    assert msgs[3]["content"] == "price?"  # blank turn dropped
+
+
 def test_fmt_llm_meta_free_time_and_id() -> None:
     from app.modules.conversation.reply import _fmt_llm_meta
     free = _fmt_llm_meta({"model": "x/mistral-large-latest", "tokens_in": 537,

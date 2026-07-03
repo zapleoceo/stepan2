@@ -85,6 +85,17 @@ def build_messages(
         parts.append(f"{_COACHING_HEADER}\n{notes_block}")
     parts.append(_DECISION_CONTRACT.format(lang=lang))
 
+    # Merge consecutive same-role turns: a lead's message burst or the bot's |||-split
+    # produces user/user or assistant/assistant runs, which Anthropic (and others) reject —
+    # the chat API requires strict user/assistant alternation. Empty turns are dropped.
     messages: list[dict[str, Any]] = [{"role": "system", "content": "\n\n".join(parts)}]
-    messages.extend({"role": _role_of(m), "content": m.text} for m in dialog)
+    for m in dialog:
+        content = (m.text or "").strip()
+        if not content:
+            continue
+        role = _role_of(m)
+        if len(messages) > 1 and messages[-1]["role"] == role:
+            messages[-1]["content"] += "\n" + content
+        else:
+            messages.append({"role": role, "content": content})
     return messages
