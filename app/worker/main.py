@@ -349,7 +349,12 @@ class WorkerSettings:
         process_deletions, sync_crm, refresh_profiles, backfill_media,
     ]
     cron_jobs = [
-        cron(ingest_active_channels, second=0, run_at_startup=False),
+        # Ingest every 2 min: an IG poll costs several private-API calls each with a
+        # 2-5s anti-ban delay, so a cycle can run ~50s. Every-minute polling risked
+        # overlap (→ constraint races) and hammered IG; 2 min stays well clear and is
+        # gentler on the account. Reply/send stay per-minute (DB/queue, cheap).
+        cron(ingest_active_channels, minute=set(range(0, 60, 2)), second=0,
+             run_at_startup=False),
         cron(reply_pending, second=20, run_at_startup=False),
         cron(send_outbox, second=40, run_at_startup=False),
         # Unsend requests every minute (second=30, between reply and send)
