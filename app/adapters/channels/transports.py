@@ -181,9 +181,14 @@ class InstagrapiTransport:
         return "ok"
 
     async def fetch_user_stats(self, ig_user_id: str) -> dict[str, Any]:
-        """Follower/following counts for one IG user (heavy private-API call)."""
+        """Follower/following + name/avatar for one IG user via the PRIVATE API only.
+
+        Uses user_info_v1 directly (the same private API the inbox reads), never the public
+        GraphQL path: instagrapi's user_info falls back to public GraphQL on any failure, and
+        that endpoint now returns an anti-bot HTML page → a noisy JSON-parse crash. Skipping
+        it keeps this call on the private surface that isn't blocked."""
         client = self._ensure_client()
-        info = await asyncio.to_thread(client.user_info, int(ig_user_id))
+        info = await asyncio.to_thread(client.user_info_v1, str(ig_user_id))
         return {
             "follower_count": getattr(info, "follower_count", None),
             "following_count": getattr(info, "following_count", None),
