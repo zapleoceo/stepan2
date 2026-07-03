@@ -89,6 +89,24 @@ async def test_reindex_is_a_full_rebuild(db_session) -> None:
     assert total == first
 
 
+class _PickyLLM(_BagLLM):
+    """Rejects embed batches larger than 2 — forces RagService to split and retry."""
+
+    async def embed(self, texts, **k):  # noqa: ANN001, ANN003, ANN201
+        if len(texts) > 2:
+            raise RuntimeError("502 batch too large")
+        return await super().embed(texts, **k)
+
+
+async def test_reindex_splits_oversized_embed_batches(db_session) -> None:
+    bid = await _seed(db_session)
+    stored = await RagService(db_session, bid, _PickyLLM()).reindex()
+    total = (await db_session.execute(
+        select(func.count()).select_from(KnowledgeChunk).where(KnowledgeChunk.branch_id == bid)
+    )).scalar()
+    assert stored == total and total >= 3  # every chunk embedded despite the batch cap
+
+
 async def test_retrieve_empty_when_no_index(db_session) -> None:
     bid = await _seed(db_session)
     assert await RagService(db_session, bid, _BagLLM()).retrieve("price") == []

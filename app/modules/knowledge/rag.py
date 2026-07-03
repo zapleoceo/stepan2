@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Persona is identity — always injected directly, never chunked/retrieved.
 PERSONA_SLUGS = frozenset({"persona", "persona_core"})
-_EMBED_BATCH = 64
+_EMBED_BATCH = 24  # broker/voyage rejects large embed batches (502) — keep well under ~40
 _TOP_K = 12
 
 _Source = tuple[str, str, str, str]        # (source_type, slug, title, content)
@@ -84,14 +84,27 @@ class RagService:
     async def _embed_and_store(self, rows: list[_ChunkRow]) -> int:
         stored = 0
         for i in range(0, len(rows), _EMBED_BATCH):
-            batch = rows[i:i + _EMBED_BATCH]
-            vectors = await self.llm.embed([r[4] for r in batch], branch_id=self.branch_id)
-            for (source_type, slug, title, seq, text), vec in zip(batch, vectors, strict=True):
-                self.session.add(KnowledgeChunk(
-                    branch_id=self.branch_id, source_type=source_type, source_slug=slug,
-                    title=title, seq=seq, text=text, embedding=json.dumps(vec)))
-                stored += 1
+            stored += await self._store_batch(rows[i:i + _EMBED_BATCH])
         return stored
+
+    async def _store_batch(self, batch: list[_ChunkRow]) -> int:
+        """Embed a batch; on a broker size-rejection split it in half and retry."""
+        if not batch:
+            return 0
+        try:
+            vectors = await self.llm.embed([r[4] for r in batch], branch_id=self.branch_id)
+        except Exception:
+            if len(batch) == 1:
+                logger.warning("rag: dropping unembeddable chunk %s/%s",
+                               batch[0][0], batch[0][1])
+                return 0
+            mid = len(batch) // 2
+            return await self._store_batch(batch[:mid]) + await self._store_batch(batch[mid:])
+        for (source_type, slug, title, seq, text), vec in zip(batch, vectors, strict=True):
+            self.session.add(KnowledgeChunk(
+                branch_id=self.branch_id, source_type=source_type, source_slug=slug,
+                title=title, seq=seq, text=text, embedding=json.dumps(vec)))
+        return len(batch)
 
     async def retrieve(self, query: str, k: int = _TOP_K) -> list[tuple[str, str]]:
         """Top-k (title, text) chunks most similar to `query`; [] if index/query empty."""
