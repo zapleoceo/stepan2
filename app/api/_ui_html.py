@@ -56,6 +56,9 @@ _CSS = (
     "display:flex;flex-direction:column;overflow:hidden}"
     ".thr-h{padding:.56rem .8rem;border-bottom:1px solid #2d3748;font-size:.82rem;"
     "font-weight:600;color:#e8eef4;flex-shrink:0}"
+    ".ti-q{width:calc(100% - 1rem);margin:.4rem .5rem;padding:.34rem .55rem;flex-shrink:0;"
+    "background:#0f1621;border:1px solid #2d3748;border-radius:6px;color:#e8eef4;"
+    "font-size:.76rem;outline:none}.ti-q:focus{border-color:#206bc4}"
     "#tl{flex:1;overflow-y:auto}"
     "#tl::-webkit-scrollbar{width:4px}"
     "#tl::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
@@ -504,8 +507,9 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         f'<span class="ti-br" title="Branch">🏢 {_h.escape(str(branch_name))}</span>'
         if show_branch and branch_name else ""
     )
+    search_idx = _h.escape(f"{name or ''} {ig_username or ''}".lower())
     return (
-        f'<a class="ti{on}"'
+        f'<a class="ti{on}" data-search="{search_idx}"'
         f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
         f' onclick="setOn(this);setOpenThread({tid})"'
         f' href="/ui/inbox">'
@@ -940,10 +944,15 @@ def app_shell(
         "var m=document.getElementById('msgs-'+tid);if(m)m.scrollTop=m.scrollHeight;}"
         "function setOpenThread(tid){"
         "document.cookie='stepan2_open_thread='+tid+';path=/;max-age=86400;samesite=lax';}"
+        "function filterTi(){var i=document.getElementById('ti-q');var q=i?i.value:'';"
+        "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
+        "var s=e.getAttribute('data-search')||'';"
+        "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
         "document.addEventListener('htmx:afterSettle',function(e){"
         "var m=e.target&&e.target.classList&&e.target.classList.contains('msgs')?e.target"
         ":e.target.querySelector&&e.target.querySelector('.msgs');"
-        "if(m)m.scrollTop=m.scrollHeight;});"
+        "if(m)m.scrollTop=m.scrollHeight;"
+        "if(e.target&&e.target.id==='tl')filterTi();});"
         "function showThr(v){"
         "var el=document.querySelector('.thr');"
         "if(el)el.style.display=v?'':'none';}"
@@ -1038,6 +1047,8 @@ def app_shell(
             f'<div id="fnl-wrap"'
             f' hx-get="/ui/funnel" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
+            f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
+            f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'
             f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s"'
             f' hx-swap="innerHTML"></div>'
         )

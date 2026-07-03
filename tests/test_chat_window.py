@@ -51,6 +51,13 @@ def test_thread_list_no_active_marks_none() -> None:
     assert 'class="ti on"' not in html
 
 
+def test_thread_card_has_lowercase_search_index() -> None:
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    html = thread_list_html([_thread_row(3)])  # name "Alice", handle "alice"
+    assert 'data-search="alice alice"' in html  # name + @handle, lowercased for live search
+
+
 def test_thread_card_branch_badge_only_in_multibranch_view() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")

@@ -49,6 +49,9 @@ _TR: dict[str, dict[str, str]] = {
     # inbox / threads
     "inbox.empty":  {"ru": "Нет чатов",   "en": "No chats",    "id": "Tidak ada obrolan"},
     "inbox.select": {"ru": "Выберите чат","en": "Select a conversation","id": "Pilih percakapan"},
+    "inbox.search": {"ru": "🔍 Поиск по имени / @нику",
+                     "en": "🔍 Search name / @handle",
+                     "id": "🔍 Cari nama / @handle"},
     # chat
     "chat.send":    {"ru": "Отправить",   "en": "Send",        "id": "Kirim"},
     "chat.ph":      {"ru": "Ваше сообщение…","en": "Your message…","id": "Pesan Anda…"},
