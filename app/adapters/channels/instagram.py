@@ -103,6 +103,7 @@ class InstagramAdapter:
         return InboundMessage(
             external_thread_id=str(thread["thread_id"]),
             sender_id=str(thread["sender_id"]),
+            lead_ig_user_id=thread.get("lead_ig_user_id") or None,
             text=str(thread.get("text", "")),
             occurred_at=_as_dt(thread.get("timestamp")),
             product_hint=thread.get("ad_product"),

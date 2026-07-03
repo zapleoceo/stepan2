@@ -15,9 +15,10 @@ from app.domain.enums import ChannelKind, SessionStatus
 @dataclass(frozen=True)
 class InboundMessage:
     external_thread_id: str
-    sender_id: str
+    sender_id: str                       # author of THIS item (own_id on our outgoing)
     text: str
     occurred_at: datetime
+    lead_ig_user_id: str | None = None   # thread participant's pk — the lead's stable IG id
     product_hint: str | None = None
     sender_username: str | None = None   # IG @handle
     sender_name: str | None = None       # full name from profile

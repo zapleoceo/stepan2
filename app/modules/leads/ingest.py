@@ -56,7 +56,7 @@ class IngestService:
                 inbound.external_thread_id, channel_id,
                 display_name=inbound.sender_name,
                 phone=phone,
-                ig_user_id=inbound.sender_id,
+                ig_user_id=inbound.lead_ig_user_id or inbound.sender_id,
                 ig_username=inbound.sender_username,
                 avatar_url=inbound.sender_avatar,
             )

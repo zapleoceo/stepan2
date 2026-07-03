@@ -121,6 +121,7 @@ class InstagrapiTransport:
                 pm = t.get("professional_metadata") or {}
                 base = {
                     "thread_id": str(t.get("thread_id", "")),
+                    "lead_ig_user_id": lead_pk,
                     "sender_username": (lead_u or {}).get("username") or None,
                     "sender_name": (lead_u or {}).get("full_name") or None,
                     "sender_avatar": str((lead_u or {}).get("profile_pic_url") or "") or None,

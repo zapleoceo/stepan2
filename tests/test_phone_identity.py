@@ -63,3 +63,23 @@ async def test_ingest_without_phone_keeps_leads_separate(db_session) -> None:
 
     leads = list((await s.exec(select(Lead).where(Lead.branch_id == branch.id))).all())
     assert len(leads) == 2
+
+
+async def test_ingest_uses_thread_participant_pk_as_ig_user_id(db_session) -> None:
+    """The lead's stable IG id comes from the thread participant (lead_ig_user_id), not the
+    per-item author — so a lead gets an ig_user_id even when the item's user_id is blank."""
+    s = db_session
+    branch = Branch(name="T", lang="id")
+    s.add(branch)
+    await s.flush()
+    ig = Channel(branch_id=branch.id, kind=ChannelKind.INSTAGRAM)
+    s.add(ig)
+    await s.flush()
+
+    svc = IngestService(s, branch.id)
+    when = datetime(2026, 6, 30, 10, 0)
+    await svc.ingest(ig.id, [InboundMessage(
+        "ig-1", sender_id="", text="halo kak", occurred_at=when,
+        lead_ig_user_id="55501", sender_name="Budi")])
+    lead = (await s.exec(select(Lead).where(Lead.branch_id == branch.id))).first()
+    assert lead.ig_user_id == "55501" and lead.display_name == "Budi"
