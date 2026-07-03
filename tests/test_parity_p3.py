@@ -53,6 +53,19 @@ def test_parse_decision_ready_subtype() -> None:
     assert parse_decision(json.dumps(base)).ready_subtype is None
 
 
+def test_parse_decision_tolerates_off_contract_stage() -> None:
+    import json
+
+    from app.domain.enums import Stage
+    # an LLM stage the enum doesn't know must NOT crash the reply — fall back, keep talking
+    assert parse_decision(json.dumps(
+        {"reply": "hi", "stage": "greeting"})).stage == Stage.QUALIFYING
+    assert parse_decision(json.dumps(
+        {"reply": "hi"})).stage == Stage.QUALIFYING  # missing stage too
+    assert parse_decision(json.dumps(
+        {"reply": "hi", "stage": "PRESENTING"})).stage == Stage.PRESENTING  # case-insensitive
+
+
 # ─── context cap ──────────────────────────────────────────────────────────────
 
 async def test_dialog_capped_to_recent(db_session) -> None:

@@ -5,11 +5,25 @@ sometimes wraps around the object."""
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 from app.domain.enums import Stage
 
 from .sanitize import clean_reply
+
+logger = logging.getLogger(__name__)
+
+
+def _coerce_stage(value: object) -> Stage:
+    """Model's stage → Stage. An LLM can emit anything ('greeting', a typo, nothing);
+    an off-contract stage must NOT abort the reply — fall back to QUALIFYING (an active,
+    non-silent stage) so the bot keeps talking. The reply itself is what matters."""
+    try:
+        return Stage(str(value).lower().strip())
+    except ValueError:
+        logger.warning("decision: unknown stage %r → QUALIFYING", value)
+        return Stage.QUALIFYING
 
 
 @dataclass(frozen=True)
@@ -43,12 +57,7 @@ def parse_decision(raw_json: str) -> Decision:
     if not isinstance(data, dict):
         raise ValueError("decision JSON must be an object")
 
-    try:
-        stage = Stage(data["stage"])
-    except KeyError as exc:
-        raise ValueError("decision missing 'stage'") from exc
-    except ValueError as exc:
-        raise ValueError(f"unknown stage: {data['stage']!r}") from exc
+    stage = _coerce_stage(data.get("stage"))
 
     try:
         reply = data["reply"]

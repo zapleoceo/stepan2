@@ -17,6 +17,8 @@ _DECISION_CONTRACT = (
     '"ready_subtype": str|null, "needs_manager": bool, '
     '"manager_question": str|null, "kb_gap": str|null}}. '
     "reply: the message text, with '|||' between bubbles when you split it. "
+    "stage: the lead's funnel stage, EXACTLY one of: "
+    "new, nurturing, qualifying, presenting, objection, ready. "
     "ready_subtype: 'deal' (ready to enroll/pay) or 'openhouse' (wants the open-house/trial) "
     "— only when ready=true, else null. "
     "manager_question: the specific thing the lead needs a human to resolve (null if not needed). "
