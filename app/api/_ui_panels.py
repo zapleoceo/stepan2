@@ -550,6 +550,45 @@ def branches_panel_html(rows: list) -> str:
     )
 
 
+_TZ_LIST: list[tuple[int, str]] = [
+    (14, "UTC+14 — Kiritimati"),
+    (13, "UTC+13 — Samoa (Apia), Nuku'alofa"),
+    (12, "UTC+12 — Auckland, Fiji, Petropavlovsk"),
+    (11, "UTC+11 — Solomon Islands, Vladivostok"),
+    (10, "UTC+10 — Sydney, Brisbane, Guam"),
+    (9,  "UTC+9  — Tokyo, Seoul, Yakutsk"),
+    (8,  "UTC+8  — Beijing, Singapore, KL, Manila, Irkutsk"),
+    (7,  "UTC+7  — Jakarta, Bangkok, Hanoi, Krasnoyarsk"),
+    (6,  "UTC+6  — Dhaka, Almaty, Omsk"),
+    (5,  "UTC+5  — Karachi, Tashkent, Ekaterinburg"),
+    (4,  "UTC+4  — Dubai, Baku, Yerevan"),
+    (3,  "UTC+3  — Moscow, Riyadh, Nairobi"),
+    (2,  "UTC+2  — Cairo, Johannesburg, Helsinki"),
+    (1,  "UTC+1  — Paris, Berlin, Lagos"),
+    (0,  "UTC+0  — London, Lisbon, Reykjavik"),
+    (-1, "UTC−1  — Cape Verde, Azores"),
+    (-2, "UTC−2  — South Georgia"),
+    (-3, "UTC−3  — Buenos Aires, Brasilia, São Paulo"),
+    (-4, "UTC−4  — New York (EDT), Santiago, La Paz"),
+    (-5, "UTC−5  — New York (EST), Lima, Bogotá"),
+    (-6, "UTC−6  — Mexico City, Chicago, Guatemala"),
+    (-7, "UTC−7  — Denver, Phoenix"),
+    (-8, "UTC−8  — Los Angeles, Vancouver, Seattle"),
+    (-9, "UTC−9  — Alaska (Anchorage)"),
+    (-10, "UTC−10 — Honolulu, Hawaii"),
+    (-11, "UTC−11 — Pago Pago, Midway"),
+    (-12, "UTC−12 — Baker Island, Howland Island"),
+]
+
+
+def _tz_opts(current: int) -> str:
+    return "".join(
+        f'<option value="{offset}" {"selected" if offset == current else ""}>'
+        f'{label}</option>'
+        for offset, label in _TZ_LIST
+    )
+
+
 def branch_edit_html(
     bid: int | None,
     name: str,
@@ -605,9 +644,9 @@ def branch_edit_html(
         f'<select class="act-sel" name="lang"'
         f' style="width:100%;padding:.32rem .35rem">{lang_opts}</select></div>'
         f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{tz_lbl} (7 = Jakarta, 3 = Москва, 0 = UTC)</label>'
-        f'<input class="frm-inp" name="tz_offset_h" type="number"'
-        f' min="-12" max="14" value="{tz}"></div>'
+        f'<label class="frm-lbl">{tz_lbl}</label>'
+        f'<select class="act-sel" name="tz_offset_h"'
+        f' style="width:100%;padding:.32rem .35rem">{_tz_opts(tz)}</select></div>'
         f'<div class="frm-grp" style="display:flex;align-items:center;gap:.5rem">'
         f'<input type="checkbox" name="is_active" id="br-active" {active_checked}>'
         f'<label class="frm-lbl" for="br-active" style="margin:0">{active_lbl}</label></div>'

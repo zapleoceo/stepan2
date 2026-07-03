@@ -296,7 +296,7 @@ _TR: dict[str, dict[str, str]] = {
     "nav.branches":  {"ru": "Филиалы",      "en": "Branches",    "id": "Cabang"},
     "br.name":       {"ru": "Название",     "en": "Name",        "id": "Nama"},
     "br.lang_lbl":   {"ru": "Язык бота",   "en": "Bot language","id": "Bahasa bot"},
-    "br.tz":         {"ru": "UTC смещение", "en": "UTC offset",  "id": "Zona waktu (UTC)"},
+    "br.tz":         {"ru": "Часовой пояс",  "en": "Time zone",   "id": "Zona waktu"},
     "br.active":     {"ru": "Активен",     "en": "Active",       "id": "Aktif"},
     "br.create":     {"ru": "+ Филиал",    "en": "+ Branch",     "id": "+ Cabang"},
     "br.new":        {"ru": "Новый филиал","en": "New Branch",   "id": "Cabang Baru"},
