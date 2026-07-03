@@ -241,6 +241,47 @@ async def test_channel_row_persists_with_created_at(db_session) -> None:
     assert ch.created_at is not None
 
 
+class _FakeIGClient:
+    def __init__(self) -> None:
+        self.last_json = {"two_factor_info": {"two_factor_identifier": "abc"}}
+        self.challenge_code_handler = None
+        self.login_calls: list[tuple] = []
+        self.resolved: Any = None
+        self.handler_code: str | None = None
+
+    def login(self, username=None, password=None, verification_code=""):
+        self.login_calls.append((username, password, verification_code))
+        return True
+
+    def challenge_resolve(self, last_json):
+        self.resolved = last_json
+        self.handler_code = self.challenge_code_handler("user", None)  # type: ignore[misc]
+        return True
+
+
+def test_ig_2fa_code_re_logs_in_not_challenge_resolve() -> None:
+    """2FA in instagrapi is resolved by re-login with verification_code — NOT by
+    challenge_resolve (which takes last_json, not a code)."""
+    from app.api._routes_channels import _resolve_ig_code
+
+    cl = _FakeIGClient()
+    _resolve_ig_code(cl, {"kind": "2fa", "username": "u", "password": "p"}, "123456")
+    assert cl.login_calls == [("u", "p", "123456")]
+    assert cl.resolved is None
+
+
+def test_ig_challenge_code_drives_challenge_resolve() -> None:
+    """Email/SMS challenge feeds the code through challenge_code_handler, then
+    challenge_resolve(last_json) — no re-login."""
+    from app.api._routes_channels import _resolve_ig_code
+
+    cl = _FakeIGClient()
+    _resolve_ig_code(cl, {"kind": "challenge"}, "654321")
+    assert cl.resolved is cl.last_json
+    assert cl.handler_code == "654321"
+    assert cl.login_calls == []
+
+
 def test_credential_panel_shows_session_after_connect() -> None:
     """Active session → connected view (not a blank login form again); otherwise form."""
     from app.api._i18n import _lang

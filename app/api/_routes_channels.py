@@ -268,21 +268,40 @@ async def ig_login_start(
 
     try:
         from instagrapi import Client  # noqa: PLC0415 (lazy)
-        cl = Client()
-        try:
-            cl.login(username.strip(), password.strip())
-        except Exception as exc:
-            name = type(exc).__name__.lower()
-            if "twofactor" in name or "challenge" in name or "two" in name:
-                fid = secrets.token_hex(8)
-                _ig_flows[fid] = {"client": cl, "channel_id": ch_id}
-                return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid))
-            return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:160]))
-        return await _ig_save(ch_id, cl.get_settings())
+        from instagrapi.exceptions import (  # noqa: PLC0415
+            ChallengeRequired,
+            TwoFactorRequired,
+        )
     except ImportError:
         return HTMLResponse(_ch_ig_form(ch_id, error="instagrapi not installed on server"))
+
+    cl = Client()
+    user, pw = username.strip(), password.strip()
+    try:
+        cl.login(user, pw)
+    except TwoFactorRequired:
+        fid = secrets.token_hex(8)
+        _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "2fa",
+                          "username": user, "password": pw}
+        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid))
+    except ChallengeRequired:
+        fid = secrets.token_hex(8)
+        _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "challenge"}
+        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid))
     except Exception as exc:
         return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:160]))
+    return await _ig_save(ch_id, cl.get_settings())
+
+
+def _resolve_ig_code(cl: Any, flow: dict[str, Any], code: str) -> None:
+    """Apply the verification code per challenge kind. instagrapi resolves 2FA by
+    re-login with verification_code, but an email/SMS challenge by challenge_resolve
+    driven through challenge_code_handler — the two are not interchangeable."""
+    if flow.get("kind") == "challenge":
+        cl.challenge_code_handler = lambda username, choice: code
+        cl.challenge_resolve(cl.last_json)
+    else:
+        cl.login(flow["username"], flow["password"], verification_code=code)
 
 
 @router.post("/channels/{ch_id}/ig/verify", response_class=HTMLResponse)
@@ -296,15 +315,16 @@ async def ig_login_verify(
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
-    flow = _ig_flows.pop(flow_id, None)
+    flow = _ig_flows.get(flow_id)
     if not flow or flow["channel_id"] != ch_id:
         return HTMLResponse(_ch_ig_form(ch_id, error="Flow expired — please login again"))
+    cl = flow["client"]
     try:
-        cl = flow["client"]
-        cl.challenge_resolve(code.strip())
-        return await _ig_save(ch_id, cl.get_settings())
-    except Exception as exc:
+        _resolve_ig_code(cl, flow, code.strip())
+    except Exception as exc:  # keep the flow so the user can retry the code
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=flow_id, error=str(exc)[:160]))
+    _ig_flows.pop(flow_id, None)
+    return await _ig_save(ch_id, cl.get_settings())
 
 
 async def _ig_save(ch_id: int, dump: dict) -> HTMLResponse:
