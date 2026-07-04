@@ -157,6 +157,10 @@ _CSS = (
     ".ch-sub{font-size:.67rem;color:#4a5568;font-family:monospace}"
     ".msgs{flex:1;overflow-y:auto;padding:.72rem .95rem;display:flex;"
     "flex-direction:column;gap:.3rem}"
+    # pending bubbles live inside their own #pend-<tid> wrapper, not directly in .msgs, so
+    # their align-self:flex-end needs THIS wrapper to be a flex column too — else they fall
+    # back to block layout and render left instead of on the right like a real outgoing msg.
+    "[id^='pend-']{display:flex;flex-direction:column;gap:.3rem}"
     ".msgs::-webkit-scrollbar{width:4px}"
     ".msgs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
     ".bb{display:flex;flex-direction:column;max-width:72%}"
