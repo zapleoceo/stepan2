@@ -94,8 +94,10 @@ async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
 
 
 def _authorized(scope: Scope) -> bool:
-    secret = settings().mcp_secret
-    if not secret:
+    # MCP_SECRET may hold several comma-separated tokens (owner, partner, integration) —
+    # each independently revocable.
+    tokens = [t.strip() for t in settings().mcp_secret.split(",") if t.strip()]
+    if not tokens:
         return False
     headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
     token = headers.get("authorization", "").removeprefix("Bearer ").strip()
@@ -105,7 +107,7 @@ def _authorized(scope: Scope) -> bool:
             if part.startswith("key="):
                 token = part[4:]
                 break
-    return bool(token) and hmac.compare_digest(token, secret)
+    return bool(token) and any(hmac.compare_digest(token, t) for t in tokens)
 
 
 class _TokenGuard:

@@ -20,12 +20,18 @@ from app.modules.leads import ops
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 
+def _valid_tokens() -> list[str]:
+    """MCP_SECRET may hold several comma-separated tokens so each caller (owner, a
+    partner, an integration) gets its own revocable one."""
+    return [t.strip() for t in settings().mcp_secret.split(",") if t.strip()]
+
+
 def _auth(authorization: str | None) -> None:
-    secret = settings().mcp_secret
-    if not secret:
+    tokens = _valid_tokens()
+    if not tokens:
         raise HTTPException(status_code=403, detail="MCP API disabled (no MCP_SECRET set)")
     token = authorization.removeprefix("Bearer ").strip() if authorization else ""
-    if not token or not hmac.compare_digest(token, secret):
+    if not token or not any(hmac.compare_digest(token, t) for t in tokens):
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
 
