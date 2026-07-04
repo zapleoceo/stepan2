@@ -22,21 +22,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("rederive_needs")
 
 _SYSTEM = (
-    "You extract a sales lead's needs from an Instagram DM chat, from what the LEAD said in "
-    "THEIR OWN words.\n"
-    "CAPTURE anything the lead EXPLICITLY stated themselves, e.g. 'I want to be a fullstack "
-    "developer', 'pengen bikin aplikasi mobile game', 'I want to switch careers' — those ARE "
-    "explicit jobs/gains and MUST be captured in the lead's words.\n"
-    "DO NOT capture: (a) the AGENT's suggestions/options the lead only replied 'yes'/'iya'/"
-    "'everything'/a single word to — a bare yes is NOT the lead stating those; (b) anything "
-    "you infer or invent that the lead never actually said.\n"
-    "Rank by importance and keep only the few that matter (<=3 each); short phrases in the "
-    "lead's language; empty lists when the lead truly said nothing concrete.\n"
+    "Below are ONLY the LEAD's own messages from an Instagram sales chat (the agent's replies "
+    "are NOT included). Extract what the lead EXPLICITLY stated about themselves.\n"
+    "CAPTURE explicit statements, e.g. 'I want to be a fullstack developer', 'pengen bikin "
+    "aplikasi mobile game', 'I want to switch careers' — those ARE explicit jobs/gains.\n"
+    "DO NOT infer or invent. A bare 'yes'/'iya'/'everything'/'ok'/a single word or a request "
+    "like 'show me the syllabus' states NO concrete need — capture nothing for those. If the "
+    "lead said nothing concrete, all lists are empty (that is the correct answer).\n"
+    "Rank by importance, keep only the few that matter (<=3 each); short phrases in the lead's "
+    "language.\n"
     "Output ONLY this JSON, nothing else:\n"
     '{"jobs":[],"pains":[],"gains":[],"discovery_complete":false}\n'
-    "jobs = what the lead explicitly wants to achieve. pains = fears/obstacles/cost-of-"
-    "inaction the lead explicitly voiced. gains = outcomes the lead explicitly said they "
-    "want. discovery_complete = true ONLY if the lead voiced a real pain in their own words."
+    "jobs = what the lead explicitly wants to achieve. pains = fears/obstacles the lead voiced. "
+    "gains = outcomes the lead said they want. discovery_complete = true ONLY if the lead "
+    "voiced a real pain (fear/obstacle) in their own words."
 )
 
 
@@ -60,14 +59,15 @@ async def _dialog(session, lead_id: int) -> str:
     rows = (await session.execute(
         text("SELECT m.direction, m.text FROM message m"
              " JOIN channel_thread ct ON ct.id = m.thread_id"
-             " WHERE ct.lead_id = :lid AND m.text <> ''"
+             " WHERE ct.lead_id = :lid AND m.direction = 'in' AND m.text <> ''"
              " ORDER BY m.occurred_at, m.id LIMIT 200"),
         {"lid": lead_id},
     )).all()
-    return "\n".join(
-        f"{'LEAD' if r[0] == 'in' else 'AGENT'}: {(r[1] or '').strip()}"
-        for r in rows if (r[1] or "").strip()
-    )[:8000]
+    # LEAD-ONLY: feed just the lead's own messages, agent turns stripped entirely. The model
+    # then cannot attribute the agent's pitch to the lead (real defect: lead 1384 said only
+    # 'show me the syllabus' yet got 3 agent-described jobs). What isn't in the lead's own
+    # words simply isn't there to capture.
+    return "\n".join((r[1] or "").strip() for r in rows if (r[1] or "").strip())[:8000]
 
 
 def _parse(raw: str) -> NeedsProfile:
