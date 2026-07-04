@@ -124,10 +124,12 @@ async def reports_panel(
         date_and += " AND l.branch_id = ANY(:bids)"
         params["bids"] = branch_ids
     if df:
-        date_and += " AND l.created_at >= :df"
+        # CAST(... AS date), not ::date — asyncpg needs a typed bind, and SQLAlchemy's
+        # text() colon-parameter syntax collides with Postgres's "::" cast operator.
+        date_and += " AND l.created_at >= CAST(:df AS date)"
         params["df"] = df
     if dt_:
-        date_and += " AND l.created_at < (:dt::date + INTERVAL '1 day')"
+        date_and += " AND l.created_at < (CAST(:dt AS date) + INTERVAL '1 day')"
         params["dt"] = dt_
     lead_where = ("WHERE" + date_and[4:]) if date_and else ""
     # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.
