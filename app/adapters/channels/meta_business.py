@@ -4,10 +4,9 @@ Reading is canonical via Graph; sending here is only the in-window reply. The ad
 maps a thin GraphTransport's payloads, so Graph version bumps stay in the transport."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from app.domain.clock import naive_utc
+from app.domain.clock import as_naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
 from app.ports.channel import InboundMessage, SendResult
 
@@ -56,7 +55,7 @@ class MetaBusinessAdapter:
             external_thread_id=str(conv["thread_id"]),
             sender_id=str(conv["from_id"]),
             text=str(conv.get("message", "")),
-            occurred_at=_as_dt(conv.get("created_time")),
+            occurred_at=as_naive_utc(conv.get("created_time")),
             product_hint=conv.get("referral_product"),
         )
 
@@ -68,14 +67,3 @@ def _map_token(debug: dict[str, Any]) -> SessionStatus:
     if debug.get("window_open", True):
         return SessionStatus.ACTIVE
     return SessionStatus.EXPIRED
-
-
-def _as_dt(value: Any) -> datetime:
-    """Graph epoch seconds or ISO-8601 → aware datetime; missing → epoch (never crash)."""
-    if isinstance(value, datetime):
-        return naive_utc(value)
-    if isinstance(value, (int, float)):
-        return naive_utc(datetime.fromtimestamp(value, tz=UTC))
-    if isinstance(value, str) and value:
-        return naive_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
-    return datetime.fromtimestamp(0, tz=UTC).replace(tzinfo=None)
