@@ -15,7 +15,7 @@ from app.adapters.db.models import Lead
 from app.modules.budget import BudgetService
 
 from .needs import NeedsProfile, needs_summary, parse_needs
-from .prompt import build_messages
+from .prompt import build_messages, source_hint
 from .repository import CoachingNoteRepo, MessageRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -126,7 +126,8 @@ class DecisionEngine:
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(
             context, ctx.dialog, lang, coaching_notes=notes,
-            needs_block=needs_summary(ctx.stored_needs))
+            needs_block=needs_summary(ctx.stored_needs),
+            source_block=source_hint(ctx.thread.lead_source))
         if extra_user_msg is not None:
             messages.append({"role": "user", "content": extra_user_msg})
         elif messages[-1]["role"] == "assistant":

@@ -73,6 +73,25 @@ def test_build_messages_merges_consecutive_same_role() -> None:
     assert msgs[3]["content"] == "price?"  # blank turn dropped
 
 
+def test_source_hint_only_for_known_entry_points() -> None:
+    from app.modules.conversation.prompt import source_hint
+    assert "paid ad" in (source_hint("ad_clicktomsg") or "")
+    assert "story" in (source_hint("story") or "")
+    assert source_hint(None) is None
+    assert source_hint("organic") is None  # unknown source → no assumption
+
+
+def test_build_messages_injects_entry_hint() -> None:
+    from types import SimpleNamespace
+
+    from app.modules.conversation.prompt import build_messages
+    dialog = [SimpleNamespace(direction="in", text="halo")]
+    msgs = build_messages("persona", dialog, "en", source_block="ENTRY: paid ad, be warm.")
+    assert "ENTRY: paid ad" in msgs[0]["content"]
+    plain = build_messages("persona", dialog, "en")
+    assert "ENTRY:" not in plain[0]["content"]  # no block → nothing injected
+
+
 def test_fmt_llm_meta_free_time_and_id() -> None:
     from app.modules.conversation.reply import _fmt_llm_meta
     free = _fmt_llm_meta({"model": "x/mistral-large-latest", "tokens_in": 537,

@@ -122,6 +122,26 @@ _DECISION_CONTRACT = (
 
 _COACHING_HEADER = "MANDATORY RULES (from manager — follow strictly):"
 
+# How the lead first reached us — shapes the opener. An ad-click lead is warm and already
+# picked an offer, so re-asking "what brings you here" wastes the intent; a story-reply is
+# a lighter, more casual entry. Organic/unknown gets no hint (no assumptions).
+_SOURCE_HINTS = {
+    "ad_clicktomsg": (
+        "ENTRY: the lead started this chat by tapping one of our paid ads — they already "
+        "showed intent in a specific offer. Don't ask what brought them here; acknowledge it "
+        "warmly and move straight to discovering their goal."
+    ),
+    "story": (
+        "ENTRY: the lead replied to our Instagram story — a light, casual entry. Warm up and "
+        "build rapport before steering toward an offer."
+    ),
+}
+
+
+def source_hint(lead_source: str | None) -> str | None:
+    """One-line entry-point instruction for the prompt, or None for organic/unknown leads."""
+    return _SOURCE_HINTS.get(lead_source or "")
+
 
 def _role_of(message: Message) -> str:
     return "user" if message.direction == "in" else "assistant"
@@ -133,14 +153,17 @@ def build_messages(
     lang: str,
     coaching_notes: list[str] | None = None,
     needs_block: str | None = None,
+    source_block: str | None = None,
 ) -> list[dict[str, Any]]:
-    """System (persona+KB+coaching+known-needs+decision contract) then dialog, oldest first."""
+    """System (persona+KB+coaching+known-needs+entry+decision contract) then dialog."""
     parts: list[str] = []
     if persona_and_kb.strip():
         parts.append(persona_and_kb.rstrip())
     if coaching_notes:
         notes_block = "\n".join(f"- {n}" for n in coaching_notes)
         parts.append(f"{_COACHING_HEADER}\n{notes_block}")
+    if source_block and source_block.strip():
+        parts.append(source_block.strip())
     if needs_block and needs_block.strip():
         parts.append(needs_block.strip())
     parts.append(_DECISION_CONTRACT.format(lang=lang))
