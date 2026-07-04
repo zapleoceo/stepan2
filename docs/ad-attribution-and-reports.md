@@ -52,7 +52,13 @@ per-branch), сервис `app/modules/ads/mapping.py`.
 - **Ячейка рекламы** — `<details>`-меню (чистый HTML, без JS): «Открыть чаты этой рекламы»
   (→ `/ui/inbox?ad_id=…`, список чатов фильтруется по `channel_thread.ad_id`) и «Открыть в
   Facebook» (deep-link `selected_ad_ids=…` в Ads Manager). Рядом иконка 📷 — ссылка на
-  IG-пост креатива (`ig_post_url(ad_media_id)`).
+  IG-пост креатива (`ig_post_url(ad_media_id)`); при наведении показывается превью креатива.
+- **Ховер-превью креатива** — Marketing API мы не читаем, поэтому превью тянется из
+  публичного IG-пермалинка: `_ig_preview.og_image_for_media` достаёт `og:image` со страницы
+  `/p/<code>/` (кэш в памяти, креативы неизменяемы), а `GET /ui/ig-preview/{media_id}`
+  проксирует байты картинки **со своего домена** — так обходятся hotlink/referer/CORS
+  ограничения cdninstagram. Тёмные/непубличные посты просто не дают превью (404 → ховер
+  прячется).
 - **Колонка «Продукт»** — `<select>`, который на `change` шлёт `POST /ui/ads/{ad_id}/product`
   и апсертит `ad_product_map`. Если реклама ещё не размечена, показывается чип ⚡ с
   автоподсказкой из истории (`suggest_from_history`) — клик применяет её.

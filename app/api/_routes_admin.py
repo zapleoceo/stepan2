@@ -5,7 +5,7 @@ import html as _h
 from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
@@ -17,6 +17,7 @@ from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
 
 from ._i18n import apply_lang, t
+from ._ig_preview import fetch_creative_bytes
 from ._query import (
     _branch_where,
     fetch_ad_funnel,
@@ -146,6 +147,20 @@ async def ad_product_map(
         mapped = await svc.product_for_ad(ad_id)
         suggested = (await svc.suggest_from_history()).get(ad_id)
     return HTMLResponse(admap_cell_inner(ad_id, mapped, suggested, products))
+
+
+@router.get("/ig-preview/{media_id}")
+async def ig_preview(media_id: str) -> Response:
+    """Proxy the IG ad-creative thumbnail same-origin for the reports hover preview.
+    404 (→ the hover just hides) when the media id isn't numeric or has no public creative."""
+    if not media_id.isdigit():
+        return Response(status_code=404)
+    got = await fetch_creative_bytes(media_id)
+    if got is None:
+        return Response(status_code=404)
+    content, ctype = got
+    return Response(content=content, media_type=ctype,
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/reports/panel", response_class=HTMLResponse)
