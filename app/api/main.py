@@ -18,6 +18,7 @@ from app.admin.api import router as admin_meta_router
 from app.admin.setup import mount_admin
 from app.api._auth import AdminGuardMiddleware, AuthMiddleware, WriteGuardMiddleware
 from app.api._routes_auth import router as auth_router
+from app.api._routes_mcp import router as mcp_router
 from app.api.ui import router as ui_router
 from app.api.webhooks import router as webhooks_router
 
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
         return {"ok": True, "service": "stepan2"}
 
     app.include_router(auth_router)
+    app.include_router(mcp_router)
     app.include_router(webhooks_router)
     app.include_router(admin_meta_router)
     app.include_router(ui_router)

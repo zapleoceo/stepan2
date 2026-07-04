@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     session_secret: str = Field(default="")
     # Bot username for the Telegram Login widget (domain bound via BotFather).
     tg_login_bot_username: str = Field(default="")
+    # Bearer token for the MCP connector's /mcp API. Empty → the API is disabled (403).
+    mcp_secret: str = Field(default="", description="Bearer token gating the /mcp lead-ops API")
 
     # ── Worker cadence & batch caps ─────────────────────────────────────────────
     # These are pinned around worker_job_timeout_s: a tick must finish inside it or ARQ

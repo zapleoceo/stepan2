@@ -25,7 +25,7 @@ SESSION_COOKIE = "stepan2_session"
 SESSION_MAX_AGE_S = 60 * 60 * 24 * 30  # 30 days
 
 # Reachable without a session (exact path or prefix).
-_PUBLIC_PREFIXES = ("/healthz", "/login", "/api/tg_login", "/logout", "/webhooks/")
+_PUBLIC_PREFIXES = ("/healthz", "/login", "/api/tg_login", "/logout", "/webhooks/", "/mcp/")
 
 
 def _secret() -> str:
