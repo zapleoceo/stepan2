@@ -76,6 +76,8 @@ class Lead(SQLModel, table=True):
     following_count: int | None = Field(default=None)
     last_active_at: datetime | None = Field(default=None)
     profile_synced_at: datetime | None = Field(default=None, description="последний refresh")
+    notify_topic_id: int | None = Field(
+        default=None, description="Telegram forum topic (message_thread_id) для алертов лида")
     created_at: datetime = Field(default_factory=_utcnow)
 
 

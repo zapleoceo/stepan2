@@ -1,6 +1,7 @@
-"""Notifications: AlertService records + pings in one place (branch-isolated, fake notifier);
-TelegramNotifier builds the EN/RU payload, posts to the right group, and swallows transport
-errors. No real network — httpx.AsyncClient is monkeypatched."""
+"""Notifications: AlertService records the CRM row AND pings the lead's own Telegram forum
+topic — branch-language chat summary + reason, then the same in Russian. TelegramNotifier
+creates topics and sends into them; transport errors degrade to a status, never raise. No
+real network — httpx.AsyncClient is monkeypatched."""
 from __future__ import annotations
 
 from typing import Any
@@ -17,78 +18,94 @@ _FAKE_TOKEN = "TOK"  # noqa: S105 — dummy bot token for tests, never a real se
 
 
 class FakeNotifier:
-    """Records notify_manager calls so the service's ping can be asserted in isolation."""
+    """Records create_topic + send calls. `gone_once` makes the first send into a topic
+    report 'topic_gone' so the recreate-and-resend path can be exercised."""
 
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
+    def __init__(self, *, gone_once: bool = False) -> None:
+        self.topics: list[str] = []
+        self.sends: list[dict[str, Any]] = []
+        self._next_id = 100
+        self._gone_once = gone_once
 
-    async def notify_manager(
-        self,
-        *,
-        branch_id: int,
-        lead_id: int,
-        kind: str,
-        summary_en: str,
-        summary_ru: str,
-        link: str | None = None,
-    ) -> None:
-        self.calls.append(
-            {
-                "branch_id": branch_id,
-                "lead_id": lead_id,
-                "kind": kind,
-                "summary_en": summary_en,
-                "summary_ru": summary_ru,
-            }
-        )
+    async def create_topic(self, *, name: str) -> int | None:
+        self.topics.append(name)
+        self._next_id += 1
+        return self._next_id
+
+    async def send(self, *, text: str, topic_id: int | None = None) -> str:
+        self.sends.append({"text": text, "topic_id": topic_id})
+        if self._gone_once and topic_id is not None:
+            self._gone_once = False
+            return "topic_gone"
+        return "ok"
 
 
-async def _branch(s, name: str) -> int:
-    b = Branch(name=name)
+async def _branch(s, name: str, lang: str = "id") -> int:
+    b = Branch(name=name, lang=lang)
     s.add(b)
     await s.flush()
     return b.id
 
 
-async def _lead(s, branch_id: int, phone: str) -> int:
-    lead = Lead(branch_id=branch_id, phone_e164=phone, display_name="L")
+async def _lead(s, branch_id: int, phone: str, name: str = "Budi") -> int:
+    lead = Lead(branch_id=branch_id, phone_e164=phone, display_name=name)
     s.add(lead)
     await s.flush()
     return lead.id
 
 
-async def test_raise_alert_writes_row_and_pings_once(db_session):
+async def test_raise_alert_writes_row_and_opens_lead_topic(db_session):
     s = db_session
     branch_id = await _branch(s, "Jakarta")
-    lead_id = await _lead(s, branch_id, "+62811")
+    lead_id = await _lead(s, branch_id, "+62811", name="Budi")
     notifier = FakeNotifier()
 
-    svc = AlertService(s, branch_id, notifier)
-    alert = await svc.raise_alert(
+    alert = await AlertService(s, branch_id, notifier).raise_alert(
         lead_id, "ready_deal", "ready to buy", "готов купить",
         thread_id=None, lead_phone="+62811",
     )
 
-    rows = list((await s.exec(select(ManagerAlert))).all())
-    assert len(rows) == 1
-    saved = rows[0]
-    assert saved.id == alert.id
-    assert saved.branch_id == branch_id
-    assert saved.lead_id == lead_id
-    assert saved.kind == "ready_deal"
-    assert saved.summary_en == "ready to buy"
-    assert saved.summary_ru == "готов купить"
-    assert saved.lead_phone == "+62811"
+    row = (await s.exec(select(ManagerAlert))).one()
+    assert row.id == alert.id and row.kind == "ready_deal"
+    assert row.summary_en == "ready to buy" and row.summary_ru == "готов купить"
+    # one topic opened (named after the lead), one message sent into it
+    assert notifier.topics == ["Budi"]
+    assert len(notifier.sends) == 1
+    sent = notifier.sends[0]
+    assert sent["topic_id"] == 101
+    # without an LLM the body carries the reason in both languages
+    assert "ready to buy" in sent["text"] and "готов купить" in sent["text"]
+    # topic id is persisted on the lead for reuse
+    lead = await s.get(Lead, lead_id)
+    assert lead.notify_topic_id == 101
 
-    assert len(notifier.calls) == 1
-    call = notifier.calls[0]
-    assert call == {
-        "branch_id": branch_id,
-        "lead_id": lead_id,
-        "kind": "ready_deal",
-        "summary_en": "ready to buy",
-        "summary_ru": "готов купить",
-    }
+
+async def test_topic_reused_across_alerts(db_session):
+    s = db_session
+    branch_id = await _branch(s, "Jakarta")
+    lead_id = await _lead(s, branch_id, "+62811")
+    notifier = FakeNotifier()
+    svc = AlertService(s, branch_id, notifier)
+
+    await svc.raise_alert(lead_id, "needs_manager", "q1", "в1")
+    await svc.raise_alert(lead_id, "ready_deal", "q2", "в2")
+
+    assert len(notifier.topics) == 1               # created once, reused
+    assert [x["topic_id"] for x in notifier.sends] == [101, 101]
+
+
+async def test_deleted_topic_is_recreated_and_message_resent(db_session):
+    s = db_session
+    branch_id = await _branch(s, "Jakarta")
+    lead_id = await _lead(s, branch_id, "+62811")
+    notifier = FakeNotifier(gone_once=True)
+
+    await AlertService(s, branch_id, notifier).raise_alert(lead_id, "ready_deal", "en", "ru")
+
+    assert len(notifier.topics) == 2               # first topic gone → recreated
+    assert len(notifier.sends) == 2                # resent after recreate
+    lead = await s.get(Lead, lead_id)
+    assert lead.notify_topic_id == 102             # points at the recreated topic
 
 
 async def test_alert_is_branch_scoped(db_session):
@@ -98,12 +115,8 @@ async def test_alert_is_branch_scoped(db_session):
     lead_a = await _lead(s, a, "+62811")
     lead_b = await _lead(s, b, "+84900")
 
-    await AlertService(s, a, FakeNotifier()).raise_alert(
-        lead_a, "ready_deal", "en-A", "ru-A"
-    )
-    await AlertService(s, b, FakeNotifier()).raise_alert(
-        lead_b, "needs_manager", "en-B", "ru-B"
-    )
+    await AlertService(s, a, FakeNotifier()).raise_alert(lead_a, "ready_deal", "en-A", "ru-A")
+    await AlertService(s, b, FakeNotifier()).raise_alert(lead_b, "needs_manager", "en-B", "ru-B")
 
     only_a = list((await s.exec(select(ManagerAlert).where(ManagerAlert.branch_id == a))).all())
     only_b = list((await s.exec(select(ManagerAlert).where(ManagerAlert.branch_id == b))).all())
@@ -111,35 +124,61 @@ async def test_alert_is_branch_scoped(db_session):
     assert [r.summary_en for r in only_b] == ["en-B"]
 
 
-async def test_raise_alert_forces_branch_id_on_row(db_session):
+async def test_bilingual_body_orders_branch_then_ru(db_session):
+    """Message body: branch-language summary + reason, a divider, then the Russian pair."""
+    class _FakeLLM:
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+            return (
+                "[SUMMARY_BRANCH]\nRingkasan Bahasa\n"
+                "[SUMMARY_RU]\nСводка по-русски\n"
+                "[REASON_BRANCH]\nAlasan Bahasa\n"
+            ), {"cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001, ANN201
+            return [[0.0] for _ in texts]
+
     s = db_session
-    a = await _branch(s, "Jakarta")
-    other = await _branch(s, "Hanoi")
-    lead_a = await _lead(s, a, "+62811")
+    branch_id = await _branch(s, "Jakarta", lang="id")
+    lead_id = await _lead(s, branch_id, "+62811")
+    from app.adapters.db.models import Channel, ChannelThread, Message
+    from app.domain.enums import ChannelKind
+    ch = Channel(branch_id=branch_id, kind=ChannelKind.INSTAGRAM)
+    s.add(ch)
+    await s.flush()
+    thread = ChannelThread(lead_id=lead_id, channel_id=ch.id, external_thread_id="ig-1")
+    s.add(thread)
+    await s.flush()
+    s.add(Message(branch_id=branch_id, thread_id=thread.id, channel_id=ch.id, external_id="m1",
+                  direction="in", sent_by="lead", text="halo"))
+    await s.flush()
 
-    svc = AlertService(s, a, FakeNotifier())
-    # BranchScoped.add must overwrite any caller-supplied branch_id with the scope's.
-    alert = await svc.raise_alert(lead_a, "ready_openhouse", "en", "ru")
-    assert alert.branch_id == a != other
+    notifier = FakeNotifier()
+    await AlertService(s, branch_id, notifier, llm=_FakeLLM()).raise_alert(
+        lead_id, "ready_openhouse", "Lead ready", "Лид готов", thread_id=thread.id,
+    )
+    body = notifier.sends[0]["text"]
+    # branch-language block (summary + reason) comes before the Russian block
+    assert body.index("Ringkasan Bahasa") < body.index("Alasan Bahasa") < body.index("➖")
+    assert body.index("➖") < body.index("Сводка по-русски") < body.index("Лид готов")
 
 
-class _FakeResponse:
+# ─── TelegramNotifier transport (no network) ───────────────────────────────────
+
+class _Resp:
     def __init__(self, payload: dict[str, Any]) -> None:
         self._payload = payload
 
     def json(self) -> dict[str, Any]:
         return self._payload
 
-    def raise_for_status(self) -> None:
-        return None
-
 
 class _CapturingClient:
-    """Stand-in for httpx.AsyncClient that records the posted url + json (no network)."""
+    """Records posted url + json; returns a canned ok body."""
 
     captured: dict[str, Any] = {}
+    reply: dict[str, Any] = {"ok": True, "result": {"message_thread_id": 555, "message_id": 42}}
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *a: Any, **k: Any) -> None:
         pass
 
     async def __aenter__(self) -> _CapturingClient:
@@ -148,15 +187,13 @@ class _CapturingClient:
     async def __aexit__(self, *exc: Any) -> None:
         return None
 
-    async def post(self, url: str, *, json: dict[str, Any]) -> _FakeResponse:
+    async def post(self, url: str, *, json: dict[str, Any]) -> _Resp:
         type(self).captured = {"url": url, "json": json}
-        return _FakeResponse({"ok": True, "result": {"message_id": 42}})
+        return _Resp(type(self).reply)
 
 
 class _FailingClient:
-    """httpx.AsyncClient stand-in whose post raises a transport error."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *a: Any, **k: Any) -> None:
         pass
 
     async def __aenter__(self) -> _FailingClient:
@@ -169,46 +206,44 @@ class _FailingClient:
         raise httpx.ConnectError("boom")
 
 
-async def test_telegram_builds_bilingual_payload_to_right_group(monkeypatch):
-    _CapturingClient.captured = {}
+async def test_telegram_create_topic_returns_thread_id(monkeypatch):
+    _CapturingClient.reply = {"ok": True, "result": {"message_thread_id": 555}}
     monkeypatch.setattr(httpx, "AsyncClient", _CapturingClient)
-
     notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-1009999)
-    result = await notifier._send("ignored-by-fake")  # noqa: SLF001 — exercise transport directly
-
-    # success returns the parsed body, posts to the bot/sendMessage endpoint of the group
-    assert result == {"ok": True, "result": {"message_id": 42}}
-    captured = _CapturingClient.captured
-    assert captured["url"].endswith("/botTOK/sendMessage")
-    assert captured["json"]["chat_id"] == -1009999
+    tid = await notifier.create_topic(name="Budi")
+    assert tid == 555
+    assert _CapturingClient.captured["url"].endswith("/botTOK/createForumTopic")
+    assert _CapturingClient.captured["json"]["chat_id"] == -1009999
+    assert _CapturingClient.captured["json"]["name"] == "Budi"
 
 
-async def test_telegram_notify_manager_renders_en_and_ru(monkeypatch):
-    _CapturingClient.captured = {}
+async def test_telegram_send_targets_topic_and_group(monkeypatch):
+    _CapturingClient.reply = {"ok": True, "result": {"message_id": 1}}
     monkeypatch.setattr(httpx, "AsyncClient", _CapturingClient)
-
     notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-1009999)
-    await notifier.notify_manager(
-        branch_id=1,
-        lead_id=7,
-        kind="ready_deal",
-        summary_en="Lead is ready to enroll",
-        summary_ru="Лид готов записаться",
-    )
 
-    text = _CapturingClient.captured["json"]["text"]
-    assert "ready_deal" in text
-    assert "lead #7" in text
-    assert "Lead is ready to enroll" in text
-    assert "Лид готов записаться" in text
+    assert await notifier.send(text="hi", topic_id=555) == "ok"
+    j = _CapturingClient.captured["json"]
+    assert j["chat_id"] == -1009999
+    assert j["message_thread_id"] == 555 and j["parse_mode"] == "HTML"
+
+    await notifier.send(text="hi")  # no topic → General, no message_thread_id key
+    assert "message_thread_id" not in _CapturingClient.captured["json"]
 
 
-async def test_telegram_transport_error_returns_none(monkeypatch):
+async def test_telegram_send_reports_topic_gone(monkeypatch):
+    _CapturingClient.reply = {"ok": False, "description": "Bad Request: message thread not found"}
+    monkeypatch.setattr(httpx, "AsyncClient", _CapturingClient)
+    notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-100)
+    assert await notifier.send(text="x", topic_id=999) == "topic_gone"
+    # same error with no topic is just a plain failure, not a recreate signal
+    assert await notifier.send(text="x") == "failed"
+
+
+async def test_telegram_transport_error_is_failed_not_raised(monkeypatch):
     monkeypatch.setattr(httpx, "AsyncClient", _FailingClient)
-
-    notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-1009999)
-    # graceful degrade: a transport failure must not raise out of the notifier
-    assert await notifier._send("anything") is None  # noqa: SLF001
+    notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-100)
+    assert await notifier.send(text="anything") == "failed"
 
 
 async def test_alert_service_survives_notifier_failure(db_session, monkeypatch):
@@ -216,22 +251,19 @@ async def test_alert_service_survives_notifier_failure(db_session, monkeypatch):
     s = db_session
     branch_id = await _branch(s, "Jakarta")
     lead_id = await _lead(s, branch_id, "+62811")
-
     notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-100)
     svc = AlertService(s, branch_id, notifier)
-    # row is still written even though the real notifier swallows the transport error
-    alert = await svc.raise_alert(lead_id, "needs_manager", "en", "ru")
-
+    alert = await svc.raise_alert(lead_id, "needs_manager", "e", "r")
     rows = list((await s.exec(select(ManagerAlert))).all())
-    assert [r.id for r in rows] == [alert.id]
+    assert [r.id for r in rows] == [alert.id]  # row written despite the swallowed transport error
 
 
 @pytest.mark.parametrize("kind", ["ready_deal", "ready_openhouse", "needs_manager"])
-async def test_notify_manager_round_trips_kind(db_session, kind):
+async def test_alert_round_trips_kind(db_session, kind):
     s = db_session
     branch_id = await _branch(s, "Jakarta")
     lead_id = await _lead(s, branch_id, "+62811")
     notifier = FakeNotifier()
-
     await AlertService(s, branch_id, notifier).raise_alert(lead_id, kind, "en", "ru")
-    assert notifier.calls[0]["kind"] == kind
+    row = (await s.exec(select(ManagerAlert))).one()
+    assert row.kind == kind and len(notifier.sends) == 1

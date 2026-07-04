@@ -1,67 +1,63 @@
-"""Telegram notifier — manager hand-off pings to a branch's Telegram group.
+"""Telegram notifier — per-lead forum topics in a branch's Telegram group.
 
-Implements app.ports.notify.NotifierPort. The group id is injected per branch (no
-globals); httpx is imported lazily so the module loads without the dep and unit tests
-inject a fake send instead. Transport failure degrades gracefully — the alert row is
-already persisted by the caller, so a missed ping must never raise."""
+Implements app.ports.notify.NotifierPort. The group must be a forum (topics enabled) and
+the bot an admin with 'Manage topics'. httpx is imported lazily so the module loads
+without the dep and unit tests inject a fake. Transport failure degrades gracefully: the
+alert row is already persisted by the caller, so a missed ping must never raise."""
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+from app.ports.notify import SendStatus
+
 logger = logging.getLogger(__name__)
 
 _API = "https://api.telegram.org"
+# Telegram errors that mean the forum topic no longer exists → recreate + resend.
+_TOPIC_GONE = ("thread not found", "topic_deleted", "topic deleted",
+               "message thread not found", "topic_closed", "topic id invalid")
 
 
 class TelegramNotifier:
-    """Implements app.ports.notify.NotifierPort over the Telegram Bot API."""
+    """Implements app.ports.notify.NotifierPort over the Telegram Bot API (forum topics)."""
 
     def __init__(self, *, bot_token: str, group_chat_id: int, base_url: str = _API) -> None:
         self._token = bot_token
         self._chat_id = group_chat_id
         self._base = base_url.rstrip("/")
 
-    async def notify_manager(
-        self,
-        *,
-        branch_id: int,
-        lead_id: int,
-        kind: str,
-        summary_en: str,
-        summary_ru: str,
-        link: str | None = None,
-    ) -> None:
-        text = _render(kind=kind, lead_id=lead_id, summary_en=summary_en,
-                       summary_ru=summary_ru, link=link)
-        await self._send(text)
+    async def create_topic(self, *, name: str) -> int | None:
+        data = await self._call("createForumTopic", {"chat_id": self._chat_id, "name": name[:128]})
+        if data and data.get("ok"):
+            return int(data["result"]["message_thread_id"])
+        return None
 
-    async def _send(self, text: str) -> dict[str, Any] | None:
-        """POST to sendMessage; on any transport error log a warning and return None."""
+    async def send(self, *, text: str, topic_id: int | None = None) -> SendStatus:
+        payload: dict[str, Any] = {
+            "chat_id": self._chat_id, "text": text,
+            "parse_mode": "HTML", "disable_web_page_preview": True,
+        }
+        if topic_id is not None:
+            payload["message_thread_id"] = topic_id
+        data = await self._call("sendMessage", payload)
+        if data and data.get("ok"):
+            return "ok"
+        desc = (data or {}).get("description", "").lower() if data else ""
+        if topic_id is not None and any(tok in desc for tok in _TOPIC_GONE):
+            return "topic_gone"
+        return "failed"
+
+    async def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """POST to the Bot API; return the parsed body (even on HTTP 4xx so callers can read
+        `description`), or None on a transport error. Never raises — a missed ping is not fatal."""
         import httpx  # lazy: keep httpx out of the import path so the module loads without it
 
         try:
+            url = f"{self._base}/bot{self._token}/{method}"
             async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.post(
-                    f"{self._base}/bot{self._token}/sendMessage",
-                    json={"chat_id": self._chat_id, "text": text, "parse_mode": "HTML"},
-                )
-            response.raise_for_status()
+                response = await client.post(url, json=payload)
+            return response.json()
         except Exception as exc:  # missed ping is non-fatal; the alert row already exists
-            logger.warning("telegram notify failed (chat=%s): %s", self._chat_id, exc)
+            logger.warning("telegram %s failed (chat=%s): %s", method, self._chat_id, exc)
             return None
-        return response.json()
-
-
-def _render(
-    *, kind: str, lead_id: int, summary_en: str, summary_ru: str, link: str | None = None,
-) -> str:
-    """Bilingual EN/RU manager message — one block per language, plus a chat deep-link."""
-    body = (
-        f"<b>{kind}</b> · lead #{lead_id}\n\n"
-        f"EN: {summary_en}\n"
-        f"RU: {summary_ru}"
-    )
-    if link:
-        body += f'\n\n💬 <a href="{link}">open chat</a>'
-    return body

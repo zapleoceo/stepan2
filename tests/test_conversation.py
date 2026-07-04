@@ -283,13 +283,17 @@ def test_parse_decision_hard_stop():
 # ── manager alert ─────────────────────────────────────────────────────────────
 
 class FakeNotifier:
-    """Records notify_manager calls."""
+    """Records send() calls (into the lead's topic)."""
 
     def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
+        self.sends: list[dict[str, Any]] = []
 
-    async def notify_manager(self, **kwargs: Any) -> None:
-        self.calls.append(kwargs)
+    async def create_topic(self, *, name: str) -> int:  # noqa: ARG002
+        return 1
+
+    async def send(self, *, text: str, topic_id: Any = None) -> str:  # noqa: ARG002
+        self.sends.append({"text": text, "topic_id": topic_id})
+        return "ok"
 
 
 async def test_enqueue_reply_triggers_alert_when_needs_manager(db_session):
@@ -311,10 +315,8 @@ async def test_enqueue_reply_triggers_alert_when_needs_manager(db_session):
     row = await svc.enqueue_reply(thread_id, decision)
 
     assert row is not None
-    assert len(notifier.calls) == 1
-    call = notifier.calls[0]
-    assert call["kind"] == "needs_manager"
-    assert "Lead tanya diskon khusus." in call["summary_en"]
+    assert len(notifier.sends) == 1
+    assert "Lead tanya diskon khusus." in notifier.sends[0]["text"]
 
 
 async def test_enqueue_reply_no_alert_without_needs_manager(db_session):
@@ -334,4 +336,4 @@ async def test_enqueue_reply_no_alert_without_needs_manager(db_session):
 
     await svc.enqueue_reply(thread_id, decision)
 
-    assert len(notifier.calls) == 0
+    assert len(notifier.sends) == 0

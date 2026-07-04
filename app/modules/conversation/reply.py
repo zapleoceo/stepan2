@@ -214,7 +214,7 @@ class ReplyService:
         lead.handed_off_at = now
         lead.ready_subtype = lead.ready_subtype or subtype or "deal"
         kind = f"ready_{lead.ready_subtype}"
-        alerts = AlertService(self.session, self.branch_id, self._notifier)
+        alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)
         try:
             await alerts.raise_alert(
                 lead_id=lead.id,
@@ -244,7 +244,7 @@ class ReplyService:
         summary_ru = f"Вопрос: {q}" if q else "Лид запросил менеджера"
         if gap:
             summary_ru += f"\nПробел в KB: {gap}"
-        alerts = AlertService(self.session, self.branch_id, self._notifier)
+        alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)
         try:
             await alerts.raise_alert(
                 lead_id=lead_id,

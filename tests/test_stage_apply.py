@@ -41,10 +41,14 @@ class FakeLLM:
 
 class FakeNotifier:
     def __init__(self) -> None:
-        self.pings: list[str] = []
+        self.sends: list[str] = []
 
-    async def notify_manager(self, **kw) -> None:  # noqa: ANN003
-        self.pings.append(kw["kind"])
+    async def create_topic(self, *, name: str) -> int:  # noqa: ARG002
+        return 1
+
+    async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
+        self.sends.append(text)
+        return "ok"
 
 
 async def _world(s, *, phone: str | None = None, stage: Stage = Stage.NEW,
@@ -125,7 +129,7 @@ async def test_ready_with_phone_hands_off(db_session, monkeypatch) -> None:
     alert = (await db_session.exec(select(ManagerAlert))).first()
     assert alert is not None and alert.kind == "ready_deal"
     assert alert.lead_phone == "+6281234567890"
-    assert notifier.pings == ["ready_deal"]
+    assert len(notifier.sends) == 1  # one group ping for the hand-off
     assert capi_calls == [f"handoff-{bid}-{lead.id}"]
 
 

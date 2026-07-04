@@ -181,12 +181,13 @@ def test_event_bubble_shows_product_change_detail() -> None:
 
 # ─── manager alert deep-link ──────────────────────────────────────────────────
 
-def test_telegram_render_includes_chat_deep_link() -> None:
-    from app.adapters.notify.telegram import _render
-    txt = _render(kind="needs_manager", lead_id=9, summary_en="x", summary_ru="у",
-                  link="https://stepan2.zapleo.com/ui/chat/1732")
-    assert "https://stepan2.zapleo.com/ui/chat/1732" in txt
-    assert "open chat" in txt
+def test_alert_body_includes_chat_deep_link() -> None:
+    from app.modules.notifications.alerts import AlertService
+    svc = AlertService(None, 1, None)  # _compose is pure — no session/notifier touched
+    body = svc._compose("ringkasan", "alasan", "сводка", "причина", thread_id=1732)
+    assert "/ui/chat/1732" in body and "open chat" in body
+    # branch-language block precedes the Russian one
+    assert body.index("alasan") < body.index("причина")
 
 
 def test_manual_stage_alert_only_for_ready_and_manager() -> None:

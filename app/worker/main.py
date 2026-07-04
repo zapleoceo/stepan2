@@ -115,10 +115,9 @@ async def _healthy(session: AsyncSession, branch_id: int, channel: Channel, port
         notifier = _build_notifier(cfg)
         if notifier is not None:
             try:
-                await notifier.notify_manager(
-                    branch_id=branch_id, lead_id=0, kind="channel_checkpoint",
-                    summary_en=f"IG channel {channel.handle or channel.id} needs re-login",
-                    summary_ru=f"IG-канал {channel.handle or channel.id} требует ре-логина",
+                await notifier.send(  # channel-level alert → group General, no per-lead topic
+                    text=(f"⚠️ IG channel {channel.handle or channel.id} needs re-login\n"
+                          f"IG-канал {channel.handle or channel.id} требует ре-логина"),
                 )
             except Exception:
                 logger.warning("checkpoint alert failed channel %s", channel.id)
