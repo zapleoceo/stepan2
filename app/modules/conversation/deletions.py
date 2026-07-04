@@ -59,16 +59,27 @@ class DeletionService:
         thread_id = msg.thread_id
         await self.session.delete(msg)
         await self.session.flush()
-        # rewind last_out_at to the newest remaining outgoing message (or NULL)
-        newest = (
+        # rewind BOTH watermarks to the newest remaining message per direction (or NULL).
+        # last_out_at gates the reply loop; last_in_at drives the sidebar's activity sort
+        # and the reply window — leaving it stale after a delete left the thread list in the
+        # wrong order (the real bug: deleting the newest message didn't re-sort the list).
+        newest_out = (
             await self.session.execute(
                 select(func.max(Message.occurred_at)).where(
                     Message.thread_id == thread_id, Message.direction == "out"
                 )
             )
         ).scalar_one_or_none()
+        newest_in = (
+            await self.session.execute(
+                select(func.max(Message.occurred_at)).where(
+                    Message.thread_id == thread_id, Message.direction == "in"
+                )
+            )
+        ).scalar_one_or_none()
         thread = await self.session.get(ChannelThread, thread_id)
         if thread is not None:
-            thread.last_out_at = newest
+            thread.last_out_at = newest_out
+            thread.last_in_at = newest_in
             self.session.add(thread)
             await self.session.flush()

@@ -79,6 +79,24 @@ async def test_deleting_last_out_rewinds_last_out_at(db_session) -> None:
     assert refreshed.last_out_at < _NOW - timedelta(minutes=20)
 
 
+async def test_delete_local_rewinds_both_watermarks(db_session) -> None:
+    """_delete_local rewinds BOTH last_out_at and last_in_at to the newest remaining
+    message per direction — last_in_at drives the sidebar activity sort + reply window,
+    and leaving it stale left the chat list in the wrong order after a delete."""
+    bid, cid, tid, thread = await _thread(db_session)
+    thread.last_in_at = _NOW
+    await db_session.flush()
+    await _msg(db_session, bid, cid, tid, ext="in-old", out=False, requested=False,
+               minutes_ago=30)
+    new_in = await _msg(db_session, bid, cid, tid, ext="in-new", out=False,
+                        requested=False, minutes_ago=1)
+    await DeletionService(db_session, bid)._delete_local(new_in)
+    refreshed = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    assert refreshed.last_in_at is not None
+    assert refreshed.last_in_at < _NOW - timedelta(minutes=20)  # rewound to older inbound
+
+
 async def test_inbound_and_unflagged_not_touched(db_session) -> None:
     bid, cid, tid, _ = await _thread(db_session)
     await _msg(db_session, bid, cid, tid, ext="in1", out=False, requested=True)

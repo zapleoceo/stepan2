@@ -528,6 +528,14 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
             text("DELETE FROM message WHERE id=:mid AND thread_id=:tid"),
             {"mid": mid, "tid": thread_id},
         )
+        # rewind last_in_at so the sidebar re-sorts by real last-activity — a direct
+        # inbound delete used to leave it stale, so the chat list kept the old order.
+        await session.execute(
+            text("UPDATE channel_thread SET last_in_at="
+                 "(SELECT max(occurred_at) FROM message WHERE thread_id=:tid AND direction='in')"
+                 " WHERE id=:tid"),
+            {"tid": thread_id},
+        )
     return HTMLResponse("")
 
 
