@@ -41,11 +41,12 @@ async def products_new(request: Request) -> HTMLResponse:
 @router.get("/products/{prod_id}/edit", response_class=HTMLResponse)
 async def products_edit(prod_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
         row = (
             await session.execute(
                 text(
-                    "SELECT id, slug, title, content, is_active, sort_order"
+                    "SELECT id, slug, title, content, is_active, sort_order, branch_id"
                     " FROM product WHERE id = :id"
                 ),
                 {"id": prod_id},
@@ -53,6 +54,8 @@ async def products_edit(prod_id: int, request: Request) -> HTMLResponse:
         ).first()
     if not row:
         return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    if is_branch_forbidden(row[6], branch_ids):
+        return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
     return HTMLResponse(
         product_edit_html(
             row[0], str(row[1]), str(row[2] or ""),

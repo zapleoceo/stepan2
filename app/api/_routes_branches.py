@@ -1,20 +1,22 @@
-"""Branch management routes — list, create, edit."""
+"""Branch management routes — list, create, edit. Super_admin only: branch CRUD is a
+platform-wide action, not something a branch_admin/viewer of one branch should reach."""
 from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
+from app.admin._branch import require_super_admin
 from app.modules.knowledge.canonical import ensure_canonical_docs
 from app.modules.settings.schema import defaults as _schema_defaults
 
 from ._i18n import apply_lang
 from ._ui_panels import branch_edit_html, branches_panel_html
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_super_admin)])
 
 _log = logging.getLogger(__name__)
 

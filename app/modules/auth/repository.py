@@ -42,3 +42,40 @@ class MembershipRepo:
         )
         m = (await self.session.exec(q)).first()
         return m.role if m is not None else None
+
+    async def get(self, membership_id: int) -> Membership | None:
+        return await self.session.get(Membership, membership_id)
+
+    async def create(
+        self, user_id: int, branch_id: int | None, role: Role,
+    ) -> Membership:
+        m = Membership(user_id=user_id, branch_id=branch_id, role=role)
+        self.session.add(m)
+        await self.session.flush()
+        return m
+
+    async def update_role(self, membership_id: int, role: Role) -> bool:
+        m = await self.get(membership_id)
+        if m is None:
+            return False
+        m.role = role
+        self.session.add(m)
+        await self.session.flush()
+        return True
+
+    async def update_branch(self, membership_id: int, branch_id: int | None) -> bool:
+        m = await self.get(membership_id)
+        if m is None:
+            return False
+        m.branch_id = branch_id
+        self.session.add(m)
+        await self.session.flush()
+        return True
+
+    async def delete(self, membership_id: int) -> bool:
+        m = await self.get(membership_id)
+        if m is None:
+            return False
+        await self.session.delete(m)
+        await self.session.flush()
+        return True

@@ -53,12 +53,15 @@ async def knowledge_products_tab(request: Request) -> HTMLResponse:
 @router.get("/knowledge/{doc_id}/edit", response_class=HTMLResponse)
 async def knowledge_edit(doc_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
         row = (await session.execute(
-            text("SELECT id, slug, title, content, updated_by"
+            text("SELECT id, slug, title, content, updated_by, branch_id"
                  " FROM knowledge_doc WHERE id = :id"), {"id": doc_id})).first()
     if not row:
         return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+    if is_branch_forbidden(row[5], branch_ids):
+        return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
     return HTMLResponse(kb_editor_html(
         row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""), row[4]))
 

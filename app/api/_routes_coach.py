@@ -34,10 +34,13 @@ async def coach_panel_partial(request: Request) -> HTMLResponse:
 @router.post("/coach/say", response_class=HTMLResponse)
 async def coach_say(
     request: Request,
-    branch_id: int = Form(),
     request_text: str = Form(alias="request"),
 ) -> HTMLResponse:
+    # branch_id is resolved server-side, same as every other coach route — the form's
+    # hidden branch_id field is never trusted (a client could submit any branch it likes).
     apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    branch_id = branch_ids[0] if branch_ids else 1
     llm = BrokerLLM()
     async with session_scope() as session:
         edit = await propose_edit(session, branch_id, request_text.strip(), llm)

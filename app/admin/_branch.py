@@ -7,6 +7,7 @@ with auth disabled (no state) the cookie alone drives the filter, empty = show a
 """
 from __future__ import annotations
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 BRANCH_COOKIE = "stepan2_branch"
@@ -46,3 +47,17 @@ def allowed_branch_ids(request: Request) -> list[int] | None:
     view-filter cookie — a super-admin filtering their inbox to one branch must still
     be able to manage channels/chats of any other branch."""
     return getattr(getattr(request, "state", None), "allowed_branch_ids", None)
+
+
+def is_super_admin(request: Request) -> bool:
+    """True for a platform-wide super_admin — same permissive default the rest of the
+    branch-scoping helpers use when auth is disabled (dev/local), so a bare `None` state
+    doesn't accidentally lock the owner out before auth is configured."""
+    return allowed_branch_ids(request) is None
+
+
+def require_super_admin(request: Request) -> None:
+    """FastAPI dependency: 403s any non-super-admin off platform-wide routes (member
+    management, branch CRUD, the platform-wide bot kill switch)."""
+    if not is_super_admin(request):
+        raise HTTPException(status_code=403, detail="Super admin only")

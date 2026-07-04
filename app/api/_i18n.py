@@ -179,14 +179,28 @@ _TR: dict[str, dict[str, str]] = {
     },
     "help.members": {
         "ru": (
-            "Пользователи и их роли: manager — может отвечать в чатах"
-            " и управлять KB, viewer — только просмотр."
+            "Пользователи и их роли/филиалы. Видно и редактируется только"
+            " супер-админом."
         ),
-        "en": (
-            "Users and roles: manager — can reply in chats and manage KB,"
-            " viewer — read-only."
-        ),
-        "id": "Pengguna dan peran: manager — kelola chat dan KB, viewer — hanya baca.",
+        "en": "Users, their roles and branches. Visible and editable to super admins only.",
+        "id": "Pengguna, peran, dan cabang. Hanya terlihat/diedit oleh super admin.",
+    },
+    "role.super_admin":  {"ru": "Супер-админ",   "en": "Super admin",  "id": "Super admin"},
+    "role.branch_admin": {"ru": "Админ филиала", "en": "Branch admin", "id": "Admin cabang"},
+    "role.branch_viewer": {"ru": "Наблюдатель",  "en": "Viewer",       "id": "Peninjau"},
+    "member.add":        {"ru": "Добавить",       "en": "Add",         "id": "Tambah"},
+    "member.tg_id":      {"ru": "Telegram ID",    "en": "Telegram ID", "id": "Telegram ID"},
+    "member.name":       {"ru": "Имя",            "en": "Name",        "id": "Nama"},
+    "member.remove":     {"ru": "Удалить",        "en": "Remove",      "id": "Hapus"},
+    "member.remove_confirm": {
+        "ru": "Убрать этого участника?", "en": "Remove this member?", "id": "Hapus anggota ini?",
+    },
+    "member.platform":   {"ru": "— (вся платформа)", "en": "— (whole platform)",
+                          "id": "— (seluruh platform)"},
+    "member.self_locked": {
+        "ru": "Нельзя редактировать себя здесь",
+        "en": "Can't edit yourself here",
+        "id": "Tidak bisa mengedit diri sendiri di sini",
     },
     "help.settings": {
         "ru": (

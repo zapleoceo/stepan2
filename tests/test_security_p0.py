@@ -15,8 +15,20 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 from fastapi.testclient import TestClient  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead  # noqa: E402
-from app.admin._branch import allowed_branch_ids, is_branch_forbidden  # noqa: E402
+from app.adapters.db.models import (  # noqa: E402
+    Branch,
+    Channel,
+    ChannelThread,
+    KnowledgeDoc,
+    Lead,
+    Product,
+)
+from app.admin._branch import (  # noqa: E402
+    allowed_branch_ids,
+    is_branch_forbidden,
+    is_super_admin,
+    require_super_admin,
+)
 from app.api._routes_channels import _channel_branch  # noqa: E402
 from app.api._routes_chat import _guarded_branch, chat_bot_toggle  # noqa: E402
 from app.api.main import app  # noqa: E402
@@ -93,6 +105,132 @@ def test_is_branch_forbidden_empty_list_denies_everything() -> None:
     assert is_branch_forbidden(1, None) is False
     assert is_branch_forbidden(1, [1]) is False
     assert is_branch_forbidden(2, [1]) is True
+
+
+# ─── super_admin gate (members, branch CRUD, platform kill switch) ────────────
+
+def test_is_super_admin_true_for_none_state_and_super_session() -> None:
+    assert is_super_admin(_req()) is True                      # auth disabled → permissive
+    assert is_super_admin(_req(allowed=None)) is True           # sess.get("sa") was True
+    assert is_super_admin(_req(allowed=[7])) is False           # branch-scoped session
+    assert is_super_admin(_req(allowed=[])) is False            # zero-branch member
+
+
+def test_require_super_admin_raises_403_for_scoped_user() -> None:
+    from fastapi import HTTPException
+    require_super_admin(_req(allowed=None))  # no raise
+    try:
+        require_super_admin(_req(allowed=[7]))
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("expected HTTPException")
+
+
+# ─── knowledge/product edit forms leak cross-branch content (IDOR, read-only) ─
+
+async def test_knowledge_edit_denies_cross_branch_read(db_session, monkeypatch) -> None:
+    import contextlib
+
+    from app.api._routes_knowledge import knowledge_edit
+
+    a = Branch(name="A", lang="id")
+    b = Branch(name="B", lang="id")
+    db_session.add_all([a, b])
+    await db_session.flush()
+    doc = KnowledgeDoc(branch_id=a.id, slug="faq", title="FAQ", content="secret")
+    db_session.add(doc)
+    await db_session.flush()
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr("app.api._routes_knowledge.session_scope", fake_scope)
+
+    ok = await knowledge_edit(doc.id, _req(allowed=[a.id]))
+    assert ok.status_code == 200
+    denied = await knowledge_edit(doc.id, _req(allowed=[b.id]))
+    assert denied.status_code == 403
+
+
+async def test_products_edit_denies_cross_branch_read(db_session, monkeypatch) -> None:
+    import contextlib
+
+    from app.api._routes_products import products_edit
+
+    a = Branch(name="A", lang="id")
+    b = Branch(name="B", lang="id")
+    db_session.add_all([a, b])
+    await db_session.flush()
+    prod = Product(branch_id=a.id, slug="course", title="Course")
+    db_session.add(prod)
+    await db_session.flush()
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr("app.api._routes_products.session_scope", fake_scope)
+
+    ok = await products_edit(prod.id, _req(allowed=[a.id]))
+    assert ok.status_code == 200
+    denied = await products_edit(prod.id, _req(allowed=[b.id]))
+    assert denied.status_code == 403
+
+
+# ─── platform-wide bot kill switch is super_admin-only ────────────────────────
+
+async def test_agent_toggle_platform_scope_ignored_for_non_super(db_session, monkeypatch) -> None:
+    import contextlib
+
+    from sqlalchemy import text as _text
+
+    from app.api._routes_admin import agent_toggle
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr("app.api._routes_admin.session_scope", fake_scope)
+
+    before = (await db_session.execute(
+        _text("SELECT value FROM app_setting WHERE key='agent_enabled_platform'"))).first()
+
+    class _Req:
+        cookies: dict = {}
+        headers: dict = {}
+        state = type("S", (), {"allowed_branch_ids": [7]})()
+
+    await agent_toggle(_Req(), scope="platform", branch_id=7)  # type: ignore[arg-type]
+    after = (await db_session.execute(
+        _text("SELECT value FROM app_setting WHERE key='agent_enabled_platform'"))).first()
+    assert after == before  # a non-super-admin's platform toggle must be a no-op
+
+
+def test_agent_toggles_html_hides_platform_switch_for_non_super() -> None:
+    from app.api.ui import _agent_toggles_html
+    html = _agent_toggles_html(1, platform_on=True, branch_on=False, is_super=False)
+    assert 'name="scope" value="platform"' not in html
+    assert 'name="scope" value="branch"' in html
+
+
+# ─── coach_say no longer trusts a client-submitted branch_id ──────────────────
+
+def test_coach_say_has_no_client_branch_id_param() -> None:
+    import inspect
+
+    from app.api._routes_coach import coach_say
+    params = inspect.signature(coach_say).parameters
+    assert "branch_id" not in params
+
+
+# ─── branch CRUD (create/edit/save any branch) is super_admin-only ────────────
+
+def test_branches_router_requires_super_admin() -> None:
+    from app.api._routes_branches import router as branches_router
+    deps = [d.dependency for d in branches_router.dependencies]
+    assert require_super_admin in deps
 
 
 async def test_guarded_branch_denies_zero_branch_member(db_session) -> None:

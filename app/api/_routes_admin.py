@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request
+from app.admin._branch import allowed_branch_ids, branch_ids_from_request, is_super_admin
 from app.domain.clock import utc_now
 from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
@@ -25,7 +25,6 @@ from ._query import (
 from ._ui_panels import (
     broker_log_panel_html,
     leads_panel_html,
-    members_panel_html,
     outbox_count_html,
     outbox_panel_html,
     reports_panel_html,
@@ -86,21 +85,6 @@ async def outbox_panel(request: Request) -> HTMLResponse:
         seen_ids = {r[7] for r in rows if r[7] is not None}
         tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
     return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch))
-
-
-@router.get("/members/panel", response_class=HTMLResponse)
-async def members_panel(request: Request) -> HTMLResponse:
-    apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids, col="m.branch_id")
-    async with session_scope() as session:
-        q = (
-            "SELECT u.id, u.telegram_id, m.role, u.name, m.branch_id"  # noqa: S608
-            " FROM membership m JOIN app_user u ON u.id = m.user_id"
-            f" {where} ORDER BY m.branch_id, m.role, u.name"
-        )
-        rows = (await session.execute(text(q), params)).all()
-    return HTMLResponse(members_panel_html(list(rows)))
 
 
 def _valid_date(value: str) -> str:
@@ -307,10 +291,11 @@ async def _single_selected_branch(request: Request) -> int | None:
 async def agent_status(request: Request) -> HTMLResponse:
     apply_lang(request)
     branch_id = await _single_selected_branch(request)
+    is_super = is_super_admin(request)
     async with session_scope() as session:
         platform_on = await _read_flag(session, None, _PLATFORM_KEY)
         branch_on = await _read_flag(session, branch_id, _BRANCH_KEY) if branch_id else None
-    return HTMLResponse(_agent_toggles_html(branch_id, platform_on, branch_on))
+    return HTMLResponse(_agent_toggles_html(branch_id, platform_on, branch_on, is_super))
 
 
 @router.post("/agent-toggle", response_class=HTMLResponse)
@@ -318,14 +303,19 @@ async def agent_toggle(
     request: Request, scope: str = Form(default="branch"), branch_id: int = Form(default=1),
 ) -> HTMLResponse:
     apply_lang(request)
+    is_super = is_super_admin(request)
     allowed = branch_ids_from_request(request)
     if allowed and branch_id not in allowed:
         branch_id = allowed[0]
     selected = await _single_selected_branch(request)
     async with session_scope() as session:
         if scope == "platform":
-            new = not await _read_flag(session, None, _PLATFORM_KEY)
-            await _write_flag(session, None, _PLATFORM_KEY, new)
+            # The platform switch is only rendered for super admins (_agent_toggles_html),
+            # but a non-super-admin could still POST scope=platform directly — the kill
+            # switch for the ENTIRE platform must not be reachable by a branch-scoped role.
+            if is_super:
+                new = not await _read_flag(session, None, _PLATFORM_KEY)
+                await _write_flag(session, None, _PLATFORM_KEY, new)
         elif selected is not None:
             # The branch-scope button only renders when a single branch is selected (see
             # _agent_toggles_html) — a POST for scope=branch with no branch actually
@@ -336,7 +326,7 @@ async def agent_toggle(
             invalidate(selected)
         platform_on = await _read_flag(session, None, _PLATFORM_KEY)
         branch_on = await _read_flag(session, selected, _BRANCH_KEY) if selected else None
-    return HTMLResponse(_agent_toggles_html(selected, platform_on, branch_on))
+    return HTMLResponse(_agent_toggles_html(selected, platform_on, branch_on, is_super))
 
 
 def _switch(scope: str, branch_id: int, label: str, on: bool) -> str:
@@ -358,13 +348,14 @@ def _switch(scope: str, branch_id: int, label: str, on: bool) -> str:
 
 
 def _agent_toggles_html(
-    branch_id: int | None, platform_on: bool, branch_on: bool | None,
+    branch_id: int | None, platform_on: bool, branch_on: bool | None, is_super: bool = True,
 ) -> str:
+    platform_switch = _switch("platform", branch_id or 0, t("bot.platform"), platform_on)
     if branch_id is None or branch_on is None:
         hint = f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
-        return _switch("platform", 0, t("bot.platform"), platform_on) + hint
+        return (platform_switch if is_super else "") + hint
     return (
-        _switch("platform", branch_id, t("bot.platform"), platform_on)
+        (platform_switch if is_super else "")
         + _switch("branch", branch_id, t("bot.branch"), branch_on)
     )
 
@@ -373,10 +364,18 @@ def _agent_toggles_html(
 async def branches_widget(request: Request) -> HTMLResponse:
     apply_lang(request)
     current = request.cookies.get(_BRANCH_COOKIE, "")
+    allowed = allowed_branch_ids(request)
+    # A branch-scoped user must not see other branches' names in this dropdown, even
+    # though the filter cookie itself can't grant access beyond `allowed` (_branch.py
+    # intersects it server-side) — this is purely about not leaking names.
+    where, params = ("WHERE is_active", {})
+    if allowed is not None:
+        where, params = "WHERE is_active AND id = ANY(:bids)", {"bids": allowed}
     async with session_scope() as session:
         rows = (
             await session.execute(
-                text("SELECT id, name FROM branch WHERE is_active ORDER BY id")
+                text(f"SELECT id, name FROM branch {where} ORDER BY id"),  # noqa: S608
+                params,
             )
         ).all()
     all_lbl = _h.escape(t("branch.all"))

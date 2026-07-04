@@ -266,7 +266,6 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
         f' hx-indicator="#coach-thinking"'
         f' hx-on::before-request="coachSend(this)"'
         f' hx-on::after-request="coachThinkStop();scrollMsgs(\'coach\')">'
-        f'<input type="hidden" name="branch_id" value="{branch_id}">'
         f'<textarea name="request" rows="2" placeholder="{ph}"'
         f' onkeydown="entSend(event)"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
@@ -366,37 +365,6 @@ def product_edit_html(
         f'<button class="btn-sm btn-p">{save_lbl}</button>'
         f'{delete_btn}</div>'
         f'</form></div>'
-    )
-
-
-# ─── members panel ────────────────────────────────────────────────────────────
-
-def members_panel_html(rows: list) -> str:
-    """Members list with user display names and roles."""
-    title = _h.escape(t("nav.members"))
-    help_txt = _h.escape(t("help.members"))
-
-    def _role(role: str) -> str:
-        css = {"manager": "p-mgr", "admin": "p-adm"}.get(role, "p-off")
-        return f'<span class="pill {css}">{_h.escape(role)}</span>'
-
-    trows = "".join(
-        f'<tr>'
-        f'<td><strong style="color:#e8eef4">{_h.escape(str(r[3] or "—"))}</strong>'
-        f'<br><span style="font-size:.7rem;color:#4a5568">tg:{r[1]}</span></td>'
-        f'<td>{_role(str(r[2]))}</td>'
-        f'<td style="color:#6b7685;font-size:.76rem">{r[4]}</td>'
-        f'</tr>'
-        for r in rows  # (u.id, u.telegram_id, m.role, u.name, m.branch_id)
-    )
-    return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
-        f'<div class="pnl-body">'
-        f'<div class="hint">{help_txt}</div>'
-        f'<table class="tbl">'
-        f'<thead><tr><th>User</th><th>Role</th><th>Branch</th></tr></thead>'
-        f'<tbody>{trows or "<tr><td colspan=3 style=color:#4a5568>—</td></tr>"}</tbody>'
-        f'</table></div>'
     )
 
 

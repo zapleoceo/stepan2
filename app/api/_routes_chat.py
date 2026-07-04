@@ -13,7 +13,7 @@ from app.adapters.db.models import Outbox, StageEvent, ThreadLog
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.adapters.notify.telegram import TelegramNotifier
-from app.admin._branch import allowed_branch_ids, is_branch_forbidden
+from app.admin._branch import allowed_branch_ids, is_branch_forbidden, is_super_admin
 from app.config import settings
 from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.needs_translate import translated_needs
@@ -185,7 +185,7 @@ async def chat_page(thread_id: int, request: Request) -> HTMLResponse:
         return RedirectResponse("/ui/inbox", status_code=303)
     if is_hx:
         return HTMLResponse(html)
-    resp = HTMLResponse(app_shell(lang, html, active_nav="inbox"))
+    resp = HTMLResponse(app_shell(lang, html, active_nav="inbox", is_super=is_super_admin(request)))
     resp.set_cookie("stepan2_open_thread", str(thread_id), max_age=86400, samesite="lax")
     return resp
 

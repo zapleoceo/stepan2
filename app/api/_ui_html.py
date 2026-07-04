@@ -1266,7 +1266,7 @@ _FAVICON = (
 
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
-    stage: str = "",
+    stage: str = "", is_super: bool = True,
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1305,10 +1305,12 @@ def app_shell(
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
         + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
         + '<div class="nav-sep"></div>'
-        + _hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")
+        + (_hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")
+           if is_super else "")
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
         + '<div class="nav-sep"></div>'
-        + _hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
+        + (_hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
+           if is_super else "")
         + _hna("nav.log", "/ui/settings/log", "fa-solid fa-list", "log")
     )
 

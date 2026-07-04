@@ -153,6 +153,15 @@ def test_app_shell_contains_sidebar_and_nav() -> None:
     assert "<div>main</div>" in html
 
 
+def test_app_shell_hides_members_and_branches_for_non_super_admin() -> None:
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>main</div>", active_nav="inbox", is_super=False)
+    assert "/ui/members/panel" not in html
+    assert "/ui/branches/panel" not in html
+    assert "Settings" in html  # branch-scoped nav stays visible
+
+
 def test_app_shell_lang_buttons_highlight_active() -> None:
     from app.api._ui_html import app_shell
     _set_lang("ru")
@@ -344,13 +353,36 @@ def test_kb_tree_html_groups_by_category() -> None:
 
 
 def test_members_panel_html() -> None:
-    from app.api._ui_panels import members_panel_html
+    from app.api._ui_members import members_panel_html
     _set_lang("en")
-    rows = [(10, 169510539, "manager", "Dima", 1)]
-    html = members_panel_html(rows)
+    rows = [(10, 169510539, "branch_admin", "Dima", 1)]
+    branches = [(1, "Jakarta")]
+    html = members_panel_html(rows, branches)
     assert "Dima" in html
-    assert "manager" in html
-    assert "p-mgr" in html
+    assert "tg:169510539" in html
+    assert 'value="branch_admin" selected' in html
+    assert "Branch admin" in html
+    assert 'value="1" selected' in html and "Jakarta" in html
+
+
+def test_members_panel_html_row_has_role_branch_and_delete_controls() -> None:
+    from app.api._ui_members import members_panel_html
+    _set_lang("en")
+    rows = [(10, 169510539, "super_admin", "Dima", None)]
+    html = members_panel_html(rows, [(1, "Jakarta")])
+    assert 'hx-post="/ui/members/10/role"' in html
+    assert 'hx-post="/ui/members/10/branch"' in html
+    assert 'hx-post="/ui/members/10/delete"' in html
+    assert 'value="" selected' in html  # platform-wide (branch_id None)
+
+
+def test_members_panel_html_add_form() -> None:
+    from app.api._ui_members import members_panel_html
+    _set_lang("en")
+    html = members_panel_html([], [(2, "Bali")])
+    assert 'hx-post="/ui/members/create"' in html
+    assert 'name="telegram_id"' in html and 'name="name"' in html
+    assert "Bali" in html
 
 
 def test_settings_panel_html_with_desc() -> None:

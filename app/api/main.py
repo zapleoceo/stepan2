@@ -52,6 +52,7 @@ class _PartialShellMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        from app.admin._branch import is_super_admin  # noqa: PLC0415
         from app.api._i18n import DEFAULT_LANG, LANG_COOKIE, LANGS, _lang  # noqa: PLC0415
         from app.api._ui_html import app_shell  # noqa: PLC0415
 
@@ -92,7 +93,8 @@ class _PartialShellMiddleware(BaseHTTPMiddleware):
         section = m.group(1) if m else ""
         active_nav = _SECTION_NAV.get(section, section)
 
-        full_html = app_shell(lang, decoded, active_nav=active_nav)
+        full_html = app_shell(lang, decoded, active_nav=active_nav,
+                              is_super=is_super_admin(request))
         return HTMLResponse(full_html, status_code=200)
 
 
