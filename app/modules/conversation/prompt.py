@@ -5,6 +5,7 @@ and the thread dialog into the chat `messages` array. The model is told to
 answer in `lang`; nothing here is tied to a specific language."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.adapters.db.models import Message
@@ -143,6 +144,25 @@ def source_hint(lead_source: str | None) -> str | None:
     return _SOURCE_HINTS.get(lead_source or "")
 
 
+# IG display names are often the raw @handle ('vibecoding_id', 'user8842') — a digit,
+# underscore, dot or @ is the tell. Greeting a lead by a handle reads as a bot.
+_HANDLE_TELL = re.compile(r"[0-9_@.]")
+
+
+def lead_name_hint(display_name: str | None) -> str | None:
+    """Deterministic: a clean given name to address the lead by, or None for a handle."""
+    name = (display_name or "").strip()
+    if not name or _HANDLE_TELL.search(name):
+        return None
+    first = name.split()[0]
+    if not (2 <= len(first) <= 20) or not first.isalpha():
+        return None
+    return (
+        f"LEAD NAME: the lead's name is {first}. Address them by it naturally and sparingly, "
+        "like a real salesperson — never force it into every message."
+    )
+
+
 def _role_of(message: Message) -> str:
     return "user" if message.direction == "in" else "assistant"
 
@@ -154,8 +174,9 @@ def build_messages(
     coaching_notes: list[str] | None = None,
     needs_block: str | None = None,
     source_block: str | None = None,
+    name_block: str | None = None,
 ) -> list[dict[str, Any]]:
-    """System (persona+KB+coaching+known-needs+entry+decision contract) then dialog."""
+    """System (persona+KB+coaching+known-needs+entry+name+contract) then dialog."""
     parts: list[str] = []
     if persona_and_kb.strip():
         parts.append(persona_and_kb.rstrip())
@@ -164,6 +185,8 @@ def build_messages(
         parts.append(f"{_COACHING_HEADER}\n{notes_block}")
     if source_block and source_block.strip():
         parts.append(source_block.strip())
+    if name_block and name_block.strip():
+        parts.append(name_block.strip())
     if needs_block and needs_block.strip():
         parts.append(needs_block.strip())
     parts.append(_DECISION_CONTRACT.format(lang=lang))

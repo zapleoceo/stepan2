@@ -81,6 +81,19 @@ def test_source_hint_only_for_known_entry_points() -> None:
     assert source_hint("organic") is None  # unknown source → no assumption
 
 
+def test_lead_name_hint_rejects_handles_keeps_real_names() -> None:
+    from app.modules.conversation.prompt import lead_name_hint
+    assert "Ade" in (lead_name_hint("Ade Putra") or "")  # real name → first name used
+    assert "Budi" in (lead_name_hint("Budi") or "")
+    assert lead_name_hint("user8842") is None            # digits → handle
+    assert lead_name_hint("vibecoding.id") is None        # dot → handle
+    assert lead_name_hint("cool_guy") is None             # underscore → handle
+    assert lead_name_hint("@someone") is None             # at → handle
+    assert lead_name_hint(None) is None
+    assert lead_name_hint("   ") is None
+    assert lead_name_hint("A") is None                    # too short to be a name
+
+
 def test_build_messages_injects_entry_hint() -> None:
     from types import SimpleNamespace
 
