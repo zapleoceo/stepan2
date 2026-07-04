@@ -185,8 +185,8 @@ _TR: dict[str, dict[str, str]] = {
     # chat actions
     "chat.stage":       {"ru": "Стадия",           "en": "Stage",             "id": "Tahap"},
     "chat.suggest":     {"ru": "✦ Предложить",     "en": "✦ Suggest",         "id": "✦ Sarankan"},
-    "chat.translate":   {"ru": "⇄ Перевод",        "en": "⇄ Translate",       "id": "⇄ Terjemah"},
-    "chat.tr_result":   {"ru": "Перевод:", "en": "Translation:", "id": "Terjemahan:"},
+    "chat.translate":   {"ru": "≡ Саммари",        "en": "≡ Summary",         "id": "≡ Ringkasan"},
+    "chat.tr_result":   {"ru": "Саммари:", "en": "Summary:", "id": "Ringkasan:"},
     "rep.ad_funnel":    {"ru": "Воронка по рекламе", "en": "Ad funnel", "id": "Corong iklan"},
     "rep.ad":           {"ru": "Реклама", "en": "Ad", "id": "Iklan"},
     "chat.block":       {"ru": "Заблокировать (спам)", "en": "Block (spam)",

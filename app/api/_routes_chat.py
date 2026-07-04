@@ -457,27 +457,36 @@ async def chat_tr_draft(
     return HTMLResponse(f"🌐 {_h.escape(tr)}" if tr else "")
 
 
+_SUMMARY_MAX_MSGS = 60
+
+
 @router.post("/chat/{thread_id}/translate", response_class=HTMLResponse)
 async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
-    """Translate the last inbound message (global toolbar button)."""
+    """Summarize the WHOLE conversation in the current UI language (toolbar button).
+
+    Not a single-message translation: it condenses the dialog so a manager who does not
+    read the lead's language gets the gist. Target language follows the interface language."""
     lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-        row = (
+        rows = (
             await session.execute(
                 text(
-                    "SELECT text FROM message"
-                    " WHERE thread_id = :tid AND direction = 'in'"
-                    " ORDER BY occurred_at DESC, id DESC LIMIT 1"
+                    "SELECT direction, text FROM message"
+                    " WHERE thread_id = :tid AND text <> ''"
+                    " ORDER BY occurred_at DESC, id DESC LIMIT :lim"
                 ),
-                {"tid": thread_id},
+                {"tid": thread_id, "lim": _SUMMARY_MAX_MSGS},
             )
-        ).first()
-    if not row or not row[0]:
+        ).all()
+    if not rows:
         return HTMLResponse("")
-    last_msg = (row[0] or "")[:800]
+    convo = "\n".join(
+        f"{'Lead' if r[0] == 'in' else 'Agent'}: {(r[1] or '').strip()}"
+        for r in reversed(rows) if (r[1] or "").strip()
+    )[:6000]
     target_lang = {
         "ru": "Russian", "en": "English", "id": "Indonesian",
     }.get(lang_code, "English")
@@ -485,27 +494,28 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
         {
             "role": "system",
             "content": (
-                f"Translate the following message to {target_lang}. "
-                "Return ONLY the translated text, nothing else."
+                f"Summarize this sales conversation in {target_lang}. Cover what the lead "
+                "wants, key objections, and the current state. 3-6 short sentences, no "
+                "preamble. Return ONLY the summary."
             ),
         },
-        {"role": "user", "content": last_msg},
+        {"role": "user", "content": convo},
     ]
     llm = BrokerLLM()
     try:
-        translation, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=400,
-                                        workflow="translate", thread_id=thread_id)
+        summary, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=500,
+                                    workflow="translate", thread_id=thread_id)
     except Exception as exc:
-        _log.warning("translate LLM error tid=%s: %s", thread_id, exc)
-        translation = ""
-    if not translation.strip():
+        _log.warning("chat summary LLM error tid=%s: %s", thread_id, exc)
+        summary = ""
+    if not summary.strip():
         return HTMLResponse("")
     tr_lbl = _h.escape(t("chat.tr_result"))
     return HTMLResponse(
         f'<div style="padding:.3rem .75rem;font-size:.76rem;color:#8899aa;'
-        f'background:#141925;border-top:1px solid #2d3748">'
+        f'background:#141925;border-top:1px solid #2d3748;white-space:pre-wrap">'
         f'<span style="color:#4a5568">{tr_lbl}</span>'
-        f' {_h.escape(translation.strip())}</div>'
+        f' {_h.escape(summary.strip())}</div>'
     )
 
 
@@ -520,12 +530,7 @@ async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HT
             tr = await translate_message(session, mid, BrokerLLM())
         except Exception as exc:
             _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
-            orig = (
-                await session.execute(
-                    text("SELECT text FROM message WHERE id=:mid"), {"mid": mid}
-                )
-            ).first()
-            return HTMLResponse(_h.escape(orig[0]) if orig and orig[0] else "")
+            return HTMLResponse("")  # empty → JS leaves the bubble as-is, lets the user retry
     return HTMLResponse(_h.escape(tr) if tr else "")
 
 
