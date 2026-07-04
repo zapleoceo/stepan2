@@ -12,6 +12,14 @@ from app.domain.clock import as_naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
 from app.ports.channel import InboundMessage, SendResult
 
+# IG errors that mean the message is already gone — unsend is idempotent, don't retry.
+_GONE_MARKERS = ("not found", "does not exist", "media_unavailable", "no longer available",
+                 "already", "unsend")
+
+
+def _already_gone(exc: Exception) -> bool:
+    return any(m in str(exc).lower() for m in _GONE_MARKERS)
+
 
 class IGTransport(Protocol):
     """Raw Instagram calls, decoupled from instagrapi specifics."""
@@ -59,10 +67,15 @@ class InstagramAdapter:
         return SendResult(ok=True, external_message_id=str(raw.get("item_id", "")))
 
     async def revoke(self, external_thread_id: str, external_message_id: str) -> bool:
-        """Unsend one of our messages in IG; False on transport failure (keep + retry)."""
+        """Unsend one of our messages in IG. True on success OR when IG says the message is
+        already gone (idempotent — the goal is 'not in IG', which is met either way, so a
+        message the manager already deleted in the app doesn't retry forever). False only on
+        a real, retryable failure (e.g. a 403 action throttle)."""
         try:
             await self._t.revoke_direct(external_thread_id, external_message_id)
-        except Exception:  # noqa: BLE001 — worker logs, keeps the flag, retries next tick
+        except Exception as exc:  # noqa: BLE001 — classify: gone = done, else keep + retry
+            if _already_gone(exc):
+                return True
             return False
         return True
 

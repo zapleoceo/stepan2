@@ -97,6 +97,28 @@ async def test_delete_local_rewinds_both_watermarks(db_session) -> None:
     assert refreshed.last_in_at < _NOW - timedelta(minutes=20)  # rewound to older inbound
 
 
+async def test_stale_revoke_gives_up_and_clears_flag(db_session) -> None:
+    """A months-old delete_requested that keeps failing must NOT retry forever (that poison
+    backlog throttled the whole IG delete action). Past the age cutoff, drop the flag and
+    never call IG for it again."""
+    bid, cid, tid, _ = await _thread(db_session)
+    await _msg(db_session, bid, cid, tid, ext="ancient", minutes_ago=60 * 24 * 30)  # 30 days
+    rev = FakeRevoker(ok=False)
+    assert await DeletionService(db_session, bid).process(cid, "ig-1", rev) == 0
+    assert rev.calls == []  # never even attempted — too old
+    msg = (await db_session.exec(select(Message))).first()
+    assert msg is not None and msg.delete_requested is False  # flag cleared, stops retrying
+
+
+async def test_idempotent_gone_revoke_reports_success() -> None:
+    """A message already deleted in the app makes IG raise 'not found' — the adapter treats
+    that as success (the goal, 'not in IG', is met) so it doesn't retry forever."""
+    from app.adapters.channels.instagram import _already_gone
+    assert _already_gone(Exception("item not found")) is True
+    assert _already_gone(Exception("does not exist")) is True
+    assert _already_gone(Exception("403 ClientForbiddenError something went wrong")) is False
+
+
 async def test_inbound_and_unflagged_not_touched(db_session) -> None:
     bid, cid, tid, _ = await _thread(db_session)
     await _msg(db_session, bid, cid, tid, ext="in1", out=False, requested=True)

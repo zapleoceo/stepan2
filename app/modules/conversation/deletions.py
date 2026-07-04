@@ -6,7 +6,9 @@ happen. A failed revoke keeps the flag (warn + retry next tick). Removing the la
 outgoing message rewinds last_out_at so the reply/followup state stays honest."""
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy import func
@@ -16,6 +18,14 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import ChannelThread, Message
 
 logger = logging.getLogger(__name__)
+
+# A revoke that hasn't succeeded within this window never will (IG won't unsend very old
+# messages, and a message already deleted in the app stays 403/failed) — give up and clear
+# the flag so the poison never piles up and starves the tick (real incident: a months-old
+# backlog retried every minute got the whole delete action throttled by IG).
+_MAX_REVOKE_AGE = timedelta(hours=6)
+# One IG revoke can hang 40-90s; bound it so a single stuck call can't eat the job timeout.
+_REVOKE_TIMEOUT_S = 25
 
 
 class Revoker(Protocol):
@@ -41,8 +51,23 @@ class DeletionService:
     async def process(self, channel_id: int, external_thread_id: str, revoker: Revoker) -> int:
         """Revoke each pending message in IG; delete locally only on success."""
         done = 0
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - _MAX_REVOKE_AGE
         for msg in await self.pending(channel_id):
-            if not await revoker.revoke(external_thread_id, msg.external_id):
+            if msg.occurred_at is not None and msg.occurred_at < cutoff:
+                msg.delete_requested = False  # too old to unsend — stop retrying, drop the flag
+                self.session.add(msg)
+                await self.session.flush()
+                logger.info("unsend giving up (too old) branch=%d msg=%d",
+                            self.branch_id, msg.id)
+                continue
+            try:
+                ok = await asyncio.wait_for(
+                    revoker.revoke(external_thread_id, msg.external_id),
+                    timeout=_REVOKE_TIMEOUT_S,
+                )
+            except TimeoutError:
+                ok = False
+            if not ok:
                 logger.warning(
                     "unsend failed branch=%d msg=%d — still in IG, will retry",
                     self.branch_id, msg.id,
