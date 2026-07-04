@@ -22,15 +22,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("rederive_needs")
 
 _SYSTEM = (
-    "You extract a sales lead's needs from an Instagram DM chat. Use ONLY what the LEAD "
-    "said in THEIR OWN words. ABSOLUTE RULES:\n"
-    "- NEVER copy the agent's suggestions or questions. If the agent listed options "
-    "('become an analyst? build apps?') and the lead only replied 'yes'/'iya'/'everything'/"
-    "a single word, that is NOT the lead stating those things — capture at most ONE short "
-    "vague job, or nothing.\n"
-    "- NEVER infer, guess, or invent. If the lead didn't explicitly voice something, leave "
-    "it out. Empty lists are correct and expected.\n"
-    "- Keep the lead's own language and wording; short phrases.\n"
+    "You extract a sales lead's needs from an Instagram DM chat, from what the LEAD said in "
+    "THEIR OWN words.\n"
+    "CAPTURE anything the lead EXPLICITLY stated themselves, e.g. 'I want to be a fullstack "
+    "developer', 'pengen bikin aplikasi mobile game', 'I want to switch careers' — those ARE "
+    "explicit jobs/gains and MUST be captured in the lead's words.\n"
+    "DO NOT capture: (a) the AGENT's suggestions/options the lead only replied 'yes'/'iya'/"
+    "'everything'/a single word to — a bare yes is NOT the lead stating those; (b) anything "
+    "you infer or invent that the lead never actually said.\n"
+    "Rank by importance and keep only the few that matter (<=3 each); short phrases in the "
+    "lead's language; empty lists when the lead truly said nothing concrete.\n"
     "Output ONLY this JSON, nothing else:\n"
     '{"jobs":[],"pains":[],"gains":[],"discovery_complete":false}\n'
     "jobs = what the lead explicitly wants to achieve. pains = fears/obstacles/cost-of-"
@@ -39,13 +40,18 @@ _SYSTEM = (
 )
 
 
-async def _lead_ids(session, branch: int | None, limit: int | None) -> list[int]:
+async def _lead_ids(
+    session, branch: int | None, limit: int | None, offset: int = 0,
+) -> list[int]:
     where = "WHERE l.branch_id = :b" if branch else ""
     params: dict = {"b": branch} if branch else {}
     q = f"SELECT l.id FROM lead l {where} ORDER BY l.id"  # noqa: S608 — where is a fixed clause
     if limit:
         q += " LIMIT :lim"
         params["lim"] = limit
+    if offset:
+        q += " OFFSET :off"
+        params["off"] = offset
     rows = (await session.execute(text(q), params)).all()
     return [r[0] for r in rows]
 
@@ -94,12 +100,18 @@ async def _process(lead_id: int, llm: BrokerLLM, dry: bool) -> str:
         raw = None
         for attempt in range(4):  # broker 502/ReadTimeout under load — retry with backoff
             try:
+                # chat:smart + a big token budget: the routed model is a REASONING model
+                # (gpt-oss-120b) that spends tokens thinking, so a small max_tokens returns
+                # an EMPTY completion — the bug that silently blanked most profiles on the
+                # first pass. 1500 leaves room for the JSON after the reasoning.
                 raw, _ = await llm.chat(
                     [{"role": "system", "content": _SYSTEM},
                      {"role": "user", "content": convo}],
-                    capability="chat:fast", max_tokens=400, workflow="rederive",
+                    capability="chat:smart", max_tokens=1500, workflow="rederive",
                     thread_id=lead_id)
-                break
+                if raw and raw.strip():
+                    break
+                raw = None  # empty completion → treat as a retryable failure
             except Exception as exc:  # noqa: BLE001
                 if attempt == 3:
                     log.warning("lead %s: LLM failed after retries: %s", lead_id, exc)
@@ -118,12 +130,13 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--branch", type=int, default=None)
     ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--offset", type=int, default=0)
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--dry", action="store_true")
     args = ap.parse_args()
 
     async with session_scope() as session:
-        ids = await _lead_ids(session, args.branch, args.limit)
+        ids = await _lead_ids(session, args.branch, args.limit, args.offset)
     log.info("re-deriving needs for %d leads (dry=%s, conc=%d)", len(ids), args.dry,
              args.concurrency)
     llm = BrokerLLM()
