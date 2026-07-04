@@ -76,7 +76,14 @@ async def _ingest_channel(branch_id: int, channel_id: int) -> int:
                 return 0
             if not await _healthy(session, branch_id, channel, port):
                 return 0  # checkpoint/expired session — frozen until re-login
-            inbound = await port.fetch_inbound()
+            try:
+                inbound = await port.fetch_inbound()
+            except RuntimeError as exc:
+                # e.g. own IG id unresolvable — the transport fails the poll on purpose
+                # rather than misclassify our own messages as inbound. Skip THIS channel
+                # only; other channels/branches keep polling.
+                logger.warning("skip ingest channel %s: fetch failed: %s", channel_id, exc)
+                return 0
             return len(await IngestService(session, branch_id).ingest(channel_id, inbound))
     except IntegrityError:
         logger.info("ingest channel %s: rows already stored by a concurrent run", channel_id)

@@ -356,6 +356,67 @@ def test_transport_prefers_stored_ds_user_id_over_unset_client_user_id() -> None
     assert rows[0]["direction"] == "out"
 
 
+def test_transport_raises_when_own_id_unresolvable() -> None:
+    """If neither ds_user_id nor client.user_id is available, the transport must FAIL the
+    poll rather than default every item to direction='in' — that silent default filed 1401
+    of our own sent messages as inbound lead messages in prod. Raising skips the poll (the
+    worker logs + retries) instead of writing corrupt rows."""
+    import asyncio
+
+    import pytest
+
+    from app.adapters.channels.transports import InstagrapiTransport
+
+    transport = InstagrapiTransport(username="acc", session_settings={})  # no ds_user_id
+    transport._client = _FakeInstagrapiClient()  # client.user_id is None too
+
+    with pytest.raises(RuntimeError, match="cannot resolve own IG user id"):
+        asyncio.run(transport.fetch_threads())
+
+
+def test_transport_skips_item_with_no_user_id() -> None:
+    """An item carrying no user_id can't be attributed to anyone; guessing 'in' is exactly
+    how our own messages got mislabeled. It must be skipped, not stored as inbound."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.adapters.channels.transports import InstagrapiTransport
+
+    transport = InstagrapiTransport(
+        username="acc",
+        session_settings={"authorization_data": {"ds_user_id": "999"}},
+    )
+    transport._client = _FakeInstagrapiClient()
+
+    def _echo(item):
+        return {"text": item.get("text", ""), "link_url": None, "preview_url": None,
+                "media_url": None, "media_kind": None}
+
+    async def _run():
+        with patch(
+            "app.adapters.channels.ig_parse.item_content", side_effect=_echo,
+        ), patch(
+            "app.adapters.channels.transports._paged_threads",
+            return_value=[{
+                "thread_id": "t1", "is_group": False,
+                "users": [{"pk": "999"}, {"pk": "lead9"}],
+                "items": [
+                    {"item_type": "text", "text": "ours", "item_id": "a",
+                     "user_id": "999", "timestamp": 1},
+                    {"item_type": "text", "text": "orphan", "item_id": "b",
+                     "user_id": "", "timestamp": 2},  # no sender → must be skipped
+                    {"item_type": "text", "text": "theirs", "item_id": "c",
+                     "user_id": "lead9", "timestamp": 3},
+                ],
+            }],
+        ):
+            return await transport.fetch_threads()
+
+    rows = asyncio.run(_run())
+    texts = {r["text"]: r["direction"] for r in rows}
+    assert texts == {"ours": "out", "theirs": "in"}  # orphan dropped, others correct
+
+
 # --- Registry ----------------------------------------------------------------
 
 

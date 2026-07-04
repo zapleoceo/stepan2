@@ -91,20 +91,33 @@ class InstagrapiTransport:
                 lang=self._lang, tz_offset_h=self._tz_offset_h)
         return self._client
 
+    def _resolve_own_id(self, client: Any) -> str:
+        """Our IG account's numeric id — REQUIRED to tell our own sent items apart from the
+        lead's. `client.user_id` is set by instagrapi's login() flow, NOT by set_settings();
+        we rebuild the client from a stored session dump and never re-login, so it stays
+        unset. `authorization_data.ds_user_id` DOES survive set_settings() and equals the
+        user_id IG stamps on our own polled items — always prefer it.
+
+        Fail-CLOSED if neither is available: direction is decided by `uid == own_id`, so a
+        blank own_id would classify EVERY item as inbound, silently filing our own outgoing
+        messages as if the lead sent them (corrupts the transcript AND the LLM's turn-taking
+        — this was a real prod incident: 1401 of our sends mislabeled inbound). Raising skips
+        the whole poll (logged by the caller) instead of writing corrupt rows."""
+        own = str((self._session_settings.get("authorization_data") or {}).get("ds_user_id") or "")
+        if not own and client.user_id:
+            own = str(client.user_id)
+        if not own:
+            raise RuntimeError(
+                "cannot resolve own IG user id (no ds_user_id / client.user_id); skipping "
+                "poll to avoid misclassifying our own messages as inbound lead messages"
+            )
+        return own
+
     async def fetch_threads(self) -> list[dict[str, Any]]:
         from .ig_parse import item_content  # noqa: PLC0415
 
         client = self._ensure_client()
-        # client.user_id is set by instagrapi's login() flow, NOT by set_settings() — a
-        # client rebuilt from a stored session dump (the only path here, we never call
-        # login() again) leaves it unset, so items we sent ourselves get misread as
-        # direction="in" (the lead's own words echoed back, corrupting dialog history and
-        # the LLM's turn-taking). authorization_data.ds_user_id survives set_settings() and
-        # is the same id IG assigns the sender_id of our own polled items — always prefer it.
-        own_id = (
-            str((self._session_settings.get("authorization_data") or {}).get("ds_user_id") or "")
-            or (str(client.user_id) if client.user_id else None)
-        )
+        own_id = self._resolve_own_id(client)  # raises → caller skips this poll, no corrupt rows
         out: list[dict[str, Any]] = []
         seen_threads: set[str] = set()
         # Raw private API gives ad_context_data / send_attribution not in the pydantic
@@ -150,6 +163,11 @@ class InstagrapiTransport:
                     if content is None:
                         continue
                     uid = str(item.get("user_id", ""))
+                    if not uid:
+                        # No sender on the item — we cannot know whose it is, and guessing
+                        # 'in' is exactly how our own messages got mislabeled. Skip it; a
+                        # real message re-surfaces on a later poll with its user_id present.
+                        continue
                     out.append({
                         **base,
                         # client_context is IG's own idempotency key — fall back to it so
@@ -157,7 +175,9 @@ class InstagrapiTransport:
                         # fallback drifts by timestamp precision and dupes the message).
                         "item_id": str(item.get("item_id") or item.get("client_context") or "")
                         or None,
-                        "direction": "out" if (own_id and uid == own_id) else "in",
+                        # own_id is guaranteed non-empty here (see _resolve_own_id), so this
+                        # is a definite ownership test, never a fall-through-to-inbound default.
+                        "direction": "out" if uid == own_id else "in",
                         "sender_id": uid,
                         "timestamp": item.get("timestamp"),
                         **content,
