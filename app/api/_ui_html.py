@@ -240,7 +240,7 @@ _CSS = (
     ".bm{font-size:.63rem;color:#4a5568;margin-bottom:.1rem;display:flex;"
     "align-items:center;gap:.2rem}"
     ".bb-o .bm{justify-content:flex-end}"
-    ".b-llm{font-size:.66rem;color:#93a1b3;opacity:.95;margin-top:.2rem;max-width:100%;"
+    ".b-llm{font-size:.63rem;color:#4a5568;margin-top:.2rem;max-width:100%;"
     "font-family:ui-monospace,monospace;letter-spacing:.1px;"
     "white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
     ".bb-o .b-llm{text-align:right}"
