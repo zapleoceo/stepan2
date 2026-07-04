@@ -161,6 +161,32 @@ async def test_product_slug_attributed_once(db_session) -> None:
     assert thread.product_slug == "vibe"
 
 
+async def test_hard_stop_dormant_bot_off_timer_cleared(db_session) -> None:
+    bid, tid, lead = await _world(db_session, stage=Stage.QUALIFYING)
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    thread.next_followup_at = _NOW  # a pending nudge that must be revoked
+    db_session.add(thread)
+    await db_session.flush()
+    out = await _svc(db_session, bid).enqueue_reply(tid, _decision(hard_stop=True))
+    assert out is not None  # the one apology still queues and goes out
+    assert lead.stage == Stage.DORMANT
+    assert lead.agent_enabled is False
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    assert thread.next_followup_at is None
+    ev = (await db_session.exec(
+        select(StageEvent).where(StageEvent.reason == "hard_stop"))).first()
+    assert ev is not None and ev.to_stage == "dormant" and ev.actor == "bot"
+
+
+async def test_hard_stop_when_already_dormant_writes_no_duplicate_event(db_session) -> None:
+    bid, tid, lead = await _world(db_session, stage=Stage.DORMANT)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(hard_stop=True))
+    assert lead.agent_enabled is False
+    assert (await db_session.exec(select(StageEvent))).first() is None
+
+
 async def test_budget_gate_blocks_decide(db_session) -> None:
     bid, tid, _ = await _world(db_session, settings={"daily_budget_usd": "0.01"})
     svc = _svc(db_session, bid)

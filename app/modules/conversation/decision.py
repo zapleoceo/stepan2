@@ -43,6 +43,9 @@ class Decision:
     pains: list[str] = field(default_factory=list)
     gains: list[str] = field(default_factory=list)
     discovery_complete: bool = False
+    # Lead explicitly demanded we stop contacting them ("jangan chat lagi", "stop", threatens
+    # to report spam). A normal "no thanks" is NOT this — only an explicit do-not-contact.
+    hard_stop: bool = False
 
     def has_needs(self) -> bool:
         """At least one pain or gain captured — the minimum to present against a need."""
@@ -93,6 +96,7 @@ def parse_decision(raw_json: str) -> Decision:
         pains=_str_list(data.get("pains")),
         gains=_str_list(data.get("gains")),
         discovery_complete=bool(data.get("discovery_complete", False)),
+        hard_stop=bool(data.get("hard_stop", False)),
     )
 
 

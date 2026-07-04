@@ -128,6 +128,18 @@ async def test_send_sets_last_out_at_and_arms_timer(db_session) -> None:
     assert thread.next_followup_at is not None  # armed at sched[0]=4h from send
 
 
+async def test_send_to_bot_off_lead_does_not_arm_timer(db_session) -> None:
+    """After a hard-stop the apology still goes out, but the send must NOT re-arm a nudge —
+    agent_enabled=False (or dormant) means no more contact. Anti-ban guard in _plan_followup."""
+    bid, tid, _lead, thread = await _world(db_session, agent_enabled=False)
+    db_session.add(Outbox(branch_id=bid, thread_id=tid, text="sorry", source="agent",
+                          scheduled_at=_NOW - timedelta(seconds=5)))
+    await db_session.flush()
+    row = await OutboxSender(db_session, bid, FakeChannel()).send_next(tid)
+    assert row is not None and row.status == "sent"  # apology still delivered
+    assert thread.next_followup_at is None  # but no follow-up armed
+
+
 async def test_manager_send_does_not_touch_followup_cycle(db_session) -> None:
     bid, tid, _lead, thread = await _world(db_session)
     db_session.add(Outbox(branch_id=bid, thread_id=tid, text="hi", source="manager",

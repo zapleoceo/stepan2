@@ -127,6 +127,10 @@ class OutboxSender:
         Manager sends do not touch the cycle."""
         if row.source not in ("agent", "followup"):
             return
+        lead = await self.session.get(Lead, thread.lead_id)
+        if lead is not None and (not lead.agent_enabled or lead.stage == Stage.DORMANT):
+            thread.next_followup_at = None  # bot off / hard-stopped / handed off — no nudges
+            return
         if row.source == "followup":
             thread.followups_sent += 1  # this nudge counts now that it actually went out
         schedule = cfg.followup_schedule_h

@@ -271,6 +271,15 @@ def test_parse_decision_manager_question_defaults_to_none():
     assert d.kb_gap is None
 
 
+def test_parse_decision_hard_stop():
+    from app.modules.conversation.decision import parse_decision
+    on = parse_decision(json.dumps({"reply": "Maaf, aku berhenti.", "stage": "dormant",
+                                    "hard_stop": True}))
+    assert on.hard_stop is True
+    off = parse_decision(json.dumps({"reply": "ok", "stage": "qualifying"}))
+    assert off.hard_stop is False  # absent → not a hard stop
+
+
 # ── manager alert ─────────────────────────────────────────────────────────────
 
 class FakeNotifier:

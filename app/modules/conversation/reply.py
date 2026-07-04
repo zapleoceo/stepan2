@@ -144,6 +144,9 @@ class ReplyService:
         if decision.reply_language and decision.reply_language != lead.preferred_language:
             lead.preferred_language = decision.reply_language  # lead switched language — remember
             self.session.add(lead)
+        if decision.hard_stop:
+            await self._hard_stop(lead, thread)
+            return
         new_stage = self._stage_for(decision, lead)
         if new_stage == lead.stage:
             return
@@ -160,6 +163,23 @@ class ReplyService:
             await self._handoff(lead, thread, decision.ready_subtype)
         self.session.add(lead)
         logger.info("branch=%d lead=%d stage → %s", self.branch_id, lead.id, new_stage)
+
+    async def _hard_stop(self, lead: Lead, thread) -> None:
+        """Lead explicitly demanded we stop: let the one queued apology go out, then silence
+        the account — bot off, dormant, follow-up timer cleared. Anti-ban: a nudge after an
+        explicit stop turns an annoyed lead into a spam report against the IG account."""
+        thread.next_followup_at = None
+        self.session.add(thread)
+        if lead.stage != Stage.DORMANT:
+            self.session.add(StageEvent(
+                branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+                from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
+                actor="bot", reason="hard_stop",
+            ))
+            lead.stage = Stage.DORMANT
+        lead.agent_enabled = False
+        self.session.add(lead)
+        logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
 
     def _stage_for(self, decision: Decision, lead: Lead) -> Stage:
         if decision.ready and lead.phone_e164:
