@@ -112,6 +112,25 @@ async def test_retrieve_empty_when_no_index(db_session) -> None:
     assert await RagService(db_session, bid, _BagLLM()).retrieve("price") == []
 
 
+async def test_retrieve_labels_embed_as_query_with_thread(db_session) -> None:
+    """The per-reply retrieval embedding is tagged embed:query + carries the chat id, so
+    the broker log distinguishes it from KB-reindex embeddings (embed:index)."""
+    class _RecordingLLM(_BagLLM):
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def embed(self, texts, **k):  # noqa: ANN001, ANN003, ANN201
+            self.calls.append(k)
+            return await super().embed(texts, **k)
+
+    bid = await _seed(db_session)
+    llm = _RecordingLLM()
+    await reindex_branch(db_session, bid, _BagLLM())
+    await RagService(db_session, bid, llm).retrieve("price", thread_id=1761)
+    assert llm.calls and llm.calls[-1]["kind"] == "embed:query"
+    assert llm.calls[-1]["thread_id"] == 1761
+
+
 # ─── watcher staleness ──────────────────────────────────────────────────────────
 
 async def test_watcher_detects_edits(db_session) -> None:

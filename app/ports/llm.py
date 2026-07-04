@@ -24,6 +24,7 @@ class LLMPort(Protocol):
         ...
 
     async def embed(
-        self, texts: list[str], *, thread_id: int | None = None, branch_id: int | None = None
+        self, texts: list[str], *, thread_id: int | None = None,
+        branch_id: int | None = None, kind: str = "embed",
     ) -> list[list[float]]:
         ...

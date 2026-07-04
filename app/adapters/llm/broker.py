@@ -93,6 +93,7 @@ class BrokerLLM:
         *,
         thread_id: int | None = None,
         branch_id: int | None = None,
+        kind: str = "embed",
     ) -> list[list[float]]:
         if not texts:
             return []
@@ -115,11 +116,11 @@ class BrokerLLM:
                 "request_id": d.get("request_id") or d.get("id"),
             }
         except Exception as exc:
-            await _log_call("embedding", "embed", thread_id, branch_id,
+            await _log_call("embedding", kind, thread_id, branch_id,
                             {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
                             ok=False, error=_err_text(exc))
             raise
-        await _log_call("embedding", "embed", thread_id, branch_id, meta, ok=True)
+        await _log_call("embedding", kind, thread_id, branch_id, meta, ok=True)
         return embeddings
 
 

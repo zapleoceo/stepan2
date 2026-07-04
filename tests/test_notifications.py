@@ -23,12 +23,14 @@ class FakeNotifier:
 
     def __init__(self, *, gone_once: bool = False) -> None:
         self.topics: list[str] = []
+        self.icons: list[str | None] = []
         self.sends: list[dict[str, Any]] = []
         self._next_id = 100
         self._gone_once = gone_once
 
-    async def create_topic(self, *, name: str) -> int | None:
+    async def create_topic(self, *, name: str, icon_emoji: str | None = None) -> int | None:
         self.topics.append(name)
+        self.icons.append(icon_emoji)
         self._next_id += 1
         return self._next_id
 
@@ -62,18 +64,19 @@ async def test_raise_alert_writes_row_and_opens_lead_topic(db_session):
 
     alert = await AlertService(s, branch_id, notifier).raise_alert(
         lead_id, "ready_deal", "ready to buy", "готов купить",
-        thread_id=None, lead_phone="+62811",
+        thread_id=1729, lead_phone="+62811",
     )
 
     row = (await s.exec(select(ManagerAlert))).one()
     assert row.id == alert.id and row.kind == "ready_deal"
     assert row.summary_en == "ready to buy" and row.summary_ru == "готов купить"
-    # one topic opened (named after the lead), one message sent into it
-    assert notifier.topics == ["Budi"]
+    # one topic opened (named after the lead), fire icon for a deal, one message sent
+    assert notifier.topics == ["Budi"] and notifier.icons == ["🔥"]
     assert len(notifier.sends) == 1
     sent = notifier.sends[0]
     assert sent["topic_id"] == 101
-    # without an LLM the body carries the reason in both languages
+    # header (chat # + name) + both reasons (no summary lines without an LLM)
+    assert "чат #1729" in sent["text"] and "Budi" in sent["text"]
     assert "ready to buy" in sent["text"] and "готов купить" in sent["text"]
     # topic id is persisted on the lead for reuse
     lead = await s.get(Lead, lead_id)
@@ -160,6 +163,8 @@ async def test_bilingual_body_orders_branch_then_ru(db_session):
     # branch-language block (summary + reason) comes before the Russian block
     assert body.index("Ringkasan Bahasa") < body.index("Alasan Bahasa") < body.index("➖")
     assert body.index("➖") < body.index("Сводка по-русски") < body.index("Лид готов")
+    # open-house alerts get the calendar topic icon
+    assert notifier.icons == ["📆"]
 
 
 # ─── TelegramNotifier transport (no network) ───────────────────────────────────
@@ -210,11 +215,12 @@ async def test_telegram_create_topic_returns_thread_id(monkeypatch):
     _CapturingClient.reply = {"ok": True, "result": {"message_thread_id": 555}}
     monkeypatch.setattr(httpx, "AsyncClient", _CapturingClient)
     notifier = TelegramNotifier(bot_token=_FAKE_TOKEN, group_chat_id=-1009999)
-    tid = await notifier.create_topic(name="Budi")
+    tid = await notifier.create_topic(name="Budi", icon_emoji="🔥")
     assert tid == 555
     assert _CapturingClient.captured["url"].endswith("/botTOK/createForumTopic")
-    assert _CapturingClient.captured["json"]["chat_id"] == -1009999
-    assert _CapturingClient.captured["json"]["name"] == "Budi"
+    j = _CapturingClient.captured["json"]
+    assert j["chat_id"] == -1009999 and j["name"] == "Budi"
+    assert j["icon_custom_emoji_id"] == "5312241539987020022"  # 🔥 topic-icon sticker id
 
 
 async def test_telegram_send_targets_topic_and_group(monkeypatch):

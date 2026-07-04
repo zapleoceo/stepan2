@@ -22,6 +22,14 @@ from .summarize import build_alert_body
 
 logger = logging.getLogger(__name__)
 
+# Alert kind → forum-topic icon (matches the funnel semantics: a deal is 🔥, an
+# open-house RSVP is a 📆, a manager question is a ❓).
+_KIND_ICON = {
+    "ready_deal": "🔥", "ready_openhouse": "📆", "needs_manager": "❓",
+}
+# Short language label shown before each summary block.
+_LANG_LABEL = {"id": "Bahasa", "en": "En", "ru": "Ru", "ms": "Melayu"}
+
 
 class AlertService:
     """Records and dispatches manager hand-offs for one branch."""
@@ -79,21 +87,24 @@ class AlertService:
             self.session, self._llm, thread_id,
             branch_lang=lang, reason_en=reason_en, reason_ru=reason_ru,
         )
-        text = self._compose(body.summary_branch, body.reason_branch,
-                             body.summary_ru, reason_ru, thread_id)
+        lead_name = (lead.display_name or lead.ig_username or f"lead #{lead_id}") if lead else ""
+        text = self._compose(
+            thread_id, lead_name, lang,
+            body.summary_branch, body.reason_branch, body.summary_ru, reason_ru,
+        )
         topic_id = lead.notify_topic_id if lead is not None else None
         if lead is not None and topic_id is None:
-            topic_id = await self._open_topic(lead, branch)
+            topic_id = await self._open_topic(lead, kind)
         status = await self._notifier.send(text=text, topic_id=topic_id)
         if status == "topic_gone" and lead is not None:  # topic was deleted — recreate once
-            topic_id = await self._open_topic(lead, branch)
+            topic_id = await self._open_topic(lead, kind)
             await self._notifier.send(text=text, topic_id=topic_id)
 
-    async def _open_topic(self, lead: Lead, branch: Branch | None) -> int | None:
-        """Create the lead's forum topic and persist its id; None if creation failed."""
+    async def _open_topic(self, lead: Lead, kind: str) -> int | None:
+        """Create the lead's forum topic (icon by alert kind) and persist its id."""
         assert self._notifier is not None
         name = (lead.display_name or lead.ig_username or f"lead #{lead.id}").strip()
-        topic_id = await self._notifier.create_topic(name=name)
+        topic_id = await self._notifier.create_topic(name=name, icon_emoji=_KIND_ICON.get(kind))
         if topic_id is not None:
             lead.notify_topic_id = topic_id
             self.session.add(lead)
@@ -101,16 +112,21 @@ class AlertService:
         return topic_id
 
     def _compose(
-        self, sum_branch: str, reason_branch: str, sum_ru: str, reason_ru: str,
-        thread_id: int | None,
+        self, thread_id: int | None, lead_name: str, branch_lang: str,
+        sum_branch: str, reason_branch: str, sum_ru: str, reason_ru: str,
     ) -> str:
+        blabel = _LANG_LABEL.get((branch_lang or "").lower(), branch_lang or "?")
+        head = ", ".join(p for p in (
+            (f"чат #{thread_id}" if thread_id is not None else ""), _esc(lead_name)) if p)
         parts: list[str] = []
+        if head:
+            parts.append(f"<b>{head}</b>")
         if sum_branch.strip():
-            parts.append(_esc(sum_branch.strip()))
+            parts.append(f"<b>{_esc(blabel)}:</b> {_esc(sum_branch.strip())}")
         parts.append(f"⚠️ {_esc(reason_branch.strip())}")
         parts.append("➖➖➖")
         if sum_ru.strip():
-            parts.append(_esc(sum_ru.strip()))
+            parts.append(f"<b>Ru:</b> {_esc(sum_ru.strip())}")
         parts.append(f"⚠️ {_esc(reason_ru.strip())}")
         body = "\n\n".join(parts)
         if thread_id is not None:

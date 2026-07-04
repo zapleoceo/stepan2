@@ -438,8 +438,13 @@ class WorkerSettings:
         # gentler on the account. Reply/send stay per-minute (DB/queue, cheap).
         cron(ingest_active_channels, minute=set(range(0, 60, 2)), second=0,
              run_at_startup=False),
-        cron(reply_pending, second=20, run_at_startup=False),
-        cron(send_outbox, second=40, run_at_startup=False),
+        # Reply + send poll every 20s (not once/min) to cut internal latency. Neither adds
+        # IG load: reply_pending is LLM/DB only, and send_outbox's real IG send rate is
+        # bounded by scheduled_at + reply_delay + hourly/daily caps — polling more often
+        # just shortens the wait for an already-due row, it never sends more. The 2-min
+        # ingest cadence (the actual IG-polling, anti-ban-sensitive step) is unchanged.
+        cron(reply_pending, second={0, 20, 40}, run_at_startup=False),
+        cron(send_outbox, second={10, 30, 50}, run_at_startup=False),
         # Unsend requests every minute (second=30, between reply and send)
         cron(process_deletions, second=30, run_at_startup=False),
         # Follow-ups run every 10 minutes (minute divisible by 10, second=50)

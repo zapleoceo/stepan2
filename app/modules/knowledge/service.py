@@ -60,7 +60,8 @@ class KnowledgeService:
         return branch.lang if branch is not None else "id"
 
     async def knowledge_context(
-        self, product_slug: str | None, lang: str | None = None, query: str | None = None
+        self, product_slug: str | None, lang: str | None = None, query: str | None = None,
+        thread_id: int | None = None,
     ) -> str:
         """Persona (direct) + catalog + focused card + RAG-retrieved chunks for `query`.
         Chunks are added only when an llm is available and a query is given."""
@@ -71,7 +72,8 @@ class KnowledgeService:
             blocks.append(_focus_block(focused, resolved_lang))
         blocks.append(_catalog_block(await self.products.active(), resolved_lang))
         if self.llm is not None and query:
-            chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(query)
+            chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
+                query, thread_id=thread_id)
             blocks.append(_rag_block(chunks))
         return "\n\n".join(b for b in blocks if b)
 

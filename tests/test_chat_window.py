@@ -216,10 +216,12 @@ def test_event_bubble_shows_product_change_detail() -> None:
 
 # ─── manager alert deep-link ──────────────────────────────────────────────────
 
-def test_alert_body_includes_chat_deep_link() -> None:
+def test_alert_body_includes_header_deep_link_and_lang_blocks() -> None:
     from app.modules.notifications.alerts import AlertService
     svc = AlertService(None, 1, None)  # _compose is pure — no session/notifier touched
-    body = svc._compose("ringkasan", "alasan", "сводка", "причина", thread_id=1732)
+    body = svc._compose(1732, "Budi", "id", "ringkasan", "alasan", "сводка", "причина")
+    assert "чат #1732" in body and "Budi" in body       # header line
+    assert "Bahasa:" in body and "Ru:" in body          # per-language summary labels
     assert "/ui/chat/1732" in body and "open chat" in body
     # branch-language block precedes the Russian one
     assert body.index("alasan") < body.index("причина")

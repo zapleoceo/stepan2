@@ -17,6 +17,15 @@ _API = "https://api.telegram.org"
 # Telegram errors that mean the forum topic no longer exists → recreate + resend.
 _TOPIC_GONE = ("thread not found", "topic_deleted", "topic deleted",
                "message thread not found", "topic_closed", "topic id invalid")
+# Forum-topic icon sticker ids (from getForumTopicIconStickers) keyed by emoji — a topic
+# icon must be a custom_emoji_id from this fixed Telegram set, not an arbitrary emoji.
+_ICON_EMOJI_ID = {
+    "🔥": "5312241539987020022",   # ready_deal — hot lead / enrolling
+    "📆": "5433614043006903194",   # ready_openhouse — event RSVP
+    "❓": "5377316857231450742",   # needs_manager — open question
+    "💰": "5350452584119279096",
+    "📈": "5350305691942788490",
+}
 
 
 class TelegramNotifier:
@@ -27,8 +36,12 @@ class TelegramNotifier:
         self._chat_id = group_chat_id
         self._base = base_url.rstrip("/")
 
-    async def create_topic(self, *, name: str) -> int | None:
-        data = await self._call("createForumTopic", {"chat_id": self._chat_id, "name": name[:128]})
+    async def create_topic(self, *, name: str, icon_emoji: str | None = None) -> int | None:
+        payload: dict[str, Any] = {"chat_id": self._chat_id, "name": name[:128]}
+        icon_id = _ICON_EMOJI_ID.get(icon_emoji or "")
+        if icon_id:
+            payload["icon_custom_emoji_id"] = icon_id
+        data = await self._call("createForumTopic", payload)
         if data and data.get("ok"):
             return int(data["result"]["message_thread_id"])
         return None

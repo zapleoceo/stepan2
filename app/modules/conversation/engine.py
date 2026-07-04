@@ -122,7 +122,7 @@ class DecisionEngine:
     ) -> tuple[str, dict]:
         """Build the prompt, call the model, record the spend; returns (raw, meta)."""
         context = await self.knowledge.knowledge_context(
-            ctx.thread.product_slug, query=_retrieval_query(ctx.dialog))
+            ctx.thread.product_slug, query=_retrieval_query(ctx.dialog), thread_id=thread_id)
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(
             context, ctx.dialog, lang, coaching_notes=notes,

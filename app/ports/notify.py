@@ -9,8 +9,8 @@ SendStatus = Literal["ok", "topic_gone", "failed"]
 
 
 class NotifierPort(Protocol):
-    async def create_topic(self, *, name: str) -> int | None:
-        """Open a forum topic named `name`; return its id (message_thread_id) or None."""
+    async def create_topic(self, *, name: str, icon_emoji: str | None = None) -> int | None:
+        """Open a forum topic named `name` (optional icon by emoji); return its id or None."""
         ...
 
     async def send(self, *, text: str, topic_id: int | None = None) -> SendStatus:

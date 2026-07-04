@@ -93,7 +93,8 @@ class RagService:
         if not batch:
             return 0
         try:
-            vectors = await self.llm.embed([r[4] for r in batch], branch_id=self.branch_id)
+            vectors = await self.llm.embed(
+                [r[4] for r in batch], branch_id=self.branch_id, kind="embed:index")
         except Exception:
             if len(batch) == 1:
                 logger.warning("rag: dropping unembeddable chunk %s/%s",
@@ -107,7 +108,9 @@ class RagService:
                 title=title, seq=seq, text=text, embedding=json.dumps(vec)))
         return len(batch)
 
-    async def retrieve(self, query: str, k: int = _TOP_K) -> list[tuple[str, str]]:
+    async def retrieve(
+        self, query: str, k: int = _TOP_K, thread_id: int | None = None,
+    ) -> list[tuple[str, str]]:
         """Top-k (title, text) chunks most similar to `query`; [] if index/query empty."""
         query = (query or "").strip()
         if not query:
@@ -117,7 +120,8 @@ class RagService:
         )).scalars().all()
         if not chunks:
             return []
-        qv = (await self.llm.embed([query[:2000]], branch_id=self.branch_id))[0]
+        qv = (await self.llm.embed([query[:2000]], branch_id=self.branch_id,
+                                   thread_id=thread_id, kind="embed:query"))[0]
         qn = _norm(qv)
         if qn == 0.0:
             return []

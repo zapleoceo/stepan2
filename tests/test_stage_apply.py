@@ -43,7 +43,7 @@ class FakeNotifier:
     def __init__(self) -> None:
         self.sends: list[str] = []
 
-    async def create_topic(self, *, name: str) -> int:  # noqa: ARG002
+    async def create_topic(self, *, name: str, icon_emoji=None) -> int:  # noqa: ANN001, ARG002
         return 1
 
     async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
