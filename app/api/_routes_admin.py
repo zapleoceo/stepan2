@@ -116,17 +116,28 @@ async def reports_panel(request: Request) -> HTMLResponse:
         " FROM message m JOIN channel_thread ct ON ct.id=m.thread_id"
         " JOIN lead l ON l.id=ct.lead_id WHERE m.direction='out' {and_where} GROUP BY 1"
     )
+    # ad deep links need the branch's own FB business + ad-account ids; use them only when
+    # the view is scoped to a single branch (an all-branches ad list can't pick one account).
+    fb_bid = fb_acct = ""
     async with session_scope() as session:
         sc = (await session.execute(text(_sc.format(where=where)), params)).all()
         hi = (await session.execute(text(_hi.format(and_where=and_where)), params)).all()
         ho = (await session.execute(text(_ho.format(and_where=and_where)), params)).all()
         ad_funnel = await fetch_ad_funnel(session, branch_ids)
         discovery = await fetch_discovery_metrics(session, branch_ids)
+        if branch_ids and len(branch_ids) == 1:
+            fb = (await session.execute(
+                text("SELECT key, value FROM app_setting WHERE branch_id=:b"
+                     " AND key IN ('fb_business_id','fb_account_id')"),
+                {"b": branch_ids[0]})).all()
+            fbm = {k: v for k, v in fb}
+            fb_bid, fb_acct = fbm.get("fb_business_id", ""), fbm.get("fb_account_id", "")
     stage_counts = {r[0]: int(r[1]) for r in sc}
     hour_in = {int(r[0]): int(r[1]) for r in hi}
     hour_out = {int(r[0]): int(r[1]) for r in ho}
     return HTMLResponse(
-        reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery))
+        reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
+                           fb_business_id=fb_bid, fb_account_id=fb_acct))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)

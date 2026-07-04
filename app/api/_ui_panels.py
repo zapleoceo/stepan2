@@ -867,7 +867,22 @@ def settings_panel_html(settings: list) -> str:
 
 # ─── reports panel ────────────────────────────────────────────────────────────
 
-def _ad_funnel_html(rows: list) -> str:
+def _fb_ad_url(ad_id: object, business_id: str, account_id: str) -> str:
+    """Deep link that opens THIS ad in the right account. selected_ad_ids alone lands in
+    whatever account the session last used (often the wrong one); business_id + act pin the
+    business and ad account so it opens on the exact ad — the params from the working link
+    the owner uses. Falls back to the bare link when the ids aren't configured."""
+    base = "https://adsmanager.facebook.com/adsmanager/manage/ads?"
+    if business_id and account_id:
+        acct = account_id if account_id.startswith("act=") else f"act={account_id}"
+        return _h.escape(
+            f"{base}business_id={business_id}&global_scope_id={business_id}&{acct}"
+            f"&selected_ad_ids={ad_id}"
+        )
+    return _h.escape(f"{base}selected_ad_ids={ad_id}")
+
+
+def _ad_funnel_html(rows: list, business_id: str = "", account_id: str = "") -> str:
     """Per-ad funnel table: leads from each ad → pipeline / won / conv%, + FB deep link."""
     if not rows:
         return ""
@@ -880,10 +895,7 @@ def _ad_funnel_html(rows: list) -> str:
         total = int(total or 0)
         won = int(won or 0)
         conv = round(won / total * 100, 1) if total else 0.0
-        fb = _h.escape(
-            "https://adsmanager.facebook.com/adsmanager/manage/ads?"
-            f"selected_ad_ids={ad_id}"
-        )
+        fb = _fb_ad_url(ad_id, business_id, account_id)
         ad_cell = (
             f'<a href="{fb}" target="_blank" rel="noreferrer"'
             f' style="color:#4da6ff;font-family:ui-monospace,monospace;font-size:.7rem">'
@@ -922,6 +934,8 @@ def reports_panel_html(
     hour_out: dict[int, int],
     ad_funnel: list | None = None,
     discovery: dict | None = None,
+    fb_business_id: str = "",
+    fb_account_id: str = "",
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1029,7 +1043,7 @@ def reports_panel_html(
         f'<div class="kpi-row">{kpis}</div>'
         f'{status_bar}'
         f'{stage_table}'
-        f'{_ad_funnel_html(ad_funnel or [])}'
+        f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id)}'
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl} (24h)</h3>'
         f'<div class="hchart">{hour_bars}</div>'
         f'<div style="font-size:.63rem;color:#4a5568;margin-top:.3rem">'
