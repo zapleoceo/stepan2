@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels import REGISTRY
@@ -88,11 +88,18 @@ async def try_lock_thread(session: AsyncSession, thread_id: int) -> bool:
 
 
 async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> list[int]:
-    """Distinct thread ids that have at least one queued (pending) outbox line."""
+    """Thread ids with a queued (pending) outbox line — a thread with a real REPLY
+    (agent/manager) waiting goes first, a thread with ONLY a follow-up queued goes last.
+    send_outbox drains threads in this order, so when the hourly/daily send cap is tight,
+    a reply to something the lead just said is never crowded out by a proactive nudge.
+    Oldest-queued-first as the tiebreaker within each tier."""
+    has_reply = func.max(case((Outbox.source != "followup", 1), else_=0))
+    earliest = func.min(Outbox.id)
     rows = await session.exec(
         select(Outbox.thread_id)
         .where(Outbox.branch_id == branch_id, Outbox.status == "pending")
-        .distinct()
+        .group_by(Outbox.thread_id)
+        .order_by(has_reply.desc(), earliest)
     )
     return list(rows.scalars().all())
 
