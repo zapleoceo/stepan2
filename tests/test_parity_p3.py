@@ -258,7 +258,10 @@ async def test_openhouse_handoff_kind_and_subtype(db_session) -> None:
     decision = Decision(reply="ok", stage=Stage.PRESENTING, product_slug=None,
                         ready=True, needs_manager=False, ready_subtype="openhouse")
     await svc.enqueue_reply(thread.id, decision)
-    assert lead.stage == Stage.READY and lead.ready_subtype == "openhouse"
+    # Openhouse is a notify-only side channel, not a hand-off — the bot must keep talking
+    # (see reply.py's _stage_for/_handoff_openhouse), so stage stays put and the bot stays on.
+    assert lead.stage == Stage.PRESENTING and lead.ready_subtype == "openhouse"
+    assert lead.agent_enabled is True
     alert = (await db_session.exec(select(ManagerAlert))).first()
     assert alert is not None and alert.kind == "ready_openhouse"
 

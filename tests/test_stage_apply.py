@@ -153,6 +153,51 @@ async def test_needs_manager_moves_to_manager_and_mutes(db_session) -> None:
     assert alert.lead_phone == "+6281234567890"
 
 
+async def test_openhouse_rsvp_notifies_without_muting_bot(db_session) -> None:
+    notifier = FakeNotifier()
+    bid, tid, lead = await _world(db_session, phone="+6281234567890", stage=Stage.PRESENTING)
+    await _svc(db_session, bid, notifier=notifier).enqueue_reply(
+        tid, _decision(ready=True, ready_subtype="openhouse", stage=Stage.PRESENTING),
+    )
+    assert lead.stage == Stage.PRESENTING  # no forced stage jump — bot keeps talking
+    assert lead.agent_enabled is True
+    assert lead.ready_subtype == "openhouse"
+    alert = (await db_session.exec(select(ManagerAlert))).first()
+    assert alert is not None and alert.kind == "ready_openhouse"
+    assert alert.lead_phone == "+6281234567890"
+    assert len(notifier.sends) == 1
+    assert "09:00-18:00" in notifier.sends[0] or "09:00-18:00" in alert.summary_en
+
+
+async def test_openhouse_rsvp_without_phone_still_notifies(db_session) -> None:
+    notifier = FakeNotifier()
+    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.QUALIFYING)
+    await _svc(db_session, bid, notifier=notifier).enqueue_reply(
+        tid, _decision(ready=True, ready_subtype="openhouse", stage=Stage.QUALIFYING),
+    )
+    assert lead.stage == Stage.QUALIFYING
+    assert lead.agent_enabled is True
+    alert = (await db_session.exec(select(ManagerAlert))).first()
+    assert alert is not None and alert.kind == "ready_openhouse"
+
+
+async def test_openhouse_rsvp_ignores_conflicting_needs_manager_flag(db_session) -> None:
+    """The model sometimes also flags needs_manager on an RSVP turn — the openhouse
+    notification already covers the hand-off, so it must not ALSO flip to MANAGER."""
+    notifier = FakeNotifier()
+    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.PRESENTING)
+    await _svc(db_session, bid, notifier=notifier).enqueue_reply(
+        tid,
+        _decision(ready=True, ready_subtype="openhouse", needs_manager=True,
+                  stage=Stage.PRESENTING),
+    )
+    assert lead.stage == Stage.PRESENTING
+    assert lead.agent_enabled is True
+    alerts = (await db_session.exec(select(ManagerAlert))).all()
+    assert len(alerts) == 1  # only the openhouse alert, no duplicate generic one
+    assert alerts[0].kind == "ready_openhouse"
+
+
 async def test_manager_stage_not_in_bot_silent() -> None:
     assert Stage.MANAGER not in BOT_SILENT_STAGES  # silence is per-lead agent_enabled
 

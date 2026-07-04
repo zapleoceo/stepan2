@@ -139,7 +139,8 @@ class ReplyService:
         lead = await self.session.get(Lead, thread.lead_id)
         if lead is not None:
             await self._apply_decision(lead, thread, decision)
-        if decision.needs_manager:
+        is_openhouse_rsvp = decision.ready and decision.ready_subtype == "openhouse"
+        if decision.needs_manager and not is_openhouse_rsvp:
             await self._raise_manager_alert(
                 thread_id, thread.lead_id, decision,
                 lead.phone_e164 if lead is not None else None,
@@ -148,7 +149,8 @@ class ReplyService:
 
     async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> None:
         """Move the funnel: stage priority ready+contact → READY, needs_manager →
-        MANAGER, ready w/o contact → PRESENTING, else the model's stage."""
+        MANAGER, ready w/o contact → PRESENTING, else the model's stage. An openhouse RSVP
+        is a side-channel notification, not a stage transition — see _stage_for."""
         if decision.product_slug and thread.product_slug is None:
             thread.product_slug = decision.product_slug
             self.session.add(thread)
@@ -158,6 +160,8 @@ class ReplyService:
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return
+        if decision.ready and decision.ready_subtype == "openhouse":
+            await self._handoff_openhouse(lead, thread)
         inbound = await self.messages.inbound_count(thread.id)
         new_stage = self._stage_for(decision, lead, inbound)
         if new_stage == lead.stage:
@@ -194,6 +198,11 @@ class ReplyService:
         logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
 
     def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0) -> Stage:
+        if decision.ready and decision.ready_subtype == "openhouse":
+            # An event RSVP is a notify-only side channel (see _handoff_openhouse) — it's
+            # a sale (of a seat, not a course) but NOT a hand-off: the bot keeps talking,
+            # so never let it force READY/MANAGER and silence the account.
+            return decision.stage
         if decision.ready and lead.phone_e164:
             return Stage.READY
         if decision.needs_manager:
@@ -249,6 +258,33 @@ class ReplyService:
                 event_id=f"handoff-{self.branch_id}-{lead.id}",
                 phone=lead.phone_e164,
             )
+
+    async def _handoff_openhouse(self, lead: Lead, thread) -> None:
+        """Lead RSVP'd to an event (open house / demo day): notify the team with a
+        callback-hours note, keep the bot ON. Unlike _handoff (a course deal), this is
+        a seat sale, not a hand-off — no agent_enabled/stage change, no CAPI event."""
+        lead.ready_subtype = lead.ready_subtype or "openhouse"
+        contact = lead.phone_e164 or (f"IG @{lead.ig_username}" if lead.ig_username else None) \
+            or "no contact yet"
+        alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)
+        try:
+            await alerts.raise_alert(
+                lead_id=lead.id,
+                kind="ready_openhouse",
+                summary_en=(
+                    f"Lead RSVP'd for an event · contact {contact} · IT STEP will call back "
+                    "Mon-Fri, 09:00-18:00 WIB (no same-day callback outside those hours)"
+                ),
+                summary_ru=(
+                    f"Лид согласился на ивент · контакт {contact} · перезвонят в рабочее "
+                    "время IT STEP (Пн-Пт, 09:00-18:00 WIB, без обещания в тот же день)"
+                ),
+                thread_id=thread.id,
+                lead_phone=lead.phone_e164,
+            )
+        except Exception:
+            logger.warning("openhouse alert failed lead=%s", lead.id, exc_info=True)
+        self.session.add(lead)
 
     async def _raise_manager_alert(
         self, thread_id: int, lead_id: int, decision: Decision,
