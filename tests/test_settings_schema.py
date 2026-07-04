@@ -92,6 +92,26 @@ def test_form_localized_ru_and_id() -> None:
     assert "Anggaran" in id_
 
 
+def test_form_layout_fills_wide_screens_not_a_narrow_column() -> None:
+    """A hardcoded max-width:600px left a sea of empty space on wide monitors — cards must
+    flow into a responsive multi-column grid instead."""
+    html = settings_form_html({}, "en")
+    assert "max-width:600px" not in html
+    assert "grid-template-columns" in html
+
+
+def test_autosave_hint_shown_next_to_title_not_just_in_help_mode() -> None:
+    """No Save button exists (every field auto-saves on change) — a manager looking for one
+    must see this called out up front, not only when '?' help-mode is toggled on."""
+    from app.api._i18n import _lang
+    _lang.set("ru")
+    html = settings_form_html({}, "ru")
+    assert "сохраняется автоматически" in html
+    _lang.set("en")
+    html = settings_form_html({}, "en")
+    assert "saves automatically" in html
+
+
 def test_bool_renders_onoff_select() -> None:
     html = field_html(S.field_for("agent_enabled_global"), "true", "en")
     assert "<select" in html

@@ -100,11 +100,20 @@ def _section_html(sec: S.SettingSection, values: dict[str, str], lang: str) -> s
 
 
 def settings_form_html(values: dict[str, str], lang: str) -> str:
-    """Full settings panel: every schema section rendered with current values."""
+    """Full settings panel: every schema section rendered with current values.
+
+    No Save button by design — every field auto-saves on change (see _HX). The autosave
+    label next to the title says so up front, since a manager used to a Save button won't
+    find one here otherwise."""
     from app.api._i18n import t  # noqa: PLC0415
     title = _h.escape(t("nav.settings"))
+    autosave = _h.escape(t("set.autosave"))
     body = "".join(_section_html(sec, values, lang) for sec in S.SCHEMA)
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
-        f'<div class="pnl-body" style="max-width:600px">{body}</div>'
+        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<span style="font-size:.68rem;color:#5f6b78;margin-left:.6rem">'
+        f'· {autosave}</span></div>'
+        f'<div class="pnl-body" style="max-width:1400px">'
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));'
+        f'gap:.8rem;align-items:start">{body}</div></div>'
     )

@@ -110,6 +110,8 @@ _TR: dict[str, dict[str, str]] = {
     # settings panel
     "set.save":     {"ru": "Сохранить", "en": "Save",          "id": "Simpan"},
     "set.saved":    {"ru": "✓",         "en": "✓",             "id": "✓"},
+    "set.autosave": {"ru": "сохраняется автоматически", "en": "saves automatically",
+                     "id": "tersimpan otomatis"},
     # help overlay
     "help.title":   {"ru": "Справка",   "en": "Help",          "id": "Bantuan"},
     "help.inbox":   {
@@ -173,14 +175,17 @@ _TR: dict[str, dict[str, str]] = {
         "ru": (
             "Настройки бота для этого филиала."
             " Каждая настройка описана ниже."
-            " Сохраняйте кнопкой рядом с полем."
+            " Изменения сохраняются автоматически — отдельной кнопки нет."
         ),
         "en": (
             "Bot settings for this branch."
             " Each setting is described below."
-            " Save with the button next to each field."
+            " Changes save automatically — there is no separate button."
         ),
-        "id": "Pengaturan bot untuk cabang ini. Setiap pengaturan dijelaskan di bawah.",
+        "id": (
+            "Pengaturan bot untuk cabang ini. Setiap pengaturan dijelaskan di bawah."
+            " Perubahan tersimpan otomatis — tidak ada tombol terpisah."
+        ),
     },
     # help mode: floating element tips (shown on hover while the ? toggle is on)
     "hint.branch": {
