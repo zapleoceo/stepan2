@@ -91,12 +91,21 @@ async def _process(lead_id: int, llm: BrokerLLM, dry: bool) -> str:
                 await session.execute(text("UPDATE lead SET needs = NULL WHERE id = :id"),
                                       {"id": lead_id})
             return "empty"
-        try:
-            raw, _ = await llm.chat(
-                [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": convo}],
-                capability="chat:fast", max_tokens=400, workflow="rederive", thread_id=lead_id)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("lead %s: LLM failed: %s", lead_id, exc)
+        raw = None
+        for attempt in range(4):  # broker 502/ReadTimeout under load — retry with backoff
+            try:
+                raw, _ = await llm.chat(
+                    [{"role": "system", "content": _SYSTEM},
+                     {"role": "user", "content": convo}],
+                    capability="chat:fast", max_tokens=400, workflow="rederive",
+                    thread_id=lead_id)
+                break
+            except Exception as exc:  # noqa: BLE001
+                if attempt == 3:
+                    log.warning("lead %s: LLM failed after retries: %s", lead_id, exc)
+                    return "error"
+                await asyncio.sleep(2 * (attempt + 1))
+        if raw is None:
             return "error"
         profile = _parse(raw)
         if not dry:
