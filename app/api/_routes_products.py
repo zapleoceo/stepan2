@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import actor_from_request, branch_ids_from_request
+from app.admin._branch import actor_from_request, branch_ids_from_request, is_branch_forbidden
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 
 from ._i18n import apply_lang
@@ -78,7 +78,7 @@ async def products_save(
             {"id": prod_id})).first()
         if prev is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-        if branch_ids and prev[0] not in branch_ids:
+        if is_branch_forbidden(prev[0], branch_ids):
             return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         await session.execute(
             text("UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s,"

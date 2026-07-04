@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.adapters.db.models import Outbox, ThreadLog
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
-from app.admin._branch import allowed_branch_ids
+from app.admin._branch import allowed_branch_ids, is_branch_forbidden
 from app.modules.conversation.translate import translate_message, translate_text
 
 from ._i18n import apply_lang, t
@@ -67,7 +67,7 @@ async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) ->
     ).first()
     if row is None:
         return None
-    if allowed is not None and row[0] not in allowed:
+    if is_branch_forbidden(row[0], allowed):
         return None
     set_render_tz(row[1])
     return row[0]
@@ -96,7 +96,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
                 {"tid": thread_id},
             )
         ).first()
-        if not info or (allowed is not None and info[3] not in allowed):
+        if not info or is_branch_forbidden(info[3], allowed):
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         set_render_tz(info[21])
         msgs = await fetch_messages(session, thread_id)
@@ -139,7 +139,7 @@ async def chat_media(asset_id: int, request: Request) -> Response:
         ).first()
     if row is None or row[0] is None:
         return Response(status_code=404)
-    if allowed is not None and row[3] not in allowed:
+    if is_branch_forbidden(row[3], allowed):
         return Response(status_code=404)
     mime = row[1] or _MIME_FOR_KIND.get(row[2], "application/octet-stream")
     return Response(content=row[0], media_type=mime,
@@ -213,7 +213,7 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
         if not info:
             return HTMLResponse("")
         lead_id, branch_id, enabled = info
-        if allowed and branch_id not in allowed:
+        if is_branch_forbidden(branch_id, allowed):
             return HTMLResponse(chat_bot_pill_html(thread_id, bool(enabled)))
         new_val = not bool(enabled)
         await session.execute(
@@ -241,7 +241,7 @@ async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
         if not info:
             return HTMLResponse("")
         lead_id, branch_id, blocked = info
-        if allowed is not None and branch_id not in allowed:
+        if is_branch_forbidden(branch_id, allowed):
             return HTMLResponse(chat_block_pill_html(thread_id, bool(blocked)))
         new_val = not bool(blocked)
         if new_val:

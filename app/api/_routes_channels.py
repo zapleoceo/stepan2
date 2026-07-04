@@ -14,7 +14,7 @@ from app.adapters.channels.ig_client import build_ig_client
 from app.adapters.crypto import encrypt
 from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
-from app.admin._branch import allowed_branch_ids
+from app.admin._branch import allowed_branch_ids, is_branch_forbidden
 from app.config import settings
 from app.domain.enums import ChannelKind
 from app.modules.channels.service import ChannelService
@@ -53,10 +53,6 @@ async def _ch_list_html(session: Any, branch_id: int) -> str:
     return channel_list_partial_html(list(channels), list(sessions), branch_id)
 
 
-def _branch_forbidden(branch_id: int, allowed: list[int] | None) -> bool:
-    return allowed is not None and branch_id not in allowed
-
-
 async def _channel_branch(session: Any, ch_id: int, allowed: list[int] | None) -> int | None:
     """Channel's branch_id, or None if missing / outside the caller's allowed branches —
     the tenant-ownership guard blocking cross-branch credential/edit IDOR."""
@@ -65,7 +61,7 @@ async def _channel_branch(session: Any, ch_id: int, allowed: list[int] | None) -
             text("SELECT branch_id FROM channel WHERE id=:id"), {"id": ch_id}
         )
     ).first()
-    if row is None or _branch_forbidden(row[0], allowed):
+    if row is None or is_branch_forbidden(row[0], allowed):
         return None
     return row[0]
 
@@ -79,7 +75,7 @@ _FORBIDDEN = '<div class="emp">Forbidden</div>'
 async def channels_list(branch_id: int, request: Request) -> HTMLResponse:
     """HTMX partial: channel table for #ch-list in branch edit page."""
     apply_lang(request)
-    if _branch_forbidden(branch_id, allowed_branch_ids(request)):
+    if is_branch_forbidden(branch_id, allowed_branch_ids(request)):
         return HTMLResponse(_FORBIDDEN, status_code=403)
     async with session_scope() as session:
         return HTMLResponse(await _ch_list_html(session, branch_id))
@@ -88,7 +84,7 @@ async def channels_list(branch_id: int, request: Request) -> HTMLResponse:
 @router.get("/channels/branch/{branch_id}/new", response_class=HTMLResponse)
 async def channel_new(branch_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
-    if _branch_forbidden(branch_id, allowed_branch_ids(request)):
+    if is_branch_forbidden(branch_id, allowed_branch_ids(request)):
         return HTMLResponse(_FORBIDDEN, status_code=403)
     return HTMLResponse(channel_new_form_html(branch_id))
 
@@ -103,9 +99,8 @@ async def channel_create(
     is_active: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = allowed_branch_ids(request)
-    if branch_ids and branch_id not in branch_ids:
-        return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+    if is_branch_forbidden(branch_id, allowed_branch_ids(request)):
+        return HTMLResponse(_FORBIDDEN, status_code=403)
     kind_val = kind if kind in (k.value for k in ChannelKind) else ChannelKind.INSTAGRAM.value
     async with session_scope() as session:
         session.add(Channel(
