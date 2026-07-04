@@ -423,7 +423,7 @@ _STAGE_COLOR: dict[str, str] = {
 _SIDE_ICON = {"dormant": "😴", "manager": "👤"}
 
 
-def funnel_html(counts: dict[str, int]) -> str:
+def funnel_html(counts: dict[str, int], active_stage: str = "") -> str:
     """Stage filter for the inbox .thr column: a clean wrap of stage chips (colour dot +
     label + count), each filters the thread list; the active one is highlighted."""
     total = sum(counts.values())
@@ -432,9 +432,11 @@ def funnel_html(counts: dict[str, int]) -> str:
     def chip(stage: str | None, label: str, n: int, color: str | None) -> str:
         dot = (f'<span class="fdot" style="background:{color}"></span>' if color else "")
         url = f"/ui/threads?stage={stage}" if stage else "/ui/threads"
-        on = " on" if stage is None else ""  # 'All' active by default
+        push = f"/ui/inbox?stage={stage}" if stage else "/ui/inbox"
+        on = " on" if (stage or "") == (active_stage or "") else ""
         return (
-            f'<a class="fpill{on}" hx-get="{url}" hx-target="#tl" hx-swap="innerHTML"'
+            f'<a class="fpill{on}" hx-get="{url}" hx-push-url="{push}"'
+            f' hx-target="#tl" hx-swap="innerHTML"'
             f' onclick="setFnl(this)" title="{label}">{dot}'
             f'<span class="fpl-l">{label}</span><span class="fpl-n">{n}</span></a>'
         )
@@ -751,7 +753,8 @@ def _last_msg_id(msgs: list) -> int:
     return max((int(m[0]) for m in msgs), default=0)
 
 
-_LOG_KIND_KEY = {"context_cleared": "chat.cleared", "context_loaded": "chat.loaded"}
+_LOG_KIND_KEY = {"context_cleared": "chat.cleared", "context_loaded": "chat.loaded",
+                 "product_changed": "chat.product"}
 
 
 def _event_bubble(row: object) -> str:
@@ -765,6 +768,8 @@ def _event_bubble(row: object) -> str:
         )
     else:
         label = t(_LOG_KIND_KEY.get(str(kind), str(kind)))
+        if detail:  # e.g. product_changed carries "old→new"
+            label = f"{label}: {detail}"
     who = _h.escape(t(f"who.{actor}") if actor in ("agent", "manager", "lead") else str(actor))
     return (
         f'<div class="sys-log">— {_h.escape(label)} · {who} · {_fmt_time(_as_dt(ts))} —</div>'
@@ -941,6 +946,7 @@ def chat_header_html(
     following_count: int | None = None,
     last_active_at: datetime | None = None,
     needs: str | None = None,
+    products: list | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -957,12 +963,26 @@ def chat_header_html(
         f' onchange="this.form.requestSubmit()">{opts}</select>'
         f'</form>'
     )
-    product_badge = ""
-    if product_slug:
+    if products is not None:
+        none_lbl = _h.escape(t("product.none"))
+        p_opts = f'<option value="">{none_lbl}</option>' + "".join(
+            f'<option value="{_h.escape(slug)}" '
+            f'{"selected" if slug == product_slug else ""}>{_h.escape(title or slug)}</option>'
+            for slug, title in products
+        )
+        product_badge = (
+            f' <form style="display:inline;margin:0" hx-post="/ui/chat/{tid}/product"'
+            f' hx-target="#chat-hdr-{tid}" hx-swap="outerHTML">'
+            f'<select class="act-sel" name="product"'
+            f' onchange="this.form.requestSubmit()">{p_opts}</select></form>'
+        )
+    elif product_slug:
         product_badge = (
             f' <span class="bg sq" style="font-size:.62rem;text-transform:none">'
             f'{_h.escape(product_slug)}</span>'
         )
+    else:
+        product_badge = ""
     # Avatar with optional IG profile link
     av_html = _avatar(name, avatar_url, size_cls="ch-av")
     if ig_username:
@@ -1069,6 +1089,7 @@ def chat_panel_html(
     lead_seen_at: datetime | None = None,
     needs: str | None = None,
     events: list | None = None,
+    products: list | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -1083,7 +1104,7 @@ def chat_panel_html(
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
         agent_enabled=agent_enabled, is_blocked=is_blocked,
         follower_count=follower_count, following_count=following_count,
-        last_active_at=last_active_at, needs=needs,
+        last_active_at=last_active_at, needs=needs, products=products,
     )
     return (
         f'{header}'
@@ -1149,6 +1170,7 @@ def suggest_box_html(tid: int, draft: str) -> str:
 
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
+    stage: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1375,13 +1397,14 @@ def app_shell(
         _thr_inner = thr_html
     elif active_nav == "inbox":
         _show_thr = True
+        _qs = f"?stage={stage}" if stage else ""
         _thr_inner = (
             f'<div id="fnl-wrap"'
-            f' hx-get="/ui/funnel" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
+            f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
             f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'
-            f'<div id="tl" hx-get="/ui/threads" hx-trigger="load, every 30s"'
+            f'<div id="tl" hx-get="/ui/threads{_qs}" hx-trigger="load, every 30s"'
             f' hx-swap="innerHTML"></div>'
         )
     else:

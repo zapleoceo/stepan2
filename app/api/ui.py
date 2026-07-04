@@ -75,10 +75,10 @@ _FULL_PAGE_PATHS = {"/ui/inbox", "/ui/coach", "/ui/knowledge", "/ui/reports"}
 # ─── full pages ───────────────────────────────────────────────────────────────
 
 @router.get("/inbox", response_class=HTMLResponse)
-async def inbox(request: Request) -> HTMLResponse:
+async def inbox(request: Request, stage: str = "") -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
-    return HTMLResponse(app_shell(lang, empty, active_nav="inbox"))
+    return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip()))
 
 
 @router.get("/knowledge", response_class=HTMLResponse)
@@ -111,12 +111,12 @@ async def coach_page(request: Request) -> HTMLResponse:
 # ─── thread list ──────────────────────────────────────────────────────────────
 
 @router.get("/funnel", response_class=HTMLResponse)
-async def funnel_partial(request: Request) -> HTMLResponse:
+async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
         counts = await fetch_stage_counts(session, branch_ids)
-    return HTMLResponse(funnel_html(counts))
+    return HTMLResponse(funnel_html(counts, active_stage=stage.strip()))
 
 
 @router.get("/threads", response_class=HTMLResponse)

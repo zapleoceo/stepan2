@@ -9,11 +9,16 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import text
 
-from app.adapters.db.models import Outbox, ThreadLog
+from app.adapters.db.models import Outbox, StageEvent, ThreadLog
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
+from app.adapters.notify.telegram import TelegramNotifier
 from app.admin._branch import allowed_branch_ids, is_branch_forbidden
+from app.config import settings
 from app.modules.conversation.translate import translate_message, translate_text
+from app.modules.knowledge.repository import ProductRepo
+from app.modules.notifications.alerts import AlertService
+from app.modules.settings.service import get_settings
 
 from ._i18n import apply_lang, t
 from ._query import (
@@ -43,6 +48,20 @@ _VALID_STAGES = frozenset({
     "new", "nurturing", "qualifying", "presenting", "objection",
     "ready", "handed_off", "dormant", "manager",
 })
+
+
+_MANUAL_ALERT_KIND = {"ready": "ready_deal", "manager": "needs_manager"}
+
+
+def _branch_notifier(branch_cfg: object) -> TelegramNotifier | None:
+    tok = settings().tg_bot_token
+    grp = getattr(branch_cfg, "tg_group_id", "")
+    if not tok or not grp:
+        return None
+    try:
+        return TelegramNotifier(bot_token=tok, group_chat_id=int(grp))
+    except (ValueError, TypeError):
+        return None
 
 
 def _actor_name(request: Request) -> str:
@@ -103,6 +122,7 @@ async def _build_chat_panel(
     msgs = await fetch_messages(session, thread_id)
     pending = await fetch_pending(session, thread_id)
     events = await fetch_thread_events(session, thread_id)
+    products = [(p.slug, p.title) for p in await ProductRepo(session, info[3]).active()]
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
@@ -118,7 +138,7 @@ async def _build_chat_panel(
         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs,
-        events=events,
+        events=events, products=products,
     )
 
 
@@ -349,12 +369,13 @@ async def chat_stage(
         stage = "new"
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        branch_id = await _guarded_branch(session, thread_id, allowed)
+        if branch_id is None:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
         info = (
             await session.execute(
                 text(
-                    "SELECT ct.id, l.display_name, l.id as lead_id,"
+                    "SELECT ct.id, l.display_name, l.id as lead_id, l.stage as old_stage,"
                     " ct.product_slug, ct.external_thread_id,"
                     " l.phone_e164, l.created_at, ct.last_in_at,"
                     " l.ig_username, l.avatar_url,"
@@ -371,16 +392,38 @@ async def chat_stage(
         ).first()
         if not info:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        (_, name, lead_id, product_slug, ig_id,
+        (_, name, lead_id, old_stage, product_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _tz, needs) = info
         set_render_tz(_tz)
-        await session.execute(
-            text("UPDATE lead SET stage = :s WHERE id = :id"),
-            {"s": stage, "id": lead_id},
-        )
+        products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
+        if stage != str(old_stage):
+            await session.execute(
+                text("UPDATE lead SET stage = :s WHERE id = :id"),
+                {"s": stage, "id": lead_id},
+            )
+            session.add(StageEvent(
+                branch_id=branch_id, lead_id=lead_id, thread_id=thread_id,
+                from_stage=str(old_stage), to_stage=stage,
+                actor=_actor_name(request), reason="manual",
+            ))
+            await session.flush()
+            # Same rule as the bot: a move into READY / MANAGER pings the manager. Other
+            # manual moves are silent (just the history line above).
+            if stage in _MANUAL_ALERT_KIND:
+                cfg = await get_settings(session, branch_id)
+                who = _actor_name(request)
+                try:
+                    await AlertService(session, branch_id, _branch_notifier(cfg)).raise_alert(
+                        lead_id=lead_id, kind=_MANUAL_ALERT_KIND[stage],
+                        summary_en=f"Manager {who} moved the lead to {stage}",
+                        summary_ru=f"Менеджер {who} перевёл лида в стадию {stage}",
+                        thread_id=thread_id, lead_phone=phone,
+                    )
+                except Exception:
+                    _log.warning("manual stage alert failed tid=%s", thread_id, exc_info=True)
     return HTMLResponse(
         chat_header_html(thread_id, str(name or "Lead"), stage,
                          product_slug=product_slug, ig_id=ig_id,
@@ -390,7 +433,73 @@ async def chat_stage(
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs)
+                         last_active_at=last_active_at, needs=needs, products=products)
+    )
+
+
+@router.post("/chat/{thread_id}/product", response_class=HTMLResponse)
+async def chat_product(
+    thread_id: int, request: Request, product: str = Form(default=""),
+) -> HTMLResponse:
+    """Manager re-binds the thread's product; the change is logged to the chat history.
+
+    product_slug biases which product card the bot foregrounds in its prompt (soft steer,
+    not a hard filter). Empty value clears the binding."""
+    apply_lang(request)
+    new_slug = product.strip() or None
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        branch_id = await _guarded_branch(session, thread_id, allowed)
+        if branch_id is None:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        info = (
+            await session.execute(
+                text(
+                    "SELECT ct.id, l.display_name, l.stage, ct.product_slug,"
+                    " ct.external_thread_id, l.phone_e164, l.created_at, ct.last_in_at,"
+                    " l.ig_username, l.avatar_url,"
+                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
+                    " l.agent_enabled, l.is_blocked,"
+                    " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
+                    " l.needs"
+                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                    " JOIN branch b ON b.id = l.branch_id WHERE ct.id = :tid"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+        if not info:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        (_, name, stage, old_slug, ig_id,
+         phone, created_at, last_in_at,
+         ig_username, avatar_url,
+         lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
+         follower_count, following_count, last_active_at, _tz, needs) = info
+        set_render_tz(_tz)
+        products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
+        if new_slug is not None and new_slug not in {sl for sl, _ in products}:
+            new_slug = old_slug  # ignore a slug that isn't an active product of this branch
+        if new_slug != old_slug:
+            await session.execute(
+                text("UPDATE channel_thread SET product_slug = :p WHERE id = :tid"),
+                {"p": new_slug, "tid": thread_id},
+            )
+            session.add(ThreadLog(
+                branch_id=branch_id, thread_id=thread_id, kind="product_changed",
+                detail=f"{old_slug or '∅'} → {new_slug or '∅'}",
+                actor=_actor_name(request),
+            ))
+            await session.flush()
+    return HTMLResponse(
+        chat_header_html(thread_id, str(name or "Lead"), str(stage or "new"),
+                         product_slug=new_slug, ig_id=ig_id,
+                         phone=phone, created_at=created_at, last_in_at=last_in_at,
+                         ig_username=ig_username, avatar_url=avatar_url,
+                         lead_source=lead_source, ad_id=ad_id,
+                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
+                         follower_count=follower_count, following_count=following_count,
+                         last_active_at=last_active_at, needs=needs, products=products)
     )
 
 

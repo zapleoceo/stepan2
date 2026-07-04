@@ -205,6 +205,10 @@ _TR: dict[str, dict[str, str]] = {
                          "id": "Konteks dimuat"},
     "log.stage_change": {"ru": "Стадия: {from} → {to}", "en": "Stage: {from} → {to}",
                          "id": "Tahap: {from} → {to}"},
+    "product.none":     {"ru": "— без продукта —", "en": "— no product —",
+                         "id": "— tanpa produk —"},
+    "chat.product":     {"ru": "Продукт изменён", "en": "Product changed",
+                         "id": "Produk diubah"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

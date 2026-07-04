@@ -30,6 +30,7 @@ class FakeNotifier:
         kind: str,
         summary_en: str,
         summary_ru: str,
+        link: str | None = None,
     ) -> None:
         self.calls.append(
             {

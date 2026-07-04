@@ -126,6 +126,60 @@ def test_bubble_hides_translate_button_when_no_caption() -> None:
     assert "trMsg(2,10)" not in html  # no translate button on a caption-less media bubble
 
 
+# ─── funnel filter → shareable /ui/inbox?stage=X URL ──────────────────────────
+
+def test_funnel_html_highlights_active_and_pushes_inbox_url() -> None:
+    from app.api._ui_html import funnel_html
+    _set_lang("en")
+    html = funnel_html({"dormant": 5, "new": 2}, active_stage="dormant")
+    assert 'hx-push-url="/ui/inbox?stage=dormant"' in html  # shareable full-page URL
+    assert 'hx-get="/ui/threads?stage=dormant"' in html     # fast partial swap into #tl
+    # the dormant chip is the active one, the All chip is not
+    i = html.find("stage=dormant")
+    seg = html[max(0, i - 120):i]
+    assert "fpill on" in seg
+
+
+# ─── manual product change: header <select> + history line ────────────────────
+
+def test_chat_header_renders_product_select_when_products_given() -> None:
+    from app.api._ui_html import chat_header_html
+    _set_lang("en")
+    html = chat_header_html(7, "Bob", "new", product_slug="vibe",
+                            products=[("vibe", "Vibe Coding"), ("py", "Python")])
+    assert 'hx-post="/ui/chat/7/product"' in html
+    assert 'name="product"' in html
+    assert '<option value="vibe" selected>Vibe Coding</option>' in html
+    assert '<option value="">' in html  # the "no product" option
+
+
+def test_event_bubble_shows_product_change_detail() -> None:
+    from datetime import UTC, datetime
+
+    from app.api._ui_html import _event_bubble
+    _set_lang("en")
+    row = (1, "log", "product_changed", "vibe → py", "Dima",
+           datetime.now(UTC).replace(tzinfo=None))
+    html = _event_bubble(row)
+    assert "Product changed" in html
+    assert "vibe → py" in html  # the old→new detail is shown
+
+
+# ─── manager alert deep-link ──────────────────────────────────────────────────
+
+def test_telegram_render_includes_chat_deep_link() -> None:
+    from app.adapters.notify.telegram import _render
+    txt = _render(kind="needs_manager", lead_id=9, summary_en="x", summary_ru="у",
+                  link="https://stepan2.zapleo.com/ui/chat/1732")
+    assert "https://stepan2.zapleo.com/ui/chat/1732" in txt
+    assert "open chat" in txt
+
+
+def test_manual_stage_alert_only_for_ready_and_manager() -> None:
+    from app.api._routes_chat import _MANUAL_ALERT_KIND
+    assert _MANUAL_ALERT_KIND == {"ready": "ready_deal", "manager": "needs_manager"}
+
+
 # ─── item 2: IG post URL conversion ───────────────────────────────────────────
 
 def test_ig_post_url_is_deterministic_and_url_safe() -> None:
