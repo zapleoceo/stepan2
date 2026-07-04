@@ -44,11 +44,13 @@ class BranchSettings:
     daily_budget_usd: float
     crm_enabled: bool
     crm_webhook_url: str
-    crm_read_enabled: bool
-    crm_state_url: str
-    crm_read_secret: str
     meta_pixel_id: str
     meta_capi_token: str
+    # defaulted + last so adding them doesn't break callers that build BranchSettings
+    # positionally (dataclass requires defaulted fields after non-defaulted ones).
+    crm_read_enabled: bool = False
+    crm_state_url: str = ""
+    crm_read_secret: str = ""
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
