@@ -604,7 +604,10 @@ _TR: dict[str, dict[str, str]] = {
     "rep.msgs_in": {"ru": "входящие",       "en": "incoming",     "id": "masuk"},
     "rep.msgs_out":{"ru": "исходящие",      "en": "outgoing",     "id": "keluar"},
     "rep.msgs_total": {"ru": "всего",       "en": "total",        "id": "total"},
-    "rep.by_hour": {"ru": "по часам (0-23)", "en": "by hour (0-23)", "id": "per jam (0-23)"},
+    "rep.by_hour": {"ru": "по часам суток (0-23, WIB)", "en": "by hour of day (0-23, WIB)",
+                    "id": "per jam (0-23, WIB)"},
+    "rep.peak": {"ru": "пик {n} сообщ. в {h}:00", "en": "peak {n} msgs at {h}:00",
+                 "id": "puncak {n} pesan jam {h}:00"},
     "help.reports": {
         "ru": (
             "Общая статистика: воронка по стадиям, конверсия, активность по часам."

@@ -1229,8 +1229,15 @@ def reports_panel_html(
     total_in = sum(hour_in.values())
     total_out = sum(hour_out.values())
 
-    # hourly activity chart
+    # hourly activity chart — grouped in/out bars per hour-of-day (0-23). Both directions are
+    # scaled to the single busiest in/out count so they compare directly; the peak hour is
+    # labelled so the bar heights have a magnitude to read against.
     max_val = max(max(hour_in.values(), default=0), max(hour_out.values(), default=0), 1)
+    hour_totals = {h: hour_in.get(h, 0) + hour_out.get(h, 0) for h in range(24)}
+    peak_h = max(hour_totals, key=lambda h: hour_totals[h])
+    peak_val = hour_totals[peak_h]
+    in_lbl = _h.escape(t("rep.msgs_in"))
+    out_lbl = _h.escape(t("rep.msgs_out"))
     hour_bars = ""
     for h in range(24):
         n_in = hour_in.get(h, 0)
@@ -1238,22 +1245,18 @@ def reports_panel_html(
         h_in = round(n_in / max_val * 100)
         h_out = round(n_out / max_val * 100)
         hour_bars += (
-            f'<div class="hbar" title="{h:02d}:00 ↓{n_in} ↑{n_out}">'
-            f'<div style="flex:1;display:flex;flex-direction:column;gap:1px;'
-            f'justify-content:flex-end;width:100%">'
-            f'<div style="height:{h_in}%;background:#4da6ff;'
-            f'{"min-height:1px" if n_in else ""}"></div>'
-            f'<div style="height:{h_out}%;background:#51cf66;'
-            f'{"min-height:1px" if n_out else ""}"></div>'
+            f'<div class="hbar" title="{h:02d}:00 · {in_lbl} {n_in} · {out_lbl} {n_out}">'
+            f'<div class="hbar-g">'
+            f'<div class="hbar-in" style="height:{h_in}%"></div>'
+            f'<div class="hbar-out" style="height:{h_out}%"></div>'
             f'</div>'
-            f'<div class="hbar-l">{h if h % 4 == 0 else ""}</div>'
+            f'<div class="hbar-l">{f"{h:02d}" if h % 3 == 0 else ""}</div>'
             f'</div>'
         )
 
     title_lbl = _h.escape(t("rep.title"))
     act_lbl = _h.escape(t("rep.activity"))
-    in_lbl = _h.escape(t("rep.msgs_in"))
-    out_lbl = _h.escape(t("rep.msgs_out"))
+    peak_txt = _h.escape(t("rep.peak", n=peak_val, h=f"{peak_h:02d}"))
 
     return (
         f'<div class="ch"><span class="ch-n">{title_lbl}</span></div>'
@@ -1263,14 +1266,17 @@ def reports_panel_html(
         f'{_funnel_line_html(stage_counts)}'
         f'{status_bar}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
-        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl}</h3>'
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+        f'margin:1rem 0 .35rem">'
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:0">{act_lbl}</h3>'
+        f'<span style="font-size:.63rem;color:#6b7685">{peak_txt}</span></div>'
         f'<div class="kpi-row">'
         f'{_kpi("rep.msgs_in", str(total_in), "#4da6ff")}'
         f'{_kpi("rep.msgs_out", str(total_out), "#51cf66")}'
         f'{_kpi("rep.msgs_total", str(total_in + total_out))}'
         f'</div>'
         f'<div class="hchart">{hour_bars}</div>'
-        f'<div style="font-size:.63rem;color:#4a5568;margin-top:.3rem">'
+        f'<div style="font-size:.63rem;color:#6b7685;margin-top:.35rem">'
         f'<span style="color:#4da6ff">▮</span> {in_lbl}&nbsp;&nbsp;'
         f'<span style="color:#51cf66">▮</span> {out_lbl}'
         f'&nbsp;·&nbsp;{_h.escape(t("rep.by_hour"))}'
