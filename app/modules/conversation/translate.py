@@ -18,7 +18,10 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
          "content": f"Translate the following message to {target}. Return ONLY the translation."},
         {"role": "user", "content": body[:800]},
     ]
-    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=400,
+    # Cyrillic/Indonesian output is token-heavy (mistral encodes Cyrillic at ~2-3x the
+    # char count); 400 truncated real translations mid-sentence. Cap input at 800 chars,
+    # so ~1500 output tokens comfortably covers a full translation.
+    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=1500,
                             workflow="translate")
     return out.strip() or None
 

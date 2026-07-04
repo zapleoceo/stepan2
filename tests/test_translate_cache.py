@@ -17,6 +17,7 @@ class CountingLLM:
 
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
         self.calls += 1
+        self.last_kw = kw
         return self.out, {"model": "fake", "cost_usd": 0.001}
 
     async def embed(self, texts):  # noqa: ANN001, ANN201
@@ -67,3 +68,12 @@ async def test_missing_or_empty_message_returns_none(db_session) -> None:
     empty = await _msg(db_session, text="")
     assert await translate_message(db_session, empty, llm) is None
     assert llm.calls == 0
+
+
+async def test_translate_uses_generous_max_tokens() -> None:
+    """A real 400-token cap truncated Cyrillic translations mid-sentence (output is
+    token-heavy). translate_text must ask for a comfortably large budget."""
+    from app.modules.conversation.translate import translate_text
+    llm = CountingLLM("перевод")
+    await translate_text(llm, "halo apa kabar kak")
+    assert llm.last_kw.get("max_tokens", 0) >= 1000
