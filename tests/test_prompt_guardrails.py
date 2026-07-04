@@ -24,3 +24,19 @@ def test_one_product_facts_no_mixing() -> None:
 def test_soft_qualify_gate_present() -> None:
     assert "SOFT-QUALIFY EARLY" in _DECISION_CONTRACT
     assert "risk signal" in _DECISION_CONTRACT.lower()
+
+
+def test_catch_all_answer_is_narrowed_not_reasked() -> None:
+    assert "CATCH-ALL ANSWERS" in _DECISION_CONTRACT
+
+
+def test_capture_contact_early_but_not_ready() -> None:
+    assert "CAPTURE CONTACT EARLY" in _DECISION_CONTRACT
+    # a WhatsApp shared for materials must NOT flip the lead to ready/handoff
+    assert "is NOT 'ready'" in _DECISION_CONTRACT
+    assert "AND wants to ENROL" in _DECISION_CONTRACT
+
+
+def test_proactive_close_and_openhouse_bridge() -> None:
+    assert "PROACTIVELY CLOSE" in _DECISION_CONTRACT
+    assert "OPEN HOUSE" in _DECISION_CONTRACT
