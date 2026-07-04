@@ -21,6 +21,9 @@ _FA = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css
 
 _CSS = (
     "*{box-sizing:border-box;margin:0;padding:0}"
+    # Firefox scrollbar styling (Chromium/Safari use ::-webkit-scrollbar below); keeps every
+    # scroll region slim instead of a full-width OS bar in Firefox.
+    "*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}"
     "html,body{height:100%;overflow:hidden}"
     "body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
     "background:#0f1117;color:#d0d7de;font-size:14px}"
@@ -240,7 +243,7 @@ _CSS = (
     ".bx{padding:.17rem .4rem;font-size:.7rem;border:none;border-radius:4px;"
     "cursor:pointer;font-weight:600;margin-right:.2rem;margin-top:.28rem}"
     ".bx-a{background:#206bc4;color:#fff}.bx-c{background:#862e2e;color:#fff}"
-    ".pnl-body{flex:1;overflow-y:auto;padding:.55rem .8rem}"
+    ".pnl-body{flex:1;overflow-y:auto;overflow-x:auto;padding:.55rem .8rem}"
     ".pnl-body::-webkit-scrollbar{width:4px}"
     ".pnl-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:2px}"
     ".tbl{width:100%;border-collapse:collapse;font-size:.81rem}"
@@ -377,6 +380,31 @@ _CSS = (
     ".s-pend{background:#2a2218;color:#ffd43b}"
     ".s-sent{background:#1f3a1f;color:#51cf66}"
     ".s-fail{background:#3a1f1f;color:#ff6b6b}"
+    # mobile floating bar (hidden on desktop)
+    ".mbar{display:none}"
+    ".mbtn{position:fixed;top:.5rem;z-index:70;width:2.2rem;height:2.2rem;border:none;"
+    "border-radius:50%;background:#206bc4;color:#fff;font-size:1.2rem;line-height:1;"
+    "box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer}"
+    ".mnav{left:.5rem}.mback{left:.5rem;display:none}"
+    # ── responsive: phones/tablets (all desktop CSS above is untouched) ──
+    "@media (max-width:760px){"
+    "body{padding-top:0}"
+    ".mbar{display:block}"
+    # sidebar becomes a slide-in overlay, opened by the ☰ button
+    ".sid{position:fixed;left:0;top:0;bottom:0;z-index:80;transform:translateX(-100%);"
+    "transition:transform .2s ease;box-shadow:2px 0 12px rgba(0,0,0,.5)}"
+    "body.nav-open .sid{transform:translateX(0)}"
+    ".sbrz,.thrz{display:none}"
+    # thread list is the default full-width mobile view
+    ".thr{width:auto;flex:1;padding-top:2.9rem}"
+    # #main (a chat) slides in over the thread list; back button reveals the list again
+    "#main{position:fixed;inset:0;z-index:60;background:#0f1117;transform:translateX(100%);"
+    "transition:transform .2s ease}"
+    "body.chat-open #main{transform:translateX(0)}"
+    "body.chat-open .mnav{display:none}body.chat-open .mback{display:block}"
+    # give tables room to scroll horizontally instead of overflowing the viewport
+    ".tbl,.rep-tbl{min-width:520px}"
+    "}"
 )
 
 _STC: dict[str, str] = {
@@ -1180,7 +1208,11 @@ def app_shell(
         "function scrollMsgs(tid){"
         "var m=document.getElementById('msgs-'+tid);if(m)m.scrollTop=m.scrollHeight;}"
         "function setOpenThread(tid){"
-        "document.cookie='stepan2_open_thread='+tid+';path=/;max-age=86400;samesite=lax';}"
+        "document.cookie='stepan2_open_thread='+tid+';path=/;max-age=86400;samesite=lax';"
+        # mobile: opening a chat slides the #main overlay in over the thread list
+        "document.body.classList.add('chat-open');document.body.classList.remove('nav-open');}"
+        "function backToList(){document.body.classList.remove('chat-open');}"
+        "function toggleNav(){document.body.classList.toggle('nav-open');}"
         "function filterTi(){var i=document.getElementById('ti-q');var q=i?i.value:'';"
         "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
         "var s=e.getAttribute('data-search')||'';"
@@ -1339,7 +1371,8 @@ def app_shell(
     )
     return (
         f'<!doctype html><html lang="{lang}"><head>'
-        f'<meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+        f'<meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<title>Stepan 2</title>'
         f'<link rel="stylesheet" href="{_FA}">'
         f'<script src="{_HTMX}" defer></script>'
@@ -1372,6 +1405,12 @@ def app_shell(
         f'<div class="thr"{_thr_style}>{_thr_inner}</div>'
         f'<div class="thrz" id="thrz" title="⇆ Resize threads"></div>'
         f'<div id="main">{main_html}</div>'
+        # mobile-only bar: ☰ opens the sidebar overlay; ‹ (shown when a chat is open) slides
+        # the chat back off to reveal the thread list. Hidden on desktop via @media.
+        f'<div class="mbar">'
+        f'<button class="mbtn mnav" onclick="toggleNav()" title="Menu">☰</button>'
+        f'<button class="mbtn mback" onclick="backToList()" title="Back">‹</button>'
+        f'</div>'
         f'{help_overlay}'
         f'<script>{script}</script>'
         f'</body></html>'

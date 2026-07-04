@@ -143,6 +143,18 @@ def test_app_shell_lang_buttons_highlight_active() -> None:
     assert '"lb on" href="/ui/lang/ru"' in html
 
 
+def test_app_shell_is_mobile_responsive() -> None:
+    """Shell must ship the responsive viewport + a mobile @media block + the slide-in
+    overlay hooks so the chat is reachable on a phone (was unreachable: 3 fixed columns)."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>m</div>", active_nav="inbox")
+    assert "initial-scale=1" in html
+    assert "@media (max-width:760px)" in html
+    assert "chat-open" in html and "toggleNav()" in html and "backToList()" in html
+    assert "scrollbar-width:thin" in html  # Firefox scrollbar styling
+
+
 def test_app_shell_has_help_button() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")
