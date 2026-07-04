@@ -82,8 +82,12 @@ async def _translate_batch(llm: LLMPort, items: list[str], lang: str) -> dict[st
         {"role": "user", "content": numbered},
     ]
     try:
+        # up to 18 phrases (6 jobs + 6 pains + 6 gains) in one call; Cyrillic/etc output is
+        # token-heavy (same lesson as the per-bubble translate: 400 truncated a SINGLE
+        # message). 600 truncated the JSON array mid-string here, so every translation for
+        # a lead with a full needs profile failed forever (until this cap was raised).
         raw, _ = await llm.chat(
-            messages, capability="chat:fast", max_tokens=600, workflow="translate",
+            messages, capability="chat:fast", max_tokens=2500, workflow="translate",
         )
         arr = json.loads(raw)
     except Exception as exc:  # noqa: BLE001 — degrade to originals, never break the render

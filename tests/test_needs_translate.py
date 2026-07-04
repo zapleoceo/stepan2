@@ -16,9 +16,11 @@ class _EchoLLM:
         self.lang_tag = lang_tag
         self.calls = 0
         self.last_items: list[str] | None = None
+        self.last_kw: dict | None = None
 
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
         self.calls += 1
+        self.last_kw = kw
         user_msg = messages[-1]["content"]
         lines = [ln.split(". ", 1)[1] for ln in user_msg.splitlines() if ln.strip()]
         self.last_items = lines
@@ -101,3 +103,28 @@ async def test_empty_profile_short_circuits_without_a_broker_call() -> None:
     assert translated == NeedsProfile()
     assert new_tr is None
     assert llm.calls == 0
+
+
+async def test_batch_translate_uses_a_generous_max_tokens_for_a_full_profile() -> None:
+    """A full profile (6 jobs + 6 pains + 6 gains) with long real-world phrases must fit in
+    one broker call without truncating the JSON array mid-string (real incident: 600 tokens
+    truncated the response for a 10-phrase profile, so translation failed forever for that
+    lead — the failure never poisoned the cache, but it also never succeeded)."""
+    long_phrases_jobs = [
+        "jadi data analyst", "bikin laporan bisnis yang cerdas",
+        "analisis data buat usaha sendiri",
+        "ngolah data penjualan & customer behavior jadi insight actionable",
+        "memanfaatkan AI untuk analisis data", "otomatisasi laporan marketing dengan AI",
+    ]
+    long_phrases_gains = [
+        "dashboard otomatis di Power BI", "prediksi customer churn pake Python",
+        "laporan marketing jadi lebih strategis", "otomatisasi analisis data dengan AI",
+    ]
+    profile = NeedsProfile(jobs=long_phrases_jobs, gains=long_phrases_gains)
+    llm = _EchoLLM()
+    translated, new_tr = await translated_needs(profile, None, "ru", llm)
+    assert new_tr is not None
+    assert len(translated.jobs) == len(long_phrases_jobs)
+    assert len(translated.gains) == len(long_phrases_gains)
+    assert llm.last_kw is not None
+    assert llm.last_kw.get("max_tokens", 0) >= 2000
