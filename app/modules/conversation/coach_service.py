@@ -135,15 +135,27 @@ async def analyze_chat(
     )[:12000]
     if not convo:
         return ""
-    docs = await KnowledgeRepo(session, branch_id).list()
-    docs_text = "\n\n".join(f"=== {d.slug} ===\n{d.content}" for d in docs)
+    # RAG-retrieve the KB chunks this chat actually touches, not the whole 32k-token base:
+    # the full KB + a full chat through the reasoning model overran the broker's ~100s
+    # gateway (504). The relevant chunks are exactly the facts to grade the bot against.
+    from app.modules.knowledge.rag import RagService  # noqa: PLC0415 (avoid import cycle)
+    chunks = await RagService(session, branch_id, llm).retrieve(convo[-3000:], k=20,
+                                                                thread_id=thread_id)
+    if chunks:
+        docs_text = "\n\n".join(f"=== {title} ===\n{txt}" for title, txt in chunks)
+    else:  # index empty (never reindexed) → fall back to the raw docs
+        docs = await KnowledgeRepo(session, branch_id).list()
+        docs_text = "\n\n".join(f"=== {d.slug} ===\n{d.content}" for d in docs)[:20000]
     messages = [
         {"role": "system", "content": _ANALYZE_SYSTEM.format(docs=docs_text, lang=lang)},
         {"role": "user", "content": convo},
     ]
     for attempt in range(3):
         try:
-            raw, _ = await llm.chat(messages, capability="chat:deep", max_tokens=8000,
+            # chat:smart (fast large-context model), NOT chat:deep: a full chat + full KB
+            # through the slow reasoning model overran the broker's ~100s gateway (504). One
+            # branch's KB + one chat fits chat:smart's 128k window fine and answers in time.
+            raw, _ = await llm.chat(messages, capability="chat:smart", max_tokens=4000,
                                     temperature=0.2, workflow="coach", thread_id=thread_id,
                                     branch_id=branch_id)
             if raw and raw.strip():
