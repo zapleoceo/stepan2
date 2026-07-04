@@ -182,6 +182,82 @@ _TR: dict[str, dict[str, str]] = {
         ),
         "id": "Pengaturan bot untuk cabang ini. Setiap pengaturan dijelaskan di bawah.",
     },
+    # help mode: floating element tips (shown on hover while the ? toggle is on)
+    "hint.branch": {
+        "ru": "Фильтр филиала: какие чаты и настройки показывать. «Все» — сводно по всем.",
+        "en": "Branch filter: which branch's chats and settings to show. 'All' = combined.",
+        "id": "Filter cabang: chat & pengaturan cabang mana yang tampil. 'All' = gabungan.",
+    },
+    "hint.bot_global": {
+        "ru": "Главный выключатель Степана: OFF — бот не отвечает никому (синк работает).",
+        "en": "Stepan's master switch: OFF — the bot replies to no one (sync keeps running).",
+        "id": "Saklar utama Stepan: OFF — bot tidak membalas siapa pun (sync tetap jalan).",
+    },
+    "hint.lang": {
+        "ru": "Язык интерфейса админки. На язык ответов бота не влияет.",
+        "en": "Admin UI language. Does not affect the bot's reply language.",
+        "id": "Bahasa UI admin. Tidak memengaruhi bahasa balasan bot.",
+    },
+    "hint.search": {
+        "ru": "Поиск по имени или @нику лида в списке чатов.",
+        "en": "Search the chat list by lead name or @handle.",
+        "id": "Cari daftar chat berdasarkan nama atau @handle lead.",
+    },
+    "hint.funnel": {
+        "ru": "Воронка: количество лидов на каждой стадии. Клик — отфильтровать список чатов.",
+        "en": "Funnel: lead count per stage. Click a stage to filter the chat list.",
+        "id": "Funnel: jumlah lead per tahap. Klik tahap untuk memfilter daftar chat.",
+    },
+    "hint.stage": {
+        "ru": "Стадия воронки этого лида. Меняется ботом автоматически; можно поправить вручную.",
+        "en": "This lead's funnel stage. The bot moves it automatically; override by hand here.",
+        "id": "Tahap funnel lead ini. Bot memindahkannya otomatis; bisa diubah manual.",
+    },
+    "hint.product": {
+        "ru": "Курс, который обсуждает лид. Определяет, какие факты из базы попадают в промпт.",
+        "en": "The course this lead is discussing. Decides which KB facts enter the prompt.",
+        "id": "Kursus yang dibahas lead. Menentukan fakta KB mana yang masuk prompt.",
+    },
+    "hint.bot_chat": {
+        "ru": "Бот в этом чате: OFF — Степан молчит, отвечает только человек.",
+        "en": "Bot for THIS chat: OFF — Stepan stays silent, only a human replies.",
+        "id": "Bot untuk chat INI: OFF — Stepan diam, hanya manusia yang membalas.",
+    },
+    "hint.block": {
+        "ru": "Заблокировать лида (спам): бот полностью игнорирует все его сообщения.",
+        "en": "Block the lead (spam): the bot ignores all their messages entirely.",
+        "id": "Blokir lead (spam): bot mengabaikan semua pesannya.",
+    },
+    "hint.clear_ctx": {
+        "ru": "Очистить контекст: старые сообщения сереют и не попадают в промпт Степана.",
+        "en": "Clear context: older messages grey out and leave Stepan's prompt.",
+        "id": "Bersihkan konteks: pesan lama jadi abu-abu dan keluar dari prompt Stepan.",
+    },
+    "hint.load_ctx": {
+        "ru": "Вернуть контекст: снова включить очищенные сообщения в промпт.",
+        "en": "Load context back: cleared messages re-enter the prompt.",
+        "id": "Muat ulang konteks: pesan yang dibersihkan masuk prompt lagi.",
+    },
+    "hint.needs": {
+        "ru": "Что Степан выяснил о лиде: цели (jobs), боли (pains), желаемое (gains).",
+        "en": "What Stepan discovered: goals (jobs), fears (pains), desired outcomes (gains).",
+        "id": "Yang Stepan temukan: tujuan (jobs), kendala (pains), hasil diinginkan (gains).",
+    },
+    "hint.suggest": {
+        "ru": "ИИ пишет черновик ответа. Правьте и отправляйте — сам он не уйдёт.",
+        "en": "AI drafts a reply. Edit and send it yourself — it never sends on its own.",
+        "id": "AI membuat draf balasan. Edit dan kirim sendiri — tidak terkirim otomatis.",
+    },
+    "hint.summary": {
+        "ru": "Саммари всего чата на языке интерфейса. Повторный клик — скрыть.",
+        "en": "Summary of the whole chat in the UI language. Click again to hide.",
+        "id": "Ringkasan seluruh chat dalam bahasa UI. Klik lagi untuk sembunyikan.",
+    },
+    "hint.composer": {
+        "ru": "Ваш ответ лиду от имени аккаунта. Enter — отправить, Shift+Enter — новая строка.",
+        "en": "Your reply to the lead from the account. Enter sends, Shift+Enter = new line.",
+        "id": "Balasan Anda ke lead dari akun. Enter kirim, Shift+Enter baris baru.",
+    },
     # chat actions
     "chat.stage":       {"ru": "Стадия",           "en": "Stage",             "id": "Tahap"},
     "chat.suggest":     {"ru": "✦ Предложить",     "en": "✦ Suggest",         "id": "✦ Sarankan"},

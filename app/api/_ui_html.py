@@ -347,15 +347,16 @@ _CSS = (
     ".help-btn{width:1.45rem;height:1.45rem;border-radius:50%;background:#206bc4;"
     "color:#fff;border:none;font-size:.72rem;font-weight:700;cursor:pointer;"
     "flex-shrink:0;line-height:1}"
-    ".hov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);"
-    "z-index:500;align-items:center;justify-content:center}"
-    ".hov.on{display:flex}"
-    ".hov-box{background:#1a1f2e;border:1px solid #2d3748;border-radius:10px;"
-    "padding:1.3rem 1.5rem;max-width:480px;width:90%;max-height:80vh;overflow-y:auto}"
-    ".hov-box h3{color:#e8eef4;font-size:.95rem;margin-bottom:.6rem;font-weight:700}"
-    ".hov-box p{color:#8899aa;font-size:.8rem;line-height:1.6;margin-bottom:.5rem}"
-    ".hov-close{float:right;background:none;border:none;color:#6b7685;"
-    "font-size:1.1rem;cursor:pointer;padding:.1rem .3rem;margin-left:.5rem}"
+    # help mode: the ? toggle lights up, every annotated element gets a dashed outline
+    # ('hover me'), and one fixed-position tip floats ABOVE the page so card/table
+    # overflow can never clip it.
+    "body.help-mode .help-btn{background:#e2b33d;color:#1a1f2e}"
+    "body.help-mode [data-help]{outline:1px dashed #4da6ff;outline-offset:2px;"
+    "cursor:help}"
+    "#help-tip{position:fixed;z-index:900;max-width:300px;background:#1b2432;"
+    "border:1px solid #3a5578;border-radius:8px;padding:.5rem .7rem;font-size:.78rem;"
+    "color:#cfe0f4;line-height:1.5;box-shadow:0 6px 24px rgba(0,0,0,.55);display:none;"
+    "pointer-events:none}"
     # chat actions
     ".ch-acts{display:flex;align-items:center;gap:.4rem;margin-left:auto}"
     ".act-sel{background:#1a1f2e;border:1px solid #2d3748;border-radius:5px;"
@@ -488,22 +489,9 @@ _HELP_KEYS: dict[str, str] = {
 }
 
 
-def help_oob_html(active_nav: str) -> str:
-    """Out-of-band update for the '?' overlay's title+body on an htmx nav swap.
-
-    The shell (sidebar, help button, #hov overlay) is rendered once on the initial full
-    page load and never touches again — nav clicks only swap #main via htmx. Without this,
-    the help overlay stays frozen on whatever section was active at that first load: click
-    '?' on Coach after navigating there client-side and it still explains Inbox. Matching
-    ids + hx-swap-oob="true" let htmx find and refresh #hov-title/#hov-body wherever they
-    live in the DOM, even though this fragment's own swap target is #main."""
-    key = _HELP_KEYS.get(active_nav, "")
-    title = _h.escape(t(f"nav.{active_nav}") if active_nav in _HELP_KEYS else t("help.title"))
-    body = _h.escape(t(key)) if key else ""
-    return (
-        f'<h3 id="hov-title" hx-swap-oob="true">{title}</h3>'
-        f'<p id="hov-body" hx-swap-oob="true">{body}</p>'
-    )
+# Section-level help texts (help.*) now ride on the nav links as data-help tips —
+# see _na in app_shell. No out-of-band machinery needed: the tips live in the shell
+# markup itself and the delegated hover handler reads them straight off the DOM.
 
 
 def _ago(dt: datetime | None) -> str:
@@ -906,6 +894,7 @@ def chat_bot_pill_html(tid: int, enabled: bool) -> str:
     bg = "rgba(31,58,31,.35)" if enabled else "rgba(58,31,31,.35)"
     return (
         f'<form id="bot-pill-{tid}" style="display:inline;margin:0"'
+        f' data-help="{_h.escape(t("hint.bot_chat"))}"'
         f' hx-post="/ui/chat/{tid}/bot-toggle"'
         f' hx-target="#bot-pill-{tid}" hx-swap="outerHTML">'
         f'<button type="submit" class="act-btn"'
@@ -925,6 +914,7 @@ def chat_block_pill_html(tid: int, blocked: bool) -> str:
         body = "🚫"
     return (
         f'<form id="blk-{tid}" style="display:inline;margin:0"'
+        f' data-help="{_h.escape(t("hint.block"))}"'
         f' hx-post="/ui/chat/{tid}/block" hx-target="#blk-{tid}" hx-swap="outerHTML">'
         f'<button type="submit" class="act-btn" style="{style}"'
         f' title="{_h.escape(t("chat.block"))}">{body}</button>'
@@ -937,12 +927,14 @@ def _clear_ctx_btn(tid: int) -> str:
     Both re-render the message feed so the greyed state updates without a reload."""
     clear = (
         f'<button class="act-btn" hx-post="/ui/chat/{tid}/clear"'
+        f' data-help="{_h.escape(t("hint.clear_ctx"))}"'
         f' hx-target="#msgs-{tid}" hx-swap="innerHTML"'
         f' hx-confirm="{_h.escape(t("chat.clear_confirm"))}"'
         f' title="{_h.escape(t("chat.clear"))}">🧹</button>'
     )
     load = (
         f'<button class="act-btn" hx-post="/ui/chat/{tid}/load-context"'
+        f' data-help="{_h.escape(t("hint.load_ctx"))}"'
         f' hx-target="#msgs-{tid}" hx-swap="innerHTML"'
         f' title="{_h.escape(t("chat.load_ctx"))}">📥</button>'
     )
@@ -980,6 +972,7 @@ def chat_header_html(
     )
     stage_sel = (
         f'<form style="display:inline;margin:0"'
+        f' data-help="{_h.escape(t("hint.stage"))}"'
         f' hx-post="/ui/chat/{tid}/stage"'
         f' hx-target="#chat-hdr-{tid}"'
         f' hx-swap="outerHTML">'
@@ -996,6 +989,7 @@ def chat_header_html(
         )
         product_badge = (
             f' <form style="display:inline;margin:0" hx-post="/ui/chat/{tid}/product"'
+            f' data-help="{_h.escape(t("hint.product"))}"'
             f' hx-target="#chat-hdr-{tid}" hx-swap="outerHTML">'
             f'<select class="act-sel" name="product"'
             f' onchange="this.form.requestSubmit()">{p_opts}</select></form>'
@@ -1084,7 +1078,10 @@ def _needs_block(needs: str | None) -> str:
                         f'{_h.escape(label)}</span>{chips}</div>')
     if not rows:
         return ""
-    return f'<div class="nd-box">{"".join(rows)}</div>'
+    return (
+        f'<div class="nd-box" data-help="{_h.escape(t("hint.needs"))}">'
+        f'{"".join(rows)}</div>'
+    )
 
 
 def chat_panel_html(
@@ -1139,9 +1136,11 @@ def chat_panel_html(
         f'<div class="fin">'
         f'<div class="fin-acts">'
         f'<button class="act-btn"'
+        f' data-help="{_h.escape(t("hint.suggest"))}"'
         f' hx-post="/ui/chat/{tid}/suggest"'
         f' hx-target="#sug-{tid}" hx-swap="innerHTML">{sug_lbl}</button>'
-        f'<button class="act-btn" onclick="trChat({tid})">{tr_lbl}</button>'
+        f'<button class="act-btn" data-help="{_h.escape(t("hint.summary"))}"'
+        f' onclick="trChat({tid})">{tr_lbl}</button>'
         f'</div>'
         f'{_emoji_bar(f"cmp-{tid}")}'
         f'<form class="fin-row"'
@@ -1150,6 +1149,7 @@ def chat_panel_html(
         f' hx-swap="innerHTML"'
         f' hx-on::after-request="this.reset();scrollMsgs({tid})">'
         f'<textarea id="cmp-{tid}" name="text" rows="2" placeholder="{ph}"'
+        f' data-help="{_h.escape(t("hint.composer"))}"'
         f' onkeydown="entSend(event)"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
         f'</div>'
@@ -1212,8 +1212,10 @@ def app_shell(
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
         lbl = _h.escape(t(key))
+        hk = _HELP_KEYS.get(nav_id)  # section description doubles as its help-mode tip
+        tip = f' data-help="{_h.escape(t(hk))}"' if hk else ""
         return (
-            f'<a class="{cls}" href="{href}"{extra}>'
+            f'<a class="{cls}" href="{href}"{tip}{extra}>'
             f'<i class="{icon}"></i>'
             f'<span class="na-lbl">{lbl}</span>{badge}</a>'
         )
@@ -1254,10 +1256,6 @@ def app_shell(
     def _lb(code: str) -> str:
         cls = "lb on" if code == lang else "lb"
         return f'<a class="{cls}" href="/ui/lang/{code}">{code.upper()}</a>'
-
-    help_key = _HELP_KEYS.get(active_nav, "")
-    help_title = _h.escape(t(f"nav.{active_nav}") if active_nav in _HELP_KEYS else t("help.title"))
-    help_body = _h.escape(t(help_key)) if help_key else ""
 
     script = (
         "function setOn(el,cls){"
@@ -1301,8 +1299,22 @@ def app_shell(
         "function showThr(v){"
         "var el=document.querySelector('.thr');"
         "if(el)el.style.display=v?'':'none';}"
-        "function toggleHelp(){"
-        "document.getElementById('hov').classList.toggle('on');}"
+        # help mode: ? toggles it; ONE delegated hover handler on the document (survives
+        # every htmx re-render); the tip is measured after being filled, then flips below
+        # the element when there is no room above and clamps to the viewport width.
+        "function toggleHelp(){document.body.classList.toggle('help-mode');"
+        "var tp=document.getElementById('help-tip');if(tp)tp.style.display='none';}"
+        "document.addEventListener('mouseover',function(e){"
+        "if(!document.body.classList.contains('help-mode'))return;"
+        "var tp=document.getElementById('help-tip');if(!tp)return;"
+        "var el=e.target.closest?e.target.closest('[data-help]'):null;"
+        "if(!el){tp.style.display='none';return;}"
+        "tp.textContent=el.getAttribute('data-help');"
+        "tp.style.display='block';tp.style.top='0px';tp.style.left='0px';"
+        "var r=el.getBoundingClientRect();"
+        "var top=r.top-tp.offsetHeight-8;if(top<4)top=r.bottom+8;"
+        "var left=Math.max(4,Math.min(r.left,window.innerWidth-tp.offsetWidth-4));"
+        "tp.style.top=top+'px';tp.style.left=left+'px';});"
         "function setFnl(el){"
         "document.querySelectorAll('.fseg.on,.fchip.on,.fnl-all.on')"
         ".forEach(e=>e.classList.remove('on'));"
@@ -1429,10 +1441,11 @@ def app_shell(
         _show_thr = True
         _qs = f"?stage={stage}" if stage else ""
         _thr_inner = (
-            f'<div id="fnl-wrap"'
+            f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'
             f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
+            f' data-help="{_h.escape(t("hint.search"))}"'
             f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'
             f'<div id="tl" hx-get="/ui/threads{_qs}" hx-trigger="load, every 30s"'
             f' hx-swap="innerHTML"></div>'
@@ -1441,14 +1454,6 @@ def app_shell(
         _show_thr = False
         _thr_inner = ""
     _thr_style = "" if _show_thr else " style='display:none'"
-    help_overlay = (
-        f'<div class="hov" id="hov" onclick="if(event.target===this)toggleHelp()">'
-        f'<div class="hov-box">'
-        f'<button class="hov-close" onclick="toggleHelp()">✕</button>'
-        f'<h3 id="hov-title">{help_title}</h3>'
-        f'<p id="hov-body">{help_body}</p>'
-        f'</div></div>'
-    )
     return (
         f'<!doctype html><html lang="{lang}"><head>'
         f'<meta charset="utf-8">'
@@ -1469,15 +1474,15 @@ def app_shell(
         f'<nav class="sid-nav">{nav}</nav>'
         f'<div class="sid-ft">'
         f'<div class="bft-lbl">{_h.escape(t("branch.filter"))}</div>'
-        f'<div id="branch-sel"'
+        f'<div id="branch-sel" data-help="{_h.escape(t("hint.branch"))}"'
         f' hx-get="/ui/branches/widget"'
         f' hx-trigger="load"'
         f' hx-swap="innerHTML"></div>'
-        f'<div id="bot-tog-wrap"'
+        f'<div id="bot-tog-wrap" data-help="{_h.escape(t("hint.bot_global"))}"'
         f' hx-get="/ui/agent-status"'
         f' hx-trigger="load"'
         f' hx-swap="innerHTML"></div>'
-        f'<div style="margin-top:.45rem">'
+        f'<div style="margin-top:.45rem" data-help="{_h.escape(t("hint.lang"))}">'
         f'<div style="font-size:.63rem;color:#4a5568">lang</div>'
         f'<div class="lrow">{_lb("ru")}{_lb("en")}{_lb("id")}</div>'
         f'</div>'
@@ -1492,7 +1497,7 @@ def app_shell(
         f'<button class="mbtn mnav" onclick="toggleNav()" title="Menu">☰</button>'
         f'<button class="mbtn mback" onclick="backToList()" title="Back">‹</button>'
         f'</div>'
-        f'{help_overlay}'
+        f'<div id="help-tip"></div>'
         f'<script>{script}</script>'
         f'</body></html>'
     )

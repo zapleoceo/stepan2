@@ -357,52 +357,59 @@ def test_inbox_has_members_nav(client: TestClient) -> None:
     assert "/ui/settings/panel" in resp.text
 
 
-# ─── help overlay OOB refresh on htmx nav ──────────────────────────────────────
+# ─── help mode: ? toggles explainer mode, tips ride on data-help ────────────────
 
-def test_help_oob_html_matches_active_nav() -> None:
-    """Pure helper: title/body track whichever section is passed, not a frozen default."""
-    from app.api._ui_html import help_oob_html
+def test_help_mode_wiring_in_shell() -> None:
+    """One ? toggle flips body.help-mode; annotated elements get a dashed outline; a
+    single fixed-position #help-tip floats above the page (never clipped by cards);
+    ONE delegated document-level hover handler survives htmx re-renders."""
+    from app.api._ui_html import app_shell
     _set_lang("en")
-    coach = help_oob_html("coach")
-    assert 'id="hov-title"' in coach and "Coach KB" in coach
-    assert 'hx-swap-oob="true"' in coach
-    inbox = help_oob_html("inbox")
-    assert "Inbox" in inbox and "Coach KB" not in inbox
+    shell = app_shell("en", "", active_nav="inbox")
+    assert 'id="help-tip"' in shell
+    assert "body.help-mode [data-help]" in shell            # dashed 'hover me' outlines
+    assert "document.body.classList.toggle('help-mode')" in shell
+    assert "document.addEventListener('mouseover'" in shell  # delegated, not per-element
+    assert "#help-tip{position:fixed" in shell               # floats above everything
+    assert 'id="hov"' not in shell                           # old modal overlay is gone
 
 
-def test_htmx_nav_swap_refreshes_help_overlay_out_of_band(client: TestClient) -> None:
-    """The shell (help button + #hov) is only rendered on a full page load; an htmx nav
-    click swapping #main must still carry a fresh #hov-title/#hov-body OOB update, or the
-    '?' button stays stuck explaining whatever section loaded first (the reported bug).
-    /ui/branches/new has no DB access, so this is a real 200 (not tolerated 500)."""
-    resp = client.get(
-        "/ui/branches/new",
-        headers={"HX-Request": "true", "HX-Target": "main"},
-    )
-    assert resp.status_code == 200
-    assert 'id="hov-title" hx-swap-oob="true"' in resp.text
-    assert 'id="hov-body" hx-swap-oob="true"' in resp.text
-    assert "Branches" in resp.text  # nav.branches — matches this section, not a stale default
+def test_help_mode_nav_and_sidebar_have_tips() -> None:
+    """Nav links reuse the section help.* texts as data-help; sidebar controls
+    (branch filter, master bot switch, UI language) are annotated too."""
+    import html as _h
+
+    from app.api._i18n import t
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    shell = app_shell("en", "", active_nav="inbox")
+    for key in ("help.inbox", "hint.branch", "hint.bot_global",
+                "hint.search", "hint.funnel"):
+        assert f'data-help="{_h.escape(t(key))}"' in shell, key
 
 
-def test_htmx_fragment_without_main_target_skips_help_oob(client: TestClient) -> None:
-    """A sub-fragment swap (not the nav-level #main target) must NOT get the help OOB
-    stamped on it — only genuine section navigation should touch the overlay."""
-    resp = client.get(
-        "/ui/branches/new",
-        headers={"HX-Request": "true", "HX-Target": "some-other-div"},
-    )
-    assert resp.status_code == 200
-    assert "hov-title" not in resp.text
+def test_help_mode_chat_elements_have_tips() -> None:
+    """Chat header controls and the composer are annotated for explainer mode."""
+    import html as _h
+
+    from app.api._i18n import t
+    from app.api._ui_html import chat_panel_html
+    _set_lang("en")
+    panel = chat_panel_html(7, "Bob", "qualifying", [], [],
+                            products=[("vibe", "Vibe Coding")])
+    for key in ("hint.stage", "hint.product", "hint.bot_chat", "hint.block",
+                "hint.clear_ctx", "hint.load_ctx", "hint.suggest", "hint.summary",
+                "hint.composer"):
+        assert f'data-help="{_h.escape(t(key))}"' in panel, key
 
 
-def test_direct_full_page_load_has_help_overlay_for_its_own_section(client: TestClient) -> None:
-    """A non-htmx full load renders the shell directly with the correct help text baked
-    in (no OOB needed — app_shell already computes it from active_nav)."""
-    resp = client.get("/ui/branches/new")
-    assert resp.status_code == 200
-    assert 'id="hov-title"' in resp.text
-    assert "Branches" in resp.text
+def test_help_mode_tips_are_localized() -> None:
+    from app.api._i18n import t
+    _set_lang("ru")
+    ru = t("hint.suggest")
+    _set_lang("id")
+    idn = t("hint.suggest")
+    assert ru != idn and ru and idn  # each language carries its own text
 
 
 # ─── language switch keeps the current view ────────────────────────────────────
