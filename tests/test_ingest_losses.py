@@ -142,6 +142,35 @@ async def test_media_message_flags_pending_stubs_asset_and_records_seen(db_sessi
     assert thread.lead_seen_at == seen  # read-receipt captured
 
 
+async def test_read_receipt_advances_even_when_all_messages_dedup_away(db_session) -> None:
+    """A lead who READS our replies without answering produces no new message rows — every
+    polled item dedups away by external_id. The thread's lead_seen_at must still advance
+    (live bug: thread 452 showed 'read' in the IG app, our UI never marked it)."""
+    bid, cid, _, thread = await _world(db_session)
+    older_seen = _NOW - timedelta(hours=2)
+    thread.lead_seen_at = older_seen
+    db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,
+                           external_id="i-old", direction="in", sent_by="lead",
+                           text="halo", occurred_at=_NOW - timedelta(hours=3)))
+    await db_session.flush()
+    # the same old item polled again, now carrying a FRESH read receipt
+    fresh_seen = _NOW - timedelta(minutes=1)
+    repoll = InboundMessage(
+        external_thread_id="ig-1", sender_id="lead9", text="halo",
+        occurred_at=_NOW - timedelta(hours=3), external_id="i-old",
+        lead_seen_at=fresh_seen)
+    created = await IngestService(db_session, bid).ingest(cid, [repoll])
+    assert created == []  # message itself correctly deduped
+    assert thread.lead_seen_at == fresh_seen  # but the receipt moved forward
+    # a STALE receipt on a later poll must never rewind it
+    stale = InboundMessage(
+        external_thread_id="ig-1", sender_id="lead9", text="halo",
+        occurred_at=_NOW - timedelta(hours=3), external_id="i-old",
+        lead_seen_at=older_seen)
+    await IngestService(db_session, bid).ingest(cid, [stale])
+    assert thread.lead_seen_at == fresh_seen
+
+
 async def test_content_dedup_catches_pending_to_main_drift(db_session) -> None:
     """Same message reappears under a new external id (pending→main inbox) — item-level
     dedup misses it, content dedup (same text, same 2s window, same thread) catches it."""

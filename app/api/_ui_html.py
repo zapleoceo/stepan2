@@ -1356,16 +1356,17 @@ def app_shell(
         "fetch('/ui/chat/'+tid+'/tr-draft',{method:'POST',headers:{'HX-Request':'true'},"
         "body:fd}).then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
         ".catch(function(){out.textContent='';});}"
-        # mobile pull-to-refresh: html/body overflow:hidden kills the native gesture, so
-        # roll our own — at the top of a scroll region, a >90px downward drag reloads.
-        # Two engine-agnostic gotchas fixed here: (1) a swipe starting outside the known
-        # scroll containers (top bar, empty gap) used to never arm at all — fall back to
-        # the document's own scrollTop; (2) some engines (seen on Opera Mobile) rest at a
-        # scrollTop of 1-2px after overscroll instead of exactly 0, so 0 alone missed it.
+        # touch pull-to-refresh. NOT the browser-native gesture: our app-shell layout
+        # (html/body overflow:hidden, inner scroll containers — same as any web chat app)
+        # structurally disables native PTR in every mobile engine; the only 'native' fix
+        # is making the document itself the scroller, which this layout can't do. So we
+        # emulate: at the top of the touched scroll region (or the document as fallback,
+        # with a 2px tolerance — Opera Mobile rests at 1-2px after overscroll), a >90px
+        # downward drag reloads. Gated on touch events, not viewport width: desktop-mode
+        # browsing on a phone is still a touch device and must keep the gesture.
         "(function(){var sy=0,pull=false;"
         "function topOf(el){return el?el.scrollTop:0;}"
         "document.addEventListener('touchstart',function(e){"
-        "if(window.innerWidth>760){pull=false;return;}"
         "var t=e.target;"
         "var reg=t.closest?(t.closest('.msgs')||t.closest('.thr')||"
         "t.closest('.pnl-body')||t.closest('#tl')):null;"

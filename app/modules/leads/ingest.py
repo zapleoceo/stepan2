@@ -6,7 +6,7 @@ persist the message, advance the thread's reply window. Branch-scoped throughout
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -42,6 +42,7 @@ class IngestService:
     ) -> list[Message]:
         """Persist each new inbound; skip duplicates. Returns the rows it created."""
         created: list[Message] = []
+        await self._advance_read_receipts(channel_id, messages)
         for inbound in messages:
             external_id = inbound.external_id or _external_id(inbound)
             if await self.messages.by_external(channel_id, external_id) is not None:
@@ -68,6 +69,31 @@ class IngestService:
             if row is not None:
                 created.append(row)
         return created
+
+    async def _advance_read_receipts(
+        self, channel_id: int, messages: list[InboundMessage]
+    ) -> None:
+        """Advance each known thread's lead_seen_at BEFORE message dedup.
+
+        The receipt rides on every polled item, but the old update lived in _store and
+        only ran when a NEW inbound row was written — a lead who READS our replies
+        without answering produces no new rows, so their receipt froze at their last
+        message (live: thread 452 showed 'read' in the IG app, nothing in our UI).
+        Threads not yet in the DB are covered by _store after identity resolution."""
+        latest: dict[str, datetime] = {}
+        for m in messages:
+            if m.lead_seen_at is None:
+                continue
+            prev = latest.get(m.external_thread_id)
+            if prev is None or m.lead_seen_at > prev:
+                latest[m.external_thread_id] = m.lead_seen_at
+        for ext_id, seen in latest.items():
+            thread = await self.identity.threads.by_external(channel_id, ext_id)
+            if thread is not None and (
+                thread.lead_seen_at is None or seen > thread.lead_seen_at
+            ):
+                thread.lead_seen_at = seen
+                self.session.add(thread)
 
     async def _store_outgoing(
         self, channel_id: int, external_id: str, inbound: InboundMessage
