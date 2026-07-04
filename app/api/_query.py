@@ -107,7 +107,7 @@ async def fetch_thread_events(
     time-ordered — rendered as system-log lines interleaved with the message bubbles."""
     return (
         await session.execute(
-            text(f"SELECT * FROM ({_EVENT_UNION}) e ORDER BY created_at, id"),
+            text(f"SELECT * FROM ({_EVENT_UNION}) e ORDER BY created_at, id"),  # noqa: S608
             {"tid": thread_id, "after_stage": after_stage_id, "after_log": after_log_id},
         )
     ).all()
