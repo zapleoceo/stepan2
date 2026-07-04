@@ -101,6 +101,31 @@ def test_threads_partial_honors_open_thread_cookie(client: TestClient) -> None:
     assert resp.status_code in (200, 500)
 
 
+# ─── bubble translate button: only when there is text to translate ────────────
+
+def _msg_row(mid: int, text: str, media_id=None) -> tuple:
+    # (id, direction, sent_by, text, ts, llm_info, link_url, preview_url, media_id, media_kind)
+    return (mid, "in", "lead", text, datetime.now(UTC).replace(tzinfo=None),
+            None, None, None, media_id, "image" if media_id else None)
+
+
+def test_bubble_shows_translate_button_for_text() -> None:
+    from app.api._ui_html import _bubble
+    _set_lang("en")
+    html = _bubble(_msg_row(1, "halo kak apa kabar"), 10)
+    assert "trMsg(1,10)" in html  # 🌐 translate button present on a text bubble
+
+
+def test_bubble_hides_translate_button_when_no_caption() -> None:
+    """A media-only bubble has no bt-{mid} text node, so the 🌐 button would no-op — it must
+    not be rendered at all (root cause of 'bubble translate sometimes does nothing')."""
+    from app.api._ui_html import _MEDIA_PH, _bubble
+    _set_lang("en")
+    placeholder = next(iter(_MEDIA_PH))
+    html = _bubble(_msg_row(2, placeholder, media_id=99), 10)
+    assert "trMsg(2,10)" not in html  # no translate button on a caption-less media bubble
+
+
 # ─── item 2: IG post URL conversion ───────────────────────────────────────────
 
 def test_ig_post_url_is_deterministic_and_url_safe() -> None:

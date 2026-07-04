@@ -167,6 +167,19 @@ def test_app_shell_is_mobile_responsive() -> None:
     assert "scrollbar-width:thin" in html  # Firefox scrollbar styling
 
 
+def test_outbox_badge_does_not_push_url() -> None:
+    """The polling outbox badge sits inside the outbox <a hx-push-url=...>; without its own
+    hx-push-url="false" its load/every-15s poll rewrites the address bar to /ui/outbox/panel,
+    hijacking a direct /ui/chat/{id} URL. Guard that it opts out of URL pushing."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>m</div>", active_nav="inbox")
+    i = html.find('id="outbox-badge"')
+    assert i != -1
+    end = html.find(">", i)
+    assert 'hx-push-url="false"' in html[i:end]
+
+
 def test_app_shell_has_help_button() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")

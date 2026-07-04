@@ -720,6 +720,7 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     tr_btn = (
         f'<button class="trx" title="Translate" tabindex="-1"'
         f' onclick="trMsg({mid},{tid})">🌐</button>'
+        if caption else ""  # nothing to translate on a media-only / no-caption bubble
     )
     if direction == "in":
         return (
@@ -1169,7 +1170,8 @@ def app_shell(
 
     outbox_badge = (
         '<span class="na-badge" id="outbox-badge" hx-get="/ui/outbox/count"'
-        ' hx-trigger="load, every 15s" hx-swap="innerHTML" hx-target="this"></span>'
+        ' hx-trigger="load, every 15s" hx-swap="innerHTML" hx-target="this"'
+        ' hx-push-url="false"></span>'  # poll must not rewrite the address bar
     )
 
     coach_extra = (
