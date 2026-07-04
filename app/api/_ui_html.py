@@ -234,11 +234,13 @@ _CSS = (
     ".delx:hover{opacity:1!important;color:#ff6b6b}"
     ".fin{padding:.45rem .8rem .52rem;border-top:1px solid #2d3748;"
     "background:#141925;flex-shrink:0}"
-    ".fin-acts{display:flex;gap:.3rem;margin-bottom:.3rem}"
+    ".fin-tools{display:flex;align-items:center;gap:.3rem;margin-bottom:.3rem;overflow-x:auto}"
+    ".fin-tools .act-btn{flex-shrink:0}"
+    ".fin-tools .emo-bar{flex-wrap:nowrap;flex-shrink:0}"
     ".fin-row{display:flex;gap:.4rem;align-items:flex-end}"
     ".fin textarea{flex:1;background:#1a1f2e;border:1px solid #2d3748;border-radius:6px;"
     "color:#d0d7de;padding:.36rem .52rem;font-size:.8rem;resize:none;"
-    "font-family:inherit;line-height:1.4}"
+    "font-family:inherit;line-height:1.4;max-height:9.5rem;overflow-y:hidden}"
     ".fin textarea:focus{outline:none;border-color:#206bc4}"
     ".bsn{background:#206bc4;color:#fff;border:none;border-radius:6px;"
     "padding:0 .88rem;font-size:.78rem;font-weight:600;cursor:pointer;height:2.1rem}"
@@ -637,8 +639,6 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
      ig_username, avatar_url, follower_count, following_count, agent_enabled,
      last_msg, last_dir, cnt_in, cnt_out, branch_name) = row  # type: ignore[misc]
     on = " on" if tid == active_tid else ""
-    arr = "→ " if last_dir == "out" else ("← " if last_dir == "in" else "")
-    preview = _h.escape((arr + (last_msg or ""))[:80])
     prod_badge = (
         f' <span class="bg sq" style="font-size:.57rem;text-transform:none">'
         f'{_h.escape(str(product_slug))}</span>'
@@ -678,7 +678,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
         f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_fmt_dt_short(_as_dt(last_act))}</span></div>'
-        f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge} {preview}</div>'
+        f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge}</div>'
         f'{handle_row}'
         f'{sub_row}</div></a>'
     )
@@ -1157,23 +1157,23 @@ def chat_panel_html(
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
         f'<div class="fin">'
-        f'<div class="fin-acts">'
+        f'<div class="fin-tools">'
         f'<button class="act-btn"'
         f' data-help="{_h.escape(t("hint.suggest"))}"'
         f' hx-post="/ui/chat/{tid}/suggest"'
         f' hx-target="#sug-{tid}" hx-swap="innerHTML">{sug_lbl}</button>'
         f'<button class="act-btn" data-help="{_h.escape(t("hint.summary"))}"'
         f' onclick="trChat({tid})">{tr_lbl}</button>'
-        f'</div>'
         f'{_emoji_bar(f"cmp-{tid}")}'
+        f'</div>'
         f'<form class="fin-row"'
         f' hx-post="/ui/chat/{tid}/send"'
         f' hx-target="#msgs-{tid}"'
         f' hx-swap="innerHTML"'
-        f' hx-on::after-request="this.reset();scrollMsgs({tid})">'
-        f'<textarea id="cmp-{tid}" name="text" rows="2" placeholder="{ph}"'
+        f" hx-on::after-request='this.reset();scrollMsgs({tid});resetGrow(\"cmp-{tid}\")'>"
+        f'<textarea id="cmp-{tid}" name="text" rows="1" placeholder="{ph}"'
         f' data-help="{_h.escape(t("hint.composer"))}"'
-        f' onkeydown="entSend(event)"></textarea>'
+        f' oninput="autoGrow(this)" onkeydown="entSend(event)"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
         f'</div>'
     )
@@ -1262,17 +1262,17 @@ def app_shell(
     )
     nav = (
         _na("nav.inbox", "/ui/inbox", "fa-solid fa-inbox", "inbox")
+        + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox", outbox_badge)
         + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
-        + '<div class="nav-sep"></div>'
-        + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
         + _na("nav.know", "/ui/knowledge", "fa-solid fa-book", "know")
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
+        + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
+        + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
+        + '<div class="nav-sep"></div>'
         + _hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
-        + _hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
         + '<div class="nav-sep"></div>'
-        + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
-        + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox", outbox_badge)
+        + _hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
         + _hna("nav.log", "/ui/settings/log", "fa-solid fa-list", "log")
     )
 
@@ -1390,6 +1390,9 @@ def app_shell(
         # Enter sends, Shift+Enter = newline
         "function entSend(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();"
         "var f=e.target.closest('form');if(f)f.requestSubmit();}}"
+        # message textarea grows with content up to CSS max-height, then scrolls
+        "function autoGrow(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}"
+        "function resetGrow(id){var ta=document.getElementById(id);if(ta)ta.style.height='';}"
         # insert an emoji at the cursor in a chat composer / suggest textarea
         "function insEmo(ta,em){if(!ta)return;var s=ta.selectionStart;"
         "if(s==null)s=ta.value.length;var e=ta.selectionEnd!=null?ta.selectionEnd:s;"

@@ -1091,3 +1091,37 @@ def test_inbox_has_branches_nav_link(client: TestClient) -> None:
     resp = client.get("/ui/inbox")
     assert resp.status_code == 200
     assert "/ui/branches/panel" in resp.text
+
+
+def test_reports_date_form_auto_submits_on_change() -> None:
+    from app.api._ui_panels import _date_range_form_html
+    html = _date_range_form_html("", "")
+    assert 'hx-trigger="change"' in html   # fires on either date, no Apply click needed
+    assert "rep.apply" not in html          # Apply button removed
+    assert "<button" not in html            # no submit button left in the form
+
+
+def test_chat_toolbar_suggest_summary_emoji_in_one_row() -> None:
+    from app.api._ui_html import chat_panel_html
+    _set_lang("en")
+    html = chat_panel_html(7, "Bob", "qualifying", [], [])
+    i = html.find('class="fin-tools"')
+    j = html.find("</div>", i)
+    row = html[i:j]
+    assert "Suggest" in row and "Summary" in row and "emo-bar" in row  # all one row
+
+
+def test_composer_textarea_auto_grows() -> None:
+    from app.api._ui_html import chat_panel_html
+    html = chat_panel_html(7, "Bob", "qualifying", [], [])
+    assert 'oninput="autoGrow(this)"' in html
+    assert "resetGrow(" in html            # height resets after a send
+
+
+def test_nav_order_matches_requested_grouping() -> None:
+    from app.api._ui_html import app_shell
+    html = app_shell("en", "<div>x</div>", active_nav="inbox")
+    labels = ["Inbox", "Outbox", "Coach KB", "Knowledge", "Products",
+              "Reports", "Leads", "Members", "Settings", "Branches", "Broker log"]
+    positions = [html.index(f">{lbl}<") for lbl in labels]
+    assert positions == sorted(positions)  # exact requested order, left to right

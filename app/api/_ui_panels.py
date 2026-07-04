@@ -968,15 +968,17 @@ def _funnel_line_html(stage_counts: dict[str, int]) -> str:
 
 
 def _date_range_form_html(date_from: str, date_to: str) -> str:
-    """From/To date pickers filtering the whole report by lead conversation-start date."""
+    """From/To date pickers filtering the whole report by lead conversation-start date.
+
+    Auto-applies on change of EITHER date (no Apply click needed, no full reload) — htmx's
+    hx-trigger="change" listens on the form and fires from either input independently."""
     return (
-        f'<form class="rep-dates" method="get" action="/ui/reports/panel"'
-        f' hx-get="/ui/reports/panel" hx-target="#main" hx-push-url="true">'
+        f'<form class="rep-dates" hx-get="/ui/reports/panel" hx-target="#main"'
+        f' hx-push-url="true" hx-trigger="change">'
         f'<label>{_h.escape(t("rep.from"))}'
         f'<input type="date" name="date_from" value="{_h.escape(date_from)}"></label>'
         f'<label>{_h.escape(t("rep.to"))}'
         f'<input type="date" name="date_to" value="{_h.escape(date_to)}"></label>'
-        f'<button type="submit">{_h.escape(t("rep.apply"))}</button>'
         f'<span class="rep-dhint">{_h.escape(t("rep.date_hint"))}</span>'
         f'</form>'
     )
