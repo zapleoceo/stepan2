@@ -43,6 +43,7 @@ services:
       STEPAN2_AUTH_ENABLED: ${AUTH_ENABLED:-false}
       STEPAN2_SESSION_SECRET: ${SESSION_SECRET:-}
       STEPAN2_TG_LOGIN_BOT_USERNAME: ${TG_LOGIN_BOT_USERNAME:-}
+      STEPAN2_PUBLIC_URL: ${PUBLIC_URL:-}
     ports:
       - "127.0.0.1:8020:8000"
     restart: unless-stopped
@@ -63,6 +64,8 @@ services:
       STEPAN2_BROKER_PROJECT_KEY: ${BROKER_PROJECT_KEY:-}
       STEPAN2_SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set}
       STEPAN2_IG_PROXY: ${IG_PROXY:-}
+      STEPAN2_TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
+      STEPAN2_PUBLIC_URL: ${PUBLIC_URL:-}
     restart: unless-stopped
 
 volumes:
