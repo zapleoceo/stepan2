@@ -46,6 +46,14 @@ class MessageRepo(_LeadMessageRepo):
         rows = list((await self.session.exec(q)).all())
         return list(reversed(rows))
 
+    async def inbound_count(self, thread_id: int) -> int:
+        """How many messages the lead has sent in this thread — the discovery-length signal
+        the gate uses to stop forcing discovery once the lead has had enough turns."""
+        return int((await self.session.execute(
+            select(func.count()).select_from(Message).where(
+                Message.thread_id == thread_id, Message.direction == "in")
+        )).scalar_one())
+
 
 class CoachingNoteRepo:
     """Read active coaching directives for a branch — injected into the system prompt."""

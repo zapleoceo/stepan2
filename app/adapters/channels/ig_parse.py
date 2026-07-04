@@ -30,6 +30,9 @@ _MEDIA_PH = {
     "xma_product_share": "🛍 product", "media": "🖼 media", "raven_media": "🖼 media",
     "animated_media": "GIF", "voice_media": "🎤 voice", "store_sticker": "🏷 sticker",
 }
+# The untranscribed-voice placeholder. Once the broker transcribes, the message text
+# becomes "🎤 <words>" (longer), so an exact match means transcription is still pending.
+VOICE_PENDING_PH = _MEDIA_PH["voice_media"]
 
 _URL_RE = re.compile(r"https?://[^\s]+")
 

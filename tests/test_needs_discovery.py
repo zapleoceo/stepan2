@@ -95,6 +95,22 @@ async def test_gate_blocks_presenting_without_needs(db_session) -> None:
     assert svc._stage_for(with_need, lead) == Stage.PRESENTING  # pain + gain → allowed
 
 
+async def test_gate_stops_forcing_discovery_after_turn_cap(db_session) -> None:
+    """A non-yielding lead must not be interrogated forever: once they've taken enough turns
+    the gate stops blocking, so Stepan presents on what he has instead of a sixth question."""
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)  # still no captured need
+    db_session.add(lead)
+    await db_session.flush()
+    svc = _svc(db_session, b.id)
+    bare = Decision(reply="here's the fit...", stage=Stage.PRESENTING, product_slug="vibe",
+                    ready=False, needs_manager=False)
+    assert svc._stage_for(bare, lead, inbound_count=2) == Stage.QUALIFYING   # early → keep digging
+    assert svc._stage_for(bare, lead, inbound_count=6) == Stage.PRESENTING   # past cap → present
+
+
 async def test_gate_allows_presenting_when_lead_already_has_needs(db_session) -> None:
     b = Branch(name="T", lang="id")
     db_session.add(b)
@@ -143,6 +159,29 @@ async def test_decide_persists_captured_needs(db_session) -> None:
     await svc.decide(th.id)
     got = parse_needs((await db_session.exec(select(Lead).where(Lead.id == lead.id))).first().needs)
     assert "tried before, gave up" in got.pains and "a real job" in got.gains
+
+
+async def test_decide_holds_reply_on_untranscribed_voice(db_session) -> None:
+    """A voice note the broker hasn't transcribed yet (text is the raw '🎤 voice'
+    placeholder) must NOT get a reply — decide() returns None so Stepan waits for the
+    transcript instead of answering the placeholder (the chat-1756 bug)."""
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    db_session.add(th)
+    await db_session.flush()
+    db_session.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="v1",
+                           direction="in", sent_by="lead", text="🎤 voice", occurred_at=_NOW))
+    await db_session.flush()
+    svc = ReplyService(db_session, b.id, _ProfileLLM(),
+                       KnowledgeService(db_session, b.id, _ProfileLLM()),
+                       branch_settings=_parse({}), notifier=None)
+    assert await svc.decide(th.id) is None  # held — waiting for the transcript
 
 
 # ─── discovery metric ─────────────────────────────────────────────────────────

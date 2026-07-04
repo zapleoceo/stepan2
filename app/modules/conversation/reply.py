@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.adapters.channels.ig_parse import VOICE_PENDING_PH
 from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.adapters.meta_capi import MetaCapi
 from app.config import settings
@@ -31,6 +32,9 @@ logger = logging.getLogger(__name__)
 _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
+# After this many lead turns the discovery gate stops forcing more questions — a lead who
+# hasn't yielded a real need by now won't from a sixth question; present on what we have.
+_DISCOVERY_TURN_CAP = 5
 
 
 def _script_lang(text: str) -> str | None:
@@ -81,6 +85,13 @@ class ReplyService:
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
         ctx = await engine.prepare(thread_id, workflow="reply")
         if ctx is None:
+            return None
+        newest = ctx.dialog[-1] if ctx.dialog else None
+        if newest is not None and newest.direction == "in" \
+                and (newest.text or "").strip() == VOICE_PENDING_PH:
+            # A voice note the broker hasn't transcribed yet — hold the reply so Stepan
+            # answers the CONTENT, not the placeholder. Releases when backfill writes the
+            # transcript ("🎤 <words>"), waits indefinitely if transcription is unavailable.
             return None
         lead = ctx.lead
         last_in = next((m for m in reversed(ctx.dialog) if m.direction == "in"), None)
@@ -147,7 +158,8 @@ class ReplyService:
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return
-        new_stage = self._stage_for(decision, lead)
+        inbound = await self.messages.inbound_count(thread.id)
+        new_stage = self._stage_for(decision, lead, inbound)
         if new_stage == lead.stage:
             return
         self.session.add(StageEvent(
@@ -181,18 +193,22 @@ class ReplyService:
         self.session.add(lead)
         logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
 
-    def _stage_for(self, decision: Decision, lead: Lead) -> Stage:
+    def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0) -> Stage:
         if decision.ready and lead.phone_e164:
             return Stage.READY
         if decision.needs_manager:
             return Stage.MANAGER
         if decision.ready:  # ready without a contact — keep selling until we have one
             return Stage.PRESENTING
-        # Discovery gate: never present until we've captured a real need (a pain or gain),
-        # even when the lead opened with a direct product question. Force one more
-        # discovery turn instead — the code backstop behind the prompt's discover-first rule.
-        if decision.stage in (Stage.PRESENTING, Stage.OBJECTION) and not self._needs_captured(
-            decision, lead
+        # Discovery gate: don't present until a real need (pain + gain) is captured — the
+        # code backstop behind the prompt's discover-first rule. BUT it's an EARLY gate, not
+        # an infinite interrogation: once the lead has taken _DISCOVERY_TURN_CAP turns, stop
+        # forcing discovery (a non-yielding lead is better served by a value pitch than a
+        # sixth question) and trust the model's PRESENTING.
+        if (
+            decision.stage in (Stage.PRESENTING, Stage.OBJECTION)
+            and inbound_count < _DISCOVERY_TURN_CAP
+            and not self._needs_captured(decision, lead)
         ):
             return Stage.QUALIFYING
         return decision.stage
