@@ -1192,6 +1192,7 @@ def chat_panel_html(
         f'{messages_html(msgs, pending, tid, lead_seen_at, events)}</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
+        f'<div id="an-{tid}"></div>'
         f'<div class="fin">'
         f'<div class="fin-tools">'
         f'<button class="act-btn"'
@@ -1200,6 +1201,14 @@ def chat_panel_html(
         f' hx-target="#sug-{tid}" hx-swap="innerHTML">{sug_lbl}</button>'
         f'<button class="act-btn" data-help="{_h.escape(t("hint.summary"))}"'
         f' onclick="trChat({tid})">{tr_lbl}</button>'
+        # coach QA: grade this whole chat against the KB (chat:deep). htmx-indicator shows a
+        # 'Stepan is thinking' spinner in the popup slot while the deep call runs.
+        f'<button class="act-btn" data-help="{_h.escape(t("hint.analyze"))}"'
+        f' hx-post="/ui/coach/analyze/{tid}" hx-target="#an-{tid}" hx-swap="innerHTML"'
+        f' hx-indicator="#an-ind-{tid}">🔍 {_h.escape(t("chat.analyze"))}'
+        f'</button>'
+        f'<span id="an-ind-{tid}" class="htmx-indicator coach-think">'
+        f'<span class="spin"></span> {_h.escape(t("coach.thinking"))}</span>'
         f'{_emoji_bar(f"cmp-{tid}")}'
         f'</div>'
         f'<form class="fin-row"'
@@ -1461,6 +1470,7 @@ def app_shell(
         ".then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
         ".catch(function(){out.innerHTML='';});}"
         "function trClose(tid){var o=document.getElementById('tr-'+tid);if(o)o.innerHTML='';}"
+        "function anClose(tid){var o=document.getElementById('an-'+tid);if(o)o.innerHTML='';}"
         # translate the Suggest draft (shows the manager what Stepan's reply says)
         "function trDraft(tid){var ta=document.getElementById('sug-ta-'+tid);"
         "var out=document.getElementById('sug-tr-'+tid);if(!ta||!ta.value.trim())return;"

@@ -187,6 +187,33 @@ async def test_coach_proposes_edit_that_needs_confirm(db_session) -> None:
     assert edit.status == "proposed" and edit.new_text == "The price is 13M."  # awaits Apply
 
 
+async def test_coach_analyze_chat_grades_against_kb(db_session) -> None:
+    from app.adapters.db.models import Channel, ChannelThread, Lead, Message
+    from app.domain.enums import ChannelKind
+    from app.modules.conversation.coach_service import analyze_chat
+
+    bid = await _seed(db_session)
+    ch = Channel(branch_id=bid, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=bid)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    db_session.add(th)
+    await db_session.flush()
+    db_session.add(Message(branch_id=bid, thread_id=th.id, channel_id=ch.id, external_id="m1",
+                           direction="in", sent_by="lead", text="berapa harga?"))
+    await db_session.flush()
+
+    llm = _IntentLLM("✅ Что верно: ...\n⚠️ Ошибки: none")
+    out = await analyze_chat(db_session, bid, th.id, llm)
+    assert "Что верно" in out
+    # empty thread → empty analysis, no crash
+    empty_th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-2")
+    db_session.add(empty_th)
+    await db_session.flush()
+    assert await analyze_chat(db_session, bid, empty_th.id, llm) == ""
+
+
 async def test_coach_edit_makes_branch_need_reindex(db_session) -> None:
     """A Coach edit changes doc.content AND bumps updated_at, so the RAG watcher rebuilds —
     without the bump the index kept serving the OLD text (the reported gap)."""

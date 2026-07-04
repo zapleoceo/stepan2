@@ -1,20 +1,40 @@
 """LLM-powered Knowledge Base editor for the coach mode.
 
-propose_edit  → reads KB docs, asks LLM to produce old/new diff → stores CoachingEdit
+propose_edit  → answer a question / propose an edit / clarify (intent-based)
 apply_edit    → replaces old_text with new_text in the target doc
 cancel_edit   → marks the edit as cancelled
+analyze_chat  → read a whole lead chat and grade it against the KB
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import CoachingEdit
 from app.modules.knowledge.repository import KnowledgeRepo
 from app.ports.llm import LLMPort
+
+logger = logging.getLogger(__name__)
+
+_ANALYZE_SYSTEM = (
+    "You are a sales QA coach. Below is the branch's FULL knowledge base, then a lead chat "
+    "(LEAD = customer, AGENT = our bot). Read both fully and grade the bot's handling AGAINST "
+    "the knowledge base.\n\n"
+    "KNOWLEDGE BASE:\n{docs}\n\n"
+    "Answer concisely in {lang}, in these sections (use short bullet points):\n"
+    "✅ Что верно — where the bot followed the KB / sold well.\n"
+    "⚠️ Ошибки — anything the bot said that CONTRADICTS the KB, invented facts, wrong price/"
+    "date, or a mishandled objection (quote the KB fact it broke).\n"
+    "🕳 Пробелы в базе — questions the lead raised that the KB doesn't answer (so the bot "
+    "couldn't).\n"
+    "🎯 Что улучшить — 1-3 concrete next-step suggestions.\n"
+    "Base every point ONLY on the KB and the chat; never invent."
+)
 
 _SYSTEM = (
     "You are the Knowledge Base assistant for an AI sales bot. The FULL knowledge base is "
@@ -97,6 +117,42 @@ async def propose_edit(
     session.add(edit)
     await session.flush()
     return edit
+
+
+async def analyze_chat(
+    session: AsyncSession, branch_id: int, thread_id: int, llm: LLMPort, lang: str = "Russian",
+) -> str:
+    """Read a whole lead chat and grade the bot's handling against the KB (chat:deep). Returns
+    the analysis text, or '' if the thread is empty / the call fails."""
+    rows = (await session.execute(
+        text("SELECT direction, text FROM message WHERE thread_id = :t AND text <> ''"
+             " ORDER BY occurred_at, id LIMIT 300"),
+        {"t": thread_id},
+    )).all()
+    convo = "\n".join(
+        f"{'LEAD' if r[0] == 'in' else 'AGENT'}: {(r[1] or '').strip()}"
+        for r in rows if (r[1] or "").strip()
+    )[:12000]
+    if not convo:
+        return ""
+    docs = await KnowledgeRepo(session, branch_id).list()
+    docs_text = "\n\n".join(f"=== {d.slug} ===\n{d.content}" for d in docs)
+    messages = [
+        {"role": "system", "content": _ANALYZE_SYSTEM.format(docs=docs_text, lang=lang)},
+        {"role": "user", "content": convo},
+    ]
+    for attempt in range(3):
+        try:
+            raw, _ = await llm.chat(messages, capability="chat:deep", max_tokens=8000,
+                                    temperature=0.2, workflow="coach", thread_id=thread_id,
+                                    branch_id=branch_id)
+            if raw and raw.strip():
+                return raw.strip()
+        except Exception as exc:  # noqa: BLE001, PERF203
+            logger.warning("analyze_chat failed thread=%s: %s", thread_id, exc)
+        if attempt < 2:
+            await asyncio.sleep(1.5)
+    return ""
 
 
 async def apply_edit(

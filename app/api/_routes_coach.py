@@ -1,24 +1,30 @@
-"""Coach routes: say, apply, cancel, revert, panel."""
+"""Coach routes: say, apply, cancel, revert, analyze, panel."""
 from __future__ import annotations
+
+import html as _h
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import branch_ids_from_request
 from app.modules.conversation.coach_service import (
+    analyze_chat,
     apply_edit,
     cancel_edit,
     propose_edit,
     revert_edit,
 )
 
-from ._i18n import apply_lang
+from ._i18n import apply_lang, t
 from ._query import fetch_coach_data
 from ._ui_panels import _coach_response, coach_chat_html
 
 router = APIRouter()
+
+_LANG_NAME = {"ru": "Russian", "en": "English", "id": "Indonesian"}
 
 
 @router.get("/coach/panel", response_class=HTMLResponse)
@@ -51,6 +57,33 @@ async def coach_say(
             edit.old_text, edit.new_text, edit.summary, edit.created_at,
         )
     return HTMLResponse(html)
+
+
+@router.post("/coach/analyze/{thread_id}", response_class=HTMLResponse)
+async def coach_analyze(thread_id: int, request: Request) -> HTMLResponse:
+    """Coach reads a whole lead chat and grades it against the KB → popup in the chat window."""
+    lang = apply_lang(request)
+    async with session_scope() as session:
+        row = (await session.execute(
+            text("SELECT l.branch_id FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                 " WHERE ct.id = :t"), {"t": thread_id})).first()
+        if row is None:
+            return HTMLResponse("")
+        analysis = await analyze_chat(
+            session, row[0], thread_id, BrokerLLM(), lang=_LANG_NAME.get(lang, "English"))
+    if not analysis.strip():
+        return HTMLResponse("")
+    lbl = _h.escape(t("coach.analysis"))
+    return HTMLResponse(
+        f'<div style="position:relative;padding:.4rem 1.6rem .5rem .75rem;font-size:.78rem;'
+        f'color:#cfe0f4;background:#141925;border-top:1px solid #2d3748;white-space:pre-wrap;'
+        f'max-height:45vh;overflow-y:auto">'
+        f'<button onclick="anClose({thread_id})" title="Close"'
+        f' style="position:absolute;top:.2rem;right:.4rem;background:none;border:none;'
+        f'color:#6b7685;font-size:1rem;line-height:1;cursor:pointer">×</button>'
+        f'<div style="color:#e2b33d;font-weight:600;margin-bottom:.2rem">🔍 {lbl}</div>'
+        f'{_h.escape(analysis)}</div>'
+    )
 
 
 @router.post("/coach/apply/{edit_id}")
