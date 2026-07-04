@@ -35,6 +35,22 @@ class _LangLLM:
         return [[0.0] for _ in texts]
 
 
+class _SpyLLM:
+    """Never fills in reply_language — the exact live failure: the model forgets to
+    self-report the switch, so the OLD code path never persisted it."""
+
+    def __init__(self) -> None:
+        self.seen_lang: str | None = None
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        self.seen_lang = messages[0]["content"]  # system prompt carries the {lang} token
+        return json.dumps({"reply": "ok", "stage": "qualifying"}), \
+            {"model": "fake", "cost_usd": 0.0}
+
+    async def embed(self, texts, **kw):  # noqa: ANN001, ANN003, ANN201
+        return [[0.0] for _ in texts]
+
+
 async def _thread(s, *, pref: str | None = None) -> tuple[int, int]:
     b = Branch(name="T", lang="id")
     s.add(b)
@@ -73,3 +89,29 @@ async def test_decision_persists_lead_language(db_session) -> None:
     await svc.enqueue_reply(tid, decision)
     lead = (await db_session.exec(select(Lead))).first()
     assert lead.preferred_language == "ru"    # lead switched → remembered
+
+
+async def test_cyrillic_in_lead_text_overrides_stale_default_immediately(db_session) -> None:
+    """REGRESSION: live thread 452 kept drifting back to Bahasa mid-conversation because
+    persistence relied ENTIRELY on the model self-reporting reply_language, and it doesn't
+    reliably do that every turn. A lead writing in Cyrillic must get a Russian reply and a
+    persisted preference on THIS turn, even when the model's own decision says nothing
+    about language at all."""
+    bid, tid = await _thread(db_session)  # branch default is "id", lead has no preference yet
+    b = (await db_session.exec(select(Branch))).first()
+    thread = (await db_session.exec(select(ChannelThread).where(ChannelThread.id == tid))).one()
+    lead_before = (await db_session.exec(select(Lead))).first()
+    db_session.add(Message(branch_id=b.id, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="m2", direction="in", sent_by="lead",
+                           text="Привет, у вас дорого", occurred_at=_NOW))
+    await db_session.flush()
+
+    llm = _SpyLLM()
+    svc = _svc(db_session, bid, llm)
+    decision = await svc.decide(tid)
+
+    assert decision is not None and decision.reply_language is None  # model said nothing
+    assert "'ru'" in llm.seen_lang  # THIS turn's prompt already asked for Russian
+    lead_after = (await db_session.exec(select(Lead))).first()
+    assert lead_after.id == lead_before.id
+    assert lead_after.preferred_language == "ru"  # persisted without waiting on self-report

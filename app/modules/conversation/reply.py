@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -29,6 +30,17 @@ logger = logging.getLogger(__name__)
 
 _BUBBLE_GAP_S = 6  # stagger between split reply bubbles (human typing cadence)
 _MAX_BUBBLES = 3
+_CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
+
+
+def _script_lang(text: str) -> str | None:
+    """Cyrillic in the lead's own text -> 'ru', independent of the model's self-report.
+
+    decision.reply_language is only set when the model remembers to fill it in - live
+    threads showed it drifting back to the branch default (Bahasa) mid-conversation even
+    after the lead explicitly switched to Russian, because that self-report was the ONLY
+    thing persisting the switch. A lead's own script is a much stronger, cheap signal."""
+    return "ru" if _CYRILLIC_RE.search(text or "") else None
 
 
 def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
@@ -111,8 +123,14 @@ class ReplyService:
         notes = await self.coaching.active_manager_notes()
         lead = await self.session.get(Lead, thread.lead_id)
         stored_needs = parse_needs(lead.needs if lead is not None else None)
+        last_in = next((m for m in reversed(dialog) if m.direction == "in"), None)
+        script_lang = _script_lang(last_in.text if last_in else "")
+        lang = script_lang or await self._lang(lead)
+        if script_lang and lead is not None and lead.preferred_language != script_lang:
+            lead.preferred_language = script_lang  # sticks even if the model forgets to say so
+            self.session.add(lead)
         messages = build_messages(
-            context, dialog, await self._lang(lead), coaching_notes=notes,
+            context, dialog, lang, coaching_notes=notes,
             needs_block=needs_summary(stored_needs))
         if messages[-1]["role"] == "assistant":
             # Defensive: threads_awaiting_reply() only selects threads where the
