@@ -68,6 +68,17 @@ async def fetch_bot_enabled_count(
     return int((await session.execute(q)).scalar_one())
 
 
+async def fetch_blocked_count(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> int:
+    """How many leads are blocked — is_blocked is a flag, not a funnel stage, so without
+    this count (and the funnel's clickable 🚫 chip) a blocked lead is otherwise unfindable."""
+    q = select(func.count()).where(Lead.is_blocked.is_(True))  # type: ignore[attr-defined]
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    return int((await session.execute(q)).scalar_one())
+
+
 async def fetch_report_data(
     session: AsyncSession, branch_ids: list[int] | None,
 ) -> tuple[dict[str, int], dict[int, int], dict[int, int], list, dict[str, float | int]]:

@@ -132,18 +132,19 @@ _CSS = (
     ".sp{background:#1f3a2a;color:#4adb7a}.so{background:#3a2a1f;color:#ffa94d}"
     ".sr{background:#1f3a2a;color:#51cf66}.sh{background:#163030;color:#22b8cf}"
     ".sd{background:#2a2a2a;color:#868e96}.sm{background:#3a1f1f;color:#ff6b6b}"
-    # funnel: stage filter chips (colour dot + label + count)
-    # summary line above the funnel: bot-working count + in-funnel count
-    ".fsum{display:flex;gap:.9rem;padding:.4rem .6rem .1rem;font-size:.68rem;color:#8899aa}"
-    ".fsum b{color:#cfe0f4;font-weight:700}"
-    # one-line funnel: each stage a compact icon+count step, label on hover (title)
-    ".fnl{display:flex;gap:.15rem;padding:.3rem .5rem .45rem;border-bottom:1px solid #1e2636;"
+    # two-row funnel: row 1 = headline metrics (total/bot-on/in-funnel, one is non-clickable
+    # via .info), row 2 = per-stage + blocked chips. Each row is a compact icon+count step,
+    # full label on hover (title).
+    ".fnl{display:flex;gap:.15rem;padding:.3rem .5rem;border-bottom:1px solid #1e2636;"
     "flex-shrink:0;align-items:stretch}"
+    ".fnl:first-of-type{border-bottom-color:#161b26}"
     ".fstep{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;"
     "gap:.05rem;padding:.2rem .1rem;border-radius:6px;text-decoration:none;cursor:pointer;"
     "border:1px solid transparent;border-top:2px solid transparent;transition:background .1s}"
     ".fstep:hover{background:#1c2230}"
     ".fstep.on{background:#1e2b40;border-color:#31527a}"
+    ".fstep.info{cursor:default}"
+    ".fstep.info:hover{background:transparent}"
     ".fst-i{font-size:.82rem;line-height:1}"
     ".fst-n{font-size:.72rem;font-weight:700;color:#c8d6e5}"
     ".fstep.on .fst-n{color:#fff}"
@@ -447,10 +448,12 @@ _STAGE_ICON = {
 _IN_FUNNEL_STAGES = ("new", "nurturing", "qualifying", "presenting", "objection")
 
 
-def funnel_html(counts: dict[str, int], active_stage: str = "", bot_on: int = 0) -> str:
-    """One-line stage funnel for the inbox .thr column: an icon+count step per stage
-    (full label on hover), each filters the thread list. Above it, a summary line: how
-    many chats the bot is actively working and how many are still in the funnel."""
+def funnel_html(
+    counts: dict[str, int], active_stage: str = "", bot_on: int = 0, blocked: int = 0,
+) -> str:
+    """Two-row inbox funnel: row 1 = headline metrics (total / bot-on / in-funnel), row 2 =
+    per-stage counts (each filters the thread list) plus a 🚫 blocked chip — is_blocked is a
+    lead flag, not a funnel stage, so without this chip a blocked lead is unfindable."""
     total = sum(counts.values())
     in_funnel = sum(counts.get(s, 0) for s in _IN_FUNNEL_STAGES)
 
@@ -466,17 +469,26 @@ def funnel_html(counts: dict[str, int], active_stage: str = "", bot_on: int = 0)
             f'<span class="fst-i">{icon}</span><span class="fst-n">{n}</span></a>'
         )
 
-    steps = [step(None, _h.escape(t("fnl.all")), total, "📥", None)]
-    for s in (*_PIPELINE, *_SIDE_STAGES):
-        steps.append(step(s, _h.escape(t(f"stage.{s}")), counts.get(s, 0),
-                          _STAGE_ICON.get(s, "•"), _STAGE_COLOR[s]))
-    summary = (
-        f'<div class="fsum">'
-        f'<span>🤖 {_h.escape(t("fnl.bot_on"))}: <b>{bot_on}</b></span>'
-        f'<span>🎯 {_h.escape(t("fnl.in_funnel"))}: <b>{in_funnel}</b></span>'
-        f'</div>'
-    )
-    return f'{summary}<div class="fnl">{"".join(steps)}</div>'
+    def metric(label: str, n: int, icon: str) -> str:
+        """A headline number with no filter behind it (bot-on / in-funnel are aggregates,
+        not a single stage) — same box look as a step, but inert."""
+        return (
+            f'<span class="fstep info" data-help="{label}" title="{label}">'
+            f'<span class="fst-i">{icon}</span><span class="fst-n">{n}</span></span>'
+        )
+
+    row1 = [
+        step(None, _h.escape(t("fnl.all")), total, "📥", None),
+        metric(_h.escape(t("fnl.bot_on")), bot_on, "🤖"),
+        metric(_h.escape(t("fnl.in_funnel")), in_funnel, "🎯"),
+    ]
+    row2 = [
+        step(s, _h.escape(t(f"stage.{s}")), counts.get(s, 0),
+            _STAGE_ICON.get(s, "•"), _STAGE_COLOR[s])
+        for s in (*_PIPELINE, *_SIDE_STAGES)
+    ]
+    row2.append(step("blocked", _h.escape(t("fnl.blocked")), blocked, "🚫", "#ff6b6b"))
+    return f'<div class="fnl">{"".join(row1)}</div><div class="fnl">{"".join(row2)}</div>'
 
 _IG_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 

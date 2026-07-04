@@ -22,6 +22,7 @@ from app.admin._branch import branch_ids_from_request
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     _branch_where,
+    fetch_blocked_count,
     fetch_bot_enabled_count,
     fetch_coach_data,
     fetch_report_data,
@@ -115,7 +116,9 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
     async with session_scope() as session:
         counts = await fetch_stage_counts(session, branch_ids)
         bot_on = await fetch_bot_enabled_count(session, branch_ids)
-    return HTMLResponse(funnel_html(counts, active_stage=stage.strip(), bot_on=bot_on))
+        blocked = await fetch_blocked_count(session, branch_ids)
+    return HTMLResponse(
+        funnel_html(counts, active_stage=stage.strip(), bot_on=bot_on, blocked=blocked))
 
 
 @router.get("/threads", response_class=HTMLResponse)
@@ -126,9 +129,12 @@ async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
     if branch_ids:
         conditions.append("l.branch_id = ANY(:bids)")
         params["bids"] = branch_ids
-    if stage.strip():
+    s = stage.strip()
+    if s == "blocked":  # is_blocked is a flag, not a stage — the funnel's 🚫 chip filters on it
+        conditions.append("l.is_blocked = true")
+    elif s:
         conditions.append("l.stage = :stage")
-        params["stage"] = stage.strip()
+        params["stage"] = s
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (

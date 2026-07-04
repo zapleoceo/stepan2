@@ -484,6 +484,7 @@ _TR: dict[str, dict[str, str]] = {
     "fnl.all":     {"ru": "все",            "en": "all",          "id": "semua"},
     "fnl.bot_on":  {"ru": "бот вкл",        "en": "bot on",       "id": "bot aktif"},
     "fnl.in_funnel": {"ru": "в воронке",    "en": "in funnel",    "id": "di corong"},
+    "fnl.blocked": {"ru": "заблокированные", "en": "blocked",    "id": "diblokir"},
     # reports
     "nav.reports": {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
     "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},

@@ -154,6 +154,41 @@ def test_funnel_html_is_one_line_with_icons_and_hover_labels() -> None:
     assert "fpill" not in html              # old wrap-of-chips design gone
 
 
+def test_funnel_html_has_two_rows_metrics_then_stages() -> None:
+    """Row 1 = total/bot-on/in-funnel headline metrics; row 2 = the per-stage chips."""
+    from app.api._ui_html import funnel_html
+    _set_lang("en")
+    html = funnel_html({"new": 2}, bot_on=1)
+    assert html.count('<div class="fnl">') == 2
+    row1_end = html.index("</div>")
+    row1 = html[: row1_end]
+    assert "📥" in row1 and "🤖" in row1 and "🎯" in row1
+    assert "🔍" not in row1 and "✨" not in row1  # stage chips are NOT in row 1
+
+
+def test_bot_on_and_in_funnel_metrics_are_not_clickable() -> None:
+    """They're aggregates, not a single stage — clicking them would have no filter target."""
+    from app.api._ui_html import funnel_html
+    _set_lang("en")
+    html = funnel_html({"new": 2}, bot_on=1)
+    i = html.find("bot on")
+    seg = html[max(0, i - 60): i + 10]
+    assert 'class="fstep info"' in seg
+    assert "hx-get" not in seg
+
+
+def test_funnel_row2_has_a_clickable_blocked_chip() -> None:
+    """is_blocked is a lead flag, not a funnel stage — without this chip a blocked lead was
+    completely unfindable anywhere in the UI."""
+    from app.api._ui_html import funnel_html
+    _set_lang("en")
+    html = funnel_html({"new": 2}, blocked=3)
+    assert 'hx-get="/ui/threads?stage=blocked"' in html
+    assert 'hx-push-url="/ui/inbox?stage=blocked"' in html
+    assert "🚫" in html
+    assert ">3<" in html
+
+
 # ─── manual product change: header <select> + history line ────────────────────
 
 def test_chat_header_renders_product_select_when_products_given() -> None:
