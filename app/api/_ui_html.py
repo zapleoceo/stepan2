@@ -37,6 +37,10 @@ _CSS = (
     ".na.on{background:rgba(32,107,196,.22);color:#4da6ff}"
     ".na i{width:14px;text-align:center;flex-shrink:0}"
     ".na-lbl{overflow:hidden;text-overflow:ellipsis}"
+    ".na-badge{margin-left:auto;padding:.05rem .45rem;border-radius:8px;font-size:.7rem;"
+    "font-weight:700;background:#206bc4;color:#fff;flex-shrink:0}"
+    ".na-badge:empty{display:none}"
+    ".sid.collapsed .na-badge{display:none}"
     ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
     ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
     ".lrow{display:flex;gap:.22rem;margin-top:.3rem}"
@@ -444,15 +448,21 @@ def _as_dt(v: object) -> datetime | None:
 
 
 def _fmt_time(dt: datetime | None) -> str:
-    """Branch-local HH:MM:SS; adds date (DD.MM) when older than 24h. Age is judged in UTC,
-    the label is rendered in the branch tz (set via set_render_tz)."""
+    """Branch-local DD.MM HH:MM:SS — always includes the date, not just time-of-day, so a
+    message/event timestamp is never ambiguous about which day it happened."""
     if dt is None:
         return ""
-    now = datetime.now(UTC).replace(tzinfo=None)
     local = dt + timedelta(hours=_render_tz_h.get())
-    if (now - dt).total_seconds() > 86400:
-        return local.strftime("%d.%m %H:%M:%S")
-    return local.strftime("%H:%M:%S")
+    return local.strftime("%d.%m %H:%M:%S")
+
+
+def _fmt_dt_short(dt: datetime | None) -> str:
+    """Branch-local DD.MM HH:MM (no seconds) — for the compact sidebar thread list, where
+    an explicit last-message date/time replaces the old vague '2h ago' style label."""
+    if dt is None:
+        return ""
+    local = dt + timedelta(hours=_render_tz_h.get())
+    return local.strftime("%d.%m %H:%M")
 
 
 def _badge(stage: str) -> str:
@@ -576,7 +586,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         f'<div class="ti-body">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
         f'{bot_off}{br_badge}'
-        f'<span class="ti-ts">{_ago(last_act)}</span></div>'
+        f'<span class="ti-ts">{_fmt_dt_short(_as_dt(last_act))}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge} {preview}</div>'
         f'{handle_row}'
         f'{sub_row}</div></a>'
@@ -1087,21 +1097,26 @@ def suggest_box_html(tid: int, draft: str) -> str:
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
 ) -> str:
-    def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "") -> str:
+    def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
         lbl = _h.escape(t(key))
         return (
             f'<a class="{cls}" href="{href}"{extra}>'
             f'<i class="{icon}"></i>'
-            f'<span class="na-lbl">{lbl}</span></a>'
+            f'<span class="na-lbl">{lbl}</span>{badge}</a>'
         )
 
-    def _hna(key: str, panel: str, icon: str, nav_id: str) -> str:
+    def _hna(key: str, panel: str, icon: str, nav_id: str, badge: str = "") -> str:
         extra = (
             f' hx-get="{panel}" hx-target="#main" hx-push-url="{panel}"'
             f' onclick="setOn(this,\'na\');showThr(false)"'
         )
-        return _na(key, panel, icon, nav_id, extra)
+        return _na(key, panel, icon, nav_id, extra, badge)
+
+    outbox_badge = (
+        '<span class="na-badge" id="outbox-badge" hx-get="/ui/outbox/count"'
+        ' hx-trigger="load, every 15s" hx-swap="innerHTML" hx-target="this"></span>'
+    )
 
     coach_extra = (
         ' hx-get="/ui/coach/panel" hx-target="#main" hx-push-url="/ui/coach"'
@@ -1119,7 +1134,7 @@ def app_shell(
         + _hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
         + '<div class="nav-sep"></div>'
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
-        + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox")
+        + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox", outbox_badge)
         + _hna("nav.log", "/ui/settings/log", "fa-solid fa-list", "log")
     )
 

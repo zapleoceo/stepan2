@@ -35,6 +35,19 @@ def _thread_row(tid: int) -> tuple:
             "+62811", "course-a", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta")
 
 
+def test_thread_list_shows_exact_datetime_not_relative_ago() -> None:
+    """Sidebar previously showed a vague '2h ago' style label — must show the explicit
+    last-message date+time instead so it's never ambiguous."""
+    from app.api._ui_html import set_render_tz, thread_list_html
+    _set_lang("en")
+    set_render_tz(0)
+    row = list(_thread_row(1))
+    row[3] = datetime(2026, 7, 3, 14, 5, 0)
+    html = thread_list_html([tuple(row)])
+    assert "03.07 14:05" in html
+    assert "ago" not in html.lower()
+
+
 def test_thread_list_marks_active_row() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")
@@ -365,9 +378,9 @@ def test_fmt_time_uses_branch_offset() -> None:
     from app.api._ui_html import _fmt_time, set_render_tz
     dt = datetime(2026, 7, 3, 5, 0, 0)  # naive UTC
     set_render_tz(7)                     # Jakarta
-    assert _fmt_time(dt) == "12:00:00"
+    assert _fmt_time(dt) == "03.07 12:00:00"
     set_render_tz(0)
-    assert _fmt_time(dt) == "05:00:00"
+    assert _fmt_time(dt) == "03.07 05:00:00"
 
 
 # ─── context-clear hides pre-cutoff messages from the chat window ──────────────

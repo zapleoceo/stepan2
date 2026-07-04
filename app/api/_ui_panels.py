@@ -75,6 +75,12 @@ def leads_panel_html(rows: list) -> str:
 
 # ─── outbox panel ─────────────────────────────────────────────────────────────
 
+def outbox_count_html(n: int) -> str:
+    """Inner content of the sidebar Outbox nav badge — polled every 15s. Empty when
+    nothing is queued, which the '.na-badge:empty{display:none}' CSS rule hides."""
+    return str(n) if n > 0 else ""
+
+
 def outbox_panel_html(rows: list) -> str:
     """Read-only outbox queue monitor (last 100 entries)."""
     title = _h.escape(t("nav.outbox"))

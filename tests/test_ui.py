@@ -358,6 +358,69 @@ def test_outbox_panel_exists(client: TestClient) -> None:
     assert resp.status_code in (200, 500)
 
 
+def test_outbox_count_route_exists(client: TestClient) -> None:
+    resp = client.get("/ui/outbox/count")
+    assert resp.status_code in (200, 500)
+
+
+def test_outbox_count_html_hidden_when_zero() -> None:
+    from app.api._ui_panels import outbox_count_html
+    assert outbox_count_html(0) == ""
+    assert outbox_count_html(7) == "7"
+
+
+async def test_outbox_panel_excludes_sent_and_failed(db_session) -> None:
+    """The Outbox tab is a queue monitor — a sent/failed row belongs in message history
+    or the broker log, not here."""
+    import app.api._routes_admin as admin_routes
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Outbox
+    from app.domain.enums import ChannelKind
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    db_session.add(th)
+    await db_session.flush()
+    db_session.add_all([
+        Outbox(branch_id=b.id, thread_id=th.id, text="queued", source="agent",
+              status="pending"),
+        Outbox(branch_id=b.id, thread_id=th.id, text="already sent", source="agent",
+              status="sent"),
+        Outbox(branch_id=b.id, thread_id=th.id, text="gave up", source="agent",
+              status="failed"),
+    ])
+    await db_session.flush()
+
+    class _Scope:
+        async def __aenter__(self):
+            return db_session
+
+        async def __aexit__(self, *a) -> None:
+            await db_session.commit()
+
+    class _Req:
+        cookies: dict = {}
+        headers: dict = {}
+        state = type("S", (), {})()
+
+    orig = admin_routes.session_scope
+    admin_routes.session_scope = lambda: _Scope()
+    try:
+        resp = await admin_routes.outbox_panel(_Req())  # type: ignore[arg-type]
+    finally:
+        admin_routes.session_scope = orig
+
+    body = resp.body.decode()
+    assert "queued" in body
+    assert "already sent" not in body
+    assert "gave up" not in body
+
+
 def test_products_new_form_exists(client: TestClient) -> None:
     resp = client.get("/ui/products/new")
     assert resp.status_code == 200

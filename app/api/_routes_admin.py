@@ -24,6 +24,7 @@ from ._ui_panels import (
     broker_log_panel_html,
     leads_panel_html,
     members_panel_html,
+    outbox_count_html,
     outbox_panel_html,
     reports_panel_html,
 )
@@ -48,15 +49,34 @@ async def leads_panel(request: Request) -> HTMLResponse:
     return HTMLResponse(leads_panel_html(list(rows)))
 
 
+@router.get("/outbox/count", response_class=HTMLResponse)
+async def outbox_count(request: Request) -> HTMLResponse:
+    """Polled every 15s by the sidebar nav badge — how many sends are queued right now."""
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids)
+    status_clause = "AND status = 'pending'" if where else "WHERE status = 'pending'"
+    async with session_scope() as session:
+        n = (
+            await session.execute(
+                text(f"SELECT count(*) FROM outbox {where} {status_clause}"),  # noqa: S608
+                params,
+            )
+        ).scalar() or 0
+    return HTMLResponse(outbox_count_html(int(n)))
+
+
 @router.get("/outbox/panel", response_class=HTMLResponse)
 async def outbox_panel(request: Request) -> HTMLResponse:
+    """Queued (pending) sends only — a sent/failed row belongs in the message history or
+    the broker log, not in a queue monitor meant to show what's about to go out."""
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     where, params = _branch_where(branch_ids)
+    status_clause = "AND status = 'pending'" if where else "WHERE status = 'pending'"
     async with session_scope() as session:
         q = (
             "SELECT id, thread_id, status, source, text, scheduled_at, sent_at"  # noqa: S608
-            f" FROM outbox {where} ORDER BY id DESC LIMIT 100"
+            f" FROM outbox {where} {status_clause} ORDER BY scheduled_at LIMIT 100"
         )
         rows = (await session.execute(text(q), params)).all()
     return HTMLResponse(outbox_panel_html(list(rows)))
