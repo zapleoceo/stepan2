@@ -1,0 +1,10 @@
+# Normalize line endings to LF in the repo (the server runs Linux). Prevents the huge
+# CRLF↔LF churn diffs that appear when files are edited from a Windows checkout.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
