@@ -19,9 +19,11 @@ from app.modules.settings import schema as S  # noqa: E402
 _LANGS = ("ru", "en", "id")
 
 # Keys BranchSettings._parse depends on — defaults() must cover all of them.
+# tz_offset_h is intentionally NOT here: it's sourced from the branch row (branch.tz_offset_h),
+# not from app_setting, so it has no schema default.
 _BRANCH_KEYS = (
     "agent_enabled_global", "hourly_cap", "daily_cap", "quiet_start", "quiet_end",
-    "reply_delay_min_s", "reply_delay_max_s", "tz_offset_h", "tg_group_id",
+    "reply_delay_min_s", "reply_delay_max_s", "tg_group_id",
     "followup_enabled", "followup_schedule_h", "knowledge_backend",
     "tech_search_enabled", "tech_usecase_enabled",
 )
@@ -143,3 +145,34 @@ def test_settings_save_by_key_route(client: TestClient) -> None:
 def test_settings_save_unknown_key_rejected(client: TestClient) -> None:
     resp = client.post("/ui/settings/save", data={"key": "nope", "value": "x"})
     assert resp.status_code in (400, 500)
+
+
+def test_knowledge_backend_is_a_dropdown_not_free_text() -> None:
+    html = field_html(S.field_for("knowledge_backend"), "rag", "en")
+    assert "<select" in html                       # a real dropdown, not a text box
+    assert 'value="rag" selected' in html
+    assert 'value="direct"' in html
+    assert "canary" not in html                    # advanced A/B dropped from the operator UI
+
+
+def test_settings_has_no_timezone_field() -> None:
+    # timezone lives on the branch (branch.tz_offset_h), edited on the branch page — not here
+    assert S.field_for("tz_offset_h") is None
+    assert all(f.key != "tz_offset_h" for f in S.all_fields())
+
+
+def test_number_inputs_are_right_sized_not_airplanes() -> None:
+    html = field_html(S.field_for("quiet_start"), "22", "en")
+    assert "width:64px" in html and "text-align:right" in html
+
+
+async def test_tz_comes_from_the_branch_row_not_app_setting(db_session) -> None:
+    from app.adapters.db.models import Branch
+    from app.modules.settings.service import _cache, get_settings
+    b = Branch(name="TZ", lang="id", tz_offset_h=3)  # Moscow
+    db_session.add(b)
+    await db_session.flush()
+    _cache.pop(b.id, None)
+    cfg = await get_settings(db_session, b.id)
+    assert cfg.tz_offset_h == 3  # sourced from the branch column, not the app_setting default (7)
+    _cache.pop(b.id, None)

@@ -21,6 +21,7 @@ class SettingField:
     help: I18n | None = None
     width: str = "120px"
     hidden: bool = False  # in defaults() but never rendered (vestigial/internal keys)
+    choices: list[tuple[str, I18n]] | None = None  # text field → dropdown of fixed options
 
 
 @dataclass(frozen=True)
@@ -37,9 +38,9 @@ def _l(ru: str, en: str, id_: str) -> I18n:
 def _f(
     key: str, kind: str, default: str, label: I18n, *,
     ph: I18n | None = None, help: I18n | None = None, width: str = "120px",
-    hidden: bool = False,
+    hidden: bool = False, choices: list[tuple[str, I18n]] | None = None,
 ) -> SettingField:
-    return SettingField(key, kind, default, label, ph, help, width, hidden)
+    return SettingField(key, kind, default, label, ph, help, width, hidden, choices)
 
 
 _UNLIMITED = _l("0 = без лимита", "0 = unlimited", "0 = tanpa batas")
@@ -51,29 +52,26 @@ SCHEMA: list[SettingSection] = [
            help=_l("Главный выключатель отправки", "Master send switch", "Sakelar utama"),
            width="130px"),
         _f("reply_delay_min_s", "int", "5",
-           _l("Задержка ответа, мин (с)", "Reply delay min (s)", "Jeda min (dtk)"),
-           ph=_l("5", "5", "5"), width="110px"),
+           _l("Задержка ответа, мин (с)", "Reply delay, min (s)", "Jeda min (dtk)"),
+           ph=_l("5", "5", "5"), width="64px"),
         _f("reply_delay_max_s", "int", "30",
-           _l("Задержка ответа, макс (с)", "Reply delay max (s)", "Jeda maks (dtk)"),
-           ph=_l("30", "30", "30"), width="110px"),
+           _l("Задержка ответа, макс (с)", "Reply delay, max (s)", "Jeda maks (dtk)"),
+           ph=_l("30", "30", "30"), width="64px"),
         _f("quiet_start", "int", "22",
            _l("Тихие часы с (0–23)", "Quiet from (0–23)", "Tenang dari (0–23)"),
-           ph=_l("22", "22", "22"), width="110px"),
+           ph=_l("22", "22", "22"), width="64px"),
         _f("quiet_end", "int", "8",
            _l("Тихие часы до (0–23)", "Quiet to (0–23)", "Tenang sampai (0–23)"),
-           ph=_l("8", "8", "8"), width="110px"),
-        _f("tz_offset_h", "int", "7",
-           _l("Часовой пояс (UTC±)", "Timezone (UTC±)", "Zona waktu (UTC±)"),
-           ph=_l("7", "7", "7"), width="110px"),
+           ph=_l("8", "8", "8"), width="64px"),
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [
         _f("hourly_cap", "int", "350",
            _l("Сообщений в час", "Messages / hour", "Pesan / jam"),
-           ph=_l("350", "350", "350"), help=_UNLIMITED, width="110px"),
+           ph=_l("350", "350", "350"), help=_UNLIMITED, width="76px"),
         _f("daily_cap", "int", "2100",
            _l("Сообщений в день", "Messages / day", "Pesan / hari"),
-           ph=_l("2100", "2100", "2100"), help=_UNLIMITED, width="110px"),
+           ph=_l("2100", "2100", "2100"), help=_UNLIMITED, width="76px"),
     ]),
     SettingSection("fa-solid fa-clock-rotate-left",
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [
@@ -89,10 +87,13 @@ SCHEMA: list[SettingSection] = [
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
         _f("knowledge_backend", "text", "direct",
            _l("Движок знаний", "Knowledge backend", "Backend pengetahuan"),
-           ph=_l("direct | rag | canary:N", "direct | rag | canary:N", "direct | rag"),
-           help=_l("direct — текст · rag — вектор · canary:N — A/B",
-                   "direct — text · rag — vector · canary:N — A/B", "direct · rag · canary:N"),
-           width="210px"),
+           help=_l("Как бот ищет по базе знаний",
+                   "How the bot searches the knowledge base", "Cara bot mencari"),
+           width="150px",
+           choices=[
+               ("direct", _l("Прямой (весь текст)", "Direct (full text)", "Langsung")),
+               ("rag", _l("RAG (векторный поиск)", "RAG (vector search)", "RAG (vektor)")),
+           ]),
         # hidden until the RAG / tech-context / web-search features are ported — the
         # keys are still parsed + seeded, but showing dead toggles misleads the operator.
         _f("tech_usecase_enabled", "bool", "true",
@@ -113,7 +114,7 @@ SCHEMA: list[SettingSection] = [
                    _l("Бюджет", "Budget", "Anggaran"), [
         _f("daily_budget_usd", "int", "0",
            _l("Дневной лимит LLM, $", "Daily LLM budget, $", "Anggaran LLM, $"),
-           ph=_l("10", "10", "10"), help=_UNLIMITED, width="120px"),
+           ph=_l("10", "10", "10"), help=_UNLIMITED, width="76px"),
     ]),
     SettingSection("fa-solid fa-bullseye",
                    _l("Meta Ads и CAPI", "Meta Ads & CAPI", "Meta Ads & CAPI"), [

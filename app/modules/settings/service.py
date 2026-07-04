@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.adapters.db.models import Branch
 from app.domain.clock import branch_now
 
 from .repository import SettingRepo
@@ -65,9 +66,12 @@ async def get_settings(session: AsyncSession, branch_id: int) -> BranchSettings:
         if cached and now - cached[1] < _TTL:
             return cached[0]
         raw = await SettingRepo(session).load_all(branch_id)
-        s = _parse(raw)
-        _cache[branch_id] = (s, now)
-        return s
+        parsed = _parse(raw)
+        branch = await session.get(Branch, branch_id)
+        if branch is not None:  # timezone lives on the branch, not in app_setting
+            parsed = replace(parsed, tz_offset_h=branch.tz_offset_h)
+        _cache[branch_id] = (parsed, now)
+        return parsed
 
 
 def invalidate(branch_id: int) -> None:
@@ -120,7 +124,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         quiet_end=_i(raw, "quiet_end"),
         reply_delay_min_s=_i(raw, "reply_delay_min_s"),
         reply_delay_max_s=_i(raw, "reply_delay_max_s"),
-        tz_offset_h=_i(raw, "tz_offset_h"),
+        tz_offset_h=int(raw.get("tz_offset_h") or 7),  # overridden from the branch row
         tg_group_id=raw.get("tg_group_id", _DEFAULTS.get("tg_group_id", "")),
         followup_enabled=_b(raw, "followup_enabled"),
         followup_schedule_h=_parse_schedule(raw),
