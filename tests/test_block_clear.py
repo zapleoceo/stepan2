@@ -43,6 +43,19 @@ async def test_blocked_lead_not_awaiting_reply(db_session) -> None:
     assert thread.id in await threads_awaiting_reply(db_session, bid)
 
 
+async def test_ancient_backlog_thread_not_awaiting_reply(db_session) -> None:
+    """REGRESSION: flipping agent_enabled_global back on for a branch that had been
+    sync-only for months must not mass-reply to a year-old backlog out of nowhere (real
+    incident: threads with last_in_at back to 2025-08-26 all got auto-replied to at once
+    the moment the branch was turned on). Anything past the recency window needs a
+    deliberate, reviewed catch-up, not an automatic one."""
+    bid, _cid, _lead, thread = await _thread(db_session)
+    thread.last_in_at = _NOW - timedelta(days=10)
+    thread.last_out_at = None
+    await db_session.flush()
+    assert thread.id not in await threads_awaiting_reply(db_session, bid)
+
+
 async def test_ingest_does_not_revive_blocked_lead(db_session) -> None:
     bid, cid, lead, thread = await _thread(db_session, blocked=True)
     await IngestService(db_session, bid).ingest(cid, [InboundMessage(

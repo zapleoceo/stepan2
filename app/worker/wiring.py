@@ -7,6 +7,7 @@ orchestration and the wiring can be swapped/faked in one place."""
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -48,6 +49,15 @@ async def active_channels(session: AsyncSession, branch_id: int) -> list[Channel
     return list(rows.scalars().all())
 
 
+# A thread the bot never got the chance to answer (agent was off, or a huge sync-only
+# backlog) can sit "awaiting reply" for months. Flipping agent_enabled_global back on
+# must never mass-blast a year-old backlog with a bot reply out of nowhere — real
+# incident: turning branch 1 live re-surfaced threads with last_in_at back to 2025-08-26
+# and started auto-replying to all of them at once. Bound the sweep to genuinely live
+# conversations; anything older needs a deliberate, reviewed catch-up, not an automatic one.
+_AWAITING_REPLY_MAX_AGE = timedelta(days=3)
+
+
 async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[int]:
     """Thread ids with a fresh inbound the bot still owns (lead spoke last, not silent).
 
@@ -58,6 +68,7 @@ async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[
         .where(Outbox.thread_id == ChannelThread.id, Outbox.status == "pending")
         .exists()
     )
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - _AWAITING_REPLY_MAX_AGE
     rows = await session.exec(
         select(ChannelThread.id)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
@@ -67,6 +78,7 @@ async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[
             Lead.is_blocked.is_(False),  # type: ignore[attr-defined]
             Lead.stage.not_in(BOT_SILENT_STAGES),  # type: ignore[attr-defined]
             ChannelThread.last_in_at.is_not(None),  # type: ignore[attr-defined]
+            ChannelThread.last_in_at >= cutoff,  # type: ignore[operator]
             (ChannelThread.last_out_at.is_(None))  # type: ignore[attr-defined]
             | (ChannelThread.last_out_at < ChannelThread.last_in_at),  # type: ignore[operator]
             ~pending,
