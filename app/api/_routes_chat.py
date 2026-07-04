@@ -512,8 +512,11 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
         return HTMLResponse("")
     tr_lbl = _h.escape(t("chat.tr_result"))
     return HTMLResponse(
-        f'<div style="padding:.3rem .75rem;font-size:.76rem;color:#8899aa;'
-        f'background:#141925;border-top:1px solid #2d3748;white-space:pre-wrap">'
+        f'<div style="position:relative;padding:.3rem 1.6rem .3rem .75rem;font-size:.76rem;'
+        f'color:#8899aa;background:#141925;border-top:1px solid #2d3748;white-space:pre-wrap">'
+        f'<button onclick="trClose({thread_id})" title="Close"'
+        f' style="position:absolute;top:.2rem;right:.4rem;background:none;border:none;'
+        f'color:#6b7685;font-size:1rem;line-height:1;cursor:pointer">×</button>'
         f'<span style="color:#4a5568">{tr_lbl}</span>'
         f' {_h.escape(summary.strip())}</div>'
     )

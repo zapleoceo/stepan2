@@ -143,6 +143,20 @@ def test_app_shell_lang_buttons_highlight_active() -> None:
     assert '"lb on" href="/ui/lang/ru"' in html
 
 
+def test_chat_summary_translate_toggles_and_pull_to_refresh() -> None:
+    """Summary-translate button toggles its popup (trChat) with a close hook (trClose),
+    a background poll no longer auto-scrolls (smartScroll gone from the poll path), and
+    mobile pull-to-refresh is wired (native gesture is killed by overflow:hidden)."""
+    from app.api._ui_html import app_shell, chat_panel_html
+    _set_lang("en")
+    panel = chat_panel_html(7, "Bob", "qualifying", [], [])
+    assert "trChat(7)" in panel                     # composer translate toggles, not hx-post
+    assert 'hx-post="/ui/chat/7/translate"' not in panel
+    shell = app_shell("en", "", active_nav="inbox")
+    assert "function trChat(" in shell and "function trClose(" in shell
+    assert "location.reload()" in shell             # pull-to-refresh handler present
+
+
 def test_app_shell_opens_chats_at_the_bottom() -> None:
     """A freshly-swapped chat panel must jump to the newest message (pinBot), while a poll
     bubble inserted into an existing feed only smart-scrolls — so opening a long chat / F5

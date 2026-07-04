@@ -1096,9 +1096,7 @@ def chat_panel_html(
         f'<button class="act-btn"'
         f' hx-post="/ui/chat/{tid}/suggest"'
         f' hx-target="#sug-{tid}" hx-swap="innerHTML">{sug_lbl}</button>'
-        f'<button class="act-btn"'
-        f' hx-post="/ui/chat/{tid}/translate"'
-        f' hx-target="#tr-{tid}" hx-swap="innerHTML">{tr_lbl}</button>'
+        f'<button class="act-btn" onclick="trChat({tid})">{tr_lbl}</button>'
         f'</div>'
         f'{_emoji_bar(f"cmp-{tid}")}'
         f'<form class="fin-row"'
@@ -1233,9 +1231,8 @@ def app_shell(
         "var fresh=(t&&t.classList&&t.classList.contains('msgs'))?t"
         ":(t&&t.querySelector?t.querySelector('.msgs'):null);"
         "if(fresh){pinBot(fresh);}"
-        "else{var m=(t&&t.closest)?t.closest('.msgs'):null;"
-        "if(m){smartScroll(m);m.querySelectorAll('img').forEach(function(g){"
-        "if(!g.complete)g.addEventListener('load',function(){smartScroll(m);},{once:true});});}}"
+        # a background poll inserting a new bubble must NOT auto-scroll — the manager may be
+        # reading history mid-chat; only opening a chat (fresh panel above) jumps to the end.
         "if(t&&t.id==='tl')filterTi();});"
         # F5 / direct load: afterSettle never fires, so pin every .msgs to the bottom on load
         "function scrollAllBot(){document.querySelectorAll('.msgs').forEach(function(m){"
@@ -1297,6 +1294,15 @@ def app_shell(
         "if(s==null)s=ta.value.length;var e=ta.selectionEnd!=null?ta.selectionEnd:s;"
         "ta.value=ta.value.slice(0,s)+em+ta.value.slice(e);ta.focus();"
         "ta.selectionStart=ta.selectionEnd=s+em.length;}"
+        # chat-summary translate: toggle the popup — a second press hides it
+        "function trChat(tid){var out=document.getElementById('tr-'+tid);if(!out)return;"
+        "if(out.innerHTML.trim()){out.innerHTML='';return;}"
+        "out.innerHTML='<div style=\"padding:.3rem .75rem;font-size:.75rem;"
+        "color:#5a6472\">…</div>';"
+        "fetch('/ui/chat/'+tid+'/translate',{method:'POST',headers:{'HX-Request':'true'}})"
+        ".then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
+        ".catch(function(){out.innerHTML='';});}"
+        "function trClose(tid){var o=document.getElementById('tr-'+tid);if(o)o.innerHTML='';}"
         # translate the Suggest draft (shows the manager what Stepan's reply says)
         "function trDraft(tid){var ta=document.getElementById('sug-ta-'+tid);"
         "var out=document.getElementById('sug-tr-'+tid);if(!ta||!ta.value.trim())return;"
@@ -1304,6 +1310,18 @@ def app_shell(
         "fetch('/ui/chat/'+tid+'/tr-draft',{method:'POST',headers:{'HX-Request':'true'},"
         "body:fd}).then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
         ".catch(function(){out.textContent='';});}"
+        # mobile pull-to-refresh: html/body overflow:hidden kills the native gesture, so
+        # roll our own — at the top of a scroll region, a >90px downward drag reloads.
+        "(function(){var sy=0,pull=false,reg=null;"
+        "document.addEventListener('touchstart',function(e){"
+        "if(window.innerWidth>760){pull=false;return;}"
+        "var t=e.target;reg=t.closest?(t.closest('.msgs')||t.closest('.thr')||"
+        "t.closest('.pnl-body')||t.closest('#tl')):null;"
+        "if(reg&&reg.scrollTop<=0){sy=e.touches[0].clientY;pull=true;}else pull=false;},"
+        "{passive:true});"
+        "document.addEventListener('touchmove',function(e){if(!pull)return;"
+        "if(e.touches[0].clientY-sy>90){pull=false;location.reload();}},{passive:true});"
+        "document.addEventListener('touchend',function(){pull=false;});})();"
         # resize + collapse init (runs once after DOM ready)
         "(function(){"
         "var sb=document.querySelector('.sid');"
