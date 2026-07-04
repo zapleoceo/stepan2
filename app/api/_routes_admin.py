@@ -42,11 +42,13 @@ async def leads_panel(request: Request) -> HTMLResponse:
     where, params = _branch_where(branch_ids)
     async with session_scope() as session:
         q = (
-            "SELECT id, display_name, phone_e164, stage, created_at"  # noqa: S608
+            "SELECT id, display_name, phone_e164, stage, created_at, branch_id"  # noqa: S608
             f" FROM lead {where} ORDER BY created_at DESC LIMIT 200"
         )
         rows = (await session.execute(text(q), params)).all()
-    return HTMLResponse(leads_panel_html(list(rows)))
+        seen_ids = {r[5] for r in rows if r[5] is not None}
+        tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
+    return HTMLResponse(leads_panel_html(list(rows), tz_by_branch))
 
 
 @router.get("/outbox/count", response_class=HTMLResponse)
@@ -75,11 +77,13 @@ async def outbox_panel(request: Request) -> HTMLResponse:
     status_clause = "AND status = 'pending'" if where else "WHERE status = 'pending'"
     async with session_scope() as session:
         q = (
-            "SELECT id, thread_id, status, source, text, scheduled_at, sent_at"  # noqa: S608
+            "SELECT id, thread_id, status, source, text, scheduled_at, sent_at, branch_id"  # noqa: S608
             f" FROM outbox {where} {status_clause} ORDER BY scheduled_at LIMIT 100"
         )
         rows = (await session.execute(text(q), params)).all()
-    return HTMLResponse(outbox_panel_html(list(rows)))
+        seen_ids = {r[7] for r in rows if r[7] is not None}
+        tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
+    return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch))
 
 
 @router.get("/members/panel", response_class=HTMLResponse)
@@ -129,9 +133,12 @@ async def reports_panel(
     # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.
     _sc = f"SELECT l.stage, COUNT(*) FROM lead l {lead_where} GROUP BY l.stage"  # noqa: S608
     _hour = (
-        "SELECT EXTRACT(HOUR FROM m.occurred_at)::int, COUNT(*)"
+        # Branch-local hour bucket — see _query._HOUR_Q for why the shift is needed.
+        "SELECT EXTRACT(HOUR FROM m.occurred_at + make_interval(hours => b.tz_offset_h))::int,"
+        " COUNT(*)"
         " FROM message m JOIN channel_thread ct ON ct.id=m.thread_id"
-        " JOIN lead l ON l.id=ct.lead_id WHERE m.direction=:dir{da} GROUP BY 1"
+        " JOIN lead l ON l.id=ct.lead_id JOIN branch b ON b.id=l.branch_id"
+        " WHERE m.direction=:dir{da} GROUP BY 1"
     )
     _hi = _hour.format(da=date_and)  # noqa: S608
     _ho = _hi

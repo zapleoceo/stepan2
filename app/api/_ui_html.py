@@ -653,7 +653,10 @@ def _source_bar(
 def _thread_item(row: object, active_tid: int | None, show_branch: bool = False) -> str:
     (tid, name, stage, last_act, phone, product_slug,
      ig_username, avatar_url, follower_count, following_count, agent_enabled,
-     last_msg, last_dir, cnt_in, cnt_out, branch_name) = row  # type: ignore[misc]
+     last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h) = row  # type: ignore[misc]
+    dt = _as_dt(last_act)
+    if dt is not None:
+        dt += timedelta(hours=int(tz_offset_h or 0))
     on = " on" if tid == active_tid else ""
     prod_badge = (
         f' <span class="bg sq" style="font-size:.57rem;text-transform:none">'
@@ -693,7 +696,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         f'<div class="ti-body">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
         f'{bot_off}{br_badge}'
-        f'<span class="ti-ts">{_fmt_dt_short(_as_dt(last_act))}</span></div>'
+        f'<span class="ti-ts">{_fmt_dt_short(dt)}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge}</div>'
         f'{handle_row}'
         f'{sub_row}</div></a>'

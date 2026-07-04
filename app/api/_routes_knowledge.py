@@ -15,7 +15,8 @@ from app.modules.knowledge.reindex import reindex_branch
 from app.modules.knowledge.sections import reassemble
 
 from ._i18n import apply_lang, t
-from ._query import _branch_where
+from ._query import _branch_where, fetch_branch_tz
+from ._ui_html import set_render_tz
 from ._ui_kb import kb_editor_html, kb_history_html, kb_products_html, kb_tree_html
 
 router = APIRouter()
@@ -115,6 +116,8 @@ async def knowledge_history(doc_id: int, request: Request) -> HTMLResponse:
             {"id": doc_id})).first()
         if not row:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        tz_by_branch = await fetch_branch_tz(session, [row[0]])
+        set_render_tz(tz_by_branch.get(row[0], 0))
         bid = row[0] if branch_ids else None
         revs = await list_revisions(session, bid, "doc", str(row[1]))
     return HTMLResponse(kb_history_html(f"/ui/knowledge/{doc_id}/edit", str(row[1]), revs))

@@ -32,7 +32,7 @@ def client() -> TestClient:
 
 def _thread_row(tid: int) -> tuple:
     return (tid, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
-            "+62811", "course-a", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta")
+            "+62811", "course-a", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0)
 
 
 def test_thread_list_shows_exact_datetime_not_relative_ago() -> None:

@@ -10,7 +10,8 @@ from app.admin._branch import actor_from_request, branch_ids_from_request, is_br
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 
 from ._i18n import apply_lang
-from ._query import _branch_where
+from ._query import _branch_where, fetch_branch_tz
+from ._ui_html import set_render_tz
 from ._ui_kb import kb_history_html
 from ._ui_panels import product_edit_html, products_panel_html
 
@@ -164,6 +165,8 @@ async def products_history(prod_id: int, request: Request) -> HTMLResponse:
             text("SELECT branch_id, slug FROM product WHERE id=:id"), {"id": prod_id})).first()
         if not row:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        tz_by_branch = await fetch_branch_tz(session, [row[0]])
+        set_render_tz(tz_by_branch.get(row[0], 0))
         bid = row[0] if branch_ids else None
         revs = await list_revisions(session, bid, "product", str(row[1]))
     return HTMLResponse(kb_history_html(

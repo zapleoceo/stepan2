@@ -42,14 +42,23 @@ def _sbadge(stage: str) -> str:
 
 # ─── leads panel ──────────────────────────────────────────────────────────────
 
-def leads_panel_html(rows: list) -> str:
-    """List of leads with stage badge, phone, and creation date."""
+def leads_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> str:
+    """List of leads with stage badge, phone, and creation date (branch-local)."""
     title = _h.escape(t("nav.leads"))
     name_h = _h.escape(t("lead.name"))
     phone_h = _h.escape(t("lead.phone"))
     stage_h = _h.escape(t("lead.stage"))
     created_h = _h.escape(t("lead.created"))
     hint = _h.escape(t("help.leads"))
+    tz = tz_by_branch or {}
+
+    def _created(v: object, branch_id: object) -> str:
+        dt = _as_dt(v)
+        if dt is None:
+            return "—"
+        dt += timedelta(hours=tz.get(branch_id, 0))
+        return dt.strftime("%Y-%m-%d")
+
     trows = "".join(
         f'<tr>'
         f'<td><strong style="color:#e8eef4">{_h.escape(str(r[1] or "—"))}</strong></td>'
@@ -57,9 +66,9 @@ def leads_panel_html(rows: list) -> str:
         f'{_h.escape(str(r[2] or "—"))}</td>'
         f'<td>{_sbadge(str(r[3] or "new"))}</td>'
         f'<td style="color:#4a5568;font-size:.72rem">'
-        f'{str(r[4])[:10] if r[4] else "—"}</td>'
+        f'{_created(r[4], r[5])}</td>'
         f'</tr>'
-        for r in rows  # (id, display_name, phone_e164, stage, created_at)
+        for r in rows  # (id, display_name, phone_e164, stage, created_at, branch_id)
     )
     return (
         f'<div class="ch"><span class="ch-n">{title}</span></div>'
@@ -81,10 +90,11 @@ def outbox_count_html(n: int) -> str:
     return str(n) if n > 0 else ""
 
 
-def outbox_panel_html(rows: list) -> str:
+def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> str:
     """Read-only outbox queue monitor (last 100 entries)."""
     title = _h.escape(t("nav.outbox"))
     hint = _h.escape(t("help.outbox"))
+    tz = tz_by_branch or {}
 
     def _spill(s: str) -> str:
         css = {"pending": "s-pend", "sent": "s-sent", "failed": "s-fail"}.get(s, "s-pend")
@@ -97,8 +107,12 @@ def outbox_panel_html(rows: list) -> str:
             f'#{_h.escape(str(tid))}</a>'
         )
 
-    def _ts(v: object) -> str:
-        return str(v)[11:19] if v else "—"  # HH:MM:SS
+    def _ts(v: object, branch_id: object) -> str:
+        dt = _as_dt(v)
+        if dt is None:
+            return "—"
+        dt += timedelta(hours=tz.get(branch_id, 0))
+        return dt.strftime("%H:%M:%S")
 
     trows = "".join(
         f'<tr>'
@@ -106,10 +120,10 @@ def outbox_panel_html(rows: list) -> str:
         f'<td>{_spill(str(r[2]))}</td>'
         f'<td style="color:#6b7685;font-size:.72rem">{_h.escape(str(r[3]))}</td>'
         f'<td style="color:#d0d7de;font-size:.77rem">{_h.escape(str(r[4] or "")[:70])}</td>'
-        f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">{_ts(r[5])}</td>'
-        f'<td style="color:#6b7685;font-size:.7rem;white-space:nowrap">{_ts(r[6])}</td>'
+        f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">{_ts(r[5], r[7])}</td>'
+        f'<td style="color:#6b7685;font-size:.7rem;white-space:nowrap">{_ts(r[6], r[7])}</td>'
         f'</tr>'
-        for r in rows  # (id, thread_id, status, source, text, scheduled_at, sent_at)
+        for r in rows  # (id, thread_id, status, source, text, scheduled_at, sent_at, branch_id)
     )
     return (
         f'<div class="ch"><span class="ch-n">{title}</span>'

@@ -56,7 +56,7 @@ _THREAD_TMPL = (
     " l.follower_count, l.following_count, l.agent_enabled,"
     " lm.text AS last_msg, lm.direction AS last_dir,"
     " mc.cnt_in, mc.cnt_out,"
-    " b.name AS branch_name"
+    " b.name AS branch_name, b.tz_offset_h"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " JOIN branch b ON b.id = l.branch_id"
     " LEFT JOIN LATERAL ("

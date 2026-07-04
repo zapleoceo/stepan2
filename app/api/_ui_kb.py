@@ -137,13 +137,13 @@ def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
 
 def kb_history_html(edit_url: str, slug: str, revs: list,
                     restore_url: str = "/ui/knowledge/restore") -> str:
-    from ._ui_html import _fmt_time  # noqa: PLC0415 (avoid import cycle)
+    from ._ui_html import _as_dt, _fmt_time  # noqa: PLC0415 (avoid import cycle)
     rows = []
     for r in revs:  # (id, old_content, new_content, old_len, new_len, actor, created_at)
         rid, old_c, new_c, old_len, new_len, actor, created = r
         delta = (new_len or 0) - (old_len or 0)
         sign = f"+{delta}" if delta >= 0 else str(delta)
-        when = _fmt_time(created if hasattr(created, "year") else None) or str(created)[:19]
+        when = _fmt_time(_as_dt(created))
         diff = _diff_html(old_c or "", new_c or "")
         rows.append(
             f'<div class="kb-rev"><div class="kb-rev-h">'

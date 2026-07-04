@@ -99,13 +99,30 @@ def test_thread_list_html_with_row() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")
     row = (42, "Alice Test", "new", datetime.now(UTC).replace(tzinfo=None),
-           "+62812345", "course-a", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3, "KL")
+           "+62812345", "course-a", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
+           "KL", 0)
     html = thread_list_html([row])
     assert "Alice Test" in html
     assert "@alicetest" in html
     # thread list links to the shareable canonical URL, not the HTMX-only partial
     assert 'hx-get="/ui/chat/42"' in html
     assert "/ui/chat/42/panel" not in html
+
+
+def test_thread_list_html_shifts_last_active_to_branch_local_time() -> None:
+    """Sidebar thread list must show each thread's OWN branch-local time, not UTC —
+    a per-row tz_offset_h (from b.tz_offset_h) shifts last_act before formatting."""
+    from datetime import datetime
+
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    last_act = datetime(2026, 1, 1, 20, 0, 0)  # 20:00 UTC
+    row = (42, "Alice Test", "new", last_act,
+           "+62812345", "course-a", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
+           "KL", 7)  # UTC+7 branch
+    html = thread_list_html([row])
+    assert "03:00" in html  # 20:00 UTC + 7h = 03:00 next day, branch-local
+    assert "20:00" not in html
 
 
 def test_badge_renders_stage_en() -> None:
@@ -639,11 +656,25 @@ def test_leads_panel_html_with_rows() -> None:
     from app.api._ui_panels import leads_panel_html
     _set_lang("en")
     rows = [(1, "Alice Test", "+62811234567", "qualifying",
-             datetime.now(UTC).replace(tzinfo=None))]
+             datetime.now(UTC).replace(tzinfo=None), 9)]
     html = leads_panel_html(rows)
     assert "Alice Test" in html
     assert "+62811234567" in html
     assert "sq" in html  # qualifying badge CSS
+
+
+def test_leads_panel_html_created_date_is_branch_local() -> None:
+    """A lead created at 23:30 UTC in a UTC+7 branch is already the NEXT calendar day
+    locally — the created-date column must reflect that, not the raw UTC date."""
+    from datetime import datetime
+
+    from app.api._ui_panels import leads_panel_html
+    _set_lang("en")
+    created = datetime(2026, 1, 1, 23, 30, 0)  # 2026-01-01 UTC
+    rows = [(1, "Alice Test", "+62811234567", "qualifying", created, 9)]
+    html = leads_panel_html(rows, tz_by_branch={9: 7})
+    assert "2026-01-02" in html  # shifted +7h crosses into the next day
+    assert "2026-01-01" not in html
 
 
 def test_outbox_panel_html_empty() -> None:
@@ -661,9 +692,9 @@ def test_outbox_panel_html_statuses() -> None:
     _set_lang("en")
     now = datetime.now(UTC).replace(tzinfo=None)
     rows = [
-        (1, 10, "sent", "agent", "Hello!", now, now),
-        (2, 77, "pending", "manager", "Wait…", now, None),
-        (3, 10, "failed", "followup", "Error", now, None),
+        (1, 10, "sent", "agent", "Hello!", now, now, 1),
+        (2, 77, "pending", "manager", "Wait…", now, None, 1),
+        (3, 10, "failed", "followup", "Error", now, None, 1),
     ]
     html = outbox_panel_html(rows)
     assert "s-sent" in html
@@ -671,6 +702,20 @@ def test_outbox_panel_html_statuses() -> None:
     assert "s-fail" in html
     assert 'hx-get="/ui/chat/77"' in html  # canonical shareable chat URL
     assert ">#77<" in html
+
+
+def test_outbox_panel_html_shifts_times_to_branch_local() -> None:
+    """scheduled_at/sent_at must render in the row's own branch-local time, not raw UTC —
+    was a plain str(v)[11:19] slice with zero tz correction."""
+    from datetime import datetime
+
+    from app.api._ui_panels import outbox_panel_html
+    _set_lang("en")
+    scheduled = datetime(2026, 1, 1, 10, 0, 0)  # 10:00 UTC
+    rows = [(1, 10, "pending", "agent", "Hi", scheduled, None, 5)]
+    html = outbox_panel_html(rows, tz_by_branch={5: 7})
+    assert "17:00:00" in html  # 10:00 UTC + 7h
+    assert "10:00:00" not in html
 
 
 def test_product_edit_html_new() -> None:
@@ -705,6 +750,40 @@ def test_kb_editor_parses_existing_sections() -> None:
     html = kb_editor_html(2, "faq", "FAQ", "## Payment\nWe take cards.\n\n## Hours\n9-5")
     assert "Payment" in html and "Hours" in html
     assert "We take cards" in html
+
+
+def test_kb_history_html_shows_branch_local_time() -> None:
+    """Revision timestamps must honor set_render_tz — previously the route never called it,
+    so this rendered whatever tz happened to be left over (usually UTC/0) from a prior request."""
+    from datetime import datetime
+
+    from app.api._ui_html import set_render_tz
+    from app.api._ui_kb import kb_history_html
+    _set_lang("en")
+    set_render_tz(7)
+    try:
+        created = datetime(2026, 1, 1, 20, 0, 0)  # 20:00 UTC
+        revs = [(1, "old", "new", 3, 3, "Dima", created)]
+        html = kb_history_html("/ui/knowledge/1/edit", "faq", revs)
+    finally:
+        set_render_tz(0)
+    assert "03:00:00" in html  # 20:00 UTC + 7h, next-day branch-local
+    assert "20:00:00" not in html
+
+
+def test_kb_history_html_accepts_iso_string_created_at() -> None:
+    """SQLite returns created_at as an ISO string, not a datetime — must still parse+shift
+    instead of silently falling back to an unshifted raw string (the old hasattr('year') bug)."""
+    from app.api._ui_html import set_render_tz
+    from app.api._ui_kb import kb_history_html
+    _set_lang("en")
+    set_render_tz(7)
+    try:
+        revs = [(1, "old", "new", 3, 3, "Dima", "2026-01-01T20:00:00")]
+        html = kb_history_html("/ui/knowledge/1/edit", "faq", revs)
+    finally:
+        set_render_tz(0)
+    assert "03:00:00" in html
 
 
 def test_chat_header_html() -> None:

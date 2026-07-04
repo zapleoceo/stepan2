@@ -39,9 +39,12 @@ _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where
     "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
 )
 _HOUR_Q = (  # noqa: S608 — {and_where} is a fixed branch filter, direction is bound
-    "SELECT EXTRACT(HOUR FROM m.occurred_at)::int AS h, COUNT(*)"
+    # Hour bucket shifted to each message's OWN branch-local time (not UTC) — a Jakarta
+    # branch's "peak at 14:00" must mean 14:00 local, not 14:00 UTC (21:00 local).
+    "SELECT EXTRACT(HOUR FROM m.occurred_at + make_interval(hours => b.tz_offset_h))::int AS h,"
+    " COUNT(*)"
     " FROM message m JOIN channel_thread ct ON ct.id = m.thread_id"
-    " JOIN lead l ON l.id = ct.lead_id"
+    " JOIN lead l ON l.id = ct.lead_id JOIN branch b ON b.id = l.branch_id"
     " WHERE m.direction = :dir {and_where}"
     " GROUP BY h"
 )
