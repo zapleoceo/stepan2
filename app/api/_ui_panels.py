@@ -276,20 +276,33 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
 # ─── products panel ───────────────────────────────────────────────────────────
 
 def products_panel_html(products: list) -> str:
-    """Clickable list of products with sort_order explanation. Click row → edit form."""
+    """Clickable list of products with sort_order explanation. Click row → edit form.
+    Rows: (id, slug, title, is_active, sort_order, kind, branch_name)."""
     title = _h.escape(t("nav.products"))
     hint = _h.escape(t("prod.sort_hint"))
     create_lbl = _h.escape(t("prod.create"))
+    # when the view spans >1 branch, badge each row so per-branch copies of the same slug
+    # read as distinct rows, not duplicates (same pattern as the multi-branch inbox list).
+    multi_branch = len({p[6] for p in products if len(p) > 6}) > 1
+
+    def _badges(p: object) -> str:
+        b = ""
+        if len(p) > 6 and multi_branch:
+            b += f'<span class="br-badge">{_h.escape(str(p[6]))}</span>'
+        if len(p) > 5 and p[5] and p[5] != "course":
+            b += f'<span class="kind-badge">{_h.escape(str(p[5]))}</span>'
+        return b
+
     rows = "".join(
         f'<tr class="kdoc" style="cursor:pointer"'
         f' hx-get="/ui/products/{p[0]}/edit" hx-target="#main"'
         f' hx-push-url="/ui/products/{p[0]}/edit">'
-        f'<td><strong style="color:#e8eef4">{_h.escape(str(p[2]))}</strong>'
+        f'<td><strong style="color:#e8eef4">{_h.escape(str(p[2]))}</strong>{_badges(p)}'
         f'<br><span class="kdoc-slug">{_h.escape(str(p[1]))}</span></td>'
         f'<td><span class="pill {"p-ok" if p[3] else "p-off"}">{"✓" if p[3] else "✗"}</span></td>'
         f'<td style="color:#6b7685;font-size:.8rem;text-align:center">{p[4]}</td>'
         f'</tr>'
-        for p in products  # (id, slug, title, is_active, sort_order)
+        for p in products  # (id, slug, title, is_active, sort_order, kind, branch_name)
     )
     return (
         f'<div class="ch"><span class="ch-n">{title}</span>'
@@ -1229,9 +1242,9 @@ def reports_panel_html(
     total_in = sum(hour_in.values())
     total_out = sum(hour_out.values())
 
-    # hourly activity chart — grouped in/out bars per hour-of-day (0-23). Both directions are
-    # scaled to the single busiest in/out count so they compare directly; the peak hour is
-    # labelled so the bar heights have a magnitude to read against.
+    # compact hourly-activity mini-chart placed high in the panel — grouped in/out bars per
+    # hour-of-day, scaled to the busiest in/out count so the two directions compare directly;
+    # the header carries the period totals + the peak hour so bar heights have a magnitude.
     max_val = max(max(hour_in.values(), default=0), max(hour_out.values(), default=0), 1)
     hour_totals = {h: hour_in.get(h, 0) + hour_out.get(h, 0) for h in range(24)}
     peak_h = max(hour_totals, key=lambda h: hour_totals[h])
@@ -1250,37 +1263,31 @@ def reports_panel_html(
             f'<div class="hbar-in" style="height:{h_in}%"></div>'
             f'<div class="hbar-out" style="height:{h_out}%"></div>'
             f'</div>'
-            f'<div class="hbar-l">{f"{h:02d}" if h % 3 == 0 else ""}</div>'
+            f'<div class="hbar-l">{f"{h:02d}" if h % 6 == 0 else ""}</div>'
             f'</div>'
         )
+    peak_txt = _h.escape(t("rep.peak", n=peak_val, h=f"{peak_h:02d}"))
+    mini_act = (
+        f'<div class="mini-act">'
+        f'<div class="mini-act-hd">'
+        f'<span class="mini-act-t">{_h.escape(t("rep.activity"))} · '
+        f'{_h.escape(t("rep.by_hour"))}</span>'
+        f'<span class="mini-act-s"><b style="color:#4da6ff">{total_in}</b> {in_lbl} · '
+        f'<b style="color:#51cf66">{total_out}</b> {out_lbl} · {peak_txt}</span></div>'
+        f'<div class="hchart hchart-mini">{hour_bars}</div>'
+        f'</div>'
+    )
 
     title_lbl = _h.escape(t("rep.title"))
-    act_lbl = _h.escape(t("rep.activity"))
-    peak_txt = _h.escape(t("rep.peak", n=peak_val, h=f"{peak_h:02d}"))
-
     return (
         f'<div class="ch"><span class="ch-n">{title_lbl}</span></div>'
         f'<div class="pnl-body">'
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
+        f'{mini_act}'
         f'{_funnel_line_html(stage_counts)}'
         f'{status_bar}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
-        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
-        f'margin:1rem 0 .35rem">'
-        f'<h3 style="font-size:.78rem;color:#8899aa;margin:0">{act_lbl}</h3>'
-        f'<span style="font-size:.63rem;color:#6b7685">{peak_txt}</span></div>'
-        f'<div class="kpi-row">'
-        f'{_kpi("rep.msgs_in", str(total_in), "#4da6ff")}'
-        f'{_kpi("rep.msgs_out", str(total_out), "#51cf66")}'
-        f'{_kpi("rep.msgs_total", str(total_in + total_out))}'
-        f'</div>'
-        f'<div class="hchart">{hour_bars}</div>'
-        f'<div style="font-size:.63rem;color:#6b7685;margin-top:.35rem">'
-        f'<span style="color:#4da6ff">▮</span> {in_lbl}&nbsp;&nbsp;'
-        f'<span style="color:#51cf66">▮</span> {out_lbl}'
-        f'&nbsp;·&nbsp;{_h.escape(t("rep.by_hour"))}'
-        f'</div>'
         f'</div>'
     )
 

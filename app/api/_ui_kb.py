@@ -39,22 +39,32 @@ def _tabs(active: str) -> str:
 
 
 def kb_tree_html(docs: list, active_id: int | None = None) -> str:
-    """Persona-tab sidebar: docs grouped by category into collapsible groups."""
+    """Persona-tab sidebar: docs grouped by category into collapsible groups. When the view
+    spans >1 branch, groups are prefixed with the branch name ('Branch · Category') so
+    per-branch copies of the same slug don't read as duplicates."""
     lang = current_lang()
-    groups: dict[str, list] = {}
-    for d in docs:  # (id, slug, title, content, category, sort_order)
+    branches = sorted({d[7] for d in docs if len(d) > 7})
+    multi = len(branches) > 1
+    by_branch: dict[str, dict[str, list]] = {}
+    for d in docs:  # (id, slug, title, content, category, sort_order, updated_by, branch_name)
         cat = d[4] if d[4] in CATEGORIES else _OTHER
-        groups.setdefault(cat, []).append(d)
+        br = d[7] if len(d) > 7 else ""
+        by_branch.setdefault(br, {}).setdefault(cat, []).append(d)
     out = [_tabs("persona")]
-    for cat in (*_CAT_ORDER, _OTHER):
-        rows = groups.get(cat)
-        if not rows:
-            continue
-        rows.sort(key=lambda r: (r[5] or 0, str(r[1])))
-        items = "".join(_tree_item(d, active_id) for d in rows)
-        out.append(
-            f'<details class="kb-grp" open><summary>{_h.escape(_cat_label(cat, lang))}'
-            f'</summary>{items}</details>')
+    for br in (branches or [""]):
+        cats = by_branch.get(br, {})
+        for cat in (*_CAT_ORDER, _OTHER):
+            rows = cats.get(cat)
+            if not rows:
+                continue
+            rows.sort(key=lambda r: (r[5] or 0, str(r[1])))
+            items = "".join(_tree_item(d, active_id) for d in rows)
+            label = _cat_label(cat, lang)
+            if multi:
+                label = f"{br} · {label}"
+            out.append(
+                f'<details class="kb-grp" open><summary>{_h.escape(label)}'
+                f'</summary>{items}</details>')
     if len(out) == 1:
         out.append('<div class="emp">—</div>')
     return f'<div id="kb-side">{"".join(out)}</div>'

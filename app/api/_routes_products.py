@@ -28,11 +28,12 @@ router = APIRouter()
 async def products_panel(request: Request) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
+    where, params = _branch_where(branch_ids, col="p.branch_id")
     async with session_scope() as session:
         q = (
-            "SELECT id, slug, title, is_active, sort_order"  # noqa: S608
-            f" FROM product {where} ORDER BY sort_order, id"
+            "SELECT p.id, p.slug, p.title, p.is_active, p.sort_order, p.kind, b.name"  # noqa: S608,E501
+            " FROM product p JOIN branch b ON b.id = p.branch_id"
+            f" {where} ORDER BY b.name, p.sort_order, p.id"
         )
         rows = (await session.execute(text(q), params)).all()
     return HTMLResponse(products_panel_html(list(rows)))

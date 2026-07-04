@@ -95,11 +95,13 @@ async def inbox(
 async def knowledge_page(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
+    where, params = _branch_where(branch_ids, col="k.branch_id")
     async with session_scope() as session:
         q = (
-            "SELECT id, slug, title, content, category, sort_order, updated_by"  # noqa: S608
-            f" FROM knowledge_doc {where} ORDER BY sort_order, id"
+            "SELECT k.id, k.slug, k.title, k.content, k.category, k.sort_order,"  # noqa: S608
+            " k.updated_by, b.name"
+            " FROM knowledge_doc k JOIN branch b ON b.id = k.branch_id"
+            f" {where} ORDER BY b.name, k.sort_order, k.id"
         )
         docs = (await session.execute(text(q), params)).all()
     thr = kb_tree_html(list(docs))
