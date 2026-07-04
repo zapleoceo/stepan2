@@ -57,6 +57,17 @@ async def fetch_stage_counts(
     return {r[0]: int(r[1]) for r in rows}
 
 
+async def fetch_bot_enabled_count(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> int:
+    """How many leads still have the bot switched on (agent_enabled) — the sidebar's
+    'bot working N chats' headline. Blocked leads don't count as actively worked."""
+    q = select(func.count()).where(Lead.agent_enabled.is_(True), Lead.is_blocked.is_(False))  # type: ignore[attr-defined]
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    return int((await session.execute(q)).scalar_one())
+
+
 async def fetch_report_data(
     session: AsyncSession, branch_ids: list[int] | None,
 ) -> tuple[dict[str, int], dict[int, int], dict[int, int], list, dict[str, float | int]]:

@@ -1039,33 +1039,12 @@ def reports_panel_html(
         f'gap:1px;margin:.5rem 0 .9rem">{bar_segs}</div>'
     )
 
-    # stage breakdown table
-    tbl_rows = ""
-    for s in _ALL_STAGES:
-        n = stage_counts.get(s, 0)
-        badge = (
-            f'<span class="bg {_STC.get(s, "sd")}">'
-            f'{_h.escape(t(f"stage.{s}"))}</span>'
-        )
-        bar_w = round(n / (max(stage_counts.values(), default=1) or 1) * 80)
-        tbl_rows += (
-            f'<tr><td>{badge}</td>'
-            f'<td class="rep-n">{n}'
-            f'<span style="display:inline-block;width:{bar_w}px;height:5px;'
-            f'background:{_STAGE_COLOR.get(s,"#4a5568")};opacity:.45;'
-            f'border-radius:2px;margin-left:.4rem;vertical-align:middle"></span>'
-            f'</td></tr>'
-        )
+    # The per-stage breakdown table lived here but duplicated the one-line funnel above
+    # (same numbers, same colours) — removed in favour of the period message stats below.
 
-    by_stage_lbl = _h.escape(t("rep.by_stage"))
-    stage_lbl = _h.escape(t("rep.stage"))
-    count_lbl = _h.escape(t("rep.count"))
-    stage_table = (
-        f'<h3 style="font-size:.78rem;color:#8899aa;margin:.7rem 0 .35rem">{by_stage_lbl}</h3>'
-        f'<table class="rep-tbl"><thead>'
-        f'<tr><th>{stage_lbl}</th><th style="text-align:right">{count_lbl}</th></tr>'
-        f'</thead><tbody>{tbl_rows}</tbody></table>'
-    )
+    # message totals for the period (drives the "N messages" headline over the chart)
+    total_in = sum(hour_in.values())
+    total_out = sum(hour_out.values())
 
     # hourly activity chart
     max_val = max(max(hour_in.values(), default=0), max(hour_out.values(), default=0), 1)
@@ -1100,13 +1079,18 @@ def reports_panel_html(
         f'<div class="kpi-row">{kpis}</div>'
         f'{_funnel_line_html(stage_counts)}'
         f'{status_bar}'
-        f'{stage_table}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id)}'
-        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl} (24h)</h3>'
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl}</h3>'
+        f'<div class="kpi-row">'
+        f'{_kpi("rep.msgs_in", str(total_in), "#4da6ff")}'
+        f'{_kpi("rep.msgs_out", str(total_out), "#51cf66")}'
+        f'{_kpi("rep.msgs_total", str(total_in + total_out))}'
+        f'</div>'
         f'<div class="hchart">{hour_bars}</div>'
         f'<div style="font-size:.63rem;color:#4a5568;margin-top:.3rem">'
         f'<span style="color:#4da6ff">▮</span> {in_lbl}&nbsp;&nbsp;'
         f'<span style="color:#51cf66">▮</span> {out_lbl}'
+        f'&nbsp;·&nbsp;{_h.escape(t("rep.by_hour"))}'
         f'</div>'
         f'</div>'
     )

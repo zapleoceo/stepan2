@@ -22,6 +22,7 @@ from app.admin._branch import branch_ids_from_request
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     _branch_where,
+    fetch_bot_enabled_count,
     fetch_coach_data,
     fetch_report_data,
     fetch_stage_counts,
@@ -113,7 +114,8 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
     branch_ids = branch_ids_from_request(request)
     async with session_scope() as session:
         counts = await fetch_stage_counts(session, branch_ids)
-    return HTMLResponse(funnel_html(counts, active_stage=stage.strip()))
+        bot_on = await fetch_bot_enabled_count(session, branch_ids)
+    return HTMLResponse(funnel_html(counts, active_stage=stage.strip(), bot_on=bot_on))
 
 
 @router.get("/threads", response_class=HTMLResponse)

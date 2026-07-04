@@ -24,7 +24,14 @@ _CSS = (
     # Firefox scrollbar styling (Chromium/Safari use ::-webkit-scrollbar below); keeps every
     # scroll region slim instead of a full-width OS bar in Firefox.
     "*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}"
-    "html,body{height:100%;overflow:hidden}"
+    # overflow-x hidden (no sideways scroll) but overflow-y left OPEN on the root so the
+    # browser's OWN pull-to-refresh can fire: the columns are flex/position:fixed at 100%
+    # height with inner overflow:auto scrollers, so the document itself never actually
+    # scrolls on desktop — but a downward overscroll at the top of a region chains to the
+    # document and triggers the native refresh (works in desktop-mode-on-phone too). No JS
+    # emulation. Chats open at the newest message (scrollAllBot/pinBot), so the feed is
+    # never sitting at the top where an accidental pull could fire.
+    "html,body{height:100%;overflow-x:hidden}"
     "body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
     "background:#0f1117;color:#d0d7de;font-size:14px}"
     ".sid{width:210px;flex-shrink:0;background:#141925;border-right:1px solid #2d3748;"
@@ -126,17 +133,20 @@ _CSS = (
     ".sr{background:#1f3a2a;color:#51cf66}.sh{background:#163030;color:#22b8cf}"
     ".sd{background:#2a2a2a;color:#868e96}.sm{background:#3a1f1f;color:#ff6b6b}"
     # funnel: stage filter chips (colour dot + label + count)
-    ".fnl{display:flex;flex-wrap:wrap;gap:.25rem;padding:.4rem .5rem;"
-    "border-bottom:1px solid #1e2636;flex-shrink:0}"
-    ".fpill{display:inline-flex;align-items:center;gap:.28rem;padding:.16rem .42rem;"
-    "border-radius:6px;font-size:.7rem;color:#93a1b3;cursor:pointer;text-decoration:none;"
-    "background:#161b26;border:1px solid transparent;transition:background .1s,border .1s}"
-    ".fpill:hover{background:#1c2230;color:#c8d6e5}"
-    ".fpill.on{background:#1e2b40;border-color:#31527a;color:#e8eef4}"
-    ".fdot{width:.5rem;height:.5rem;border-radius:50%;flex-shrink:0}"
-    ".fpl-l{font-weight:500}"
-    ".fpl-n{font-weight:700;color:#c8d6e5;min-width:1ch;text-align:right}"
-    ".fpill.on .fpl-n{color:#fff}"
+    # summary line above the funnel: bot-working count + in-funnel count
+    ".fsum{display:flex;gap:.9rem;padding:.4rem .6rem .1rem;font-size:.68rem;color:#8899aa}"
+    ".fsum b{color:#cfe0f4;font-weight:700}"
+    # one-line funnel: each stage a compact icon+count step, label on hover (title)
+    ".fnl{display:flex;gap:.15rem;padding:.3rem .5rem .45rem;border-bottom:1px solid #1e2636;"
+    "flex-shrink:0;align-items:stretch}"
+    ".fstep{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;"
+    "gap:.05rem;padding:.2rem .1rem;border-radius:6px;text-decoration:none;cursor:pointer;"
+    "border:1px solid transparent;border-top:2px solid transparent;transition:background .1s}"
+    ".fstep:hover{background:#1c2230}"
+    ".fstep.on{background:#1e2b40;border-color:#31527a}"
+    ".fst-i{font-size:.82rem;line-height:1}"
+    ".fst-n{font-size:.72rem;font-weight:700;color:#c8d6e5}"
+    ".fstep.on .fst-n{color:#fff}"
     "._legacy-fnl{font-size:.62rem;color:#4a5568;cursor:pointer;text-decoration:none;"
     "padding:.12rem .3rem;border-radius:3px}"
     # reports panel
@@ -427,31 +437,44 @@ _STAGE_COLOR: dict[str, str] = {
     "presenting": "#4adb7a", "objection": "#ffa94d", "ready": "#51cf66",
     "handed_off": "#22b8cf", "dormant": "#868e96", "manager": "#ff6b6b",
 }
-_SIDE_ICON = {"dormant": "😴", "manager": "👤"}
+_STAGE_ICON = {
+    "new": "✨", "nurturing": "🌱", "qualifying": "🔍", "presenting": "📊",
+    "objection": "💬", "ready": "✅", "handed_off": "🤝", "dormant": "😴", "manager": "👤",
+}
+# Leads actively moving through the funnel (not won, not parked/handed to a human).
+_IN_FUNNEL_STAGES = ("new", "nurturing", "qualifying", "presenting", "objection")
 
 
-def funnel_html(counts: dict[str, int], active_stage: str = "") -> str:
-    """Stage filter for the inbox .thr column: a clean wrap of stage chips (colour dot +
-    label + count), each filters the thread list; the active one is highlighted."""
+def funnel_html(counts: dict[str, int], active_stage: str = "", bot_on: int = 0) -> str:
+    """One-line stage funnel for the inbox .thr column: an icon+count step per stage
+    (full label on hover), each filters the thread list. Above it, a summary line: how
+    many chats the bot is actively working and how many are still in the funnel."""
     total = sum(counts.values())
-    all_lbl = _h.escape(t("fnl.all"))
+    in_funnel = sum(counts.get(s, 0) for s in _IN_FUNNEL_STAGES)
 
-    def chip(stage: str | None, label: str, n: int, color: str | None) -> str:
-        dot = (f'<span class="fdot" style="background:{color}"></span>' if color else "")
+    def step(stage: str | None, label: str, n: int, icon: str, color: str | None) -> str:
         url = f"/ui/threads?stage={stage}" if stage else "/ui/threads"
         push = f"/ui/inbox?stage={stage}" if stage else "/ui/inbox"
         on = " on" if (stage or "") == (active_stage or "") else ""
+        bar = f"border-top-color:{color}" if color else ""
         return (
-            f'<a class="fpill{on}" hx-get="{url}" hx-push-url="{push}"'
-            f' hx-target="#tl" hx-swap="innerHTML"'
-            f' onclick="setFnl(this)" title="{label}">{dot}'
-            f'<span class="fpl-l">{label}</span><span class="fpl-n">{n}</span></a>'
+            f'<a class="fstep{on}" style="{bar}" hx-get="{url}" hx-push-url="{push}"'
+            f' hx-target="#tl" hx-swap="innerHTML" data-help="{label}"'
+            f' onclick="setFnl(this)" title="{label}">'
+            f'<span class="fst-i">{icon}</span><span class="fst-n">{n}</span></a>'
         )
 
-    pills = [chip(None, all_lbl, total, None)]
+    steps = [step(None, _h.escape(t("fnl.all")), total, "📥", None)]
     for s in (*_PIPELINE, *_SIDE_STAGES):
-        pills.append(chip(s, _h.escape(t(f"stage.{s}")), counts.get(s, 0), _STAGE_COLOR[s]))
-    return f'<div class="fnl">{"".join(pills)}</div>'
+        steps.append(step(s, _h.escape(t(f"stage.{s}")), counts.get(s, 0),
+                          _STAGE_ICON.get(s, "•"), _STAGE_COLOR[s]))
+    summary = (
+        f'<div class="fsum">'
+        f'<span>🤖 {_h.escape(t("fnl.bot_on"))}: <b>{bot_on}</b></span>'
+        f'<span>🎯 {_h.escape(t("fnl.in_funnel"))}: <b>{in_funnel}</b></span>'
+        f'</div>'
+    )
+    return f'{summary}<div class="fnl">{"".join(steps)}</div>'
 
 _IG_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 

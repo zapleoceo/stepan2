@@ -482,6 +482,8 @@ _TR: dict[str, dict[str, str]] = {
     "fnl.title":   {"ru": "ВОРОНКА",        "en": "FUNNEL",       "id": "CORONG"},
     "fnl.total":   {"ru": "Всего",          "en": "Total",        "id": "Total"},
     "fnl.all":     {"ru": "все",            "en": "all",          "id": "semua"},
+    "fnl.bot_on":  {"ru": "бот вкл",        "en": "bot on",       "id": "bot aktif"},
+    "fnl.in_funnel": {"ru": "в воронке",    "en": "in funnel",    "id": "di corong"},
     # reports
     "nav.reports": {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
     "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
@@ -532,9 +534,12 @@ _TR: dict[str, dict[str, str]] = {
     "rep.by_stage":{"ru": "По стадиям",     "en": "By stage",     "id": "Per tahap"},
     "rep.stage":   {"ru": "Стадия",         "en": "Stage",        "id": "Tahap"},
     "rep.count":   {"ru": "Кол-во",         "en": "Count",        "id": "Jumlah"},
-    "rep.activity":{"ru": "Активность",     "en": "Activity",     "id": "Aktivitas"},
+    "rep.activity":{"ru": "Сообщения за период", "en": "Messages in period",
+                    "id": "Pesan dalam periode"},
     "rep.msgs_in": {"ru": "входящие",       "en": "incoming",     "id": "masuk"},
     "rep.msgs_out":{"ru": "исходящие",      "en": "outgoing",     "id": "keluar"},
+    "rep.msgs_total": {"ru": "всего",       "en": "total",        "id": "total"},
+    "rep.by_hour": {"ru": "по часам (0-23)", "en": "by hour (0-23)", "id": "per jam (0-23)"},
     "help.reports": {
         "ru": (
             "Общая статистика: воронка по стадиям, конверсия, активность по часам."

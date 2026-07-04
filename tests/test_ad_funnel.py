@@ -87,3 +87,20 @@ def test_ad_deep_link_falls_back_without_ids() -> None:
     html = _ad_funnel_html([("120255671613970771", None, 3, 1, 1, 0)])
     assert "selected_ad_ids=120255671613970771" in html
     assert "business_id=" not in html
+
+
+def test_reports_panel_drops_by_stage_table_and_shows_message_stats() -> None:
+    from app.api._i18n import _lang
+    from app.api._ui_panels import reports_panel_html
+    _lang.set("en")
+    html = reports_panel_html(
+        stage_counts={"new": 3, "qualifying": 2, "ready": 1},
+        hour_in={9: 4, 10: 6}, hour_out={9: 5, 11: 3},
+    )
+    # the duplicate "By stage" breakdown table is gone; the one-line funnel stays
+    assert "rep-tbl" not in html
+    assert "fnl-line" in html
+    # period message totals: in=10, out=8, total=18
+    assert ">10<" in html and ">8<" in html and ">18<" in html
+    # hourly chart still present (in/out bars)
+    assert "hchart" in html

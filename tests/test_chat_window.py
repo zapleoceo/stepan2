@@ -131,13 +131,27 @@ def test_bubble_hides_translate_button_when_no_caption() -> None:
 def test_funnel_html_highlights_active_and_pushes_inbox_url() -> None:
     from app.api._ui_html import funnel_html
     _set_lang("en")
-    html = funnel_html({"dormant": 5, "new": 2}, active_stage="dormant")
+    html = funnel_html({"dormant": 5, "new": 2, "qualifying": 3}, active_stage="dormant",
+                       bot_on=7)
     assert 'hx-push-url="/ui/inbox?stage=dormant"' in html  # shareable full-page URL
     assert 'hx-get="/ui/threads?stage=dormant"' in html     # fast partial swap into #tl
-    # the dormant chip is the active one, the All chip is not
+    # the dormant step is the active one
     i = html.find("stage=dormant")
-    seg = html[max(0, i - 120):i]
-    assert "fpill on" in seg
+    seg = html[max(0, i - 140):i]
+    assert "fstep on" in seg
+    # summary line: bot-on count + in-funnel count (new+qualifying = 5, dormant excluded)
+    assert "bot on" in html and ">7<" in html
+    assert "in funnel" in html and ">5<" in html
+
+
+def test_funnel_html_is_one_line_with_icons_and_hover_labels() -> None:
+    from app.api._ui_html import funnel_html
+    _set_lang("en")
+    html = funnel_html({"new": 2}, bot_on=1)
+    assert 'class="fnl"' in html and "fstep" in html
+    assert 'title="new"' in html            # full stage label on hover
+    assert "🔍" in html or "✨" in html      # stage icons present
+    assert "fpill" not in html              # old wrap-of-chips design gone
 
 
 # ─── manual product change: header <select> + history line ────────────────────
