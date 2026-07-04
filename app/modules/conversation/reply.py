@@ -1,4 +1,4 @@
-"""ReplyService — turn a thread's dialog into a Decision, then queue the reply.
+﻿"""ReplyService — turn a thread's dialog into a Decision, then queue the reply.
 
 LLM stays behind LLMPort (injected, so tests use a fake) and all DB access goes through
 BranchScoped repos. No branch_id filtering by hand; no sending here — only enqueue."""
@@ -14,7 +14,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.adapters.meta_capi import MetaCapi
 from app.domain.enums import Stage
-from app.modules.budget import BudgetService
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import BranchSettings
@@ -22,8 +21,8 @@ from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
 from .decision import Decision, parse_decision
-from .needs import merge_needs, needs_summary, parse_needs
-from .prompt import build_messages
+from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
+from .needs import merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 logger = logging.getLogger(__name__)
@@ -52,34 +51,6 @@ def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
 
 
-def _retrieval_query(dialog: list, limit: int = 6) -> str:
-    """Recent dialog text used as the RAG retrieval query — the index is searched by what
-    the conversation is about right now, not the whole (capped) history."""
-    return "\n".join(
-        (m.text or "").strip() for m in dialog[-limit:] if (m.text or "").strip())
-
-
-def _fmt_llm_meta(meta: dict) -> str | None:
-    model = (meta.get("model") or "").split("/")[-1]
-    t_in = meta.get("tokens_in", 0)
-    t_out = meta.get("tokens_out", 0)
-    cost = meta.get("cost_usd")
-    elapsed = meta.get("elapsed_ms")
-    req = meta.get("request_id")
-    parts: list[str] = []
-    if model:
-        parts.append(model)
-    if t_in or t_out:
-        parts.append(f"{t_in}↑ {t_out}↓")
-    if cost is not None:
-        parts.append("free" if not cost else f"${cost:.4f}")
-    if elapsed is not None:
-        parts.append(f"{elapsed / 1000:.1f}s" if elapsed >= 1000 else f"{elapsed}ms")
-    if req:
-        parts.append(f"id {str(req)[:8]}")
-    return " · ".join(parts) if parts else None
-
-
 class ReplyService:
     """Decide and enqueue the agent's reply for one branch's thread."""
 
@@ -106,57 +77,22 @@ class ReplyService:
 
     async def decide(self, thread_id: int) -> Decision | None:
         """Run the model over the thread; None if the thread is foreign or has no dialog."""
-        thread = await self.threads.by_id(thread_id)
-        if thread is None:
+        engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
+        ctx = await engine.prepare(thread_id, workflow="reply")
+        if ctx is None:
             return None
-        dialog = await self.messages.dialog(thread_id, since=thread.context_cleared_at)
-        if not dialog:
-            return None
-
-        budget = BudgetService(self.session, self.branch_id)
-        if await budget.over_budget():
-            logger.warning("branch=%d over daily LLM budget — reply skipped", self.branch_id)
-            return None
-
-        context = await self.knowledge.knowledge_context(
-            thread.product_slug, query=_retrieval_query(dialog))
-        notes = await self.coaching.active_manager_notes()
-        lead = await self.session.get(Lead, thread.lead_id)
-        stored_needs = parse_needs(lead.needs if lead is not None else None)
-        last_in = next((m for m in reversed(dialog) if m.direction == "in"), None)
+        lead = ctx.lead
+        last_in = next((m for m in reversed(ctx.dialog) if m.direction == "in"), None)
         script_lang = _script_lang(last_in.text if last_in else "")
         lang = script_lang or await self._lang(lead)
         if script_lang and lead is not None and lead.preferred_language != script_lang:
             lead.preferred_language = script_lang  # sticks even if the model forgets to say so
             self.session.add(lead)
-        messages = build_messages(
-            context, dialog, lang, coaching_notes=notes,
-            needs_block=needs_summary(stored_needs))
-        if messages[-1]["role"] == "assistant":
-            # Defensive: threads_awaiting_reply() only selects threads where the
-            # lead spoke last, so dialog should always end "in" — but a re-triggered
-            # tick (see wiring.try_lock_thread) can still land here with the bot's
-            # own last message trailing. Mistral hard-rejects that shape outright
-            # ("Expected last role User or Tool ... but got assistant", code 3230);
-            # other providers silently treat it as a continuation of that message,
-            # which isn't the intent either. Nudge a fresh turn instead — same
-            # pattern FollowupService already uses for its own assistant-last case.
-            messages.append({
-                "role": "user",
-                "content": "[System: no new message from the lead since your last "
-                            "reply. Write a short natural continuation or check-in "
-                            "if warranted; otherwise keep this turn minimal. Return "
-                            "the JSON as usual.]",
-            })
-        raw, meta = await self.llm.chat(
-            messages, capability="chat:smart", require_json_schema=True,
-            workflow="reply", thread_id=thread_id, branch_id=self.branch_id,
-        )
+        raw, meta = await engine.complete(ctx, thread_id, lang=lang, workflow="reply")
         self._last_llm_meta = meta
-        await budget.record(float(meta.get("cost_usd") or 0.0))
         decision = parse_decision(raw)
         if lead is not None:
-            merged = merge_needs(stored_needs, decision.jobs, decision.pains,
+            merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
                                  decision.gains, decision.discovery_complete)
             lead.needs = merged.to_json()
             self.session.add(lead)

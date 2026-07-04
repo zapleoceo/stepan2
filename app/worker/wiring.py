@@ -57,9 +57,19 @@ async def active_channels(session: AsyncSession, branch_id: int) -> list[Channel
 # conversations; anything older needs a deliberate, reviewed catch-up, not an automatic one.
 _AWAITING_REPLY_MAX_AGE = timedelta(days=3)
 
+# Real incident: re-enabling a branch surfaced ~300 threads at once; reply_pending tried
+# to decide() every one of them in a single tick, blew past ARQ's 120s job_timeout, and
+# got killed + retried — the retry re-picked up threads whose advisory lock had already
+# been released mid-flight, producing near-duplicate replies sent seconds apart (thread
+# 1057 and ~20 others, all revoked afterward). A tick must always finish comfortably
+# inside the timeout; a capped batch plus the next tick 60s later drains a large backlog
+# just as fast, without ever risking a kill-and-retry duplicate.
+_REPLY_BATCH_CAP = 10
+
 
 async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[int]:
-    """Thread ids with a fresh inbound the bot still owns (lead spoke last, not silent).
+    """Thread ids with a fresh inbound the bot still owns (lead spoke last, not silent),
+    oldest-waiting-first, capped per tick (see _REPLY_BATCH_CAP).
 
     Per-lead agent_enabled gates manager takeovers; the NOT-EXISTS pending guard stops
     a second generation while a queued reply waits out its human-typing delay."""
@@ -83,6 +93,8 @@ async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[
             | (ChannelThread.last_out_at < ChannelThread.last_in_at),  # type: ignore[operator]
             ~pending,
         )
+        .order_by(ChannelThread.last_in_at.asc())  # type: ignore[union-attr]
+        .limit(_REPLY_BATCH_CAP)
     )
     return [tid for tid in rows.scalars().all() if tid is not None]
 
@@ -99,6 +111,13 @@ async def try_lock_thread(session: AsyncSession, thread_id: int) -> bool:
     return bool(row.scalar_one())
 
 
+# A big backlog draining at once risks the same ARQ-timeout-then-retry hazard as
+# threads_awaiting_reply — but here a retry-induced duplicate means an actual SECOND
+# send to IG, not just a second LLM call. Cap per tick; the hourly/daily send cap
+# already limits real throughput to far below this, so it only bites during a burst.
+_SEND_BATCH_CAP = 15
+
+
 async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> list[int]:
     """Thread ids with a queued (pending) outbox line — a thread with a real REPLY
     (agent/manager) waiting goes first, a thread with ONLY a follow-up queued goes last.
@@ -112,6 +131,7 @@ async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> 
         .where(Outbox.branch_id == branch_id, Outbox.status == "pending")
         .group_by(Outbox.thread_id)
         .order_by(has_reply.desc(), earliest)
+        .limit(_SEND_BATCH_CAP)
     )
     return list(rows.scalars().all())
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import case, select
+from sqlalchemy import case, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, CoachingNote, Message, Outbox
@@ -91,5 +91,15 @@ class OutboxRepo(BranchScoped[Outbox]):
 
     async def count_sent_since(self, since: datetime) -> int:
         """How many lines this branch actually sent since `since` — hourly/daily cap accounting."""
-        q = self._q().where(Outbox.status == "sent", Outbox.sent_at >= since)
-        return len((await self.session.exec(q)).all())
+        # COUNT in SQL instead of materializing rows; branch_id filter replicates
+        # BranchScoped._q() — tenant isolation must not be lost here.
+        q = (
+            select(func.count())
+            .select_from(Outbox)
+            .where(
+                Outbox.branch_id == self.branch_id,
+                Outbox.status == "sent",
+                Outbox.sent_at >= since,
+            )
+        )
+        return int((await self.session.execute(q)).scalar_one())

@@ -4,10 +4,9 @@ The adapter speaks only to a thin WhatsAppTransport; the Evolution HTTP details 
 the transport, so a different WA provider is a new transport, not a new adapter."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from app.domain.clock import naive_utc
+from app.domain.clock import as_naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
 from app.ports.channel import InboundMessage, SendResult
 
@@ -54,7 +53,7 @@ class WhatsAppAdapter:
             external_thread_id=str(msg["remote_jid"]),
             sender_id=str(msg.get("sender_id", msg["remote_jid"])),
             text=str(msg.get("text", "")),
-            occurred_at=_as_dt(msg.get("message_timestamp")),
+            occurred_at=as_naive_utc(msg.get("message_timestamp")),
             product_hint=msg.get("ad_product"),
         )
 
@@ -66,14 +65,3 @@ def _map_state(state: str) -> SessionStatus:
     if state == "connecting":
         return SessionStatus.CHALLENGE
     return SessionStatus.EXPIRED
-
-
-def _as_dt(value: Any) -> datetime:
-    """Evolution epoch seconds or ISO → naive UTC datetime; missing → epoch."""
-    if isinstance(value, datetime):
-        return naive_utc(value)
-    if isinstance(value, (int, float)):
-        return naive_utc(datetime.fromtimestamp(value, tz=UTC))
-    if isinstance(value, str) and value:
-        return naive_utc(datetime.fromisoformat(value))
-    return datetime.fromtimestamp(0, tz=UTC).replace(tzinfo=None)

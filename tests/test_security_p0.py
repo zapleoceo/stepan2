@@ -16,9 +16,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead  # noqa: E402
-from app.admin._branch import allowed_branch_ids  # noqa: E402
+from app.admin._branch import allowed_branch_ids, is_branch_forbidden  # noqa: E402
 from app.api._routes_channels import _channel_branch  # noqa: E402
-from app.api._routes_chat import _guarded_branch  # noqa: E402
+from app.api._routes_chat import _guarded_branch, chat_bot_toggle  # noqa: E402
 from app.api.main import app  # noqa: E402
 from app.modules.crm.service import is_safe_webhook_url  # noqa: E402
 
@@ -84,6 +84,47 @@ async def test_channel_branch_guard(db_session) -> None:
     assert await _channel_branch(db_session, ch.id, [a.id]) == a.id
     assert await _channel_branch(db_session, ch.id, [b.id]) is None
     assert await _channel_branch(db_session, 999999, None) is None
+
+
+# ─── empty allowed list = access to nothing (fail-closed) ────────────────────
+
+def test_is_branch_forbidden_empty_list_denies_everything() -> None:
+    assert is_branch_forbidden(1, []) is True
+    assert is_branch_forbidden(1, None) is False
+    assert is_branch_forbidden(1, [1]) is False
+    assert is_branch_forbidden(2, [1]) is True
+
+
+async def test_guarded_branch_denies_zero_branch_member(db_session) -> None:
+    a = Branch(name="A", lang="id")
+    db_session.add(a)
+    await db_session.flush()
+    tid = await _thread(db_session, a.id)
+
+    assert await _guarded_branch(db_session, tid, []) is None
+
+
+async def test_bot_toggle_denied_for_zero_branch_member(db_session, monkeypatch) -> None:
+    import contextlib
+
+    a = Branch(name="A", lang="id")
+    db_session.add(a)
+    await db_session.flush()
+    tid = await _thread(db_session, a.id)
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr("app.api._routes_chat.session_scope", fake_scope)
+    from sqlalchemy import text as _text
+
+    before = (await db_session.execute(
+        _text("SELECT agent_enabled FROM lead"))).scalar()
+    await chat_bot_toggle(tid, _req(allowed=[]))
+    after = (await db_session.execute(
+        _text("SELECT agent_enabled FROM lead"))).scalar()
+    assert after == before  # guard blocked the flip
 
 
 # ─── CRM SSRF allowlist ───────────────────────────────────────────────────────

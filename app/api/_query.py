@@ -35,6 +35,53 @@ async def fetch_ad_funnel(session: AsyncSession, branch_ids: list[int] | None) -
     return list((await session.execute(q)).all())
 
 
+_STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where
+    "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
+)
+_HOUR_Q = (  # noqa: S608 — {and_where} is a fixed branch filter, direction is bound
+    "SELECT EXTRACT(HOUR FROM m.occurred_at)::int AS h, COUNT(*)"
+    " FROM message m JOIN channel_thread ct ON ct.id = m.thread_id"
+    " JOIN lead l ON l.id = ct.lead_id"
+    " WHERE m.direction = :dir {and_where}"
+    " GROUP BY h"
+)
+
+
+async def fetch_stage_counts(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> dict[str, int]:
+    where, params = _branch_where(branch_ids)
+    rows = (
+        await session.execute(text(_STAGE_COUNTS_Q.format(where=where)), params)
+    ).all()
+    return {r[0]: int(r[1]) for r in rows}
+
+
+async def fetch_report_data(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> tuple[dict[str, int], dict[int, int], dict[int, int], list, dict[str, float | int]]:
+    """All datasets for the reports panel: stage counts, in/out hour histograms,
+    per-ad funnel and discovery KPIs — the single source for both report routes."""
+    and_where = "AND l.branch_id = ANY(:bids)" if branch_ids else ""
+    params: dict = {"bids": branch_ids} if branch_ids else {}
+    stage_counts = await fetch_stage_counts(session, branch_ids)
+    hi = (
+        await session.execute(
+            text(_HOUR_Q.format(and_where=and_where)), {**params, "dir": "in"}
+        )
+    ).all()
+    ho = (
+        await session.execute(
+            text(_HOUR_Q.format(and_where=and_where)), {**params, "dir": "out"}
+        )
+    ).all()
+    ad_funnel = await fetch_ad_funnel(session, branch_ids)
+    discovery = await fetch_discovery_metrics(session, branch_ids)
+    hour_in = {int(r[0]): int(r[1]) for r in hi}
+    hour_out = {int(r[0]): int(r[1]) for r in ho}
+    return stage_counts, hour_in, hour_out, ad_funnel, discovery
+
+
 def _branch_where(
     branch_ids: list[int] | None,
     col: str = "branch_id",

@@ -9,7 +9,7 @@ from starlette.datastructures import FormData
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import actor_from_request as _actor
-from app.admin._branch import branch_ids_from_request
+from app.admin._branch import branch_ids_from_request, is_branch_forbidden
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 from app.modules.knowledge.reindex import reindex_branch
 from app.modules.knowledge.sections import reassemble
@@ -87,7 +87,7 @@ async def knowledge_save(doc_id: int, request: Request) -> HTMLResponse:
             {"id": doc_id})).first()
         if prev is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-        if branch_ids and prev[0] not in branch_ids:
+        if is_branch_forbidden(prev[0], branch_ids):
             return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         await session.execute(
             text("UPDATE knowledge_doc SET title=:t, content=:c,"

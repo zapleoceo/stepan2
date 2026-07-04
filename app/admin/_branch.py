@@ -35,6 +35,11 @@ def actor_from_request(request: Request) -> str:
     return str(user.get("uid") or user.get("tg") or "owner")
 
 
+def is_branch_forbidden(branch_id: int, allowed: list[int] | None) -> bool:
+    """True when the caller may not act on branch_id; empty list = access to nothing."""
+    return allowed is not None and branch_id not in allowed
+
+
 def allowed_branch_ids(request: Request) -> list[int] | None:
     """Branches the caller may ACT on (write/manage): None = act on any branch
     (super_admin, or auth disabled). Unlike branch_ids_from_request this ignores the

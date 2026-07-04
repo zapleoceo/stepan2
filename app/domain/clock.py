@@ -17,6 +17,21 @@ def naive_utc(dt: datetime) -> datetime:
     return dt.astimezone(UTC).replace(tzinfo=None) if dt.tzinfo is not None else dt
 
 
+def as_naive_utc(value: object, *, epoch_unit: str = "s") -> datetime:
+    """Coerce a channel-payload timestamp to naive UTC.
+
+    Accepts datetime | epoch seconds/microseconds | ISO string (incl. 'Z'); a
+    missing/blank value falls back to epoch 0."""
+    if isinstance(value, datetime):
+        return naive_utc(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        seconds = value / 1_000_000 if epoch_unit == "us" else float(value)
+        return naive_utc(datetime.fromtimestamp(seconds, tz=UTC))
+    if isinstance(value, str) and value:
+        return naive_utc(datetime.fromisoformat(value.replace("Z", "+00:00")))
+    return datetime.fromtimestamp(0, tz=UTC).replace(tzinfo=None)
+
+
 def branch_now(tz_offset_h: int) -> datetime:
     """Wall-clock time in the branch's timezone (naive)."""
     return utc_now() + timedelta(hours=tz_offset_h)

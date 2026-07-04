@@ -1,0 +1,111 @@
+"""LLM failure in the reply pipeline: decide() propagates cleanly with no partial state,
+and the worker's _reply_thread isolates the failure (returns False, never raises)."""
+from __future__ import annotations
+
+import os
+
+os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
+
+from cryptography.fernet import Fernet  # noqa: E402
+
+os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
+
+from contextlib import asynccontextmanager  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
+
+import pytest  # noqa: E402
+from sqlmodel import select  # noqa: E402
+
+from app.adapters.db.models import (  # noqa: E402
+    Branch,
+    Channel,
+    ChannelThread,
+    Lead,
+    Message,
+    Outbox,
+)
+from app.domain.enums import ChannelKind, Stage  # noqa: E402
+from app.modules.conversation import ReplyService  # noqa: E402
+from app.modules.knowledge.service import KnowledgeService  # noqa: E402
+from app.modules.settings.service import _parse, invalidate  # noqa: E402
+from app.worker import main as worker_main  # noqa: E402
+from app.worker import wiring  # noqa: E402
+
+_NOW = datetime.now(UTC).replace(tzinfo=None)
+
+
+class _RaisingLLM:
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        raise RuntimeError("broker down")
+
+    async def embed(self, texts):  # noqa: ANN001, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def _world(s) -> tuple[int, int, Lead, ChannelThread]:  # noqa: ANN001
+    branch = Branch(name="T", lang="id")
+    s.add(branch)
+    await s.flush()
+    ch = Channel(branch_id=branch.id, kind=ChannelKind.INSTAGRAM)
+    s.add(ch)
+    await s.flush()
+    lead = Lead(branch_id=branch.id, stage=Stage.NEW)
+    s.add(lead)
+    await s.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    s.add(thread)
+    await s.flush()
+    s.add(Message(branch_id=branch.id, thread_id=thread.id, channel_id=ch.id,
+                  external_id="m1", direction="in", sent_by="lead", text="halo",
+                  occurred_at=_NOW))
+    await s.flush()
+    invalidate(branch.id)
+    return branch.id, thread.id, lead, thread
+
+
+async def test_decide_propagates_llm_error_without_side_effects(db_session) -> None:
+    bid, tid, lead, thread = await _world(db_session)
+    svc = ReplyService(db_session, bid, _RaisingLLM(), KnowledgeService(db_session, bid),
+                       branch_settings=_parse({}))
+    # Current contract: decide() has no try/except around llm.chat — the error propagates
+    # to the caller (worker's _reply_thread catches it per-thread).
+    with pytest.raises(RuntimeError, match="broker down"):
+        await svc.decide(tid)
+
+    assert (await db_session.exec(select(Outbox))).first() is None
+    assert thread.last_out_at is None
+    assert lead.needs is None
+    assert lead.stage == Stage.NEW
+    assert lead.preferred_language is None
+
+
+async def test_worker_reply_thread_returns_false_when_llm_raises(monkeypatch) -> None:
+    """_reply_thread wraps the whole decide+enqueue in try/except: a raising ReplyService
+    must yield False, not an exception, so one poison thread can't kill the tick."""
+
+    @asynccontextmanager
+    async def _fake_scope():
+        yield object()
+
+    async def _locked(_session, _thread_id) -> bool:
+        return True
+
+    async def _fake_settings(_session, _branch_id):  # noqa: ANN202
+        return _parse({})
+
+    class _RaisingReply:
+        def __init__(self, *a, **kw) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        async def decide(self, thread_id: int):  # noqa: ANN201
+            raise RuntimeError("broker down")
+
+    monkeypatch.setattr(worker_main, "session_scope", _fake_scope)
+    monkeypatch.setattr(wiring, "try_lock_thread", _locked)
+    monkeypatch.setattr(worker_main, "get_settings", _fake_settings)
+    monkeypatch.setattr(worker_main, "_build_notifier", lambda _cfg: None)
+    monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **kw: object())
+    monkeypatch.setattr(worker_main, "ReplyService", _RaisingReply)
+
+    result = await worker_main._reply_thread(1, 42, _RaisingLLM())
+    assert result is False

@@ -5,17 +5,13 @@ layer (a single scoped() helper), never ad-hoc per query. No business logic here
 """
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 
 from sqlalchemy import BigInteger, LargeBinary, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
+from app.domain.clock import utc_now as _utcnow
 from app.domain.enums import ChannelKind, Role, SessionStatus, Stage
-
-
-def _utcnow() -> datetime:
-    # naive UTC — совпадает с колонками TIMESTAMP WITHOUT TIME ZONE (Postgres строг к этому)
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Branch(SQLModel, table=True):
@@ -324,7 +320,7 @@ class LlmSpend(SQLModel, table=True):
 class BrokerLog(SQLModel, table=True):
     """Одна строка на КАЖДЫЙ вызов брокера (reply/translate/embed/suggest). Точка записи
     одна — BrokerLLM: у брокера есть цена/латентность/провайдер, но нет thread_id и типа
-    вызова — их знает только Степан. Смотрится на /settings/log. 15-дневная ретенция."""
+    вызова — их знает только Степан. Смотрится на /settings/log. 30-дневная ретенция."""
     __tablename__ = "broker_log"
 
     id: int | None = Field(default=None, primary_key=True)
