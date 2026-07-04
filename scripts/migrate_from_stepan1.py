@@ -31,14 +31,11 @@ except ImportError:
     subprocess.run([sys.executable, "-m", "pip", "install", "psycopg[binary]", "-q"], check=True)
     import psycopg  # type: ignore[no-redef]
 
-S1_ASYNC = os.environ.get(
-    "S1_DSN",
-    "postgresql://stepan:508d8a5977b1acf3e50dff33b8991117e4bba05cd86ed485@postgres:5432/stepan",
-)
-S2_ASYNC = os.environ.get(
-    "S2_DSN",
-    "postgresql://stepan2:d30b40c13f3e315eb3c6db4948b77e9f8797ca69c0ca710d@postgres:5432/stepan2",
-)
+# DSNs (with passwords) come from env only — never committed. See .claude/rules/security.md.
+S1_ASYNC = os.environ.get("S1_DSN")
+S2_ASYNC = os.environ.get("S2_DSN")
+if not S1_ASYNC or not S2_ASYNC:
+    sys.exit("set S1_DSN and S2_DSN env vars (postgresql://user:pass@host/db) before running")
 
 # strip asyncpg+ prefix if present
 def _dsn(raw: str) -> str:

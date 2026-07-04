@@ -104,11 +104,11 @@ def _f(raw: dict[str, str], key: str) -> float:
 
 
 def _parse_schedule(raw: dict[str, str]) -> list[int]:
-    val = raw.get("followup_schedule_h", _DEFAULTS.get("followup_schedule_h", "4,24,72"))
+    val = raw.get("followup_schedule_h", _DEFAULTS.get("followup_schedule_h", "1,4,24,120"))
     try:
         return sorted({int(h.strip()) for h in val.split(",") if h.strip()})
     except ValueError:
-        return [4, 24, 72]
+        return [1, 4, 24, 120]  # must match schema default followup_schedule_h
 
 
 def _parse(raw: dict[str, str]) -> BranchSettings:
