@@ -25,3 +25,32 @@ class CrmWebhook:
             logger.warning("crm push failed (alert id=%s): %s", payload.get("id"), exc)
             return False
         return True
+
+
+class CrmReader:
+    """Read the current state of a lead from the branch CRM (GET by phone).
+
+    Same never-raises contract as the push side: a transport error / bad payload returns
+    None, and the caller treats an unreachable CRM as 'no opinion' (allow the send) so a
+    CRM outage never silences Stepan."""
+
+    async def get_state(self, url: str, secret: str, phone: str) -> dict | None:
+        import httpx  # lazy
+
+        headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout()) as client:
+                response = await client.get(url, params={"phone": phone}, headers=headers)
+            if response.status_code == 404:  # lead simply not in CRM
+                return {"exists": False}
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, dict) else None
+        except Exception as exc:  # noqa: BLE001 — treat as 'no opinion', retry next tick
+            logger.warning("crm read failed (phone=%s): %s", phone, exc)
+            return None
+
+    @staticmethod
+    def _timeout() -> float:
+        from app.config import settings  # lazy to avoid import at module load
+        return settings().crm_read_timeout_s

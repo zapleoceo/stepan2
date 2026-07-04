@@ -44,6 +44,9 @@ class BranchSettings:
     daily_budget_usd: float
     crm_enabled: bool
     crm_webhook_url: str
+    crm_read_enabled: bool
+    crm_state_url: str
+    crm_read_secret: str
     meta_pixel_id: str
     meta_capi_token: str
 
@@ -134,6 +137,9 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         daily_budget_usd=_f(raw, "daily_budget_usd"),
         crm_enabled=_b(raw, "crm_enabled"),
         crm_webhook_url=raw.get("crm_webhook_url", ""),
+        crm_read_enabled=_b(raw, "crm_read_enabled"),
+        crm_state_url=raw.get("crm_state_url", ""),
+        crm_read_secret=raw.get("crm_read_secret", ""),
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
     )

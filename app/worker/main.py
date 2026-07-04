@@ -314,18 +314,25 @@ async def process_deletions(ctx: dict[str, Any]) -> int:
 
 
 async def sync_crm(ctx: dict[str, Any]) -> int:
-    """Push unsynced manager alerts to each branch's CRM webhook (crm_enabled gates)."""
-    from app.adapters.crm import CrmWebhook  # noqa: PLC0415
+    """CRM sync, both directions: push unsynced manager alerts out (crm_enabled), and
+    pull lead state in to stand down leads a manager already owns (crm_read_enabled)."""
+    from app.adapters.crm import CrmReader, CrmWebhook  # noqa: PLC0415
     from app.modules.crm import CrmSyncService  # noqa: PLC0415
+    from app.modules.crm.pull import CrmPullService  # noqa: PLC0415
     synced = 0
     transport = CrmWebhook()
+    reader = CrmReader()
     async with session_scope() as session:
         for branch in await wiring.active_branches(session):
             assert branch.id is not None
             try:
                 synced += await CrmSyncService(session, branch.id, transport).sync_pending()
             except Exception:
-                logger.exception("crm sync failed branch=%d", branch.id)
+                logger.exception("crm push failed branch=%d", branch.id)
+            try:
+                await CrmPullService(session, branch.id, reader).sync_active()
+            except Exception:
+                logger.exception("crm pull failed branch=%d", branch.id)
     return synced
 
 

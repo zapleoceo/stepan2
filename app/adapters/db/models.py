@@ -253,6 +253,25 @@ class ManagerAlert(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class CrmLeadState(SQLModel, table=True):
+    """Cached CRM state for a lead — the READ side of the CRM link. Populated by the pull
+    sync and by the point-check right before a send. The send-gate reads `verdict` to
+    decide whether Stepan may still contact the lead (proceed) or must stand down (hold,
+    e.g. a manager owns it / deal closed). One row per lead, upserted."""
+    __tablename__ = "crm_lead_state"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    lead_id: int = Field(foreign_key="lead.id", index=True, unique=True)
+    exists_in_crm: bool = Field(default=False)
+    status: str | None = Field(default=None, description="raw CRM status of the lead/client")
+    owner: str | None = Field(default=None, description="bot|manager|none")
+    verdict: str = Field(default="proceed", description="proceed|hold")
+    reason: str | None = Field(default=None)
+    raw: str | None = Field(default=None, description="verbatim CRM JSON for display/debug")
+    fetched_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
 class CoachingEdit(SQLModel, table=True):
     """Coach KB editor: manager request → LLM proposes old→new diff → manager applies."""
     __tablename__ = "coaching_edit"

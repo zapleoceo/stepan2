@@ -77,6 +77,11 @@ class OutboxSender:
         if thread is None:
             return None
 
+        if cfg.crm_read_enabled and row.source != "manager":
+            skipped = await self._crm_gate(thread, row)
+            if skipped is not None:
+                return skipped
+
         await self._humanize(thread.external_thread_id)
         result = await self.channel.send_text(thread.external_thread_id, row.text)
         if result.ok:
@@ -106,6 +111,27 @@ class OutboxSender:
             )
         self.session.add(row)
         await self.session.flush()
+        return row
+
+    async def _crm_gate(self, thread, row: Outbox) -> Outbox | None:
+        """Consult the CRM before sending: a `hold` verdict skips this line (won't
+        resend) and stands the lead down. Returns the row when skipped, else None."""
+        from app.adapters.crm import CrmReader  # noqa: PLC0415 (optional dep, keep lazy)
+        from app.modules.crm.gate import CrmGate  # noqa: PLC0415
+
+        lead = await self.session.get(Lead, thread.lead_id)
+        if lead is None:
+            return None
+        allowed, reason = await CrmGate(
+            self.session, self.branch_id, CrmReader()).allow_send(lead, row.source)
+        if allowed:
+            return None
+        row.status = "skipped"  # not 'pending' → oldest_pending never re-picks it
+        row.error = f"crm hold: {reason}" if reason else "crm hold"
+        self.session.add(row)
+        await self.session.flush()
+        logger.info("outbox skip branch=%d thread=%d: CRM hold (%s)",
+                    self.branch_id, thread.id, reason)
         return row
 
     async def _humanize(self, external_thread_id: str) -> None:

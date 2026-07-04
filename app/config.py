@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Bearer token for the MCP connector's /mcp API. Empty → the API is disabled (403).
     mcp_secret: str = Field(default="", description="Bearer token gating the /mcp lead-ops API")
 
+    # CRM read link (the gate that stops Stepan re-touching a lead a manager already owns).
+    crm_read_timeout_s: float = Field(default=8.0, description="per-request CRM read timeout")
+    crm_state_ttl_s: int = Field(
+        default=300, description="a cached CRM state newer than this is trusted; older → the "
+                                "pre-send point-check refetches live")
+
     # ── Worker cadence & batch caps ─────────────────────────────────────────────
     # These are pinned around worker_job_timeout_s: a tick must finish inside it or ARQ
     # kills+retries it, and a retry can re-pick a thread whose lock already released →
