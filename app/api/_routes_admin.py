@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import (
@@ -97,10 +97,11 @@ async def outbox_panel(request: Request) -> HTMLResponse:
         tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
         quiet_by_branch: dict[int, tuple[int, int]] = {}
         if seen_ids:  # quiet hours hold follow-up sends until they lift — needed for the ETA
-            qrows = (await session.execute(
-                text("SELECT branch_id, key, value FROM app_setting"
-                     " WHERE branch_id = ANY(:bids) AND key IN ('quiet_start','quiet_end')"),
-                {"bids": list(seen_ids)})).all()
+            stmt = text(
+                "SELECT branch_id, key, value FROM app_setting"
+                " WHERE branch_id IN :bids AND key IN ('quiet_start','quiet_end')"
+            ).bindparams(bindparam("bids", expanding=True))  # portable (SQLite + Postgres)
+            qrows = (await session.execute(stmt, {"bids": list(seen_ids)})).all()
             tmp: dict[int, dict[str, int]] = {}
             for bid, key, val in qrows:
                 try:
