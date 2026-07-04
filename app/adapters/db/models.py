@@ -146,7 +146,9 @@ class KnowledgeDoc(SQLModel, table=True):
     category: str | None = Field(default=None, description="группа дерева: persona/playbook/…")
     sort_order: int = Field(default=0)
     content: str = Field(default="")
-    updated_at: datetime = Field(default_factory=_utcnow)
+    # onupdate bumps this on ANY ORM edit so the RAG watcher (branch_needs_reindex) detects
+    # the change and rebuilds — without it, a content edit left the index stale on old text.
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
     updated_by: str | None = Field(default=None, description="кто правил (owner id)")
 
 
@@ -162,7 +164,7 @@ class Product(SQLModel, table=True):
     content: str = Field(default="")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
-    updated_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
     updated_by: str | None = Field(default=None)
 
 

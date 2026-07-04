@@ -148,3 +148,27 @@ async def test_watcher_detects_edits(db_session) -> None:
     db_session.add(doc)
     await db_session.flush()
     assert await branch_needs_reindex(db_session, bid) is True
+
+
+async def test_coach_edit_makes_branch_need_reindex(db_session) -> None:
+    """A Coach edit changes doc.content AND bumps updated_at, so the RAG watcher rebuilds —
+    without the bump the index kept serving the OLD text (the reported gap)."""
+    from app.modules.conversation.coach_service import apply_edit
+    from app.modules.knowledge.repository import KnowledgeRepo
+
+    bid = await _seed(db_session)
+    await reindex_branch(db_session, bid, _BagLLM())
+    assert await branch_needs_reindex(db_session, bid) is False  # fresh after index
+
+    doc = await KnowledgeRepo(db_session, bid).by_slug("playbook_price")
+    from app.adapters.db.models import CoachingEdit
+    edit = CoachingEdit(branch_id=bid, request="fix price", status="proposed",
+                        slug="playbook_price", old_text="The price and refund policy.",
+                        new_text="The price is 13,000,000 and refund policy.", summary="x")
+    db_session.add(edit)
+    await db_session.flush()
+    applied = await apply_edit(db_session, bid, edit.id)
+    assert applied.status == "applied"
+    doc = await KnowledgeRepo(db_session, bid).by_slug("playbook_price")
+    assert "13,000,000" in doc.content                       # content changed
+    assert await branch_needs_reindex(db_session, bid) is True  # → RAG rebuilds next tick

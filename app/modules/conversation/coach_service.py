@@ -87,6 +87,7 @@ async def apply_edit(
         doc = await KnowledgeRepo(session, branch_id).by_slug(edit.slug)
         if doc and edit.old_text in doc.content:
             doc.content = doc.content.replace(edit.old_text, edit.new_text, 1)
+            doc.updated_at = datetime.now(UTC).replace(tzinfo=None)  # → RAG watcher reindexes
             session.add(doc)
             edit.status = "applied"
             edit.applied_at = datetime.now(UTC).replace(tzinfo=None)
