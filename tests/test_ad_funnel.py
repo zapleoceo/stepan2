@@ -94,33 +94,21 @@ def test_ad_funnel_html_renders_link_and_conv() -> None:
     _lang.set("en")
     html = _ad_funnel_html([("act_123", "9988", 4, 2, 1, 1)])
     assert "act_123" in html
-    assert "adsmanager.facebook.com" in html
+    assert "facebook.com/ads/library/?id=act_123" in html  # Ad Library, not Ads Manager
     assert "25.0%" in html  # 1 won / 4 total
     assert _ad_funnel_html([]) == ""
 
 
-def test_ad_deep_link_pins_business_and_account_when_configured() -> None:
-    """With fb ids set, the ad link carries business_id + act so it opens on the right ad
-    account, and filter_set (not selected_ad_ids) narrows the list to the one ad."""
+def test_ad_link_opens_the_ad_library_by_id() -> None:
+    """The FB link goes to the public Ad Library keyed by ad id — it resolves any live ad
+    regardless of which ad account owns it, unlike an Ads Manager account-scoped deep link."""
     from app.api._i18n import _lang
     _lang.set("en")
     html = _ad_funnel_html([("120255671613970771", None, 3, 1, 1, 0)],
                            business_id="949920286532207", account_id="1000480912055519")
-    assert "business_id=949920286532207" in html
-    assert "act=1000480912055519" in html
-    assert "SEARCH_BY_ADGROUP_IDS-STRING_SET" in html   # filters the list to this ad
-    assert "120255671613970771" in html
-    assert "maximum" in html                            # lifts the default 30-day window
+    assert "facebook.com/ads/library/?id=120255671613970771" in html
+    assert "adsmanager.facebook.com" not in html   # account-scoped deep link abandoned
     assert "selected_ad_ids" not in html
-
-
-def test_ad_deep_link_falls_back_without_ids() -> None:
-    from app.api._i18n import _lang
-    _lang.set("en")
-    html = _ad_funnel_html([("120255671613970771", None, 3, 1, 1, 0)])
-    assert "SEARCH_BY_ADGROUP_IDS-STRING_SET" in html
-    assert "120255671613970771" in html
-    assert "business_id=" not in html
 
 
 def test_reports_panel_drops_by_stage_table_and_shows_message_stats() -> None:
