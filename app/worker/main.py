@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 # Anti-ban: the cron fires at a fixed second; poll IG a random moment into the minute
 # instead so the private-API calls don't hit on a machine-regular tick (S1 jitter).
-_INGEST_JITTER_S = 12.0
+_INGEST_JITTER_S = settings().ingest_jitter_s
 
 
 async def ingest_active_channels(ctx: dict[str, Any]) -> int:
@@ -279,7 +279,7 @@ async def _send_thread(
 # gracefully) so a kill+retry here is not the correctness hazard reply/send batching
 # was, but it wastes the whole tick on nothing — cap it so at least SOME progress
 # commits every cycle instead of none.
-_DELETION_THREAD_CAP = 3
+_DELETION_THREAD_CAP = settings().deletion_thread_cap
 
 
 async def process_deletions(ctx: dict[str, Any]) -> int:
@@ -379,7 +379,7 @@ async def backfill_media(ctx: dict[str, Any]) -> int:
     return done
 
 
-_BROKER_LOG_RETENTION_DAYS = 30
+_BROKER_LOG_RETENTION_DAYS = settings().broker_log_retention_days
 
 
 async def prune_broker_log(ctx: dict[str, Any]) -> int:
@@ -452,13 +452,13 @@ class WorkerSettings:
         cron(refresh_profiles, minute={0, 30}, second=15, run_at_startup=False),
         # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
-        # Broker-log retention: prune rows older than 15 days, once a day at 03:30
+        # Broker-log retention: prune old rows daily at 03:30 (broker_log_retention_days)
         cron(prune_broker_log, hour={3}, minute={30}, second=0, run_at_startup=False),
         # RAG reindex watcher every 5 min: rebuilds only branches whose KB changed
         cron(reindex_knowledge, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
              second=45, run_at_startup=False),
     ]
     redis_settings = _redis_settings()
-    max_jobs = 10
-    job_timeout = 120
+    max_jobs = settings().worker_max_jobs
+    job_timeout = settings().worker_job_timeout_s
     keep_result = 3600

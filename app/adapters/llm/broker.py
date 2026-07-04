@@ -18,8 +18,10 @@ _log = logging.getLogger(__name__)
 # chat:smart (lead replies) and chat:edit (Coach) return a large JSON and the broker may
 # fall back across providers — they need a long read timeout. Fast caps fail fast so one
 # stuck call doesn't wedge the worker. Mirrors Stepan-1's broker_client timeouts.
-_DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=20.0, write=10.0, pool=5.0)
-_SLOW_TIMEOUT = httpx.Timeout(connect=5.0, read=90.0, write=10.0, pool=5.0)
+_DEFAULT_TIMEOUT = httpx.Timeout(
+    connect=5.0, read=settings().llm_read_timeout_s, write=10.0, pool=5.0)
+_SLOW_TIMEOUT = httpx.Timeout(
+    connect=5.0, read=settings().llm_read_timeout_slow_s, write=10.0, pool=5.0)
 _SLOW_CAPS = frozenset({"chat:smart", "chat:edit"})
 
 

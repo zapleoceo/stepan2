@@ -6,6 +6,7 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.config import settings
 from app.ports.llm import LLMPort
 
 
@@ -21,7 +22,8 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
     # Cyrillic/Indonesian output is token-heavy (mistral encodes Cyrillic at ~2-3x the
     # char count); 400 truncated real translations mid-sentence. Cap input at 800 chars,
     # so ~1500 output tokens comfortably covers a full translation.
-    out, _ = await llm.chat(messages, capability="chat:fast", max_tokens=1500,
+    out, _ = await llm.chat(messages, capability="chat:fast",
+                            max_tokens=settings().translate_max_tokens,
                             workflow="translate")
     return out.strip() or None
 

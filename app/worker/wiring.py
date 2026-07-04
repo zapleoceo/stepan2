@@ -55,7 +55,7 @@ async def active_channels(session: AsyncSession, branch_id: int) -> list[Channel
 # incident: turning branch 1 live re-surfaced threads with last_in_at back to 2025-08-26
 # and started auto-replying to all of them at once. Bound the sweep to genuinely live
 # conversations; anything older needs a deliberate, reviewed catch-up, not an automatic one.
-_AWAITING_REPLY_MAX_AGE = timedelta(days=3)
+_AWAITING_REPLY_MAX_AGE = timedelta(days=settings().awaiting_reply_max_age_days)
 
 # Real incident: re-enabling a branch surfaced ~300 threads at once; reply_pending tried
 # to decide() every one of them in a single tick, blew past ARQ's 120s job_timeout, and
@@ -64,7 +64,7 @@ _AWAITING_REPLY_MAX_AGE = timedelta(days=3)
 # 1057 and ~20 others, all revoked afterward). A tick must always finish comfortably
 # inside the timeout; a capped batch plus the next tick 60s later drains a large backlog
 # just as fast, without ever risking a kill-and-retry duplicate.
-_REPLY_BATCH_CAP = 10
+_REPLY_BATCH_CAP = settings().reply_batch_cap
 
 
 async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[int]:
@@ -115,7 +115,7 @@ async def try_lock_thread(session: AsyncSession, thread_id: int) -> bool:
 # threads_awaiting_reply — but here a retry-induced duplicate means an actual SECOND
 # send to IG, not just a second LLM call. Cap per tick; the hourly/daily send cap
 # already limits real throughput to far below this, so it only bites during a burst.
-_SEND_BATCH_CAP = 15
+_SEND_BATCH_CAP = settings().send_batch_cap
 
 
 async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> list[int]:
@@ -193,7 +193,8 @@ async def build_channel_port(session: AsyncSession, channel: Channel) -> Channel
         if dump is None:
             raise RuntimeError(f"no active token for Meta Business channel {channel.id}")
         transport = GraphTransportHTTP(
-            base_url=dump.get("base_url", "https://graph.instagram.com/v21.0"),
+            base_url=dump.get("base_url",
+                              f"https://graph.instagram.com/{settings().ig_graph_version}"),
             account_id=dump.get("account_id") or channel.account_id or "",
             token=dump["token"],
         )

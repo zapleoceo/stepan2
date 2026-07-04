@@ -12,10 +12,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, CoachingNote, Message, Outbox
 from app.adapters.db.repository import BranchScoped
+from app.config import settings
 from app.modules.leads.repository import MessageRepo as _LeadMessageRepo
 from app.modules.leads.repository import ThreadRepo as _LeadThreadRepo
 
-_MAX_CONTEXT_MSGS = 40  # cap the dialog fed to the LLM — bounds token cost on long threads
+_MAX_CONTEXT_MSGS = settings().max_context_msgs  # dialog fed to the LLM (token-cost bound)
 
 
 class ThreadRepo(_LeadThreadRepo):

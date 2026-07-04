@@ -13,6 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.adapters.meta_capi import MetaCapi
+from app.config import settings
 from app.domain.enums import Stage
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.notifications.alerts import AlertService
@@ -27,8 +28,8 @@ from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 logger = logging.getLogger(__name__)
 
-_BUBBLE_GAP_S = 6  # stagger between split reply bubbles (human typing cadence)
-_MAX_BUBBLES = 3
+_BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
+_MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
 
 

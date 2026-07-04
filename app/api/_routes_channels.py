@@ -367,7 +367,7 @@ async def meta_connect(
     dump = {
         "token": token.strip(),
         "account_id": page_id.strip(),
-        "base_url": "https://graph.instagram.com/v21.0",
+        "base_url": f"https://graph.instagram.com/{settings().ig_graph_version}",
     }
     enc = encrypt(json.dumps(dump))
     async with session_scope() as session:

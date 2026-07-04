@@ -11,9 +11,11 @@ import logging
 import time
 from typing import Any
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
-_GRAPH = "https://graph.facebook.com/v18.0"
+_GRAPH = f"https://graph.facebook.com/{settings().meta_graph_version}"
 
 
 def hash_phone(phone: str | None) -> str | None:

@@ -14,6 +14,7 @@ from sqlalchemy import delete, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import KnowledgeChunk
+from app.config import settings
 from app.ports.llm import LLMPort
 
 from .chunking import chunk_sections
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Persona is identity — always injected directly, never chunked/retrieved.
 PERSONA_SLUGS = frozenset({"persona", "persona_core"})
 _EMBED_BATCH = 24  # broker/voyage rejects large embed batches (502) — keep well under ~40
-_TOP_K = 12
+_TOP_K = settings().rag_top_k
 
 _Source = tuple[str, str, str, str]        # (source_type, slug, title, content)
 _ChunkRow = tuple[str, str, str, int, str]  # (source_type, slug, title, seq, text)

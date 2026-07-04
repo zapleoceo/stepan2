@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Lead, Message, Outbox, StageEvent
+from app.config import settings
 from app.domain.clock import branch_day_start_utc
 from app.domain.enums import Stage
 from app.modules.settings.service import get_settings
@@ -32,9 +33,9 @@ _SOFT_BLOCK = (
     "challenge", "feedback_required", "login_required", "checkpoint", "please wait",
     "rate", "429", "spam", "blocked", "try again", "throttl", "temporarily",
 )
-_RETRY_AFTER = timedelta(minutes=15)
+_RETRY_AFTER = timedelta(minutes=settings().soft_block_retry_min)
 # Humanlike pause after opening a chat before replying (anti-ban) — S1 parity.
-_SEEN_DELAY_S = (2.0, 5.0)
+_SEEN_DELAY_S = (settings().seen_delay_min_s, settings().seen_delay_max_s)
 
 
 def _is_soft_block(error: str | None) -> bool:
