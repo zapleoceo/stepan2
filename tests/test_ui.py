@@ -182,6 +182,13 @@ def test_app_shell_is_mobile_responsive() -> None:
     assert "scrollbar-width:thin" in html  # Firefox scrollbar styling
 
 
+def test_app_shell_has_favicon() -> None:
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>m</div>", active_nav="inbox")
+    assert "rel='icon'" in html and "data:image/svg+xml" in html  # inline SVG favicon
+
+
 def test_mobile_bubble_buttons_visible_and_header_clears_back() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")

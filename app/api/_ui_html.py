@@ -1192,6 +1192,19 @@ def suggest_box_html(tid: int, draft: str) -> str:
     )
 
 
+_FAVICON = (
+    "<link rel='icon' href=\"data:image/svg+xml,"
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>"
+    "<stop offset='0' stop-color='%234da6ff'/>"
+    "<stop offset='1' stop-color='%231d63b8'/></linearGradient></defs>"
+    "<rect x='2' y='3' width='28' height='21' rx='5.5' fill='url(%23g)'/>"
+    "<path d='M9 22 l0 6 l7 -5 z' fill='%231d63b8'/>"
+    "<text x='16' y='19.5' font-family='Arial,Helvetica,sans-serif' font-size='15'"
+    " font-weight='800' fill='%23fff' text-anchor='middle'>S</text></svg>\">"
+)
+
+
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "",
@@ -1440,6 +1453,7 @@ def app_shell(
         f'<!doctype html><html lang="{lang}"><head>'
         f'<meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
+        f'{_FAVICON}'
         f'<title>Stepan 2</title>'
         f'<link rel="stylesheet" href="{_FA}">'
         f'<script src="{_HTMX}" defer></script>'

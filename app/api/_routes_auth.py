@@ -14,6 +14,7 @@ from app.api._auth import (
     mint_session,
     verify_telegram_login,
 )
+from app.api._ui_html import _FAVICON
 from app.config import settings
 from app.domain.enums import Role
 from app.modules.auth.repository import MembershipRepo, UserRepo
@@ -84,6 +85,7 @@ def _login_html(bot_username: str) -> str:
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'{_FAVICON}'
         '<title>Stepan 2 — Login</title><style>'
         'body{background:#0f1117;color:#e8eef4;font-family:system-ui,sans-serif;margin:0;'
         'min-height:100vh;display:flex;align-items:center;justify-content:center}'
@@ -97,6 +99,7 @@ def _login_html(bot_username: str) -> str:
 def _msg_html(message: str) -> str:
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        f'{_FAVICON}'
         '<title>Stepan 2</title><style>body{background:#0f1117;color:#e8eef4;'
         'font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:flex;'
         'align-items:center;justify-content:center}a{color:#4da6ff}</style></head>'
