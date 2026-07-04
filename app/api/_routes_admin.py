@@ -224,14 +224,21 @@ async def _write_flag(session, branch_id: int | None, key: str, on: bool) -> Non
                 {"k": key, "v": "true" if on else "false"})
 
 
+async def _single_selected_branch(request: Request) -> int | None:
+    """The ONE branch the sidebar filter currently narrows to, or None when the view
+    spans multiple/all branches — in which case there's no single branch left for the
+    per-branch toggle to mean anything, so callers must not silently guess one."""
+    branch_ids = branch_ids_from_request(request)
+    return branch_ids[0] if branch_ids and len(branch_ids) == 1 else None
+
+
 @router.get("/agent-status", response_class=HTMLResponse)
 async def agent_status(request: Request) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    branch_id = branch_ids[0] if branch_ids else 1
+    branch_id = await _single_selected_branch(request)
     async with session_scope() as session:
         platform_on = await _read_flag(session, None, _PLATFORM_KEY)
-        branch_on = await _read_flag(session, branch_id, _BRANCH_KEY)
+        branch_on = await _read_flag(session, branch_id, _BRANCH_KEY) if branch_id else None
     return HTMLResponse(_agent_toggles_html(branch_id, platform_on, branch_on))
 
 
@@ -243,17 +250,22 @@ async def agent_toggle(
     allowed = branch_ids_from_request(request)
     if allowed and branch_id not in allowed:
         branch_id = allowed[0]
+    selected = await _single_selected_branch(request)
     async with session_scope() as session:
         if scope == "platform":
             new = not await _read_flag(session, None, _PLATFORM_KEY)
             await _write_flag(session, None, _PLATFORM_KEY, new)
-        else:
-            new = not await _read_flag(session, branch_id, _BRANCH_KEY)
-            await _write_flag(session, branch_id, _BRANCH_KEY, new)
-            invalidate(branch_id)
+        elif selected is not None:
+            # The branch-scope button only renders when a single branch is selected (see
+            # _agent_toggles_html) — a POST for scope=branch with no branch actually
+            # selected (e.g. a stale form from an "all branches" view) is a no-op, not a
+            # silent branch-1 guess.
+            new = not await _read_flag(session, selected, _BRANCH_KEY)
+            await _write_flag(session, selected, _BRANCH_KEY, new)
+            invalidate(selected)
         platform_on = await _read_flag(session, None, _PLATFORM_KEY)
-        branch_on = await _read_flag(session, branch_id, _BRANCH_KEY)
-    return HTMLResponse(_agent_toggles_html(branch_id, platform_on, branch_on))
+        branch_on = await _read_flag(session, selected, _BRANCH_KEY) if selected else None
+    return HTMLResponse(_agent_toggles_html(selected, platform_on, branch_on))
 
 
 def _switch(scope: str, branch_id: int, label: str, on: bool) -> str:
@@ -274,7 +286,12 @@ def _switch(scope: str, branch_id: int, label: str, on: bool) -> str:
     )
 
 
-def _agent_toggles_html(branch_id: int, platform_on: bool, branch_on: bool) -> str:
+def _agent_toggles_html(
+    branch_id: int | None, platform_on: bool, branch_on: bool | None,
+) -> str:
+    if branch_id is None or branch_on is None:
+        hint = f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
+        return _switch("platform", 0, t("bot.platform"), platform_on) + hint
     return (
         _switch("platform", branch_id, t("bot.platform"), platform_on)
         + _switch("branch", branch_id, t("bot.branch"), branch_on)
