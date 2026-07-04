@@ -87,6 +87,37 @@ class BrokerLLM:
         await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
         return reply_text, meta
 
+    async def transcribe(
+        self, audio: bytes, *, mime: str = "audio/mp4",
+        thread_id: int | None = None, branch_id: int | None = None,
+    ) -> str:
+        """Speech-to-text for a voice message via the broker's /v1/transcribe. Returns the
+        transcript text ('' if the broker returns none). Raises on transport/scope errors
+        (the caller keeps the placeholder + retries) — needs the project key's llm:audio scope."""
+        start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+                r = await c.post(
+                    f"{self._url}/v1/transcribe", params={"workflow": "voice"},
+                    headers={"X-Project-Key": self._key},
+                    files={"file": ("voice.mp4", audio, mime)},
+                )
+            r.raise_for_status()
+            d = r.json()
+            meta = {
+                "model": d.get("model"), "provider": d.get("provider"),
+                "cost_usd": d.get("cost_usd") or 0,
+                "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                "request_id": d.get("request_id") or d.get("id"),
+            }
+        except Exception as exc:
+            await _log_call("audio", "transcribe", thread_id, branch_id,
+                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
+                            ok=False, error=_err_text(exc))
+            raise
+        await _log_call("audio", "transcribe", thread_id, branch_id, meta, ok=True)
+        return (d.get("text") or d.get("transcript") or "").strip()
+
     async def embed(
         self,
         texts: list[str],

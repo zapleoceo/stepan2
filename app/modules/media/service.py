@@ -21,6 +21,11 @@ class MediaDownloader(Protocol):
     async def download_media(self, url: str) -> bytes: ...
 
 
+class Transcriber(Protocol):
+    async def transcribe(self, audio: bytes, *, mime: str = ...,
+                         thread_id: int | None = ..., branch_id: int | None = ...) -> str: ...
+
+
 class MediaService:
     """Persist and backfill media assets for one branch."""
 
@@ -57,12 +62,17 @@ class MediaService:
         )
         return list((await self.session.exec(q)).all())
 
-    async def backfill(self, channel_id: int, downloader: MediaDownloader, limit: int) -> int:
+    async def backfill(
+        self, channel_id: int, downloader: MediaDownloader, limit: int,
+        transcriber: Transcriber | None = None,
+    ) -> int:
         """Download bytes for the media stub ingest attached to each pending message.
 
         Ingest records a MediaAsset stub (url set, data NULL) and flags the message; here
         we fill the stub's bytes. A stub without a live url just clears the flag; a
-        download failure keeps the flag so the next tick retries — nothing is lost."""
+        download failure keeps the flag so the next tick retries — nothing is lost. For a
+        voice message we also transcribe the audio (broker) into the message text, so the
+        bot answers what was SAID, not '🎤 voice'."""
         done = 0
         for msg in await self.pending(channel_id, limit):
             stub = await self._pending_stub(msg.id)
@@ -80,6 +90,8 @@ class MediaService:
                 continue
             stub.data = data
             msg.media_pending = False
+            if stub.kind == "audio" and transcriber is not None:
+                await self._transcribe_voice(msg, data, transcriber)
             self.session.add_all([stub, msg])
             await self.session.flush()
             done += 1
@@ -87,6 +99,19 @@ class MediaService:
             logger.info("media backfill branch=%d channel=%d: %d assets",
                         self.branch_id, channel_id, done)
         return done
+
+    async def _transcribe_voice(self, msg: Message, audio: bytes, transcriber: Transcriber) -> None:
+        """Replace a voice message's '🎤 voice' placeholder with its transcript, so the bot
+        reads the spoken content. On failure keep the placeholder — never block the backfill."""
+        try:
+            text = await transcriber.transcribe(
+                audio, mime="audio/mp4", thread_id=msg.thread_id, branch_id=self.branch_id)
+        except Exception as exc:  # noqa: BLE001 — scope/transport error → keep placeholder
+            logger.warning("voice transcribe failed branch=%d msg=%d: %s",
+                           self.branch_id, msg.id, exc)
+            return
+        if text:
+            msg.text = f"🎤 {text}"  # 🎤 marks it a voice; the prompt reads the words after it
 
     async def _pending_stub(self, message_id: int | None) -> MediaAsset | None:
         """The not-yet-downloaded MediaAsset for a message (data NULL, url set)."""

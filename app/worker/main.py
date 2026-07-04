@@ -374,7 +374,8 @@ async def backfill_media(ctx: dict[str, Any]) -> int:
                     continue
                 if not hasattr(port, "download_media"):
                     continue  # channel kind can't download media
-                done += await svc.backfill(channel.id, port, limit=20)  # type: ignore[arg-type]
+                done += await svc.backfill(
+                    channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
     return done
 
 

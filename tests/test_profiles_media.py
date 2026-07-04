@@ -176,6 +176,51 @@ async def test_backfill_noop_when_nothing_flagged(db_session) -> None:
     assert dl.calls == []
 
 
+class FakeTranscriber:
+    def __init__(self, *, text: str = "halo apa kabar", fail: bool = False) -> None:
+        self.text = text
+        self.fail = fail
+        self.calls = 0
+
+    async def transcribe(self, audio, *, mime="audio/mp4", thread_id=None, branch_id=None):  # noqa: ANN001, ANN003
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("project lacks scope: llm:audio")
+        return self.text
+
+
+async def test_voice_backfill_transcribes_into_message_text(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
+    tr = FakeTranscriber(text="berapa harga kursusnya")
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20, transcriber=tr) == 1
+    assert tr.calls == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🎤 berapa harga kursusnya"  # placeholder replaced with content
+
+
+async def test_voice_transcribe_failure_keeps_placeholder(db_session) -> None:
+    """A missing llm:audio scope must not block the backfill — bytes still stored, text stays."""
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20, transcriber=FakeTranscriber(fail=True)) == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🖼 media" and refreshed.media_pending is False  # kept, not retried
+
+
+async def test_image_backfill_does_not_transcribe(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    await _media_msg(db_session, bid, cid, ext="m1", kind="image")
+    tr = FakeTranscriber()
+    await MediaService(db_session, bid).backfill(cid, FakeDownloader(), limit=20, transcriber=tr)
+    assert tr.calls == 0  # only audio is transcribed
+
+
 async def test_backfill_clears_flag_when_no_stub(db_session) -> None:
     bid = await _branch(db_session)
     cid = await _channel(db_session, bid)
