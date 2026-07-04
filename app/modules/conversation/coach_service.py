@@ -6,6 +6,7 @@ cancel_edit   → marks the edit as cancelled
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 
@@ -58,17 +59,22 @@ async def propose_edit(
         {"role": "system", "content": _SYSTEM.format(docs=docs_text)},
         {"role": "user", "content": request},
     ]
-    try:
-        raw, _meta = await llm.chat(
-            messages, capability="chat:deep", max_tokens=8000, temperature=0.1,
-            workflow="coach", branch_id=branch_id,
-        )
-        cleaned = (
-            raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        )
-        data: dict = json.loads(cleaned)
-    except Exception as exc:  # noqa: BLE001
-        data = {"intent": "clarify", "summary": f"Ошибка LLM: {exc}"}
+    data: dict = {"intent": "clarify", "summary": "Ошибка LLM"}
+    for attempt in range(3):  # reasoning model can return an empty/non-JSON body — retry
+        try:
+            raw, _meta = await llm.chat(
+                messages, capability="chat:deep", require_json_schema=True,
+                max_tokens=8000, temperature=0.1, workflow="coach", branch_id=branch_id,
+            )
+            cleaned = (
+                raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            )
+            data = json.loads(cleaned)
+            break
+        except Exception as exc:  # noqa: BLE001
+            data = {"intent": "clarify", "summary": f"Ошибка LLM: {exc}"}
+            if attempt < 2:
+                await asyncio.sleep(1.5)
 
     intent = data.get("intent") or ("edit" if data.get("old_text") else "clarify")
     if intent == "answer":
