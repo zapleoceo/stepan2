@@ -82,6 +82,24 @@ def test_ad_funnel_empty_rows_render_nothing() -> None:
     assert _ad_funnel_html([], products=_PRODUCTS) == ""
 
 
+def test_ad_funnel_counts_link_to_filtered_chats() -> None:
+    _set_lang()
+    # row AD1: total=10, pipeline=4, won=3, dormant=3
+    html = _ad_funnel_html([("AD1", None, 10, 4, 3, 3)], products=_PRODUCTS)
+    assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1">10</a>' in html   # total → all chats
+    assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=pipeline">4</a>' in html
+    assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=won">3</a>' in html
+    assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=dormant">3</a>' in html
+
+
+def test_inbox_grp_filter_shows_group_chip_and_scoped_load() -> None:
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox?ad_id=120255671613970771&grp=won")
+    assert resp.status_code == 200
+    assert "ad-filter" in resp.text
+    assert "/ui/threads?ad_id=120255671613970771&grp=won" in resp.text
+
+
 # ─── sort + filter ────────────────────────────────────────────────────────────
 
 def test_ad_funnel_headers_are_sortable() -> None:

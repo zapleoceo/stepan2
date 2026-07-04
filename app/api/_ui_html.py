@@ -214,6 +214,8 @@ _CSS = (
     ".rep-f{width:100%;box-sizing:border-box;background:#161b26;border:1px solid #2d3748;"
     "color:#e8eef4;border-radius:3px;font-size:.62rem;padding:.12rem .28rem}"
     ".rep-f::placeholder{color:#4a5568}"
+    ".rep-lnk{color:inherit;text-decoration:none}"
+    ".rep-lnk:hover{text-decoration:underline}"
     # ad-funnel: click-to-open menu on the ad id, product-mapping select + suggestion chip
     ".admenu{display:inline-block;position:relative}"
     ".admenu>summary{list-style:none;cursor:pointer;color:#4da6ff;"
@@ -1312,7 +1314,7 @@ _FAVICON = (
 
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
-    stage: str = "", ad_id: str = "", is_super: bool = True,
+    stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1593,14 +1595,20 @@ def app_shell(
     elif active_nav == "inbox":
         _show_thr = True
         _qs = f"?stage={stage}" if stage else ""
-        # ad_id narrows only the thread list (funnel stays branch-wide); an active ad
-        # filter shows a dismissable chip linking back to the unfiltered inbox.
+        # ad_id (+ optional grp: pipeline|won|dormant, from a clicked funnel count) narrows
+        # only the thread list (funnel stays branch-wide); an active filter shows a
+        # dismissable chip linking back to the unfiltered inbox.
         _thr_params = "&".join(
-            f"{k}={_h.escape(v)}" for k, v in (("stage", stage), ("ad_id", ad_id)) if v)
+            f"{k}={_h.escape(v)}"
+            for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
+        _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
+                    "dormant": t("rep.dormant")}.get(grp, "")
+        _grp_html = (
+            f' · <span class="ad-filter-id">{_h.escape(_grp_lbl)}</span>' if _grp_lbl else "")
         _ad_chip = (
             f'<div class="ad-filter">{_h.escape(t("inbox.ad_filter"))} '
-            f'<span class="ad-filter-id">{_h.escape(ad_id)}</span>'
+            f'<span class="ad-filter-id">{_h.escape(ad_id)}</span>{_grp_html}'
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}" title="{_h.escape(t("inbox.ad_clear"))}"'
             f'>✕</a></div>'
         ) if ad_id else ""

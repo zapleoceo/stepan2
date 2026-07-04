@@ -1002,6 +1002,14 @@ _AD_FUNNEL_JS = (
 )
 
 
+def _count_cell(aid: str, grp: str, n: int, color: str) -> str:
+    """A funnel count that links to the matching chat list (ad + stage group). grp '' =
+    every chat of the ad; otherwise a group from AD_FUNNEL_GROUPS (pipeline|won|dormant)."""
+    style = f' style="color:{color}"' if color else ""
+    qs = f"/ui/inbox?ad_id={aid}" + (f"&grp={grp}" if grp else "")
+    return f'<td class="rep-n"{style}><a class="rep-lnk" href="{qs}">{n}</a></td>'
+
+
 def _ad_funnel_header(cols: list[tuple[str, bool, str, bool]],
                       products: list[tuple[str, str]]) -> str:
     """Two header rows: clickable sort headers + a per-column filter row.
@@ -1061,13 +1069,14 @@ def _ad_funnel_html(
             f'{cell_inner}'
             f'</td>'
         ) if show_map else ""
+        aid = _h.escape(str(ad_id))
         body += (
             f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb)}</td>'
             f'{map_cell}'
-            f'<td class="rep-n">{total}</td>'
-            f'<td class="rep-n" style="color:#9b7aff">{int(pipeline or 0)}</td>'
-            f'<td class="rep-n" style="color:#51cf66">{won}</td>'
-            f'<td class="rep-n" style="color:#868e96">{int(dormant or 0)}</td>'
+            f'{_count_cell(aid, "", total, "")}'
+            f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'
+            f'{_count_cell(aid, "won", won, "#51cf66")}'
+            f'{_count_cell(aid, "dormant", int(dormant or 0), "#868e96")}'
             f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
         )
     cols: list[tuple[str, bool, str, bool]] = [("rep.ad", False, "text", False)]

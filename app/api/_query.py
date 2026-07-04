@@ -11,6 +11,14 @@ from app.adapters.db.models import Branch, ChannelThread, Lead
 _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
 
+# Ad-funnel count columns → the exact stage set each number counts, so the chat-list
+# links behind those numbers match the counts shown (see _ad_funnel_html / threads_partial).
+AD_FUNNEL_GROUPS: dict[str, tuple[str, ...]] = {
+    "pipeline": _PIPELINE_STAGES,
+    "won": _WON_STAGES,
+    "dormant": ("dormant",),
+}
+
 
 async def fetch_ad_funnel(
     session: AsyncSession, branch_ids: list[int] | None,

@@ -22,6 +22,7 @@ from app.admin._branch import branch_ids_from_request, is_super_admin
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
+    AD_FUNNEL_GROUPS,
     _branch_where,
     fetch_blocked_count,
     fetch_bot_enabled_count,
@@ -80,11 +81,14 @@ _THREAD_TMPL = (
 # ─── full pages ───────────────────────────────────────────────────────────────
 
 @router.get("/inbox", response_class=HTMLResponse)
-async def inbox(request: Request, stage: str = "", ad_id: str = "") -> HTMLResponse:
+async def inbox(
+    request: Request, stage: str = "", ad_id: str = "", grp: str = "",
+) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
-                                  ad_id=ad_id.strip(), is_super=is_super_admin(request)))
+                                  ad_id=ad_id.strip(), grp=grp.strip(),
+                                  is_super=is_super_admin(request)))
 
 
 @router.get("/knowledge", response_class=HTMLResponse)
@@ -131,7 +135,9 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 
 
 @router.get("/threads", response_class=HTMLResponse)
-async def threads_partial(request: Request, stage: str = "", ad_id: str = "") -> HTMLResponse:
+async def threads_partial(
+    request: Request, stage: str = "", ad_id: str = "", grp: str = "",
+) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     conditions, params = [], {}
@@ -148,6 +154,11 @@ async def threads_partial(request: Request, stage: str = "", ad_id: str = "") ->
     if ad:  # "open this ad's chats" from the reports ad-funnel table
         conditions.append("ct.ad_id = :ad_id")
         params["ad_id"] = ad
+    grp_stages = AD_FUNNEL_GROUPS.get(grp.strip())
+    if grp_stages:  # a funnel count column (В работе / Закрытые / Спящие) was clicked
+        names = [f":g{i}" for i in range(len(grp_stages))]
+        conditions.append(f"l.stage IN ({', '.join(names)})")
+        params.update({f"g{i}": st for i, st in enumerate(grp_stages)})
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (
