@@ -182,6 +182,17 @@ def test_app_shell_is_mobile_responsive() -> None:
     assert "scrollbar-width:thin" in html  # Firefox scrollbar styling
 
 
+def test_mobile_panels_slide_main_in() -> None:
+    """On mobile #main is off-screen until body.chat-open; every panel (settings/reports/
+    members/...) loads into #main, so the shell must reveal it on any #main swap — else the
+    whole section is blank on a phone (the reported /ui/settings/panel bug)."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>m</div>", active_nav="inbox")
+    assert "t.id==='main'&&window.innerWidth<=760" in html   # slide #main in on mobile
+    assert "function showThr(v){if(window.innerWidth<=760)return;" in html  # keep .thr base
+
+
 def test_app_shell_has_favicon() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")

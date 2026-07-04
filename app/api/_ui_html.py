@@ -1290,13 +1290,20 @@ def app_shell(
         "if(fresh){pinBot(fresh);}"
         # a background poll inserting a new bubble must NOT auto-scroll — the manager may be
         # reading history mid-chat; only opening a chat (fresh panel above) jumps to the end.
+        # any content swapped into #main (panel or chat) slides the overlay in on mobile
+        "if(t&&t.id==='main'&&window.innerWidth<=760){document.body.classList.add('chat-open');document.body.classList.remove('nav-open');}"
         "if(t&&t.id==='tl')filterTi();});"
         # F5 / direct load: afterSettle never fires, so pin every .msgs to the bottom on load
         "function scrollAllBot(){document.querySelectorAll('.msgs').forEach(function(m){"
         "scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
         "if(!g.complete)g.addEventListener('load',function(){scrollBot(m);},{once:true});});});}"
-        "window.addEventListener('load',scrollAllBot);"
-        "function showThr(v){"
+        # direct load / F5 of a chat or a panel (middleware-wrapped): afterSettle never
+        # fires, so reveal #main on mobile when it holds real content (not the empty
+        # inbox/kb placeholder). Fixes /ui/settings/panel etc. being blank on a phone.
+        "window.addEventListener('load',function(){scrollAllBot();"
+        "if(window.innerWidth<=760){var m=document.getElementById('main');"
+        "if(m&&!m.querySelector('.emp'))document.body.classList.add('chat-open');}});"
+        "function showThr(v){if(window.innerWidth<=760)return;"
         "var el=document.querySelector('.thr');"
         "if(el)el.style.display=v?'':'none';}"
         # help mode: ? toggles it; ONE delegated hover handler on the document (survives
