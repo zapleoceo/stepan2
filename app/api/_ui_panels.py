@@ -91,11 +91,15 @@ def outbox_count_html(n: int) -> str:
     return str(n) if n > 0 else ""
 
 
-def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> str:
+def outbox_panel_html(
+    rows: list, tz_by_branch: dict[int, int] | None = None,
+    quiet_by_branch: dict[int, tuple[int, int]] | None = None,
+) -> str:
     """Read-only outbox queue monitor (last 100 entries)."""
     title = _h.escape(t("nav.outbox"))
     hint = _h.escape(t("help.outbox"))
     tz = tz_by_branch or {}
+    quiet = quiet_by_branch or {}
 
     def _spill(s: str) -> str:
         css = {"pending": "s-pend", "sent": "s-sent", "failed": "s-fail"}.get(s, "s-pend")
@@ -117,7 +121,16 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
 
     now = datetime.now(UTC).replace(tzinfo=None)
 
-    def _eta(status: object, scheduled: object) -> str:
+    def _in_quiet(branch_id: object) -> int | None:
+        """quiet_end hour if we're currently inside this branch's quiet window, else None."""
+        qs, qe = quiet.get(branch_id, (0, 0))
+        if qs == qe:
+            return None
+        hour = (now + timedelta(hours=tz.get(branch_id, 0))).hour
+        inside = (hour >= qs or hour < qe) if qs > qe else (qs <= hour < qe)
+        return qe if inside else None
+
+    def _eta(status: object, scheduled: object, source: object, branch_id: object) -> str:
         # this queue is pending-only, so 'sent time' is always blank — show instead when the
         # send is due (scheduled_at, ± the ~20s poll; a snapshot at page load).
         if str(status) != "pending":
@@ -125,6 +138,12 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
         dt = _as_dt(scheduled)
         if dt is None:
             return "—"
+        # follow-ups are HELD during quiet hours — they won't go out until quiet lifts, even
+        # if their scheduled_at is already due.
+        qe = _in_quiet(branch_id)
+        if str(source) == "followup" and qe is not None:
+            return (f'<span style="color:#ffa94d">🔇 '
+                    f'{_h.escape(t("outbox.quiet_until", h=f"{qe:02d}"))}</span>')
         secs = (dt - now).total_seconds()
         if secs <= 5:
             return f'<span style="color:#51cf66">{_h.escape(t("outbox.now"))}</span>'
@@ -141,7 +160,8 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
         f'<td style="color:#6b7685;font-size:.72rem">{_h.escape(str(r[3]))}</td>'
         f'<td style="color:#d0d7de;font-size:.77rem">{_h.escape(str(r[4] or "")[:70])}</td>'
         f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">{_ts(r[5], r[7])}</td>'
-        f'<td style="color:#93a1b3;font-size:.7rem;white-space:nowrap">{_eta(r[2], r[5])}</td>'
+        f'<td style="color:#93a1b3;font-size:.7rem;white-space:nowrap">'
+        f'{_eta(r[2], r[5], r[3], r[7])}</td>'
         f'</tr>'
         for r in rows  # (id, thread_id, status, source, text, scheduled_at, sent_at, branch_id)
     )

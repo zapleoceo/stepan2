@@ -95,7 +95,21 @@ async def outbox_panel(request: Request) -> HTMLResponse:
         rows = (await session.execute(text(q), params)).all()
         seen_ids = {r[7] for r in rows if r[7] is not None}
         tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
-    return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch))
+        quiet_by_branch: dict[int, tuple[int, int]] = {}
+        if seen_ids:  # quiet hours hold follow-up sends until they lift — needed for the ETA
+            qrows = (await session.execute(
+                text("SELECT branch_id, key, value FROM app_setting"
+                     " WHERE branch_id = ANY(:bids) AND key IN ('quiet_start','quiet_end')"),
+                {"bids": list(seen_ids)})).all()
+            tmp: dict[int, dict[str, int]] = {}
+            for bid, key, val in qrows:
+                try:
+                    tmp.setdefault(bid, {})[key] = int(val)
+                except (TypeError, ValueError):
+                    continue
+            quiet_by_branch = {
+                bid: (d.get("quiet_start", 0), d.get("quiet_end", 0)) for bid, d in tmp.items()}
+    return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch, quiet_by_branch))
 
 
 def _valid_date(value: str) -> str:

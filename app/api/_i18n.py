@@ -382,6 +382,8 @@ _TR: dict[str, dict[str, str]] = {
     "outbox.in_s":      {"ru": "через {n}с",   "en": "in {n}s",     "id": "{n}s lagi"},
     "outbox.in_m":      {"ru": "через {n} мин","en": "in {n} min",  "id": "{n} mnt lagi"},
     "outbox.in_h":      {"ru": "через {n} ч",  "en": "in {n}h",     "id": "{n} jam lagi"},
+    "outbox.quiet_until": {"ru": "тихо до {h}:00", "en": "quiet till {h}:00",
+                           "id": "senyap s/d {h}:00"},
     # broker log page
     "nav.log":          {"ru": "Лог брокера",  "en": "Broker log",  "id": "Log broker"},
     "log.title":        {"ru": "Лог вызовов брокера", "en": "Broker call log",
