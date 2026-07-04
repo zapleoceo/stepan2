@@ -16,6 +16,7 @@ from app.adapters.db.models import (
     Lead,
     ManagerAlert,
     Message,
+    Product,
     StageEvent,
 )
 from app.adapters.meta_capi import MetaCapi
@@ -196,6 +197,29 @@ async def test_openhouse_rsvp_ignores_conflicting_needs_manager_flag(db_session)
     alerts = (await db_session.exec(select(ManagerAlert))).all()
     assert len(alerts) == 1  # only the openhouse alert, no duplicate generic one
     assert alerts[0].kind == "ready_openhouse"
+
+
+async def test_event_product_forces_openhouse_rsvp(db_session) -> None:
+    """When the bound product is kind='event', a 'ready' is an RSVP regardless of the model's
+    subtype guess: notify-only, bot stays on — never a course-deal hand-off."""
+    notifier = FakeNotifier()
+    bid, tid, lead = await _world(db_session, phone="+6281234567890", stage=Stage.PRESENTING)
+    db_session.add(Product(branch_id=bid, slug="vc_demo", title="Demo Event", kind="event"))
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    thread.product_slug = "vc_demo"
+    db_session.add(thread)
+    await db_session.flush()
+    # the model treated it as a course 'deal' — the event kind must override to openhouse
+    await _svc(db_session, bid, notifier=notifier).enqueue_reply(
+        tid, _decision(ready=True, ready_subtype="deal", stage=Stage.PRESENTING,
+                       product_slug="vc_demo"),
+    )
+    assert lead.stage == Stage.PRESENTING     # event = notify-only, no READY hand-off
+    assert lead.agent_enabled is True         # bot keeps talking
+    assert lead.ready_subtype == "openhouse"
+    alert = (await db_session.exec(select(ManagerAlert))).first()
+    assert alert is not None and alert.kind == "ready_openhouse"
 
 
 async def test_manager_stage_not_in_bot_silent() -> None:

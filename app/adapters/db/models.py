@@ -166,6 +166,7 @@ class Product(SQLModel, table=True):
     content: str = Field(default="")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
+    kind: str = Field(default="course", description="course | event — event = RSVP not enrolment")
     updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
     updated_by: str | None = Field(default=None)
 

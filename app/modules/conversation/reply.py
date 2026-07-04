@@ -9,10 +9,11 @@ import random
 import re
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels.ig_parse import VOICE_PENDING_PH
-from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
+from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent
 from app.adapters.meta_capi import MetaCapi
 from app.config import settings
 from app.domain.enums import Stage
@@ -168,10 +169,17 @@ class ReplyService:
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return
-        if decision.ready and decision.ready_subtype == "openhouse":
+        # The bound product's kind decides deal-vs-RSVP: an event product is ALWAYS an
+        # openhouse-style RSVP (notify team, bot stays on), regardless of what the model
+        # guessed — the model only picks the subtype for non-event products.
+        eff_subtype = decision.ready_subtype
+        if decision.ready and thread.product_slug \
+                and await self._product_kind(thread.product_slug) == "event":
+            eff_subtype = "openhouse"
+        if decision.ready and eff_subtype == "openhouse":
             await self._handoff_openhouse(lead, thread)
         inbound = await self.messages.inbound_count(thread.id)
-        new_stage = self._stage_for(decision, lead, inbound)
+        new_stage = self._stage_for(decision, lead, inbound, eff_subtype)
         if new_stage == lead.stage:
             return
         self.session.add(StageEvent(
@@ -184,9 +192,16 @@ class ReplyService:
         if new_stage == Stage.MANAGER:
             lead.agent_enabled = False  # human takes over; manager may re-enable
         if new_stage == Stage.READY:
-            await self._handoff(lead, thread, decision.ready_subtype)
+            await self._handoff(lead, thread, eff_subtype)
         self.session.add(lead)
         logger.info("branch=%d lead=%d stage → %s", self.branch_id, lead.id, new_stage)
+
+    async def _product_kind(self, slug: str) -> str:
+        row = (await self.session.execute(
+            select(Product.kind).where(
+                Product.branch_id == self.branch_id, Product.slug == slug)
+        )).first()
+        return row[0] if row else "course"
 
     async def _hard_stop(self, lead: Lead, thread) -> None:
         """Lead explicitly demanded we stop: let the one queued apology go out, then silence
@@ -205,8 +220,9 @@ class ReplyService:
         self.session.add(lead)
         logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
 
-    def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0) -> Stage:
-        if decision.ready and decision.ready_subtype == "openhouse":
+    def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0,
+                   ready_subtype: str | None = None) -> Stage:
+        if decision.ready and ready_subtype == "openhouse":
             # An event RSVP is a notify-only side channel (see _handoff_openhouse) — it's
             # a sale (of a seat, not a course) but NOT a hand-off: the bot keeps talking,
             # so never let it force READY/MANAGER and silence the account.

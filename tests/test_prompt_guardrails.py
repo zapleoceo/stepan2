@@ -40,3 +40,8 @@ def test_capture_contact_early_but_not_ready() -> None:
 def test_proactive_close_and_openhouse_bridge() -> None:
     assert "PROACTIVELY CLOSE" in _DECISION_CONTRACT
     assert "OPEN HOUSE" in _DECISION_CONTRACT
+
+
+def test_events_vs_courses_recognizes_cheap_price() -> None:
+    assert "EVENTS vs COURSES" in _DECISION_CONTRACT
+    assert "kirain 100k" in _DECISION_CONTRACT
