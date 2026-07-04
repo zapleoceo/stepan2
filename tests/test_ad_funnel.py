@@ -42,6 +42,36 @@ async def test_ad_funnel_buckets_by_stage(db_session) -> None:
     assert rows["adB"][2:] == (1, 0, 0, 1)
 
 
+async def test_ad_funnel_scoped_by_since_until(db_session) -> None:
+    """The reports date-range/quick-range filter must also scope the per-ad funnel table,
+    not just the KPIs above it — leads outside [since, until) are excluded."""
+    from datetime import datetime
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    db_session.add(ch)
+    await db_session.flush()
+    old_lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING,
+                     created_at=datetime(2026, 1, 1))
+    new_lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING,
+                     created_at=datetime(2026, 6, 1))
+    db_session.add_all([old_lead, new_lead])
+    await db_session.flush()
+    db_session.add_all([
+        ChannelThread(lead_id=old_lead.id, channel_id=ch.id, external_thread_id="ig-old",
+                     ad_id="adOld"),
+        ChannelThread(lead_id=new_lead.id, channel_id=ch.id, external_thread_id="ig-new",
+                     ad_id="adNew"),
+    ])
+    await db_session.flush()
+
+    rows = await fetch_ad_funnel(
+        db_session, [b.id], since=datetime(2026, 3, 1), until=datetime(2026, 12, 1))
+    assert [r[0] for r in rows] == ["adNew"]
+
+
 async def test_ad_funnel_branch_scoped(db_session) -> None:
     a = Branch(name="A", lang="id")
     b = Branch(name="B", lang="id")

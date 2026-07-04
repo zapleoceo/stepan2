@@ -1,6 +1,8 @@
 """Shared SQL query helpers for UI route handlers."""
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import case, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -10,11 +12,16 @@ _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
 
 
-async def fetch_ad_funnel(session: AsyncSession, branch_ids: list[int] | None) -> list:
+async def fetch_ad_funnel(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> list:
     """Per-ad funnel: leads from each ad, counted by pipeline / won / dormant.
 
     ORM (not raw ANY) so it runs on SQLite too. Rows: (ad_id, ad_media_id, total,
-    pipeline, won, dormant), busiest ad first."""
+    pipeline, won, dormant), busiest ad first. since/until scope by the lead's
+    conversation-start date — the same window as the rest of the reports panel, so
+    picking a date range affects this table too, not just the KPIs above it."""
     won = func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0))
     q = (
         select(
@@ -32,6 +39,10 @@ async def fetch_ad_funnel(session: AsyncSession, branch_ids: list[int] | None) -
     )
     if branch_ids:
         q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
     return list((await session.execute(q)).all())
 
 
@@ -233,20 +244,31 @@ async def fetch_branch_tz(session: AsyncSession, branch_ids: list[int]) -> dict[
 
 async def fetch_discovery_metrics(
     session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
 ) -> dict[str, float | int]:
     """Discovery-before-presentation KPIs from stage_event: of leads that reached
     'presenting', how many had a 'qualifying' (discovery) event first, and the average
-    number of inbound messages before the first presentation. Portable (SQLite + Postgres)."""
+    number of inbound messages before the first presentation. Portable (SQLite + Postgres).
+
+    since/until scope by the lead's conversation-start date, joined in via `l` — the same
+    window as the rest of the reports panel, so a date filter affects this KPI too."""
+    conditions, params = [], {}
     if branch_ids:
         keys = ",".join(f":b{i}" for i in range(len(branch_ids)))
-        branch_and = f" AND se.branch_id IN ({keys})"
-        params = {f"b{i}": b for i, b in enumerate(branch_ids)}
-    else:
-        branch_and, params = "", {}
-    # branch_and holds only fixed :bN placeholders; all values are bound params
+        conditions.append(f"se.branch_id IN ({keys})")
+        params.update({f"b{i}": b for i, b in enumerate(branch_ids)})
+    if since is not None:
+        conditions.append("l.created_at >= :since")
+        params["since"] = since
+    if until is not None:
+        conditions.append("l.created_at < :until")
+        params["until"] = until
+    # extra_and holds only fixed, hardcoded conditions — all values are bound params
+    extra_and = "".join(f" AND {c}" for c in conditions)
     sql = (
         "WITH fp AS (SELECT se.lead_id, MIN(se.created_at) AS t FROM stage_event se"  # noqa: S608
-        " WHERE se.to_stage=:pres" + branch_and + " GROUP BY se.lead_id),"
+        " JOIN lead l ON l.id = se.lead_id"
+        " WHERE se.to_stage=:pres" + extra_and + " GROUP BY se.lead_id),"
         " dl AS ("
         "  SELECT fp.lead_id, count(m.id) AS cnt FROM fp"
         "  JOIN channel_thread ct ON ct.lead_id = fp.lead_id"

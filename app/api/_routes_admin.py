@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import html as _h
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -154,6 +154,15 @@ async def reports_panel(
     if dt_:
         date_and += " AND l.created_at < (CAST(:dt AS date) + INTERVAL '1 day')"
         params["dt"] = date.fromisoformat(dt_)
+    # Same window as date_and above, as plain datetimes — the ad-funnel table and the
+    # discovery KPI build their own SQL and can't reuse date_and's CAST(:df AS date)
+    # placeholders directly, so the selected date range is threaded through separately.
+    since_dt: datetime | None = params.get("since")
+    if not active_range and df:
+        since_dt = datetime.combine(date.fromisoformat(df), time.min)
+    until_dt = (
+        datetime.combine(date.fromisoformat(dt_), time.min) + timedelta(days=1) if dt_ else None
+    )
     lead_where = ("WHERE" + date_and[4:]) if date_and else ""
     # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.
     _sc = f"SELECT l.stage, COUNT(*) FROM lead l {lead_where} GROUP BY l.stage"  # noqa: S608
@@ -172,8 +181,9 @@ async def reports_panel(
         sc = (await session.execute(text(_sc), params)).all()
         hi = (await session.execute(text(_hi), {**params, "dir": "in"})).all()
         ho = (await session.execute(text(_ho), {**params, "dir": "out"})).all()
-        ad_funnel = await fetch_ad_funnel(session, branch_ids)
-        discovery = await fetch_discovery_metrics(session, branch_ids)
+        ad_funnel = await fetch_ad_funnel(session, branch_ids, since=since_dt, until=until_dt)
+        discovery = await fetch_discovery_metrics(
+            session, branch_ids, since=since_dt, until=until_dt)
         if branch_ids and len(branch_ids) == 1:
             fb = (await session.execute(
                 text("SELECT key, value FROM app_setting WHERE branch_id=:b"

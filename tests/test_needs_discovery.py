@@ -219,3 +219,31 @@ async def test_discovery_metrics(db_session) -> None:
     m = await fetch_discovery_metrics(db_session, [b.id])
     assert m["reached"] == 2 and m["discovered"] == 1
     assert m["pct"] == 50 and m["avg_msgs"] == 2.0  # only the good lead had inbound msgs
+
+
+async def test_discovery_metrics_scoped_by_since_until(db_session) -> None:
+    """The reports date-range/quick-range filter must also scope this KPI, not just the
+    lead-stage counts — leads whose conversation started outside [since, until) are
+    excluded even if their stage_event rows fall inside the window."""
+    from datetime import datetime, timedelta
+
+    from app.api._query import fetch_discovery_metrics
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    old_lead = Lead(branch_id=b.id, created_at=datetime(2026, 1, 1))
+    new_lead = Lead(branch_id=b.id, created_at=datetime(2026, 6, 1))
+    db_session.add_all([ch, old_lead, new_lead])
+    await db_session.flush()
+    for lead in (old_lead, new_lead):
+        t0 = _NOW - timedelta(minutes=10)
+        db_session.add(StageEvent(branch_id=b.id, lead_id=lead.id, from_stage="new",
+                                  to_stage="qualifying", created_at=t0))
+        db_session.add(StageEvent(branch_id=b.id, lead_id=lead.id, from_stage="qualifying",
+                                  to_stage="presenting", created_at=t0 + timedelta(minutes=5)))
+    await db_session.flush()
+
+    m = await fetch_discovery_metrics(
+        db_session, [b.id], since=datetime(2026, 3, 1), until=datetime(2026, 12, 1))
+    assert m["reached"] == 1  # only new_lead's conversation-start falls in the window
