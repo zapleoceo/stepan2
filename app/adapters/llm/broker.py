@@ -22,10 +22,17 @@ _DEFAULT_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_s, write=10.0, pool=5.0)
 _SLOW_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_slow_s, write=10.0, pool=5.0)
-_SLOW_CAPS = frozenset({"chat:smart", "chat:edit"})
+# chat:deep = full-context analysis (the whole lead history, up to ~1M tokens in): the model
+# may think for minutes, so the read timeout is very long. NEVER use on a live reply path —
+# only background/batch jobs (Coach edits, needs re-derivation) where latency doesn't matter.
+_DEEP_TIMEOUT = httpx.Timeout(
+    connect=5.0, read=settings().llm_read_timeout_deep_s, write=15.0, pool=5.0)
+_SLOW_CAPS = frozenset({"chat:smart"})
 
 
 def _chat_timeout(capability: str) -> httpx.Timeout:
+    if capability == "chat:deep":
+        return _DEEP_TIMEOUT
     return _SLOW_TIMEOUT if capability in _SLOW_CAPS else _DEFAULT_TIMEOUT
 
 
@@ -65,6 +72,18 @@ class BrokerLLM:
                     headers={"X-Project-Key": self._key},
                     json=body,
                 )
+                # chat:deep may not be enabled on the project key yet (403) — fall back to
+                # chat:smart so Coach / re-derivation keep working, and auto-upgrade the day
+                # the broker grants the capability. Grant chat:deep to switch to full context.
+                if r.status_code == 403 and capability == "chat:deep":
+                    capability = "chat:smart"
+                    body["max_tokens"] = min(max_tokens, 2000)
+                    r = await c.post(
+                        f"{self._url}/v1/chat",
+                        params={"capability": capability},
+                        headers={"X-Project-Key": self._key},
+                        json=body,
+                    )
             r.raise_for_status()
             # A 200 with a truncated body or missing keys is still a failed call — parse
             # inside the try so JSONDecodeError/KeyError also write an ok=false audit row.

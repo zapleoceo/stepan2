@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     llm_read_timeout_slow_s: float = Field(
         default=90.0, description="HTTP read timeout for chat:smart/chat:edit (long JSON, "
                                   "provider fallback); keep < worker_job_timeout_s")
+    llm_read_timeout_deep_s: float = Field(
+        default=600.0, description="HTTP read timeout for chat:deep (full-context analysis, "
+                                   "the model may think for minutes); background/batch ONLY, "
+                                   "never a live reply handler")
     max_context_msgs: int = Field(
         default=40, description="dialog messages fed to the reply LLM — the main per-reply "
                                 "token-cost bound")

@@ -116,6 +116,34 @@ async def test_chat_200_missing_keys_raises_and_logs_failure(monkeypatch) -> Non
     assert calls[0]["ok"] is False
 
 
+class _SeqClient(_FakeClient):
+    """Returns a queued response per post() call and records the capability query param."""
+
+    def __init__(self, resps: list[_FakeResp], caps: list[str]) -> None:
+        self._resps = resps
+        self._caps = caps
+
+    async def post(self, *a: object, **k: object) -> _FakeResp:
+        self._caps.append(k["params"]["capability"])  # type: ignore[index]
+        return self._resps.pop(0)
+
+
+async def test_chat_deep_falls_back_to_smart_on_403(monkeypatch) -> None:
+    """chat:deep isn't enabled on the key yet (403) — the call must retry as chat:smart so
+    Coach / re-derivation keep working, and the audit row logs the capability actually used."""
+    ok = _FakeResp({"text": "hi", "model": "m", "tokens_in": 1, "tokens_out": 1,
+                    "provider": "p", "cost_usd": 0.0, "request_id": "r"})
+    caps: list[str] = []
+    client = _SeqClient([_FakeResp({}, status=403), ok], caps)
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    text, _ = await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:deep",
+                                max_tokens=8000, workflow="coach")
+    assert text == "hi"
+    assert caps == ["chat:deep", "chat:smart"]  # tried deep, fell back to smart
+    assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:smart"
+
+
 async def test_chat_read_timeout_raises_and_logs_failure(monkeypatch) -> None:
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _TimeoutClient())
     calls = _capture_log(monkeypatch)
@@ -140,7 +168,7 @@ async def test_embed_5xx_raises_and_logs_failure(monkeypatch) -> None:
 
 @pytest.mark.parametrize(
     ("capability", "read_timeout"),
-    [("chat:smart", 90.0), ("chat:edit", 90.0), ("chat:fast", 20.0)],
+    [("chat:smart", 90.0), ("chat:deep", 600.0), ("chat:fast", 20.0)],
 )
 async def test_per_capability_timeout_passed_to_client(
     monkeypatch, capability: str, read_timeout: float,

@@ -39,8 +39,11 @@ async def propose_edit(
 ) -> CoachingEdit:
     """Ask the LLM to propose a KB doc change and persist the result."""
     docs = await KnowledgeRepo(session, branch_id).list()
+    # Coach isn't latency-critical (a manager waits a few seconds, not a live lead), so feed
+    # the WHOLE KB uncut and let chat:deep absorb it — full context beats truncated snippets
+    # when reasoning about which doc to change and how.
     docs_text = "\n\n".join(
-        f"=== {d.slug} ({d.title or d.slug}) ===\n{d.content[:3000]}" for d in docs
+        f"=== {d.slug} ({d.title or d.slug}) ===\n{d.content}" for d in docs
     )
     messages = [
         {"role": "system", "content": _SYSTEM.format(docs=docs_text)},
@@ -48,7 +51,7 @@ async def propose_edit(
     ]
     try:
         raw, _meta = await llm.chat(
-            messages, capability="chat:edit", max_tokens=800, temperature=0.1,
+            messages, capability="chat:deep", max_tokens=8000, temperature=0.1,
             workflow="coach", branch_id=branch_id,
         )
         cleaned = (
