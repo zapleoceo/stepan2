@@ -488,6 +488,24 @@ _HELP_KEYS: dict[str, str] = {
 }
 
 
+def help_oob_html(active_nav: str) -> str:
+    """Out-of-band update for the '?' overlay's title+body on an htmx nav swap.
+
+    The shell (sidebar, help button, #hov overlay) is rendered once on the initial full
+    page load and never touches again — nav clicks only swap #main via htmx. Without this,
+    the help overlay stays frozen on whatever section was active at that first load: click
+    '?' on Coach after navigating there client-side and it still explains Inbox. Matching
+    ids + hx-swap-oob="true" let htmx find and refresh #hov-title/#hov-body wherever they
+    live in the DOM, even though this fragment's own swap target is #main."""
+    key = _HELP_KEYS.get(active_nav, "")
+    title = _h.escape(t(f"nav.{active_nav}") if active_nav in _HELP_KEYS else t("help.title"))
+    body = _h.escape(t(key)) if key else ""
+    return (
+        f'<h3 id="hov-title" hx-swap-oob="true">{title}</h3>'
+        f'<p id="hov-body" hx-swap-oob="true">{body}</p>'
+    )
+
+
 def _ago(dt: datetime | None) -> str:
     if dt is None:
         return ""
@@ -1428,8 +1446,8 @@ def app_shell(
         f'<div class="hov" id="hov" onclick="if(event.target===this)toggleHelp()">'
         f'<div class="hov-box">'
         f'<button class="hov-close" onclick="toggleHelp()">✕</button>'
-        f'<h3>{help_title}</h3>'
-        f'<p>{help_body}</p>'
+        f'<h3 id="hov-title">{help_title}</h3>'
+        f'<p id="hov-body">{help_body}</p>'
         f'</div></div>'
     )
     return (

@@ -349,6 +349,54 @@ def test_inbox_has_members_nav(client: TestClient) -> None:
     assert "/ui/settings/panel" in resp.text
 
 
+# ─── help overlay OOB refresh on htmx nav ──────────────────────────────────────
+
+def test_help_oob_html_matches_active_nav() -> None:
+    """Pure helper: title/body track whichever section is passed, not a frozen default."""
+    from app.api._ui_html import help_oob_html
+    _set_lang("en")
+    coach = help_oob_html("coach")
+    assert 'id="hov-title"' in coach and "Coach KB" in coach
+    assert 'hx-swap-oob="true"' in coach
+    inbox = help_oob_html("inbox")
+    assert "Inbox" in inbox and "Coach KB" not in inbox
+
+
+def test_htmx_nav_swap_refreshes_help_overlay_out_of_band(client: TestClient) -> None:
+    """The shell (help button + #hov) is only rendered on a full page load; an htmx nav
+    click swapping #main must still carry a fresh #hov-title/#hov-body OOB update, or the
+    '?' button stays stuck explaining whatever section loaded first (the reported bug).
+    /ui/branches/new has no DB access, so this is a real 200 (not tolerated 500)."""
+    resp = client.get(
+        "/ui/branches/new",
+        headers={"HX-Request": "true", "HX-Target": "main"},
+    )
+    assert resp.status_code == 200
+    assert 'id="hov-title" hx-swap-oob="true"' in resp.text
+    assert 'id="hov-body" hx-swap-oob="true"' in resp.text
+    assert "Branches" in resp.text  # nav.branches — matches this section, not a stale default
+
+
+def test_htmx_fragment_without_main_target_skips_help_oob(client: TestClient) -> None:
+    """A sub-fragment swap (not the nav-level #main target) must NOT get the help OOB
+    stamped on it — only genuine section navigation should touch the overlay."""
+    resp = client.get(
+        "/ui/branches/new",
+        headers={"HX-Request": "true", "HX-Target": "some-other-div"},
+    )
+    assert resp.status_code == 200
+    assert "hov-title" not in resp.text
+
+
+def test_direct_full_page_load_has_help_overlay_for_its_own_section(client: TestClient) -> None:
+    """A non-htmx full load renders the shell directly with the correct help text baked
+    in (no OOB needed — app_shell already computes it from active_nav)."""
+    resp = client.get("/ui/branches/new")
+    assert resp.status_code == 200
+    assert 'id="hov-title"' in resp.text
+    assert "Branches" in resp.text
+
+
 def test_inbox_has_help_button(client: TestClient) -> None:
     resp = client.get("/ui/inbox")
     assert resp.status_code == 200

@@ -53,14 +53,42 @@ class _PartialShellMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         from app.api._i18n import DEFAULT_LANG, LANG_COOKIE, LANGS, _lang  # noqa: PLC0415
-        from app.api._ui_html import app_shell  # noqa: PLC0415
+        from app.api._ui_html import app_shell, help_oob_html  # noqa: PLC0415
 
         path = request.url.path
         is_htmx = request.headers.get("HX-Request") == "true"
 
-        # Only intercept direct (non-HTMX) GET requests under /ui/
-        if is_htmx or request.method != "GET" or not path.startswith("/ui/"):
+        if request.method != "GET" or not path.startswith("/ui/"):
             return await call_next(request)
+
+        # HTMX nav click swapping #main: the shell (help button + overlay) isn't
+        # re-rendered on this path, so stamp a fresh help-OOB fragment onto the
+        # response — otherwise '?' stays frozen on whatever section loaded first.
+        if is_htmx:
+            if request.headers.get("HX-Target") != "main":
+                return await call_next(request)
+            response = await call_next(request)
+            if response.status_code != 200 or "text/html" not in response.headers.get(
+                "content-type", ""
+            ):
+                return response
+            body = b""
+            async for chunk in response.body_iterator:
+                body += chunk
+            decoded = body.decode("utf-8")
+            m = _UI_SECTION_RE.match(path)
+            section = m.group(1) if m else ""
+            active_nav = _SECTION_NAV.get(section, section)
+            raw = request.cookies.get(LANG_COOKIE, DEFAULT_LANG)
+            lang = raw if raw in LANGS else DEFAULT_LANG
+            _lang.set(lang)
+            # drop content-length: the body just grew by the OOB fragment, and a stale
+            # length can make the client truncate or reject the response
+            headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+            return HTMLResponse(
+                decoded + help_oob_html(active_nav), status_code=200, headers=headers,
+            )
+
         # Full-page routes already return a complete shell
         if path in _FULL_PAGE_ROUTES:
             return await call_next(request)
