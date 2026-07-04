@@ -100,14 +100,14 @@ async def _process(lead_id: int, llm: BrokerLLM, dry: bool) -> str:
         raw = None
         for attempt in range(4):  # broker 502/ReadTimeout under load — retry with backoff
             try:
-                # chat:deep: full-history analysis with no short client timeout and a big
-                # token budget — the routed reasoning model (gpt-oss-120b) spends tokens
-                # thinking, so a small max_tokens returned an EMPTY completion (the bug that
-                # blanked profiles on the first pass). Batch job, latency doesn't matter.
+                # chat:smart + a big token budget: the routed reasoning model (gpt-oss-120b)
+                # spends tokens thinking, so a small max_tokens returned an EMPTY completion
+                # (the bug that blanked profiles on the first pass). chat:smart is proven and
+                # doesn't need the not-yet-enabled chat:deep capability.
                 raw, _ = await llm.chat(
                     [{"role": "system", "content": _SYSTEM},
                      {"role": "user", "content": convo}],
-                    capability="chat:deep", max_tokens=8000, workflow="rederive",
+                    capability="chat:smart", max_tokens=1500, workflow="rederive",
                     thread_id=lead_id)
                 if raw and raw.strip():
                     break
