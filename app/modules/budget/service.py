@@ -14,11 +14,18 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.domain.clock import branch_today
 from app.modules.settings.service import get_settings
 
+# The table name MUST qualify the value-side reference (llm_spend.used_usd), not just
+# the SET target — Postgres raises "column reference is ambiguous" for a bare `used_usd`
+# on the right of `=` because both the target row and `excluded` expose that name. SQLite
+# (unit tests) accepts the unqualified form fine, so this broke silently in prod only:
+# real incident — every call with cost_usd > 0 raised inside record(), which propagated
+# out of decide() and silently discarded an already-paid-for LLM reply.
 _UPSERT = (
     "INSERT INTO llm_spend (branch_id, day, used_usd, calls)"
     " VALUES (:b, :d, :c, 1)"
     " ON CONFLICT (branch_id, day) DO UPDATE"
-    " SET used_usd = used_usd + excluded.used_usd, calls = calls + 1"
+    " SET used_usd = llm_spend.used_usd + excluded.used_usd,"
+    " calls = llm_spend.calls + 1"
 )
 
 
