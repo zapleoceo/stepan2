@@ -97,32 +97,49 @@ async def members_panel(request: Request) -> HTMLResponse:
     return HTMLResponse(members_panel_html(list(rows)))
 
 
+def _valid_date(value: str) -> str:
+    """Accept only a YYYY-MM-DD string (empty otherwise) — safe to inline as a bound param."""
+    import datetime as _dt  # noqa: PLC0415
+    try:
+        return _dt.date.fromisoformat(value).isoformat() if value else ""
+    except ValueError:
+        return ""
+
+
 @router.get("/reports/panel", response_class=HTMLResponse)
-async def reports_panel(request: Request) -> HTMLResponse:
+async def reports_panel(
+    request: Request, date_from: str = "", date_to: str = "",
+) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
-    and_where = "AND l.branch_id = ANY(:bids)" if branch_ids else ""
-    _sc = (  # noqa: S608
-        "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
-    )
-    _hi = (  # noqa: S608
+    df, dt_ = _valid_date(date_from), _valid_date(date_to)
+    # date range filters by the lead's conversation-start (lead.created_at); dt_ is inclusive.
+    date_and = ""
+    params: dict = {}
+    if branch_ids:
+        date_and += " AND l.branch_id = ANY(:bids)"
+        params["bids"] = branch_ids
+    if df:
+        date_and += " AND l.created_at >= :df"
+        params["df"] = df
+    if dt_:
+        date_and += " AND l.created_at < (:dt::date + INTERVAL '1 day')"
+        params["dt"] = dt_
+    lead_where = ("WHERE" + date_and[4:]) if date_and else ""
+    # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.
+    _sc = f"SELECT l.stage, COUNT(*) FROM lead l {lead_where} GROUP BY l.stage"  # noqa: S608
+    _hour = (
         "SELECT EXTRACT(HOUR FROM m.occurred_at)::int, COUNT(*)"
         " FROM message m JOIN channel_thread ct ON ct.id=m.thread_id"
-        " JOIN lead l ON l.id=ct.lead_id WHERE m.direction='in' {and_where} GROUP BY 1"
+        " JOIN lead l ON l.id=ct.lead_id WHERE m.direction=:dir{da} GROUP BY 1"
     )
-    _ho = (  # noqa: S608
-        "SELECT EXTRACT(HOUR FROM m.occurred_at)::int, COUNT(*)"
-        " FROM message m JOIN channel_thread ct ON ct.id=m.thread_id"
-        " JOIN lead l ON l.id=ct.lead_id WHERE m.direction='out' {and_where} GROUP BY 1"
-    )
-    # ad deep links need the branch's own FB business + ad-account ids; use them only when
-    # the view is scoped to a single branch (an all-branches ad list can't pick one account).
+    _hi = _hour.format(da=date_and)  # noqa: S608
+    _ho = _hi
     fb_bid = fb_acct = ""
     async with session_scope() as session:
-        sc = (await session.execute(text(_sc.format(where=where)), params)).all()
-        hi = (await session.execute(text(_hi.format(and_where=and_where)), params)).all()
-        ho = (await session.execute(text(_ho.format(and_where=and_where)), params)).all()
+        sc = (await session.execute(text(_sc), params)).all()
+        hi = (await session.execute(text(_hi), {**params, "dir": "in"})).all()
+        ho = (await session.execute(text(_ho), {**params, "dir": "out"})).all()
         ad_funnel = await fetch_ad_funnel(session, branch_ids)
         discovery = await fetch_discovery_metrics(session, branch_ids)
         if branch_ids and len(branch_ids) == 1:
@@ -137,7 +154,8 @@ async def reports_panel(request: Request) -> HTMLResponse:
     hour_out = {int(r[0]): int(r[1]) for r in ho}
     return HTMLResponse(
         reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
-                           fb_business_id=fb_bid, fb_account_id=fb_acct))
+                           fb_business_id=fb_bid, fb_account_id=fb_acct,
+                           date_from=df, date_to=dt_))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)

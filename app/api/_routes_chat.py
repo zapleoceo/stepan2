@@ -6,7 +6,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import text
 
 from app.adapters.db.models import Outbox, ThreadLog
@@ -23,6 +23,7 @@ from ._query import (
     fetch_thread_events,
 )
 from ._ui_html import (
+    app_shell,
     chat_block_pill_html,
     chat_bot_pill_html,
     chat_header_html,
@@ -73,54 +74,84 @@ async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) ->
     return row[0]
 
 
-@router.get("/chat/{thread_id}/panel", response_class=HTMLResponse)
-async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
-    apply_lang(request)
-    allowed = allowed_branch_ids(request)
-    async with session_scope() as session:
-        info = (
-            await session.execute(
-                text(
-                    "SELECT ct.id, l.display_name, l.stage, l.branch_id,"
-                    " ct.product_slug, ct.external_thread_id,"
-                    " l.phone_e164, l.created_at, ct.last_in_at,"
-                    " l.ig_username, l.avatar_url,"
-                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                    " b.tz_offset_h, l.needs"
-                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-                    " JOIN branch b ON b.id = l.branch_id"
-                    " WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
-        if not info or is_branch_forbidden(info[3], allowed):
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        set_render_tz(info[21])
-        msgs = await fetch_messages(session, thread_id)
-        pending = await fetch_pending(session, thread_id)
-        events = await fetch_thread_events(session, thread_id)
+async def _build_chat_panel(
+    session, thread_id: int, allowed: list[int] | None,
+) -> str | None:
+    """Panel HTML for one thread, or None if it does not exist / is outside the caller's
+    branches. Shared by the partial route (/panel) and the canonical page route."""
+    info = (
+        await session.execute(
+            text(
+                "SELECT ct.id, l.display_name, l.stage, l.branch_id,"
+                " ct.product_slug, ct.external_thread_id,"
+                " l.phone_e164, l.created_at, ct.last_in_at,"
+                " l.ig_username, l.avatar_url,"
+                " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
+                " l.agent_enabled, l.is_blocked,"
+                " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
+                " b.tz_offset_h, l.needs"
+                " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                " JOIN branch b ON b.id = l.branch_id"
+                " WHERE ct.id = :tid"
+            ),
+            {"tid": thread_id},
+        )
+    ).first()
+    if not info or is_branch_forbidden(info[3], allowed):
+        return None
+    set_render_tz(info[21])
+    msgs = await fetch_messages(session, thread_id)
+    pending = await fetch_pending(session, thread_id)
+    events = await fetch_thread_events(session, thread_id)
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
      follower_count, following_count, last_active_at, lead_seen_at, _tz, needs) = info
-    return HTMLResponse(
-        chat_panel_html(
-            thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
-            product_slug=product_slug, ig_id=ig_id,
-            phone=phone, created_at=created_at, last_in_at=last_in_at,
-            ig_username=ig_username, avatar_url=avatar_url,
-            lead_source=lead_source, ad_id=ad_id,
-            ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-            agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
-            follower_count=follower_count, following_count=following_count,
-            last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs,
-            events=events,
-        )
+    return chat_panel_html(
+        thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
+        product_slug=product_slug, ig_id=ig_id,
+        phone=phone, created_at=created_at, last_in_at=last_in_at,
+        ig_username=ig_username, avatar_url=avatar_url,
+        lead_source=lead_source, ad_id=ad_id,
+        ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+        agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
+        follower_count=follower_count, following_count=following_count,
+        last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs,
+        events=events,
     )
+
+
+@router.get("/chat/{thread_id}/panel", response_class=HTMLResponse)
+async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
+    """Bare panel partial (HTMX target). See chat_page for the shareable full-page URL."""
+    apply_lang(request)
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        html = await _build_chat_panel(session, thread_id, allowed)
+    if html is None:
+        return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+    return HTMLResponse(html)
+
+
+@router.get("/chat/{thread_id}", response_class=HTMLResponse)
+async def chat_page(thread_id: int, request: Request) -> HTMLResponse:
+    """Canonical, shareable chat URL. HTMX (HX-Request) gets the bare panel; a direct load,
+    F5, or pasted link gets the full app shell with this chat open and highlighted."""
+    lang = apply_lang(request)
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        html = await _build_chat_panel(session, thread_id, allowed)
+    is_hx = request.headers.get("HX-Request") == "true"
+    if html is None:
+        if is_hx:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        return RedirectResponse("/ui/inbox", status_code=303)
+    if is_hx:
+        return HTMLResponse(html)
+    resp = HTMLResponse(app_shell(lang, html, active_nav="inbox"))
+    resp.set_cookie("stepan2_open_thread", str(thread_id), max_age=86400, samesite="lax")
+    return resp
 
 
 _MIME_FOR_KIND = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/mp4"}

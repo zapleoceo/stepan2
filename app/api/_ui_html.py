@@ -138,6 +138,27 @@ _CSS = (
     "padding:.12rem .3rem;border-radius:3px}"
     # reports panel
     ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
+    # one-line sales funnel
+    ".fnl-line{display:flex;gap:.3rem;align-items:stretch}"
+    ".fnl-step{flex:1;min-width:0;background:#141925;border:1px solid #2d3748;"
+    "border-radius:6px;padding:.35rem .3rem;text-align:center;position:relative;"
+    "overflow:hidden;cursor:help}"
+    ".fnl-bar{position:absolute;top:0;left:0;right:0;height:3px}"
+    ".fnl-num{font-size:1.05rem;font-weight:800;color:#e8eef4;line-height:1.1;margin-top:.15rem}"
+    ".fnl-nm{font-size:.6rem;color:#8899aa;text-transform:capitalize;white-space:nowrap;"
+    "overflow:hidden;text-overflow:ellipsis}"
+    ".fnl-pct{font-size:.62rem;color:#5a6472;font-weight:700}"
+    ".fnl-side-row{display:flex;gap:.35rem;flex-wrap:wrap;margin:.4rem 0 .2rem}"
+    ".fnl-side{font-size:.63rem;color:#c3cede;border:1px solid;border-radius:10px;"
+    "padding:.05rem .5rem;cursor:help}"
+    # report date-range form
+    ".rep-dates{display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:.7rem}"
+    ".rep-dates label{display:flex;flex-direction:column;gap:.15rem;font-size:.63rem;color:#8899aa}"
+    ".rep-dates input[type=date]{background:#0f1117;border:1px solid #2d3748;color:#d0d7de;"
+    "border-radius:5px;padding:.25rem .4rem;font-size:.72rem;color-scheme:dark}"
+    ".rep-dates button{background:#206bc4;color:#fff;border:none;border-radius:5px;"
+    "padding:.32rem .7rem;font-size:.72rem;font-weight:600;cursor:pointer}"
+    ".rep-dhint{font-size:.6rem;color:#5a6472;font-style:italic;align-self:center}"
     ".kpi{background:#141925;border:1px solid #2d3748;border-radius:6px;"
     "padding:.5rem .75rem;min-width:90px}"
     ".kpi-n{font-size:1.5rem;font-weight:800;line-height:1.15}"
@@ -584,7 +605,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
     search_idx = _h.escape(f"{name or ''} {ig_username or ''}".lower())
     return (
         f'<a class="ti{on}" data-search="{search_idx}"'
-        f' hx-get="/ui/chat/{tid}/panel" hx-target="#main" hx-push-url="true"'
+        f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="true"'
         f' onclick="setOn(this);setOpenThread({tid})"'
         f' href="/ui/inbox">'
         f'{_avatar(str(name or "?"), avatar_url)}'

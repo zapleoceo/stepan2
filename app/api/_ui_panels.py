@@ -92,7 +92,7 @@ def outbox_panel_html(rows: list) -> str:
 
     def _chat_link(tid: object) -> str:
         return (
-            f'<a class="oq-chat" hx-get="/ui/chat/{tid}/panel" hx-target="#main"'
+            f'<a class="oq-chat" hx-get="/ui/chat/{tid}" hx-target="#main"'
             f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">'
             f'#{_h.escape(str(tid))}</a>'
         )
@@ -928,6 +928,60 @@ def _ad_funnel_html(rows: list, business_id: str = "", account_id: str = "") -> 
     )
 
 
+# Pipeline order for the one-line funnel (side stages shown separately below).
+_FUNNEL_PIPELINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready")
+_FUNNEL_SIDE = ("handed_off", "dormant", "manager")
+
+
+def _funnel_line_html(stage_counts: dict[str, int]) -> str:
+    """One-line sales funnel: each pipeline stage as a step (count + % of total), a tooltip
+    describing HOW the stage is determined, in order — extensible by editing the tuples."""
+    total = sum(stage_counts.values()) or 1
+    steps = ""
+    for s in _FUNNEL_PIPELINE:
+        n = stage_counts.get(s, 0)
+        pct = round(n / total * 100)
+        color = _STAGE_COLOR.get(s, "#4a5568")
+        steps += (
+            f'<div class="fnl-step" title="{_h.escape(t(f"sdesc.{s}"))}">'
+            f'<div class="fnl-bar" style="background:{color}"></div>'
+            f'<div class="fnl-num">{n}</div>'
+            f'<div class="fnl-nm">{_h.escape(t(f"stage.{s}"))}</div>'
+            f'<div class="fnl-pct">{pct}%</div></div>'
+        )
+    side = ""
+    for s in _FUNNEL_SIDE:
+        n = stage_counts.get(s, 0)
+        if not n:
+            continue
+        side += (
+            f'<span class="fnl-side" title="{_h.escape(t(f"sdesc.{s}"))}"'
+            f' style="border-color:{_STAGE_COLOR.get(s,"#4a5568")}">'
+            f'{_h.escape(t(f"stage.{s}"))} {n}</span>'
+        )
+    side_row = f'<div class="fnl-side-row">{side}</div>' if side else ""
+    return (
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:.9rem 0 .4rem">'
+        f'{_h.escape(t("rep.funnel"))}</h3>'
+        f'<div class="fnl-line">{steps}</div>{side_row}'
+    )
+
+
+def _date_range_form_html(date_from: str, date_to: str) -> str:
+    """From/To date pickers filtering the whole report by lead conversation-start date."""
+    return (
+        f'<form class="rep-dates" method="get" action="/ui/reports/panel"'
+        f' hx-get="/ui/reports/panel" hx-target="#main" hx-push-url="true">'
+        f'<label>{_h.escape(t("rep.from"))}'
+        f'<input type="date" name="date_from" value="{_h.escape(date_from)}"></label>'
+        f'<label>{_h.escape(t("rep.to"))}'
+        f'<input type="date" name="date_to" value="{_h.escape(date_to)}"></label>'
+        f'<button type="submit">{_h.escape(t("rep.apply"))}</button>'
+        f'<span class="rep-dhint">{_h.escape(t("rep.date_hint"))}</span>'
+        f'</form>'
+    )
+
+
 def reports_panel_html(
     stage_counts: dict[str, int],
     hour_in: dict[int, int],
@@ -936,6 +990,8 @@ def reports_panel_html(
     discovery: dict | None = None,
     fb_business_id: str = "",
     fb_account_id: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1040,7 +1096,9 @@ def reports_panel_html(
     return (
         f'<div class="ch"><span class="ch-n">{title_lbl}</span></div>'
         f'<div class="pnl-body">'
+        f'{_date_range_form_html(date_from, date_to)}'
         f'<div class="kpi-row">{kpis}</div>'
+        f'{_funnel_line_html(stage_counts)}'
         f'{status_bar}'
         f'{stage_table}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id)}'
@@ -1083,7 +1141,7 @@ def _log_row(r: object, tz_by_branch: dict[int, int]) -> str:
         dt += timedelta(hours=tz_by_branch.get(r.branch_id, 0))
     when = dt.strftime("%m-%d %H:%M:%S") if dt else "—"  # MM-DD HH:MM:SS, branch-local
     rid = f'#{_h.escape(str(req))}' if req else "—"
-    chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}/panel" hx-target="#main"'
+    chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}" hx-target="#main"'
             f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">#{tid}</a>'
             if tid else '<span style="color:#4a5568">—</span>')
     tok = int(ti or 0) + int(to or 0)

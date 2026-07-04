@@ -103,7 +103,9 @@ def test_thread_list_html_with_row() -> None:
     html = thread_list_html([row])
     assert "Alice Test" in html
     assert "@alicetest" in html
-    assert 'hx-get="/ui/chat/42/panel"' in html
+    # thread list links to the shareable canonical URL, not the HTMX-only partial
+    assert 'hx-get="/ui/chat/42"' in html
+    assert "/ui/chat/42/panel" not in html
 
 
 def test_badge_renders_stage_en() -> None:
@@ -299,6 +301,19 @@ def test_threads_partial_exists(client: TestClient) -> None:
     assert resp.status_code in (200, 500)
 
 
+
+def test_chat_page_missing_thread_non_hx_redirects_to_inbox(client: TestClient) -> None:
+    resp = client.get("/ui/chat/99999999", follow_redirects=False)
+    assert resp.status_code in (303, 500)
+    if resp.status_code == 303:
+        assert resp.headers["location"] == "/ui/inbox"
+
+
+def test_chat_page_missing_thread_hx_returns_404(client: TestClient) -> None:
+    resp = client.get("/ui/chat/99999999", headers={"HX-Request": "true"})
+    assert resp.status_code in (404, 500)
+
+
 def test_coach_page_exists(client: TestClient) -> None:
     resp = client.get("/ui/coach")
     assert resp.status_code in (200, 500)
@@ -484,7 +499,7 @@ def test_outbox_panel_html_statuses() -> None:
     assert "s-sent" in html
     assert "s-pend" in html
     assert "s-fail" in html
-    assert 'hx-get="/ui/chat/77/panel"' in html  # chat number links to the chat
+    assert 'hx-get="/ui/chat/77"' in html  # canonical shareable chat URL
     assert ">#77<" in html
 
 

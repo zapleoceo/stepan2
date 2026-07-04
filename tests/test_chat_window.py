@@ -54,7 +54,7 @@ def test_thread_list_marks_active_row() -> None:
     html = thread_list_html([_thread_row(7), _thread_row(9)], active_tid=9)
     # only the matching row carries the "on" class
     assert html.count('class="ti on"') == 1
-    assert 'hx-get="/ui/chat/9/panel"' in html
+    assert 'hx-get="/ui/chat/9"' in html  # canonical shareable URL, not the /panel partial
 
 
 def test_thread_list_no_active_marks_none() -> None:
