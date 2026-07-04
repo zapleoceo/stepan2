@@ -159,6 +159,8 @@ _CSS = (
     ".bb-i{align-self:flex-start}.bb-o{align-self:flex-end}.bb-p{opacity:.6;align-self:flex-end}"
     ".bb-ex{opacity:.4;filter:grayscale(.7)}"  # cleared: greyed, out of Stepan's context
     ".bb-ex .bt{background:#20242c!important;border:1px dashed #3a4453}"
+    ".sys-log{align-self:center;max-width:90%;font-size:.72rem;color:#5a6472;"
+    "text-align:center;margin:.3rem 0;font-style:italic}"
     ".delx-pop{display:inline-flex;gap:.2rem;align-items:center;margin-left:.2rem}"
     ".delx-pop button{border:none;border-radius:3px;cursor:pointer;font-size:.7rem;"
     "padding:.02rem .3rem;line-height:1.3}"
@@ -684,11 +686,50 @@ def _last_msg_id(msgs: list) -> int:
     return max((int(m[0]) for m in msgs), default=0)
 
 
-def poll_sentinel_html(tid: int, after_id: int) -> str:
-    """Self-replacing 4s poller: fetches bubbles with id > after_id and reinserts itself."""
+_LOG_KIND_KEY = {"context_cleared": "chat.cleared", "context_loaded": "chat.loaded"}
+
+
+def _event_bubble(row: object) -> str:
+    """A technical/system log line (stage change, context clear/load) — centered, muted,
+    never mistaken for something a person said."""
+    _id, src, kind, detail, actor, ts = row  # type: ignore[misc]
+    if src == "stage":
+        label = t(
+            "log.stage_change",
+            **{"from": t(f"stage.{detail}"), "to": t(f"stage.{kind}")},
+        )
+    else:
+        label = t(_LOG_KIND_KEY.get(str(kind), str(kind)))
+    who = _h.escape(t(f"who.{actor}") if actor in ("agent", "manager", "lead") else str(actor))
+    return (
+        f'<div class="sys-log">— {_h.escape(label)} · {who} · {_fmt_time(_as_dt(ts))} —</div>'
+    )
+
+
+def _merge_feed(msgs: list, events: list, tid: int, lead_seen_at: datetime | None) -> str:
+    """Message bubbles + system-log lines, interleaved in timestamp order."""
+    items = [(_as_dt(m[4]) or datetime.min, 0, _bubble(m, tid, lead_seen_at)) for m in msgs]
+    items += [(_as_dt(e[5]) or datetime.min, 1, _event_bubble(e)) for e in events]
+    items.sort(key=lambda x: (x[0], x[1]))
+    return "".join(html for *_r, html in items)
+
+
+def _last_event_ids(events: list) -> tuple[int, int]:
+    """(max stage_event id seen, max thread_log id seen) — the two extra poll cursors."""
+    stage_max = max((int(e[0]) for e in events if e[1] == "stage"), default=0)
+    log_max = max((int(e[0]) for e in events if e[1] == "log"), default=0)
+    return stage_max, log_max
+
+
+def poll_sentinel_html(
+    tid: int, after_id: int, after_stage_id: int = 0, after_log_id: int = 0,
+) -> str:
+    """Self-replacing 4s poller: fetches bubbles/events newer than the three cursors and
+    reinserts itself. Three cursors, not one — messages, stage_event and thread_log each
+    have their own independent autoincrement id, so a single counter can't track all three."""
     return (
         f'<div id="poll-{tid}"'
-        f' hx-get="/ui/chat/{tid}/since/{after_id}"'
+        f' hx-get="/ui/chat/{tid}/since/{after_id}/{after_stage_id}/{after_log_id}"'
         f' hx-trigger="every 4s" hx-swap="outerHTML" hx-sync="this:replace"></div>'
     )
 
@@ -730,21 +771,30 @@ def pending_block_html(pending: list, tid: int, oob: bool = False) -> str:
 
 def since_bubbles_html(
     msgs: list, tid: int, after_id: int, lead_seen_at: datetime | None = None,
-    pending: list | None = None,
+    pending: list | None = None, events: list | None = None,
+    after_stage_id: int = 0, after_log_id: int = 0,
 ) -> str:
-    """New bubbles + fresh sentinel, plus an OOB refresh of the pending block."""
-    bubbles = "".join(_bubble(r, tid, lead_seen_at) for r in msgs)
-    out = bubbles + poll_sentinel_html(tid, _last_msg_id(msgs) or after_id)
+    """New bubbles/events + fresh sentinel, plus an OOB refresh of the pending block."""
+    events = events or []
+    feed = _merge_feed(msgs, events, tid, lead_seen_at)
+    stage_max, log_max = _last_event_ids(events)
+    out = feed + poll_sentinel_html(
+        tid, _last_msg_id(msgs) or after_id,
+        max(stage_max, after_stage_id), max(log_max, after_log_id),
+    )
     if pending is not None:
         out += pending_block_html(pending, tid, oob=True)
     return out
 
 
 def messages_html(
-    msgs: list, pending: list, tid: int, lead_seen_at: datetime | None = None
+    msgs: list, pending: list, tid: int, lead_seen_at: datetime | None = None,
+    events: list | None = None,
 ) -> str:
-    parts = [_bubble(r, tid, lead_seen_at) for r in msgs]
-    parts.append(poll_sentinel_html(tid, _last_msg_id(msgs)))  # sentinel ABOVE pending
+    events = events or []
+    stage_max, log_max = _last_event_ids(events)
+    parts = [_merge_feed(msgs, events, tid, lead_seen_at)]
+    parts.append(poll_sentinel_html(tid, _last_msg_id(msgs), stage_max, log_max))
     parts.append(pending_block_html(pending, tid))  # queued replies pinned at the bottom
     return "".join(parts)
 
@@ -953,6 +1003,7 @@ def chat_panel_html(
     last_active_at: datetime | None = None,
     lead_seen_at: datetime | None = None,
     needs: str | None = None,
+    events: list | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -972,7 +1023,7 @@ def chat_panel_html(
     return (
         f'{header}'
         f'<div class="msgs" id="msgs-{tid}">'
-        f'{messages_html(msgs, pending, tid, lead_seen_at)}</div>'
+        f'{messages_html(msgs, pending, tid, lead_seen_at, events)}</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
         f'<div class="fin">'

@@ -220,7 +220,7 @@ def test_messages_html_embeds_poll_sentinel() -> None:
            None, None, None, None, None)
     html = messages_html([row], [], 4)
     assert 'id="poll-4"' in html
-    assert 'hx-get="/ui/chat/4/since/5"' in html  # cursor at last id
+    assert 'hx-get="/ui/chat/4/since/5/0/0"' in html  # cursor at last id (msg/stage/log)
 
 
 def test_since_bubbles_only_render_given_rows_plus_sentinel() -> None:
@@ -234,7 +234,7 @@ def test_since_bubbles_only_render_given_rows_plus_sentinel() -> None:
     html = since_bubbles_html(rows, 4, after_id=9)
     assert "New one" in html
     assert "Reply" in html
-    assert 'hx-get="/ui/chat/4/since/11"' in html  # cursor advanced to newest
+    assert 'hx-get="/ui/chat/4/since/11/0/0"' in html  # cursor advanced to newest
 
 
 def test_bubble_renders_media_link_preview_and_receipt() -> None:
@@ -280,11 +280,11 @@ def test_since_bubbles_empty_keeps_cursor() -> None:
     _set_lang("en")
     html = since_bubbles_html([], 4, after_id=9)
     assert "bb-" not in html
-    assert 'hx-get="/ui/chat/4/since/9"' in html
+    assert 'hx-get="/ui/chat/4/since/9/0/0"' in html
 
 
 def test_since_route_responds(client: TestClient) -> None:
-    resp = client.get("/ui/chat/99999/since/0")
+    resp = client.get("/ui/chat/99999/since/0/0/0")
     assert resp.status_code in (200, 500)
 
 
@@ -435,3 +435,109 @@ async def test_clear_boundary_matches_llm_dialog_cutoff(db_session) -> None:
     dialog = await MessageRepo(db_session, b.id).dialog(th.id, since=cutoff)
     assert len(rows) == 1 and bool(rows[0][10]) is True  # shown but greyed (excluded)
     assert dialog == []  # … and dropped from the LLM prompt, same boundary
+
+
+# ─── item 5: technical/system log lines in the chat window ────────────────────
+
+async def _log_world(db_session):
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead
+    from app.domain.enums import ChannelKind
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-log")
+    db_session.add(th)
+    await db_session.flush()
+    return b.id, th.id
+
+
+async def test_fetch_thread_events_merges_stage_and_log_by_time(db_session) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.adapters.db.models import StageEvent, ThreadLog
+    from app.api._query import fetch_thread_events
+
+    bid, tid = await _log_world(db_session)
+    t0 = datetime.now(UTC).replace(tzinfo=None)
+    db_session.add(StageEvent(branch_id=bid, lead_id=1, thread_id=tid,
+                              from_stage="new", to_stage="qualifying",
+                              actor="bot", created_at=t0))
+    db_session.add(ThreadLog(branch_id=bid, thread_id=tid, kind="context_cleared",
+                             actor="Dima", created_at=t0 + timedelta(seconds=5)))
+    await db_session.flush()
+
+    rows = await fetch_thread_events(db_session, tid)
+    assert [r[1] for r in rows] == ["stage", "log"]  # time-ordered: stage first, then log
+
+
+async def test_fetch_thread_events_cursor_excludes_seen_rows(db_session) -> None:
+    from app.adapters.db.models import StageEvent, ThreadLog
+    from app.api._query import fetch_thread_events
+
+    bid, tid = await _log_world(db_session)
+    db_session.add(StageEvent(branch_id=bid, lead_id=1, thread_id=tid,
+                              from_stage="new", to_stage="qualifying", actor="bot"))
+    db_session.add(ThreadLog(branch_id=bid, thread_id=tid, kind="context_cleared",
+                             actor="Dima"))
+    await db_session.flush()
+
+    rows = await fetch_thread_events(db_session, tid)
+    stage_id = next(r[0] for r in rows if r[1] == "stage")
+    log_id = next(r[0] for r in rows if r[1] == "log")
+
+    fresh = await fetch_thread_events(db_session, tid, after_stage_id=stage_id,
+                                      after_log_id=log_id)
+    assert fresh == []  # both already-seen rows excluded by their own cursor
+
+
+def test_event_bubble_renders_stage_change_and_context_clear() -> None:
+    from datetime import UTC, datetime
+
+    from app.api._ui_html import _event_bubble
+
+    _set_lang("en")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    stage_row = (1, "stage", "qualifying", "new", "bot", now)
+    log_row = (2, "log", "context_cleared", None, "Dima", now)
+    assert "Stage: new → qualifying" in _event_bubble(stage_row)
+    assert "Context cleared" in _event_bubble(log_row)
+    assert "Dima" in _event_bubble(log_row)
+
+
+def test_merge_feed_interleaves_messages_and_events_by_time() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.api._ui_html import _merge_feed
+
+    _set_lang("en")
+    t0 = datetime.now(UTC).replace(tzinfo=None)
+    msg = (5, "in", "lead", "hi", t0, None, None, None, None, None)
+    evt = (1, "log", "context_cleared", None, "Dima", t0 + timedelta(seconds=1))
+    html = _merge_feed([msg], [evt], 4, None)
+    assert html.index("hi") < html.index("Context cleared")  # chronological order preserved
+
+
+async def test_chat_clear_route_writes_and_shows_log_line(db_session) -> None:
+    from sqlmodel import select
+
+    import app.api._routes_chat as rc
+    from app.adapters.db.models import ThreadLog
+    from app.api._routes_chat import chat_clear
+
+    _, tid = await _log_world(db_session)
+    orig = rc.session_scope
+    rc.session_scope = lambda: _Scope(db_session)
+    try:
+        resp = await chat_clear(tid, _Req())  # type: ignore[arg-type]
+    finally:
+        rc.session_scope = orig
+
+    assert "Context cleared" in resp.body.decode()
+    row = (await db_session.exec(
+        select(ThreadLog).where(ThreadLog.thread_id == tid))).first()
+    assert row is not None and row.kind == "context_cleared" and row.actor == "manager"

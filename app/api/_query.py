@@ -91,6 +91,28 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
     ).all()
 
 
+_EVENT_UNION = (  # noqa: S608 — no user-controlled values, thread_id is a bound param
+    "SELECT id, 'stage' AS src, to_stage AS kind, from_stage AS detail, actor, created_at"
+    " FROM stage_event WHERE thread_id = :tid AND id > :after_stage"
+    " UNION ALL"
+    " SELECT id, 'log' AS src, kind, detail, actor, created_at"
+    " FROM thread_log WHERE thread_id = :tid AND id > :after_log"
+)
+
+
+async def fetch_thread_events(
+    session: AsyncSession, thread_id: int, after_stage_id: int = 0, after_log_id: int = 0,
+) -> list:
+    """Stage transitions + thread-log rows (context clear/load, ...) for one thread,
+    time-ordered — rendered as system-log lines interleaved with the message bubbles."""
+    return (
+        await session.execute(
+            text(f"SELECT * FROM ({_EVENT_UNION}) e ORDER BY created_at, id"),
+            {"tid": thread_id, "after_stage": after_stage_id, "after_log": after_log_id},
+        )
+    ).all()
+
+
 async def fetch_pending(session: AsyncSession, thread_id: int) -> list:
     return (
         await session.execute(

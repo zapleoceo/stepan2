@@ -9,14 +9,19 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import text
 
-from app.adapters.db.models import Outbox
+from app.adapters.db.models import Outbox, ThreadLog
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import allowed_branch_ids
 from app.modules.conversation.translate import translate_message, translate_text
 
 from ._i18n import apply_lang, t
-from ._query import fetch_messages, fetch_messages_since, fetch_pending
+from ._query import (
+    fetch_messages,
+    fetch_messages_since,
+    fetch_pending,
+    fetch_thread_events,
+)
 from ._ui_html import (
     chat_block_pill_html,
     chat_bot_pill_html,
@@ -37,6 +42,14 @@ _VALID_STAGES = frozenset({
     "new", "nurturing", "qualifying", "presenting", "objection",
     "ready", "handed_off", "dormant", "manager",
 })
+
+
+def _actor_name(request: Request) -> str:
+    """Display name of the acting manager for thread_log entries; 'manager' when auth is
+    off (no session) or no name was captured at login."""
+    state = getattr(request, "state", None)
+    user = getattr(state, "user", None) if state is not None else None
+    return str(user.get("nm")) if user and user.get("nm") else "manager"
 
 
 async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) -> int | None:
@@ -88,6 +101,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
         set_render_tz(info[21])
         msgs = await fetch_messages(session, thread_id)
         pending = await fetch_pending(session, thread_id)
+        events = await fetch_thread_events(session, thread_id)
     (_, name, stage, _, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
@@ -104,6 +118,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
             agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
             follower_count=follower_count, following_count=following_count,
             last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs,
+            events=events,
         )
     )
 
@@ -146,21 +161,24 @@ async def chat_send(
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None or not text_body:
-            msgs = await fetch_messages(session, thread_id)
-            return HTMLResponse(messages_html(msgs, [], thread_id))
+            return await _rerender_feed(session, thread_id)
         session.add(Outbox(
             branch_id=branch_id, thread_id=thread_id, text=text_body, source=src,
             llm_info=(llm_info if src == "agent" else None),
         ))
         await session.flush()
-        msgs = await fetch_messages(session, thread_id)
-        pending = await fetch_pending(session, thread_id)
-    return HTMLResponse(messages_html(msgs, pending, thread_id))
+        return await _rerender_feed(session, thread_id)
 
 
-@router.get("/chat/{thread_id}/since/{after_id}", response_class=HTMLResponse)
-async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLResponse:
-    """Return only message bubbles newer than after_id plus a fresh poll sentinel."""
+@router.get(
+    "/chat/{thread_id}/since/{after_id}/{after_stage_id}/{after_log_id}",
+    response_class=HTMLResponse,
+)
+async def chat_since(
+    thread_id: int, after_id: int, after_stage_id: int, after_log_id: int, request: Request,
+) -> HTMLResponse:
+    """Return only message bubbles/system-log lines newer than the three cursors, plus a
+    fresh poll sentinel."""
     apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
@@ -168,8 +186,13 @@ async def chat_since(thread_id: int, after_id: int, request: Request) -> HTMLRes
             return HTMLResponse("")
         rows = await fetch_messages_since(session, thread_id, after_id)
         pending = await fetch_pending(session, thread_id)
+        events = await fetch_thread_events(session, thread_id, after_stage_id, after_log_id)
     return HTMLResponse(
-        since_bubbles_html(list(rows), thread_id, after_id, pending=pending))
+        since_bubbles_html(
+            list(rows), thread_id, after_id, pending=pending, events=list(events),
+            after_stage_id=after_stage_id, after_log_id=after_log_id,
+        )
+    )
 
 
 @router.post("/chat/{thread_id}/bot-toggle", response_class=HTMLResponse)
@@ -236,7 +259,8 @@ async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
 async def _rerender_feed(session, thread_id: int) -> HTMLResponse:
     msgs = await fetch_messages(session, thread_id)
     pending = await fetch_pending(session, thread_id)
-    return HTMLResponse(messages_html(msgs, pending, thread_id))
+    events = await fetch_thread_events(session, thread_id)
+    return HTMLResponse(messages_html(msgs, pending, thread_id, events=events))
 
 
 @router.post("/chat/{thread_id}/clear", response_class=HTMLResponse)
@@ -247,12 +271,18 @@ async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
     allowed = allowed_branch_ids(request)
     now = datetime.now(UTC).replace(tzinfo=None)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        branch_id = await _guarded_branch(session, thread_id, allowed)
+        if branch_id is None:
             return HTMLResponse("")
         await session.execute(
             text("UPDATE channel_thread SET context_cleared_at=:t WHERE id=:tid"),
             {"t": now, "tid": thread_id},
         )
+        session.add(ThreadLog(
+            branch_id=branch_id, thread_id=thread_id, kind="context_cleared",
+            actor=_actor_name(request),
+        ))
+        await session.flush()
         return await _rerender_feed(session, thread_id)
 
 
@@ -264,12 +294,18 @@ async def chat_load_context(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        branch_id = await _guarded_branch(session, thread_id, allowed)
+        if branch_id is None:
             return HTMLResponse("")
         await session.execute(
             text("UPDATE channel_thread SET context_cleared_at=NULL WHERE id=:tid"),
             {"tid": thread_id},
         )
+        session.add(ThreadLog(
+            branch_id=branch_id, thread_id=thread_id, kind="context_loaded",
+            actor=_actor_name(request),
+        ))
+        await session.flush()
         return await _rerender_feed(session, thread_id)
 
 

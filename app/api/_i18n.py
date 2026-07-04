@@ -201,6 +201,10 @@ _TR: dict[str, dict[str, str]] = {
     "chat.load_ctx":    {"ru": "Загрузить весь контекст", "en": "Load full context",
                          "id": "Muat semua konteks"},
     "chat.del_confirm": {"ru": "Удалить?", "en": "Delete?", "id": "Hapus?"},
+    "chat.loaded":      {"ru": "Контекст загружен", "en": "Context loaded",
+                         "id": "Konteks dimuat"},
+    "log.stage_change": {"ru": "Стадия: {from} → {to}", "en": "Stage: {from} → {to}",
+                         "id": "Tahap: {from} → {to}"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

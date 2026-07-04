@@ -281,6 +281,20 @@ class StageEvent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class ThreadLog(SQLModel, table=True):
+    """Технический лог треда для отображения в окне чата (не воронка — см. StageEvent):
+    очистка/загрузка контекста и подобные действия менеджера над самим чатом."""
+    __tablename__ = "thread_log"
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    thread_id: int = Field(foreign_key="channel_thread.id", index=True)
+    kind: str = Field(description="context_cleared|context_loaded")
+    detail: str | None = Field(default=None)
+    actor: str = Field(default="manager")
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class MediaAsset(SQLModel, table=True):
     """Скачанное медиа лида (IG image/video/audio) — заполняется backfill-воркером."""
     __tablename__ = "media_asset"
