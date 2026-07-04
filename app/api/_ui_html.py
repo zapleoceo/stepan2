@@ -1340,12 +1340,19 @@ def app_shell(
         ".catch(function(){out.textContent='';});}"
         # mobile pull-to-refresh: html/body overflow:hidden kills the native gesture, so
         # roll our own — at the top of a scroll region, a >90px downward drag reloads.
-        "(function(){var sy=0,pull=false,reg=null;"
+        # Two engine-agnostic gotchas fixed here: (1) a swipe starting outside the known
+        # scroll containers (top bar, empty gap) used to never arm at all — fall back to
+        # the document's own scrollTop; (2) some engines (seen on Opera Mobile) rest at a
+        # scrollTop of 1-2px after overscroll instead of exactly 0, so 0 alone missed it.
+        "(function(){var sy=0,pull=false;"
+        "function topOf(el){return el?el.scrollTop:0;}"
         "document.addEventListener('touchstart',function(e){"
         "if(window.innerWidth>760){pull=false;return;}"
-        "var t=e.target;reg=t.closest?(t.closest('.msgs')||t.closest('.thr')||"
+        "var t=e.target;"
+        "var reg=t.closest?(t.closest('.msgs')||t.closest('.thr')||"
         "t.closest('.pnl-body')||t.closest('#tl')):null;"
-        "if(reg&&reg.scrollTop<=0){sy=e.touches[0].clientY;pull=true;}else pull=false;},"
+        "var top=reg?topOf(reg):topOf(document.scrollingElement||document.body);"
+        "if(top<=2){sy=e.touches[0].clientY;pull=true;}else pull=false;},"
         "{passive:true});"
         "document.addEventListener('touchmove',function(e){if(!pull)return;"
         "if(e.touches[0].clientY-sy>90){pull=false;location.reload();}},{passive:true});"
