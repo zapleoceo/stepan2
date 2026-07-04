@@ -381,6 +381,9 @@ _TR: dict[str, dict[str, str]] = {
                       "id": "Stepan — semua"},
     "bot.branch":    {"ru": "Степан — этот филиал", "en": "Stepan — this branch",
                       "id": "Stepan — cabang ini"},
+    "bot.pick_branch": {"ru": "Выберите один филиал в фильтре, чтобы управлять его ботом",
+                        "en": "Pick a single branch in the filter to control its bot",
+                        "id": "Pilih satu cabang di filter untuk mengatur botnya"},
     # time abbreviations
     "time.m":        {"ru": "м",  "en": "m",  "id": "m"},
     "time.h":        {"ru": "ч",  "en": "h",  "id": "j"},

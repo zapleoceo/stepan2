@@ -309,6 +309,7 @@ _CSS = (
     ".nd-gain{background:#132a1e;color:#8fe3ac}"
     # ── Stepan on/off switches (platform + branch) ──
     ".tgl-row{margin:.2rem 0}"
+    ".tgl-hint{margin:.25rem 0;font-size:.63rem;line-height:1.3;color:#6b7688;font-style:italic}"
     ".tgl-btn{width:100%;display:flex;align-items:center;gap:.4rem;background:#161b26;"
     "border:1px solid #2d3748;border-radius:6px;padding:.32rem .5rem;cursor:pointer}"
     ".tgl-btn:hover{border-color:#3a5578}"
