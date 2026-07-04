@@ -202,6 +202,24 @@ def test_chat_header_renders_product_select_when_products_given() -> None:
     assert '<option value="">' in html  # the "no product" option
 
 
+def test_needs_block_renders_the_already_translated_profile() -> None:
+    """chat_header_html receives a pre-translated NeedsProfile (the route does the async
+    translation) and just displays it — no parsing/translation happens at render time."""
+    from app.api._ui_html import chat_header_html
+    from app.modules.conversation.needs import NeedsProfile
+    _set_lang("en")
+    profile = NeedsProfile(jobs=["learn coding"], pains=["afraid to fail"], gains=["stable job"])
+    html = chat_header_html(7, "Bob", "new", needs=profile)
+    assert "learn coding" in html and "afraid to fail" in html and "stable job" in html
+    assert "🎯" in html and "⚠️" in html and "✨" in html
+
+
+def test_needs_block_empty_when_nothing_captured() -> None:
+    from app.api._ui_html import chat_header_html
+    _set_lang("en")
+    assert "nd-box" not in chat_header_html(7, "Bob", "new", needs=None)
+
+
 def test_event_bubble_shows_product_change_detail() -> None:
     from datetime import UTC, datetime
 
@@ -353,6 +371,61 @@ async def test_bot_toggle_flips_lead_agent_enabled(db_session) -> None:
         _text("SELECT agent_enabled FROM lead WHERE id = 1")
     )).scalar()
     assert bool(val) is False
+
+
+# ─── captured-needs auto-translate on chat panel load (cached) ────────────────
+
+class _CountingTranslateLLM:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        import json as _json
+        self.calls += 1
+        user_msg = messages[-1]["content"]
+        lines = [ln.split(". ", 1)[1] for ln in user_msg.splitlines() if ln.strip()]
+        return _json.dumps([f"RU:{ln}" for ln in lines]), {"model": "fake", "cost_usd": 0.0}
+
+    async def embed(self, texts):  # noqa: ANN001, ANN201
+        return [[0.0] for _ in texts]
+
+
+@pytest.mark.asyncio
+async def test_needs_auto_translate_on_panel_load_is_cached(db_session, monkeypatch) -> None:
+    """Loading the chat panel must translate jobs/pains/gains into the UI language with NO
+    extra click, and cache the result on lead.needs_tr so a second load never re-bills."""
+    from sqlalchemy import text as _text
+
+    import app.api._routes_chat as rc
+    from app.adapters.db.models import Branch, ChannelThread, Lead
+
+    b = Branch(id=1, name="B", lang="id", tz_offset_h=7, is_active=True)
+    lead = Lead(id=1, branch_id=1, display_name="Alice", agent_enabled=True,
+                needs='{"jobs":["belajar coding"],"pains":[],"gains":[],'
+                     '"discovery_complete":false}')
+    db_session.add_all([b, lead, ChannelThread(id=1, lead_id=1, channel_id=1,
+                                                external_thread_id="x1")])
+    await db_session.commit()
+
+    orig_scope, orig_llm = rc.session_scope, rc.BrokerLLM
+    llm = _CountingTranslateLLM()
+    rc.session_scope = lambda: _Scope(db_session)
+    rc.BrokerLLM = lambda: llm
+    _set_lang("ru")
+    try:
+        html1 = await rc._build_chat_panel(db_session, 1, None)
+        assert "RU:belajar coding" in html1
+        assert llm.calls == 1
+
+        html2 = await rc._build_chat_panel(db_session, 1, None)
+        assert "RU:belajar coding" in html2
+        assert llm.calls == 1  # cache hit — no second broker call
+    finally:
+        rc.session_scope, rc.BrokerLLM = orig_scope, orig_llm
+
+    cached = (await db_session.execute(
+        _text("SELECT needs_tr FROM lead WHERE id = 1"))).scalar()
+    assert cached and "belajar coding" in cached and "RU:belajar coding" in cached
 
 
 # ─── item 4: live append polling (since-route) ────────────────────────────────

@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import html as _h
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.modules.conversation.needs import NeedsProfile
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 
@@ -996,7 +1000,7 @@ def chat_header_html(
     follower_count: int | None = None,
     following_count: int | None = None,
     last_active_at: datetime | None = None,
-    needs: str | None = None,
+    needs: NeedsProfile | None = None,
     products: list | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
@@ -1069,8 +1073,9 @@ def chat_header_html(
         meta_parts.append(presence)
     if phone:
         meta_parts.append(f'<a href="tel:{_h.escape(phone)}">📞 {_h.escape(phone)}</a>')
-    if created_at:
-        meta_parts.append(f'<span>📅 с {created_at.strftime("%d %b %Y")}</span>')
+    created_dt = _as_dt(created_at)  # raw text() SQL returns a str on sqlite, datetime on pg
+    if created_dt:
+        meta_parts.append(f'<span>📅 с {created_dt.strftime("%d %b %Y")}</span>')
     if last_in_at:
         meta_parts.append(f'<span>⬇ {_fmt_time(last_in_at)}</span>')
     meta_row = (
@@ -1096,11 +1101,13 @@ def chat_header_html(
     )
 
 
-def _needs_block(needs: str | None) -> str:
+def _needs_block(needs: NeedsProfile | None) -> str:
     """Render the captured Value-Proposition-Canvas profile (jobs/pains/gains) so the
-    manager sees what Stepan discovered. Empty when nothing captured yet."""
-    from app.modules.conversation.needs import parse_needs  # noqa: PLC0415 (avoid cycle)
-    p = parse_needs(needs)
+    manager sees what Stepan discovered — pre-translated by the caller into the current
+    UI language (see needs_translate.translated_needs). Empty when nothing captured yet."""
+    if needs is None:
+        return ""
+    p = needs
     rows = []
     for icon, label, items, cls in (
         ("🎯", t("needs.jobs"), p.jobs, "nd-job"),
@@ -1143,7 +1150,7 @@ def chat_panel_html(
     following_count: int | None = None,
     last_active_at: datetime | None = None,
     lead_seen_at: datetime | None = None,
-    needs: str | None = None,
+    needs: NeedsProfile | None = None,
     events: list | None = None,
     products: list | None = None,
 ) -> str:

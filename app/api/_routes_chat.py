@@ -15,12 +15,14 @@ from app.adapters.llm.broker import BrokerLLM
 from app.adapters.notify.telegram import TelegramNotifier
 from app.admin._branch import allowed_branch_ids, is_branch_forbidden
 from app.config import settings
+from app.modules.conversation.needs import parse_needs
+from app.modules.conversation.needs_translate import translated_needs
 from app.modules.conversation.translate import translate_message, translate_text
 from app.modules.knowledge.repository import ProductRepo
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import get_settings
 
-from ._i18n import apply_lang, t
+from ._i18n import apply_lang, current_lang, t
 from ._query import (
     fetch_messages,
     fetch_messages_since,
@@ -72,6 +74,18 @@ def _actor_name(request: Request) -> str:
     return str(user.get("nm")) if user and user.get("nm") else "manager"
 
 
+async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | None, lang: str):
+    """Auto-translate the lead's captured needs into the current UI language, caching the
+    result on lead.needs_tr so re-rendering the header never re-bills the same phrase."""
+    profile, new_tr = await translated_needs(parse_needs(needs), needs_tr, lang, BrokerLLM())
+    if new_tr is not None:
+        await session.execute(
+            text("UPDATE lead SET needs_tr = :v WHERE id = :id"), {"v": new_tr, "id": lead_id},
+        )
+        await session.flush()
+    return profile
+
+
 async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) -> int | None:
     """Thread's lead branch_id, or None if it doesn't exist or is outside the caller's
     allowed branches — the per-thread tenant-ownership guard (blocks cross-branch IDOR)."""
@@ -108,7 +122,7 @@ async def _build_chat_panel(
                 " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                 " l.agent_enabled, l.is_blocked,"
                 " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                " b.tz_offset_h, l.needs"
+                " b.tz_offset_h, l.needs, l.id, l.needs_tr"
                 " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                 " JOIN branch b ON b.id = l.branch_id"
                 " WHERE ct.id = :tid"
@@ -127,7 +141,9 @@ async def _build_chat_panel(
      phone, created_at, last_in_at,
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-     follower_count, following_count, last_active_at, lead_seen_at, _tz, needs) = info
+     follower_count, following_count, last_active_at, lead_seen_at, _tz, needs,
+     lead_id, needs_tr) = info
+    needs_profile = await _needs_for(session, lead_id, needs, needs_tr, current_lang())
     return chat_panel_html(
         thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
         product_slug=product_slug, ig_id=ig_id,
@@ -137,7 +153,7 @@ async def _build_chat_panel(
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
         follower_count=follower_count, following_count=following_count,
-        last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs,
+        last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs_profile,
         events=events, products=products,
     )
 
@@ -382,7 +398,7 @@ async def chat_stage(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.needs"
+                    " l.needs, l.needs_tr"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"
                     " WHERE ct.id = :tid"
@@ -396,7 +412,7 @@ async def chat_stage(
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at, _tz, needs) = info
+         follower_count, following_count, last_active_at, _tz, needs, needs_tr) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if stage != str(old_stage):
@@ -424,6 +440,7 @@ async def chat_stage(
                     )
                 except Exception:
                     _log.warning("manual stage alert failed tid=%s", thread_id, exc_info=True)
+        needs_profile = await _needs_for(session, lead_id, needs, needs_tr, current_lang())
     return HTMLResponse(
         chat_header_html(thread_id, str(name or "Lead"), stage,
                          product_slug=product_slug, ig_id=ig_id,
@@ -433,7 +450,7 @@ async def chat_stage(
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs, products=products)
+                         last_active_at=last_active_at, needs=needs_profile, products=products)
     )
 
 
@@ -461,7 +478,7 @@ async def chat_product(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.needs"
+                    " l.needs, l.id, l.needs_tr"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id WHERE ct.id = :tid"
                 ),
@@ -474,7 +491,8 @@ async def chat_product(
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at, _tz, needs) = info
+         follower_count, following_count, last_active_at, _tz, needs,
+         lead_id, needs_tr) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if new_slug is not None and new_slug not in {sl for sl, _ in products}:
@@ -490,6 +508,7 @@ async def chat_product(
                 actor=_actor_name(request),
             ))
             await session.flush()
+        needs_profile = await _needs_for(session, lead_id, needs, needs_tr, current_lang())
     return HTMLResponse(
         chat_header_html(thread_id, str(name or "Lead"), str(stage or "new"),
                          product_slug=new_slug, ig_id=ig_id,
@@ -499,7 +518,7 @@ async def chat_product(
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs, products=products)
+                         last_active_at=last_active_at, needs=needs_profile, products=products)
     )
 
 
