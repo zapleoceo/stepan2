@@ -169,6 +169,13 @@ _CSS = (
     ".fnl-side-row{display:flex;gap:.35rem;flex-wrap:wrap;margin:.4rem 0 .2rem}"
     ".fnl-side{font-size:.63rem;color:#c3cede;border:1px solid;border-radius:10px;"
     "padding:.05rem .5rem;cursor:help}"
+    # report quick-range presets
+    ".rep-presets{display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.5rem}"
+    ".rep-preset{background:#161b26;border:1px solid #2d3748;color:#93a1b3;"
+    "border-radius:5px;padding:.25rem .6rem;font-size:.72rem;cursor:pointer;"
+    "text-decoration:none;white-space:nowrap}"
+    ".rep-preset:hover{border-color:#4da6ff;color:#4da6ff}"
+    ".rep-preset.on{background:#206bc4;border-color:#206bc4;color:#fff}"
     # report date-range form
     ".rep-dates{display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:.7rem}"
     ".rep-dates label{display:flex;flex-direction:column;gap:.15rem;font-size:.63rem;color:#8899aa}"

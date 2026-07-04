@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import html as _h
-from datetime import date
+from datetime import date, timedelta
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
+from app.domain.clock import utc_now
 from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
 
@@ -111,20 +112,36 @@ def _valid_date(value: str) -> str:
         return ""
 
 
+_QUICK_RANGES: dict[str, timedelta] = {
+    "1h": timedelta(hours=1),
+    "24h": timedelta(hours=24),
+    "7d": timedelta(days=7),
+    "30d": timedelta(days=30),
+}
+
+
 @router.get("/reports/panel", response_class=HTMLResponse)
 async def reports_panel(
     request: Request, date_from: str = "", date_to: str = "",
+    range_: str = Query("", alias="range"),
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    df, dt_ = _valid_date(date_from), _valid_date(date_to)
+    # A quick-range button wins over manually-picked dates — it always sends its own
+    # request with no date_from/date_to, but guard anyway so stale query params can't
+    # combine two conflicting filters.
+    active_range = range_ if range_ in _QUICK_RANGES else ""
+    df, dt_ = ("", "") if active_range else (_valid_date(date_from), _valid_date(date_to))
     # date range filters by the lead's conversation-start (lead.created_at); dt_ is inclusive.
     date_and = ""
     params: dict = {}
     if branch_ids:
         date_and += " AND l.branch_id = ANY(:bids)"
         params["bids"] = branch_ids
-    if df:
+    if active_range:
+        date_and += " AND l.created_at >= :since"
+        params["since"] = utc_now() - _QUICK_RANGES[active_range]
+    elif df:
         # Both halves of the fix are needed: bind a real date object (asyncpg 500s on a
         # bare ISO string — it needs a typed value to compare against a timestamp column),
         # AND keep the explicit CAST(:df AS date) (without it, Postgres's untyped-parameter
@@ -170,7 +187,7 @@ async def reports_panel(
     return HTMLResponse(
         reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
                            fb_business_id=fb_bid, fb_account_id=fb_acct,
-                           date_from=df, date_to=dt_))
+                           date_from=df, date_to=dt_, active_range=active_range))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)

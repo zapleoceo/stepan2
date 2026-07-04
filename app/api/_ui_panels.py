@@ -981,12 +981,33 @@ def _funnel_line_html(stage_counts: dict[str, int]) -> str:
     )
 
 
-def _date_range_form_html(date_from: str, date_to: str) -> str:
-    """From/To date pickers filtering the whole report by lead conversation-start date.
+_QUICK_RANGES = (
+    ("1h", "rep.range_1h"), ("24h", "rep.range_24h"),
+    ("7d", "rep.range_7d"), ("30d", "rep.range_30d"), ("", "rep.range_all"),
+)
+
+
+def _quick_range_html(active_range: str) -> str:
+    """One-click preset buttons — each fires its own htmx GET immediately (no Apply
+    click, no date typing) and clears the manual date pickers since the two are
+    mutually exclusive filters."""
+    chips = "".join(
+        f'<a class="rep-preset{" on" if key == active_range else ""}"'
+        f' hx-get="/ui/reports/panel{f"?range={key}" if key else ""}" hx-target="#main"'
+        f' hx-push-url="true">{_h.escape(t(label))}</a>'
+        for key, label in _QUICK_RANGES
+    )
+    return f'<div class="rep-presets">{chips}</div>'
+
+
+def _date_range_form_html(date_from: str, date_to: str, active_range: str = "") -> str:
+    """Quick-range presets plus From/To date pickers filtering the whole report by the
+    lead's conversation-start date.
 
     Auto-applies on change of EITHER date (no Apply click needed, no full reload) — htmx's
     hx-trigger="change" listens on the form and fires from either input independently."""
     return (
+        f'{_quick_range_html(active_range)}'
         f'<form class="rep-dates" hx-get="/ui/reports/panel" hx-target="#main"'
         f' hx-push-url="true" hx-trigger="change">'
         f'<label>{_h.escape(t("rep.from"))}'
@@ -1008,6 +1029,7 @@ def reports_panel_html(
     fb_account_id: str = "",
     date_from: str = "",
     date_to: str = "",
+    active_range: str = "",
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1091,7 +1113,7 @@ def reports_panel_html(
     return (
         f'<div class="ch"><span class="ch-n">{title_lbl}</span></div>'
         f'<div class="pnl-body">'
-        f'{_date_range_form_html(date_from, date_to)}'
+        f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
         f'{_funnel_line_html(stage_counts)}'
         f'{status_bar}'

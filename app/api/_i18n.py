@@ -509,6 +509,11 @@ _TR: dict[str, dict[str, str]] = {
     "rep.date_hint": {"ru": "Дата = старт диалога с лидом",
                       "en": "Date = when the lead conversation started",
                       "id": "Tanggal = mulai percakapan lead"},
+    "rep.range_1h":  {"ru": "1 час",   "en": "1 hour",   "id": "1 jam"},
+    "rep.range_24h": {"ru": "24 часа", "en": "24 hours",  "id": "24 jam"},
+    "rep.range_7d":  {"ru": "7 дней",  "en": "7 days",    "id": "7 hari"},
+    "rep.range_30d": {"ru": "30 дней", "en": "30 days",   "id": "30 hari"},
+    "rep.range_all": {"ru": "Весь период", "en": "Full period", "id": "Semua periode"},
     # how each funnel stage is determined (tooltip on each step)
     "sdesc.new":        {"ru": "Лид только пришёл, содержательного ответа бота ещё не было",
                          "en": "Lead just arrived, no substantive bot reply yet",

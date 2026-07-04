@@ -1180,6 +1180,41 @@ def test_reports_date_form_auto_submits_on_change() -> None:
     assert "<button" not in html            # no submit button left in the form
 
 
+def test_reports_quick_range_buttons_fire_immediately() -> None:
+    """Each preset is a plain hx-get link — clicking it refreshes the report right away,
+    no typing a date and no separate Apply step."""
+    from app.api._ui_panels import _date_range_form_html
+    _set_lang("en")
+    html = _date_range_form_html("", "")
+    assert 'hx-get="/ui/reports/panel?range=1h"' in html
+    assert 'hx-get="/ui/reports/panel?range=24h"' in html
+    assert 'hx-get="/ui/reports/panel?range=7d"' in html
+    assert 'hx-get="/ui/reports/panel?range=30d"' in html
+    assert 'hx-get="/ui/reports/panel"' in html  # "Full period" clears range entirely
+    assert "1 hour" in html and "24 hours" in html and "7 days" in html
+    assert "30 days" in html and "Full period" in html
+
+
+def test_reports_quick_range_highlights_active_preset() -> None:
+    from app.api._ui_panels import _date_range_form_html
+    _set_lang("en")
+    html = _date_range_form_html("", "", active_range="24h")
+    assert 'rep-preset on" hx-get="/ui/reports/panel?range=24h"' in html
+    assert 'rep-preset on" hx-get="/ui/reports/panel?range=1h"' not in html
+
+
+def test_reports_panel_route_accepts_quick_range() -> None:
+    """The route must recognize ?range=1h/24h/7d/30d and ignore any leftover
+    date_from/date_to — a quick-range click always wins."""
+    import inspect
+
+    from app.api import _routes_admin
+
+    src = inspect.getsource(_routes_admin.reports_panel)
+    assert "_QUICK_RANGES[active_range]" in src
+    assert "utc_now()" in src
+
+
 def test_reports_panel_date_filter_binds_are_asyncpg_safe() -> None:
     """Two distinct bugs previously made picking EITHER report date 500 instead of
     refreshing: (1) binding a bare ISO string for date_from/date_to — asyncpg needs a
