@@ -14,8 +14,8 @@ Stepan-1.
 | [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
 | [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |
-| [architecture.md](architecture.md) | Сервисы, БД, broker-only LLM, деплой *(по мере реализации)* |
-| [domain-model.md](domain-model.md) | Схема БД, branch/channel/lead, изоляция *(по мере реализации)* |
+| [deploy.md](deploy.md) | Деплой: изолированный стек на Hetzner, nginx/Cloudflare, auth (Telegram Login), cutover со Stepan-1, CI/CD |
+| [worker.md](worker.md) | ARQ-воркер: cron-задачи, капы/тихие часы outbox, заморозка сессии при challenge, advisory-lock |
 
 ## Конвенции
 

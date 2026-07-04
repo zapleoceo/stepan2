@@ -1,0 +1,56 @@
+# ARQ-воркер — Stepan-2
+
+Один общий воркер (`stepan2-worker`, compose profile `worker`) на все филиалы:
+каждая cron-задача итерирует активные филиалы/каналы и делегирует branch-scoped
+use-case'ам. Точка входа — [`app/worker/main.py`](../app/worker/main.py)
+(`WorkerSettings`); домен-логики в воркере нет, только оркестрация.
+
+## Cron-задачи
+
+| Задача | Расписание | Что делает |
+|---|---|---|
+| `ingest_active_channels` | каждые 2 мин (`:00`) | тянет входящие всех активных каналов; джиттер до 12с (анти-бан); каждый канал — своя транзакция |
+| `reply_pending` | каждую минуту (`:20`) | решает и ставит в outbox ответ агента для тредов, ждущих ответа |
+| `process_deletions` | каждую минуту (`:30`) | выполняет запрошенные unsend: сначала отзыв в IG, потом локальное удаление |
+| `send_outbox` | каждую минуту (`:40`) | отправляет по одной due-строке outbox на тред через канал |
+| `schedule_followups` | каждые 10 мин (`:50`) | взводит таймеры фолоапов и ставит проактивные сообщения в очередь |
+| `sync_crm` | каждые 5 мин (`:10`) | пушит несинхронизированные manager_alert в CRM-webhook филиала (`crm_enabled`) |
+| `refresh_profiles` | каждые 30 мин (`:15`) | обновляет подписчиков/аватарки лидов активной воронки (TTL ~6ч, батч ≤20) |
+| `backfill_media` | каждые 3 мин (`:25`) | докачивает медиа, помеченные pending при ingest (батч ≤20) |
+| `prune_broker_log` | раз в сутки 03:30 | чистит `broker_log` старше 30 дней |
+| `reindex_knowledge` | каждые 5 мин (`:45`) | RAG-вотчер: переиндексирует только филиалы с изменённой KB |
+
+Секунды подобраны так, чтобы в пределах минуты шло ingest → reply → send по порядку.
+Платформенный kill-switch: `app_setting` `agent_enabled_platform` (branch_id IS NULL)
+глушит reply/followup для всех филиалов; per-branch — `agent_enabled` в настройках.
+
+## Outbox: капы и тихие часы
+
+Единственная точка выхода — `OutboxSender.send_next`
+([`app/modules/conversation/outbox.py`](../app/modules/conversation/outbox.py)):
+
+- **Капы** `hourly_cap` / `daily_cap` (настройки филиала; ≤0 = выключен) держат
+  автоматические строки в очереди до следующего тика; строки от менеджера
+  (`source=manager`) капы обходят.
+- **Тихие часы** `quiet_start`/`quiet_end` (по tz филиала, диапазон может переходить
+  через полночь) блокируют только отправку **фолоапов**; живые ответы лиду уходят и
+  ночью. Очередь при этом наполняется — фолоап уйдёт сразу после конца тихих часов.
+- Soft-block от IG (challenge/rate/429/…) → строка остаётся pending с ретраем через
+  15 мин; жёсткая ошибка → `failed`.
+- Анти-бан: перед отправкой `mark_seen` + человеческая пауза 2–5с.
+
+## Заморозка сессии при challenge
+
+Перед ingest каждый канал проверяется через `port.session_status()`. Не-ACTIVE статус
+(challenge/expired) → `wiring.mark_session_status` переводит `channel_session` из
+ACTIVE, и `build_channel_port` пропускает канал во **всех** циклах
+(ingest/reply/send/unsend) до ре-логина. При первой заморозке — алерт
+`channel_checkpoint` в Telegram-группу филиала. Ошибка самой проверки статуса канал не
+замораживает (не наказываем за flaky-пробу).
+
+## Advisory-lock на тред
+
+`wiring.try_lock_thread` берёт `pg_try_advisory_xact_lock(thread_id)` перед
+decide+enqueue — два перекрывающихся тика `reply_pending` не позовут LLM за один тред
+дважды. Подробности и история — [broker-log.md](broker-log.md) (раздел про фикс
+двойных вызовов). На SQLite (тесты) — no-op.
