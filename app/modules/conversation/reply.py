@@ -151,8 +151,16 @@ class ReplyService:
         """Move the funnel: stage priority ready+contact → READY, needs_manager →
         MANAGER, ready w/o contact → PRESENTING, else the model's stage. An openhouse RSVP
         is a side-channel notification, not a stage transition — see _stage_for."""
-        if decision.product_slug and thread.product_slug is None:
+        # The model may re-qualify the product it inherited from the ad (product_source
+        # 'ad') or from an earlier turn ('model'), but never overrides a manager's manual
+        # pick ('manager').
+        if (
+            decision.product_slug
+            and decision.product_slug != thread.product_slug
+            and thread.product_source in (None, "ad", "model")
+        ):
             thread.product_slug = decision.product_slug
+            thread.product_source = "model"
             self.session.add(thread)
         if decision.reply_language and decision.reply_language != lead.preferred_language:
             lead.preferred_language = decision.reply_language  # lead switched language — remember

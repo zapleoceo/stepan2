@@ -13,6 +13,7 @@ Stepan-1.
 | [broker-log.md](broker-log.md) | Лог вызовов брокера: что логируется, поля, страница `/settings/log`, ретенция |
 | [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
+| [ad-attribution-and-reports.md](ad-attribution-and-reports.md) | Атрибуция рекламы, авто-привязка продукта (`ad_product_map`), провенанс `product_source` |
 | [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |
 | [deploy.md](deploy.md) | Деплой: изолированный стек на Hetzner, nginx/Cloudflare, auth (Telegram Login), cutover со Stepan-1, CI/CD |
 | [worker.md](worker.md) | ARQ-воркер: cron-задачи, капы/тихие часы outbox, заморозка сессии при challenge, advisory-lock |

@@ -13,6 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
+from app.modules.ads import AdMappingService
 from app.ports.channel import InboundMessage
 
 from .identity import IdentityService
@@ -176,6 +177,7 @@ class IngestService:
             self._revive_bot(lead, thread)
         if inbound.product_hint and thread.product_slug is None:
             thread.product_slug = inbound.product_hint
+            thread.product_source = "ad"
         if inbound.lead_source and thread.lead_source is None:
             thread.lead_source = inbound.lead_source
         if inbound.ad_id and thread.ad_id is None:
@@ -184,6 +186,12 @@ class IngestService:
             thread.ad_media_id = inbound.ad_media_id
         if inbound.ad_preview_url:
             thread.ad_preview_url = inbound.ad_preview_url  # always refresh (CDN URL)
+        if thread.product_slug is None and thread.ad_id:
+            mapped = await AdMappingService(
+                self.session, self.branch_id).product_for_ad(thread.ad_id)
+            if mapped:
+                thread.product_slug = mapped
+                thread.product_source = "ad"
         return msg
 
     async def _reset_followup_cycle(self, thread) -> None:

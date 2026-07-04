@@ -499,7 +499,8 @@ async def chat_product(
             new_slug = old_slug  # ignore a slug that isn't an active product of this branch
         if new_slug != old_slug:
             await session.execute(
-                text("UPDATE channel_thread SET product_slug = :p WHERE id = :tid"),
+                text("UPDATE channel_thread SET product_slug = :p,"
+                     " product_source = 'manager' WHERE id = :tid"),
                 {"p": new_slug, "tid": thread_id},
             )
             session.add(ThreadLog(

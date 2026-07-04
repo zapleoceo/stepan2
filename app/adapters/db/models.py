@@ -94,6 +94,8 @@ class ChannelThread(SQLModel, table=True):
     channel_id: int = Field(foreign_key="channel.id", index=True)
     external_thread_id: str = Field(index=True, description="ig_thread / wa-jid / mbs convo id")
     product_slug: str | None = Field(default=None)
+    product_source: str | None = Field(
+        default=None, description="ad|model|manager — origin of product_slug; gates override")
     window_until: datetime | None = Field(default=None, description="окно ответа канала")
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
@@ -164,6 +166,22 @@ class Product(SQLModel, table=True):
     content: str = Field(default="")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
+    updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
+    updated_by: str | None = Field(default=None)
+
+
+class AdProductMap(SQLModel, table=True):
+    """Оператор-заданное соответствие рекламное объявление (ad_id) → продукт. При первом
+    входящем из этой рекламы тред получает product_slug как стартовый (product_source='ad');
+    Степан может переквалифицировать позже — уверенное решение модели перебивает ad-дефолт,
+    но не ручной выбор менеджера."""
+    __tablename__ = "ad_product_map"
+    __table_args__ = (UniqueConstraint("branch_id", "ad_id", name="uq_admap_branch_ad"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    ad_id: str = Field(index=True)
+    product_slug: str
     updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
     updated_by: str | None = Field(default=None)
 
