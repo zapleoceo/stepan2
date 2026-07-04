@@ -44,6 +44,7 @@ services:
       STEPAN2_SESSION_SECRET: ${SESSION_SECRET:-}
       STEPAN2_TG_LOGIN_BOT_USERNAME: ${TG_LOGIN_BOT_USERNAME:-}
       STEPAN2_PUBLIC_URL: ${PUBLIC_URL:-}
+      STEPAN2_MCP_SECRET: ${MCP_SECRET:-}
     ports:
       - "127.0.0.1:8020:8000"
     restart: unless-stopped
