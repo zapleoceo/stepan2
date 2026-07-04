@@ -64,23 +64,26 @@ class BrokerLLM:
                     json=body,
                 )
             r.raise_for_status()
+            # A 200 with a truncated body or missing keys is still a failed call — parse
+            # inside the try so JSONDecodeError/KeyError also write an ok=false audit row.
+            d = r.json()
+            meta = {
+                "model": d["model"],
+                "tokens_in": d["tokens_in"],
+                "tokens_out": d["tokens_out"],
+                "provider": d["provider"],
+                "cost_usd": d["cost_usd"],
+                "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                "request_id": d.get("request_id") or d.get("id") or r.headers.get("x-request-id"),
+            }
+            reply_text = d["text"]
         except Exception as exc:
             await _log_call(capability, workflow or "chat", thread_id, branch_id,
                             {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
                             ok=False, error=_err_text(exc))
             raise
-        d = r.json()
-        meta = {
-            "model": d["model"],
-            "tokens_in": d["tokens_in"],
-            "tokens_out": d["tokens_out"],
-            "provider": d["provider"],
-            "cost_usd": d["cost_usd"],
-            "elapsed_ms": int((time.perf_counter() - start) * 1000),
-            "request_id": d.get("request_id") or d.get("id") or r.headers.get("x-request-id"),
-        }
         await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
-        return d["text"], meta
+        return reply_text, meta
 
     async def embed(
         self,
@@ -101,19 +104,21 @@ class BrokerLLM:
                     json={"input": texts},
                 )
             r.raise_for_status()
+            d = r.json()
+            embeddings = d["embeddings"]
+            meta = {
+                "model": d.get("model"), "provider": d.get("provider"),
+                "tokens_in": d.get("tokens_in") or 0, "cost_usd": d.get("cost_usd") or 0,
+                "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                "request_id": d.get("request_id") or d.get("id"),
+            }
         except Exception as exc:
             await _log_call("embedding", "embed", thread_id, branch_id,
                             {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
                             ok=False, error=_err_text(exc))
             raise
-        d = r.json()
-        await _log_call("embedding", "embed", thread_id, branch_id, {
-            "model": d.get("model"), "provider": d.get("provider"),
-            "tokens_in": d.get("tokens_in") or 0, "cost_usd": d.get("cost_usd") or 0,
-            "elapsed_ms": int((time.perf_counter() - start) * 1000),
-            "request_id": d.get("request_id") or d.get("id"),
-        }, ok=True)
-        return d["embeddings"]
+        await _log_call("embedding", "embed", thread_id, branch_id, meta, ok=True)
+        return embeddings
 
 
 def _err_text(exc: Exception) -> str:

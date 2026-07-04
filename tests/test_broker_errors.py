@@ -90,17 +90,30 @@ async def test_chat_5xx_raises_and_logs_failure(monkeypatch, status: int) -> Non
     assert "upstream unavailable" in calls[0]["err"]
 
 
-async def test_chat_200_with_invalid_json_raises_but_is_not_logged(monkeypatch) -> None:
-    # NOTE: current behavior — see review. r.json() is called OUTSIDE the try/except in
-    # BrokerLLM.chat, so a 200 with a truncated/invalid JSON body raises ValueError to the
-    # caller WITHOUT writing an ok=False broker_log row: the failure is invisible in the
-    # /settings/log audit page. Same applies to a 200 missing required keys (KeyError).
+async def test_chat_200_with_invalid_json_raises_and_logs_failure(monkeypatch) -> None:
+    # A 200 with a truncated/invalid JSON body must still write an ok=False broker_log row
+    # so the failure is visible on /settings/log (the parse now lives inside the try/except).
     resp = _BadJsonResp({}, status=200)
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
     calls = _capture_log(monkeypatch)
     with pytest.raises(ValueError, match="Expecting value"):
         await _llm().chat([{"role": "user", "content": "hi"}])
-    assert calls == []  # failure NOT logged — current (buggy) behavior
+    assert len(calls) == 1
+    assert calls[0]["ok"] is False
+    assert calls[0]["err"].startswith("ValueError")
+
+
+async def test_chat_200_missing_keys_raises_and_logs_failure(monkeypatch) -> None:
+    # A 200 whose body parses but lacks required keys (KeyError on d["model"]) is a failed
+    # call too — it must be logged, not silently propagated.
+    resp = _FakeResp({"text": "hi"}, status=200)  # no model/tokens/provider/cost_usd
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(KeyError):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply",
+                          thread_id=1, branch_id=2)
+    assert len(calls) == 1
+    assert calls[0]["ok"] is False
 
 
 async def test_chat_read_timeout_raises_and_logs_failure(monkeypatch) -> None:
