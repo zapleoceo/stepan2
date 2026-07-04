@@ -58,7 +58,7 @@ def test_ad_funnel_with_products_has_mapping_and_menu() -> None:
         _ROWS, business_id="BID", account_id="ACT",
         mappings={"AD1": "vibe_coding"}, suggestions={"AD2": "smm_intensive"},
         products=_PRODUCTS)
-    assert "admap-sel" in html                      # product column present
+    assert 'class="admap-sel"' in html              # product column present
     assert '<details class="admenu">' in html       # ad-action menu
     assert "/ui/inbox?ad_id=AD1" in html            # "open this ad's chats"
     assert "adsmanager.facebook.com" in html         # FB deep link
@@ -69,12 +69,42 @@ def test_ad_funnel_with_products_has_mapping_and_menu() -> None:
 def test_ad_funnel_without_products_is_readonly() -> None:
     _set_lang()
     html = _ad_funnel_html(_ROWS, products=None)
-    assert "admap-sel" not in html                   # no product column cross-branch
+    assert 'class="admap-sel"' not in html           # no product column cross-branch
     assert '<details class="admenu">' in html        # menu still available
 
 
 def test_ad_funnel_empty_rows_render_nothing() -> None:
     assert _ad_funnel_html([], products=_PRODUCTS) == ""
+
+
+# ─── sort + filter ────────────────────────────────────────────────────────────
+
+def test_ad_funnel_headers_are_sortable() -> None:
+    _set_lang()
+    html = _ad_funnel_html(_ROWS, products=_PRODUCTS)
+    assert 'class="rep-sort"' in html
+    assert 'onclick="repSort(this)"' in html
+    assert 'data-num="1"' in html                    # numeric columns flagged for numeric sort
+    assert "function repSort" in html                # inline handler shipped with the fragment
+
+
+def test_ad_funnel_has_per_column_filters() -> None:
+    _set_lang()
+    html = _ad_funnel_html(_ROWS, products=_PRODUCTS)
+    assert 'class="rep-fltr"' in html                # filter row present
+    assert 'data-f="text"' in html                   # ad-id substring filter
+    assert 'data-f="min"' in html                    # numeric ≥ filters
+    assert 'data-f="eq"' in html                     # product dropdown filter
+    assert 'value="smm_intensive">SMM Intensive' in html  # product options in the filter
+    assert "function repFilter" in html
+
+
+def test_ad_funnel_readonly_has_sort_and_filter_but_no_product_eq() -> None:
+    _set_lang()
+    html = _ad_funnel_html(_ROWS, products=None)
+    assert 'class="rep-sort"' in html                # still sortable cross-branch
+    assert 'data-f="min"' in html                    # numeric filters still present
+    assert 'data-f="eq"' not in html                 # no product column → no product filter
 
 
 # ─── routes ───────────────────────────────────────────────────────────────────

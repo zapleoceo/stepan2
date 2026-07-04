@@ -206,6 +206,14 @@ _CSS = (
     "padding:.25rem .4rem;border-bottom:1px solid #2d3748}"
     ".rep-tbl td{padding:.25rem .4rem;border-bottom:1px solid #1a2033}"
     ".rep-n{text-align:right;font-weight:700;color:#e8eef4}"
+    # ad-funnel: sortable headers + per-column filter row
+    ".rep-sort{cursor:pointer;user-select:none;white-space:nowrap}"
+    ".rep-sort:hover{color:#93a1b3}"
+    ".rep-arr{font-size:.6rem;color:#4da6ff}"
+    ".rep-fltr th{padding-top:0;padding-bottom:.3rem;border-bottom:1px solid #2d3748}"
+    ".rep-f{width:100%;box-sizing:border-box;background:#161b26;border:1px solid #2d3748;"
+    "color:#e8eef4;border-radius:3px;font-size:.62rem;padding:.12rem .28rem}"
+    ".rep-f::placeholder{color:#4a5568}"
     # ad-funnel: click-to-open menu on the ad id, product-mapping select + suggestion chip
     ".admenu{display:inline-block;position:relative}"
     ".admenu>summary{list-style:none;cursor:pointer;color:#4da6ff;"

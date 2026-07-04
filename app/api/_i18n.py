@@ -323,6 +323,7 @@ _TR: dict[str, dict[str, str]] = {
                           "id": "Buka chat iklan ini"},
     "rep.ad_open_fb":   {"ru": "Открыть в Facebook", "en": "Open in Facebook",
                          "id": "Buka di Facebook"},
+    "rep.f_all":        {"ru": "все", "en": "all", "id": "semua"},
     "chat.block":       {"ru": "Заблокировать (спам)", "en": "Block (spam)",
                          "id": "Blokir (spam)"},
     "chat.blocked":     {"ru": "заблок.", "en": "blocked", "id": "diblokir"},

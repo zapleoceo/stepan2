@@ -953,6 +953,75 @@ def _ad_menu_cell(ad_id: object, ad_media_id: object, fb_url: str) -> str:
     return cell
 
 
+# Client-side sort + per-column filter for the ad-funnel table. Inline so it ships with the
+# htmx fragment; handlers are called via inline on* attrs, so redefining on each swap is a
+# no-op (no listener stacking). A cell's sort/filter value is the mapping <select>'s value,
+# else the ad-id <summary>, else the cell text — so the interactive product/ad cells sort too.
+_AD_FUNNEL_JS = (
+    "<script>"
+    "function _adCellVal(td){if(!td)return'';"
+    "var s=td.querySelector('select.admap-sel');if(s)return s.value;"
+    "var sm=td.querySelector('summary');if(sm)return sm.textContent.trim();"
+    "return td.textContent.trim();}"
+    "function repSort(th){var tbl=th.closest('table');"
+    "var idx=Array.prototype.indexOf.call(th.parentNode.children,th);"
+    "var num=th.getAttribute('data-num')==='1';var asc=th.getAttribute('data-asc')!=='1';"
+    "tbl.querySelectorAll('th.rep-sort').forEach(function(h){h.removeAttribute('data-asc');"
+    "var a=h.querySelector('.rep-arr');if(a)a.textContent='';});"
+    "th.setAttribute('data-asc',asc?'1':'0');"
+    "var ar=th.querySelector('.rep-arr');if(ar)ar.textContent=asc?' \\u25B2':' \\u25BC';"
+    "var tb=tbl.querySelector('tbody');"
+    "var rs=Array.prototype.slice.call(tb.querySelectorAll('tr'));"
+    "rs.sort(function(a,b){var x=_adCellVal(a.children[idx]),y=_adCellVal(b.children[idx]);"
+    "if(num){x=parseFloat(x.replace(/[^0-9.\\-]/g,''))||0;"
+    "y=parseFloat(y.replace(/[^0-9.\\-]/g,''))||0;return asc?x-y:y-x;}"
+    "return asc?x.localeCompare(y):y.localeCompare(x);});"
+    "rs.forEach(function(r){tb.appendChild(r);});}"
+    "function repFilter(el){var tbl=el.closest('table');var fr=el.closest('tr');"
+    "var fs=Array.prototype.slice.call(fr.querySelectorAll('.rep-f')).map(function(f){"
+    "return{idx:Array.prototype.indexOf.call(f.parentNode.parentNode.children,f.parentNode),"
+    "type:f.getAttribute('data-f'),val:f.value.trim().toLowerCase()};});"
+    "var tb=tbl.querySelector('tbody');"
+    "Array.prototype.slice.call(tb.querySelectorAll('tr')).forEach(function(r){var show=true;"
+    "fs.forEach(function(f){if(!f.val)return;"
+    "var cv=_adCellVal(r.children[f.idx]).toLowerCase();"
+    "if(f.type==='text'){if(cv.indexOf(f.val)<0)show=false;}"
+    "else if(f.type==='eq'){if(cv!==f.val)show=false;}"
+    "else if(f.type==='min'){var n=parseFloat(cv.replace(/[^0-9.\\-]/g,''))||0;"
+    "if(n<parseFloat(f.val))show=false;}});"
+    "r.style.display=show?'':'none';});}"
+    "</script>"
+)
+
+
+def _ad_funnel_header(cols: list[tuple[str, bool, str, bool]],
+                      products: list[tuple[str, str]]) -> str:
+    """Two header rows: clickable sort headers + a per-column filter row.
+    cols entries: (label_key, numeric, filter_kind[text|eq|min], align_right)."""
+    ths = ""
+    for key, num, _kind, right in cols:
+        style = ' style="text-align:right"' if right else ""
+        ths += (
+            f'<th class="rep-sort"{style} data-num="{1 if num else 0}"'
+            f' onclick="repSort(this)">{_h.escape(t(key))}<span class="rep-arr"></span></th>'
+        )
+    fths = ""
+    for _key, _num, kind, right in cols:
+        style = ' style="text-align:right"' if right else ""
+        if kind == "eq":  # product exact-match dropdown
+            opts = f'<option value="">{_h.escape(t("rep.f_all"))}</option>' + "".join(
+                f'<option value="{_h.escape(s)}">{_h.escape(tt)}</option>' for s, tt in products)
+            ctrl = f'<select class="rep-f" data-f="eq" onchange="repFilter(this)">{opts}</select>'
+        elif kind == "min":  # numeric ≥ threshold
+            ctrl = ('<input class="rep-f" data-f="min" type="number" min="0"'
+                    ' placeholder="≥" oninput="repFilter(this)">')
+        else:  # substring match
+            ctrl = ('<input class="rep-f" data-f="text"'
+                    ' placeholder="🔍" oninput="repFilter(this)">')
+        fths += f'<th{style}>{ctrl}</th>'
+    return f'<thead><tr>{ths}</tr><tr class="rep-fltr">{fths}</tr></thead>'
+
+
 def _ad_funnel_html(
     rows: list, business_id: str = "", account_id: str = "", *,
     mappings: dict[str, str] | None = None,
@@ -960,7 +1029,8 @@ def _ad_funnel_html(
     products: list[tuple[str, str]] | None = None,
 ) -> str:
     """Per-ad funnel table: leads from each ad → pipeline / won / conv%, an ad-action menu,
-    and (single-branch only) an operator product-mapping column with a history suggestion."""
+    and (single-branch only) an operator product-mapping column with a history suggestion.
+    Columns sort on header click and filter via the per-column row (client-side, see JS)."""
     if not rows:
         return ""
     mappings = mappings or {}
@@ -992,17 +1062,18 @@ def _ad_funnel_html(
             f'<td class="rep-n" style="color:#868e96">{int(dormant or 0)}</td>'
             f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
         )
-    map_th = f'<th>{_h.escape(t("rep.ad_product"))}</th>' if show_map else ""
+    cols: list[tuple[str, bool, str, bool]] = [("rep.ad", False, "text", False)]
+    if show_map:
+        cols.append(("rep.ad_product", False, "eq", False))
+    cols += [
+        ("rep.total", True, "min", True), ("rep.pipeline", True, "min", True),
+        ("rep.won", True, "min", True), ("rep.dormant", True, "min", True),
+        ("rep.conv", True, "min", True),
+    ]
+    head = _ad_funnel_header(cols, products or [])
     return (
-        f'{hdr}<table class="rep-tbl"><thead><tr>'
-        f'<th>{_h.escape(t("rep.ad"))}</th>'
-        f'{map_th}'
-        f'<th style="text-align:right">{_h.escape(t("rep.total"))}</th>'
-        f'<th style="text-align:right">{_h.escape(t("rep.pipeline"))}</th>'
-        f'<th style="text-align:right">{_h.escape(t("rep.won"))}</th>'
-        f'<th style="text-align:right">{_h.escape(t("rep.dormant"))}</th>'
-        f'<th style="text-align:right">{_h.escape(t("rep.conv"))}</th>'
-        f'</tr></thead><tbody>{body}</tbody></table>'
+        f'{hdr}<table class="rep-tbl rep-sortable">'
+        f'{head}<tbody>{body}</tbody></table>{_AD_FUNNEL_JS}'
     )
 
 
