@@ -1221,12 +1221,19 @@ def app_shell(
         "function smartScroll(m){if(!m)return;"
         "var near=m.scrollHeight-m.scrollTop-m.clientHeight<150;"
         "if(near)m.scrollTop=m.scrollHeight;}"
+        "function pinBot(m){scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
+        "if(!g.complete)g.addEventListener('load',function(){scrollBot(m);},{once:true});});}"
         "document.addEventListener('htmx:afterSettle',function(e){"
-        "var t=e.target;var m=(t&&t.classList&&t.classList.contains('msgs'))?t"
-        ":(t&&t.querySelector&&t.querySelector('.msgs'));"
-        "if(!m&&t&&t.closest)m=t.closest('.msgs');"  # poll bubbles land inside .msgs
+        "var t=e.target;"
+        # a chat panel/msgs container FRESHLY swapped in (opening a chat) -> always jump to
+        # the end; a poll bubble inserted INSIDE an existing .msgs -> smart-scroll only so we
+        # don't yank a manager who scrolled up to read history.
+        "var fresh=(t&&t.classList&&t.classList.contains('msgs'))?t"
+        ":(t&&t.querySelector?t.querySelector('.msgs'):null);"
+        "if(fresh){pinBot(fresh);}"
+        "else{var m=(t&&t.closest)?t.closest('.msgs'):null;"
         "if(m){smartScroll(m);m.querySelectorAll('img').forEach(function(g){"
-        "if(!g.complete)g.addEventListener('load',function(){smartScroll(m);},{once:true});});}"
+        "if(!g.complete)g.addEventListener('load',function(){smartScroll(m);},{once:true});});}}"
         "if(t&&t.id==='tl')filterTi();});"
         # F5 / direct load: afterSettle never fires, so pin every .msgs to the bottom on load
         "function scrollAllBot(){document.querySelectorAll('.msgs').forEach(function(m){"

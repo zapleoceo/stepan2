@@ -143,6 +143,18 @@ def test_app_shell_lang_buttons_highlight_active() -> None:
     assert '"lb on" href="/ui/lang/ru"' in html
 
 
+def test_app_shell_opens_chats_at_the_bottom() -> None:
+    """A freshly-swapped chat panel must jump to the newest message (pinBot), while a poll
+    bubble inserted into an existing feed only smart-scrolls — so opening a long chat / F5
+    lands at the end, but a manager scrolled up to read history isn't yanked down."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "", active_nav="inbox")
+    assert "function pinBot(" in html           # force-to-bottom helper
+    assert "scrollAllBot" in html               # F5 / direct load pins every .msgs
+    assert "smartScroll" in html                # incremental poll insert stays smart
+
+
 def test_app_shell_is_mobile_responsive() -> None:
     """Shell must ship the responsive viewport + a mobile @media block + the slide-in
     overlay hooks so the chat is reachable on a phone (was unreachable: 3 fixed columns)."""
