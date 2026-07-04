@@ -301,6 +301,15 @@ def test_coach_chat_html_renders_form() -> None:
     assert "coach-msgs" in html
 
 
+def test_coach_chat_textarea_sends_on_enter() -> None:
+    """Enter submits the coach message (Shift+Enter still inserts a newline) — matches
+    the main chat composer's entSend() behavior instead of requiring a button click."""
+    from app.api._ui_panels import coach_chat_html
+    _set_lang("en")
+    html = coach_chat_html(1, [], [])
+    assert 'onkeydown="entSend(event)"' in html
+
+
 def test_kb_tree_html_empty() -> None:
     from app.api._ui_kb import kb_tree_html
     _set_lang("en")

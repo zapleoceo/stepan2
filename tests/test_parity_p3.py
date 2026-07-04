@@ -113,10 +113,10 @@ def test_fmt_llm_meta_free_time_and_id() -> None:
     assert "mistral-large-latest" in free and "537↑131↓" in free
     assert "free" in free and "$" not in free   # zero cost → free
     assert "8.2s" in free                        # seconds when >= 1s
-    assert "id abc123de" in free                 # short broker request id
-    assert "  " not in free                      # no double spaces
-    # order: time · id · cost · tokens · model — all on one line, tight (no space padding)
-    assert free.index("8.2s") < free.index("id abc123de") < free.index("free") \
+    assert "#abc123de" in free                   # short broker request id
+    assert " | " in free                         # pipe-separated
+    # order: time | id | cost | tokens | model — all on one line
+    assert free.index("8.2s") < free.index("#abc123de") < free.index("free") \
         < free.index("537↑131↓") < free.index("mistral-large-latest")
 
     paid = _fmt_llm_meta({"model": "gpt", "cost_usd": 0.0021, "elapsed_ms": 450})

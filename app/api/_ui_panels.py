@@ -229,7 +229,8 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
         f' hx-post="/ui/coach/say" hx-target="#coach-msgs" hx-swap="beforeend"'
         f' hx-on::after-request="this.reset();scrollMsgs(\'coach\')">'
         f'<input type="hidden" name="branch_id" value="{branch_id}">'
-        f'<textarea name="request" rows="2" placeholder="{ph}"></textarea>'
+        f'<textarea name="request" rows="2" placeholder="{ph}"'
+        f' onkeydown="entSend(event)"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
         f'</div>'
     )
