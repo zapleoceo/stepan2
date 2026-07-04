@@ -889,18 +889,26 @@ def settings_panel_html(settings: list) -> str:
 # ─── reports panel ────────────────────────────────────────────────────────────
 
 def _fb_ad_url(ad_id: object, business_id: str, account_id: str) -> str:
-    """Deep link that opens THIS ad in the right account. selected_ad_ids alone lands in
-    whatever account the session last used (often the wrong one); business_id + act pin the
-    business and ad account so it opens on the exact ad — the params from the working link
-    the owner uses. Falls back to the bare link when the ids aren't configured."""
+    """Deep link that FILTERS Ads Manager down to THIS one ad.
+
+    selected_ad_ids only ticks the ad's checkbox — the list still shows every ad, so the
+    target is buried among hundreds and invisible. filter_set with Ads Manager's own field
+    (SEARCH_BY_ADGROUP_IDS-STRING_SET, ANY, ["<id>"] — captured from the FB UI; 'adgroup' is
+    Meta's internal name for an ad) narrows the table to the single ad. date=…,maximum lifts
+    the default 30-day window so an older ad still appears (a since-deleted ad — agencies
+    churn creatives — just yields 'not found', which nothing in the URL can fix).
+    %1E is the record separator between the filter's field/operator/value parts."""
     base = "https://adsmanager.facebook.com/adsmanager/manage/ads?"
+    flt = (
+        f"filter_set=SEARCH_BY_ADGROUP_IDS-STRING_SET%1EANY%1E%5B%22{ad_id}%22%5D"
+        "&date=2020-01-01_2035-01-01%2Cmaximum"
+    )
     if business_id and account_id:
         acct = account_id if account_id.startswith("act=") else f"act={account_id}"
         return _h.escape(
-            f"{base}business_id={business_id}&global_scope_id={business_id}&{acct}"
-            f"&selected_ad_ids={ad_id}"
+            f"{base}business_id={business_id}&global_scope_id={business_id}&{acct}&{flt}"
         )
-    return _h.escape(f"{base}selected_ad_ids={ad_id}")
+    return _h.escape(f"{base}{flt}")
 
 
 def admap_cell_inner(

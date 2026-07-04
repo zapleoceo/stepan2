@@ -101,21 +101,25 @@ def test_ad_funnel_html_renders_link_and_conv() -> None:
 
 def test_ad_deep_link_pins_business_and_account_when_configured() -> None:
     """With fb ids set, the ad link carries business_id + act so it opens on the right ad
-    account instead of landing in whatever account the FB session last used."""
+    account, and filter_set (not selected_ad_ids) narrows the list to the one ad."""
     from app.api._i18n import _lang
     _lang.set("en")
     html = _ad_funnel_html([("120255671613970771", None, 3, 1, 1, 0)],
                            business_id="949920286532207", account_id="1000480912055519")
     assert "business_id=949920286532207" in html
     assert "act=1000480912055519" in html
-    assert "selected_ad_ids=120255671613970771" in html
+    assert "SEARCH_BY_ADGROUP_IDS-STRING_SET" in html   # filters the list to this ad
+    assert "120255671613970771" in html
+    assert "maximum" in html                            # lifts the default 30-day window
+    assert "selected_ad_ids" not in html
 
 
 def test_ad_deep_link_falls_back_without_ids() -> None:
     from app.api._i18n import _lang
     _lang.set("en")
     html = _ad_funnel_html([("120255671613970771", None, 3, 1, 1, 0)])
-    assert "selected_ad_ids=120255671613970771" in html
+    assert "SEARCH_BY_ADGROUP_IDS-STRING_SET" in html
+    assert "120255671613970771" in html
     assert "business_id=" not in html
 
 

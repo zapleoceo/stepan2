@@ -62,7 +62,12 @@ def test_ad_funnel_with_products_has_mapping_and_menu() -> None:
     assert '<details class="admenu">' in html       # ad-action menu
     assert "/ui/inbox?ad_id=AD1" in html            # "open this ad's chats"
     assert "adsmanager.facebook.com" in html         # FB deep link
-    assert "selected_ad_ids=AD1" in html
+    # filter_set narrows the list to the one ad (selected_ad_ids only ticks a checkbox);
+    # date=…,maximum defeats the default 30-day window that hides older ads
+    assert "SEARCH_BY_ADGROUP_IDS-STRING_SET" in html
+    assert "AD1" in html
+    assert "maximum" in html
+    assert "selected_ad_ids" not in html
     assert 'data-ig="3932267938260790752"' in html   # IG post hover hook (row 1 has media)
 
 
