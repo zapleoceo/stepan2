@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html as _h
+import json as _json
 from datetime import timedelta
 
 from ._i18n import current_lang, t
@@ -144,12 +145,12 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
 
 # ─── coach chat ───────────────────────────────────────────────────────────────
 
-def _coach_pair(
+def _coach_bubbles(
     edit_id: int, req: str, status: str, slug: str | None,
     old_t: str | None, new_t: str | None, summary: str | None,
-    created_at: object,
-) -> str:
-    """Render one CoachingEdit as a manager-message + coach-response bubble pair."""
+    created_at: object,  # noqa: ARG001
+) -> tuple[str, str]:
+    """Build (manager_bubble_label, coach_response_bubble) for one CoachingEdit."""
     mgr = _h.escape(t("who.manager"))
     diff = ""
     if old_t:
@@ -183,13 +184,37 @@ def _coach_pair(
     summ = _h.escape(summary or "")
     label = _h.escape(t(f"coach.st.{status}")) if t(f"coach.st.{status}") != f"coach.st.{status}" \
         else _h.escape(status)
-    return (
-        f'<div class="bb bb-o mgr"><div class="bt">{_h.escape(req)}</div>'
-        f'<div class="bm">{mgr} · {_ago(created_at)}</div></div>'  # type: ignore[arg-type]
+    # the coach's response bubble only — the manager's own bubble is rendered separately
+    # (optimistically on send, or by _coach_pair for history).
+    resp = (
         f'<div class="bb bb-i" id="ce-{edit_id}">'
         f'<div class="bt">{summ}{diff}{actions}</div>'
         f'<div class="bm">Coach{slug_str} · {label}</div>'
         f'</div>'
+    )
+    return mgr, resp  # (unused mgr label kept for signature parity; see _coach_pair)
+
+
+def _coach_response(
+    edit_id: int, req: str, status: str, slug: str | None,  # noqa: ARG001
+    old_t: str | None, new_t: str | None, summary: str | None, created_at: object,  # noqa: ARG001
+) -> str:
+    """Just the coach's answer/proposal bubble — the /coach/say response (the manager's own
+    message is appended optimistically on the client the instant they hit send)."""
+    return _coach_bubbles(edit_id, req, status, slug, old_t, new_t, summary, created_at)[1]
+
+
+def _coach_pair(
+    edit_id: int, req: str, status: str, slug: str | None,
+    old_t: str | None, new_t: str | None, summary: str | None, created_at: object,
+) -> str:
+    """Manager message + coach response bubble pair — used to render the history."""
+    mgr = _h.escape(t("who.manager"))
+    resp = _coach_bubbles(edit_id, req, status, slug, old_t, new_t, summary, created_at)[1]
+    return (
+        f'<div class="bb bb-o mgr"><div class="bt">{_h.escape(req)}</div>'
+        f'<div class="bm">{mgr} · {_ago(created_at)}</div></div>'  # type: ignore[arg-type]
+        f'{resp}'
     )
 
 
@@ -222,20 +247,25 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
         for r in edits
     )
 
-    thinking = _h.escape(t("coach.thinking"))
+    mgr_lbl = _h.escape(t("who.manager"))
+    think_msgs = _h.escape(_json.dumps(
+        [t("coach.think1"), t("coach.think2"), t("coach.think3"), t("coach.think4")]))
     return (
         f'<div class="ch"><span class="ch-n">Coach KB</span></div>'
         f'{rules_section}'
         f'<div class="msgs" id="coach-msgs">{history}</div>'
-        # visible while the request is in flight (chat:deep can take seconds) — htmx toggles
-        # .htmx-request on the form, and #coach-thinking (an htmx-indicator) shows.
-        f'<div id="coach-thinking" class="htmx-indicator coach-think">'
-        f'<span class="spin"></span> {thinking}</div>'
+        # a detailed 'thinking' line (cycling stages via JS) shown while the chat:deep call
+        # is in flight — htmx toggles .htmx-request on #coach-thinking (the hx-indicator).
+        f'<div id="coach-thinking" class="htmx-indicator coach-think" data-msgs=\'{think_msgs}\'>'
+        f'<span class="spin"></span> <span id="coach-think-txt"></span></div>'
         f'<div class="fin">'
-        f'<form class="fin-row"'
+        # coachSend appends the manager's own bubble instantly (optimistic, like a real chat)
+        # and starts the cycling status; the POST returns only the coach's reply bubble.
+        f'<form class="fin-row" data-mgr="{mgr_lbl}"'
         f' hx-post="/ui/coach/say" hx-target="#coach-msgs" hx-swap="beforeend"'
         f' hx-indicator="#coach-thinking"'
-        f' hx-on::after-request="this.reset();scrollMsgs(\'coach\')">'
+        f' hx-on::before-request="coachSend(this)"'
+        f' hx-on::after-request="coachThinkStop();scrollMsgs(\'coach\')">'
         f'<input type="hidden" name="branch_id" value="{branch_id}">'
         f'<textarea name="request" rows="2" placeholder="{ph}"'
         f' onkeydown="entSend(event)"></textarea>'

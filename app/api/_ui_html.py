@@ -1323,6 +1323,22 @@ def app_shell(
         "el.classList.add('on');}"
         "function scrollMsgs(tid){"
         "var m=document.getElementById('msgs-'+tid);if(m)m.scrollTop=m.scrollHeight;}"
+        # coach: append the manager's own message instantly (optimistic), then cycle a
+        # detailed 'what Stepan is doing' status while the deep call runs.
+        "function coachSend(f){var ta=f.querySelector('textarea[name=request]');"
+        "var v=(ta?ta.value:'').trim();var box=document.getElementById('coach-msgs');"
+        "if(v&&box){var d=document.createElement('div');d.className='bb bb-o mgr';"
+        "d.innerHTML='<div class=\\\"bt\\\"></div><div class=\\\"bm\\\">'+"
+        "((f.getAttribute('data-mgr')||'')+' · now')+'</div>';"
+        "d.querySelector('.bt').textContent=v;box.appendChild(d);}"
+        "if(ta)ta.value='';scrollMsgs('coach');coachThinkStart();}"
+        "var _coachTimer=null;"
+        "function coachThinkStart(){var el=document.getElementById('coach-think-txt');"
+        "var wrap=document.getElementById('coach-thinking');if(!el||!wrap)return;"
+        "var msgs;try{msgs=JSON.parse(wrap.getAttribute('data-msgs')||'[]');}catch(e){msgs=[];}"
+        "if(!msgs.length)return;var i=0;el.textContent=msgs[0];coachThinkStop();"
+        "_coachTimer=setInterval(function(){i=(i+1)%msgs.length;el.textContent=msgs[i];},2500);}"
+        "function coachThinkStop(){if(_coachTimer){clearInterval(_coachTimer);_coachTimer=null;}}"
         "function setOpenThread(tid){"
         "document.cookie='stepan2_open_thread='+tid+';path=/;max-age=86400;samesite=lax';"
         # mobile: opening a chat slides the #main overlay in over the thread list

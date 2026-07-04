@@ -293,12 +293,28 @@ def test_coach_pair_applied_no_actions() -> None:
     assert "done" in html
 
 
+def test_coach_response_is_coach_bubble_only() -> None:
+    """The /coach/say response carries ONLY the coach bubble — the manager's own message is
+    appended optimistically on the client, so echoing it here would double it."""
+    from datetime import datetime
+
+    from app.api._ui_panels import _coach_response
+    _set_lang("en")
+    html = _coach_response(3, "Change price", "proposed", "pricing",
+                           "old text", "new text", "summary",
+                           datetime.now(UTC).replace(tzinfo=None))
+    assert "bb-i" in html and "✓ Apply" in html
+    assert "bb-o" not in html and "Change price" not in html  # no manager echo
+
+
 def test_coach_chat_html_renders_form() -> None:
     from app.api._ui_panels import coach_chat_html
     _set_lang("en")
     html = coach_chat_html(1, [], [])
     assert 'hx-post="/ui/coach/say"' in html
     assert "coach-msgs" in html
+    assert "coachSend(this)" in html          # optimistic manager bubble on send
+    assert "coach-thinking" in html and "data-msgs" in html  # detailed thinking cycle
 
 
 def test_coach_chat_textarea_sends_on_enter() -> None:

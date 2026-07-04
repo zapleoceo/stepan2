@@ -16,7 +16,7 @@ from app.modules.conversation.coach_service import (
 
 from ._i18n import apply_lang
 from ._query import fetch_coach_data
-from ._ui_panels import _coach_pair, coach_chat_html
+from ._ui_panels import _coach_response, coach_chat_html
 
 router = APIRouter()
 
@@ -41,7 +41,9 @@ async def coach_say(
     llm = BrokerLLM()
     async with session_scope() as session:
         edit = await propose_edit(session, branch_id, request_text.strip(), llm)
-        html = _coach_pair(
+        # only the coach's reply — the manager's own message was appended optimistically
+        # on the client the instant they hit send (coachSend).
+        html = _coach_response(
             edit.id, edit.request, edit.status, edit.slug,
             edit.old_text, edit.new_text, edit.summary, edit.created_at,
         )
