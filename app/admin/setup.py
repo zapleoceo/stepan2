@@ -374,7 +374,11 @@ _VIEWS: list[type[ModelView]] = [
 
 
 def mount_admin(app: Starlette, engine: AsyncEngine) -> Admin:
-    """Register the SQLAdmin dashboard. No DB I/O here."""
+    """Register the SQLAdmin dashboard. No DB I/O here.
+
+    Access is gated by AdminGuardMiddleware (super_admin only), not by a SQLAdmin
+    AuthenticationBackend — the backend pulls in starlette SessionMiddleware
+    (itsdangerous), an extra dep we don't otherwise need."""
     admin = Admin(app, engine=engine, title="Stepan2 Admin", templates_dir=_TEMPLATES)
     for view in _VIEWS:
         admin.add_view(view)

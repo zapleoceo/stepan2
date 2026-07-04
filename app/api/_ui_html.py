@@ -669,10 +669,13 @@ def _source_bar(
     if is_ad:
         parts = []
         if ad_id:
+            # ad_id comes from the IG ad payload (attacker-influenceable). Keep it in a
+            # data-* attribute and copy via this.dataset — never interpolate it into an
+            # inline JS string, where html.escape's &#x27; decodes back to ' and breaks out.
             safe_id = _h.escape(ad_id)
             parts.append(
-                f'<span class="srcid" title="Copy ad ID"'
-                f' onclick="navigator.clipboard&&navigator.clipboard.writeText(\'{safe_id}\')">'
+                f'<span class="srcid" title="Copy ad ID" data-clip="{safe_id}"'
+                f' onclick="navigator.clipboard&&navigator.clipboard.writeText(this.dataset.clip)">'
                 f'{safe_id}</span>'
             )
         post_url = ig_post_url(ad_media_id)

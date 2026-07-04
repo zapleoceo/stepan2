@@ -101,3 +101,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             resp.headers["HX-Redirect"] = "/login"
             return resp
         return RedirectResponse(url="/login", status_code=303)
+
+
+class AdminGuardMiddleware(BaseHTTPMiddleware):
+    """The SQLAdmin dashboard (/admin/**) is raw, unfiltered CRUD over every model —
+    Membership, Branch, AppSetting included — so it must be super_admin-only. This runs
+    ALWAYS, independent of auth_enabled: with auth off there is no session, so /admin is
+    closed rather than wide open (the previous behaviour). SQLAdmin owns /admin/*
+    exclusively; the branch-filter meta API lives under /_admin/, unaffected."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        path = request.url.path
+        if path == "/admin" or path.startswith("/admin/"):
+            sess = read_session(request)
+            if sess is None or not sess.get("sa"):
+                return RedirectResponse(url="/ui/inbox", status_code=303)
+        return await call_next(request)

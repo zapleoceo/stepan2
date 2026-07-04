@@ -233,6 +233,98 @@ def test_branches_router_requires_super_admin() -> None:
     assert require_super_admin in deps
 
 
+# ─── SQLAdmin raw dashboard is super_admin-only (privilege-escalation guard) ──
+
+def _cookie_client(sess: dict | None, *, auth_enabled: bool = True) -> TestClient:
+    """A TestClient carrying a signed session cookie (or none), with auth enabled so the
+    AdminGuardMiddleware path is exercised realistically."""
+    import os as _os
+
+    from app.api._auth import SESSION_COOKIE, mint_session
+    from app.config import settings as _settings
+
+    _os.environ["STEPAN2_AUTH_ENABLED"] = "true" if auth_enabled else "false"
+    _settings.cache_clear()
+    c = TestClient(app, raise_server_exceptions=False, follow_redirects=False)
+    if sess is not None:
+        tok = mint_session(
+            telegram_id=sess["tg"], user_id=sess["uid"], name=sess.get("nm", ""),
+            is_super=sess["sa"], branch_ids=sess.get("br", []),
+        )
+        c.cookies.set(SESSION_COOKIE, tok)
+    return c
+
+
+def test_admin_dashboard_blocks_non_super_admin() -> None:
+    """SQLAdmin exposes raw CRUD over Membership/Branch/AppSetting — a branch-scoped user
+    reaching /admin/membership/list could self-escalate to super_admin. Must be blocked."""
+    try:
+        # super_admin is let THROUGH the guard (the in-memory test DB has no tables, so
+        # SQLAdmin itself 500s — that's fine; the point is the guard didn't bounce it).
+        su = _cookie_client({"tg": 1, "uid": 1, "sa": True, "br": []})
+        assert su.get("/admin/membership/list").status_code != 303
+
+        scoped = _cookie_client({"tg": 2, "uid": 2, "sa": False, "br": [1]})
+        assert scoped.get("/admin/membership/list").status_code == 303  # bounced
+
+        anon = _cookie_client(None)
+        assert anon.get("/admin/membership/list").status_code == 303
+    finally:
+        import os as _os
+
+        from app.config import settings as _settings
+        _os.environ.pop("STEPAN2_AUTH_ENABLED", None)
+        _settings.cache_clear()
+
+
+def test_admin_dashboard_closed_when_auth_disabled() -> None:
+    """With auth off there is no session at all — /admin must be CLOSED (was wide open)."""
+    try:
+        c = _cookie_client(None, auth_enabled=False)
+        assert c.get("/admin/membership/list").status_code == 303
+    finally:
+        import os as _os
+
+        from app.config import settings as _settings
+        _os.environ.pop("STEPAN2_AUTH_ENABLED", None)
+        _settings.cache_clear()
+
+
+# ─── coach analyze must not read another branch's chat + KB (IDOR) ────────────
+
+async def test_coach_analyze_denies_cross_branch(db_session, monkeypatch) -> None:
+    import contextlib
+
+    from app.api._routes_coach import coach_analyze
+
+    a = Branch(name="A", lang="id")
+    b = Branch(name="B", lang="id")
+    db_session.add_all([a, b])
+    await db_session.flush()
+    tid = await _thread(db_session, a.id)
+
+    called = {"n": 0}
+
+    async def fake_analyze(*args, **kwargs):
+        called["n"] += 1
+        return "GRADED"
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr("app.api._routes_coach.session_scope", fake_scope)
+    monkeypatch.setattr("app.api._routes_coach.analyze_chat", fake_analyze)
+
+    denied = await coach_analyze(tid, _req(allowed=[b.id]))
+    assert denied.body == b""            # cross-branch → nothing rendered
+    assert called["n"] == 0              # and the LLM/KB read never ran
+
+    ok = await coach_analyze(tid, _req(allowed=[a.id]))
+    assert b"GRADED" in ok.body
+    assert called["n"] == 1
+
+
 async def test_guarded_branch_denies_zero_branch_member(db_session) -> None:
     a = Branch(name="A", lang="id")
     db_session.add(a)
@@ -263,6 +355,19 @@ async def test_bot_toggle_denied_for_zero_branch_member(db_session, monkeypatch)
     after = (await db_session.execute(
         _text("SELECT agent_enabled FROM lead"))).scalar()
     assert after == before  # guard blocked the flip
+
+
+# ─── ad_id must not break out of the copy-to-clipboard handler (XSS) ──────────
+
+def test_source_bar_ad_id_not_in_inline_js_string() -> None:
+    from app.api._ui_html import _source_bar
+    payload = "');alert(document.cookie);//"
+    html = _source_bar("ad", payload, None, None)
+    # value copied via this.dataset, never interpolated into an inline JS string, so the
+    # raw quote-breakout sequence can't appear unescaped anywhere in the output.
+    assert "writeText('" not in html
+    assert "this.dataset.clip" in html
+    assert "');alert" not in html          # the ' is escaped to &#x27; — no breakout
 
 
 # ─── CRM SSRF allowlist ───────────────────────────────────────────────────────

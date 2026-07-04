@@ -92,6 +92,83 @@ def test_tg_login_no_token_rejected() -> None:
     assert verify_telegram_login({"id": "1", "hash": "x"}, "") is None
 
 
+# ─── /api/tg_login callback: the privilege-assignment step ────────────────────
+
+async def _run_tg_login(db_session, monkeypatch, tg_id: int):
+    """Drive the real tg_login route with a stubbed verify + the test DB, return the
+    session dict decoded from the Set-Cookie it mints (or None if login was rejected)."""
+    import contextlib
+
+    import app.api._routes_auth as ra
+    from app.api._auth import SESSION_COOKIE as _SC
+    from app.api._auth import read_session
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr(ra, "session_scope", fake_scope)
+    monkeypatch.setattr(ra, "verify_telegram_login", lambda *a, **k: tg_id)
+    monkeypatch.setattr(ra, "settings", lambda: _StubSettings(tg_bot_token="TOKEN"))  # noqa: S106
+
+    req = Request({"type": "http", "headers": [], "query_string": b"", "state": {}})
+    resp = await ra.tg_login(req)
+    cookie = resp.headers.get("set-cookie", "")
+    if f"{_SC}=" not in cookie:
+        return None, resp
+    tok = cookie.split(f"{_SC}=", 1)[1].split(";", 1)[0]
+    return read_session(_CookieReq(_SC, tok)), resp
+
+
+class _CookieReq:
+    def __init__(self, name: str, tok: str) -> None:
+        self.cookies = {name: tok}
+
+
+async def test_tg_login_mints_super_admin_session(db_session, monkeypatch) -> None:
+    from app.adapters.db.models import Membership, User
+    from app.domain.enums import Role
+
+    u = User(telegram_id=169510539, name="Dima")
+    db_session.add(u)
+    await db_session.flush()
+    db_session.add(Membership(user_id=u.id, branch_id=None, role=Role.SUPER_ADMIN))
+    await db_session.flush()
+
+    sess, _ = await _run_tg_login(db_session, monkeypatch, 169510539)
+    assert sess is not None
+    assert sess["sa"] is True           # super_admin claim
+    assert sess["br"] == []             # no branch confinement
+    assert sess["uid"] == u.id
+
+
+async def test_tg_login_mints_branch_scoped_session(db_session, monkeypatch) -> None:
+    from app.adapters.db.models import Branch, Membership, User
+    from app.domain.enums import Role
+
+    b = Branch(name="Jakarta", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    u = User(telegram_id=555, name="Staff")
+    db_session.add(u)
+    await db_session.flush()
+    db_session.add(Membership(user_id=u.id, branch_id=b.id, role=Role.BRANCH_VIEWER))
+    await db_session.flush()
+
+    sess, _ = await _run_tg_login(db_session, monkeypatch, 555)
+    assert sess is not None
+    assert sess["sa"] is False          # NOT super_admin
+    assert sess["br"] == [b.id]         # confined to their branch
+
+
+async def test_tg_login_unknown_user_rejected(db_session, monkeypatch) -> None:
+    """A verified Telegram id with no User/Membership row must NOT get a session — the
+    privilege-assignment step must fail closed for strangers."""
+    sess, resp = await _run_tg_login(db_session, monkeypatch, 424242)
+    assert sess is None
+    assert resp.status_code == 403
+
+
 # ─── identity-aware branch scoping ────────────────────────────────────────────
 
 def _req(cookie: str | None = None, allowed: object = "__unset__") -> Request:

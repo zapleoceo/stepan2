@@ -908,7 +908,9 @@ def test_agent_status_route_responds(client: TestClient) -> None:
 def test_admin_root_redirects_to_ui() -> None:
     client = TestClient(app, follow_redirects=False)
     resp = client.get("/admin")
-    assert resp.status_code == 302
+    # AdminGuardMiddleware bounces a session-less /admin to the app (303); with a
+    # super-admin session the dashboard would load instead.
+    assert resp.status_code in (302, 303)
     assert resp.headers["location"] == "/ui/inbox"
 
 

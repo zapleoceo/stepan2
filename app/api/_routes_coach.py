@@ -9,7 +9,11 @@ from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
-from app.admin._branch import branch_ids_from_request
+from app.admin._branch import (
+    allowed_branch_ids,
+    branch_ids_from_request,
+    is_branch_forbidden,
+)
 from app.modules.conversation.coach_service import (
     analyze_chat,
     apply_edit,
@@ -63,11 +67,14 @@ async def coach_say(
 async def coach_analyze(thread_id: int, request: Request) -> HTMLResponse:
     """Coach reads a whole lead chat and grades it against the KB → popup in the chat window."""
     lang = apply_lang(request)
+    allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         row = (await session.execute(
             text("SELECT l.branch_id FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                  " WHERE ct.id = :t"), {"t": thread_id})).first()
-        if row is None:
+        # Same per-thread tenant guard every other chat route uses — without it a manager
+        # could analyze (read the full history + KB of) any branch's thread by id (IDOR).
+        if row is None or is_branch_forbidden(row[0], allowed):
             return HTMLResponse("")
         analysis = await analyze_chat(
             session, row[0], thread_id, BrokerLLM(), lang=_LANG_NAME.get(lang, "English"))

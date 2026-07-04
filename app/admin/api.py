@@ -54,6 +54,7 @@ async def set_branch(
             path="/",
             httponly=False,
             samesite="lax",
+            secure=True,
         )
     else:
         resp.delete_cookie(BRANCH_COOKIE, path="/")

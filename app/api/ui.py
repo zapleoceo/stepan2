@@ -1,12 +1,13 @@
 """Manager UI — 3-column layout (sidebar + thread list + panel).
 
-Full-page routes only; all HTMX partials live in _routes_*.py sub-modules.
+Full-page shells + a few HTMX partials; the rest of the partials live in the
+_routes_*.py sub-modules included below (admin, auth, branches, channels, chat,
+coach, knowledge, members, products).
 
-Routes registered here:
-  GET  /ui/inbox     — full shell (inbox active)
-  GET  /ui/coach     — full shell (coach active)
-  GET  /ui/threads   — HTMX: thread list
-  GET  /ui/lang/{c}  — language cookie + redirect
+Full pages registered here:
+  GET  /ui/inbox /ui/knowledge /ui/coach /ui/reports — full shell
+  GET  /ui/threads /ui/funnel                        — HTMX partials
+  GET  /ui/lang/{c}                                  — language cookie + redirect
 """
 from __future__ import annotations
 

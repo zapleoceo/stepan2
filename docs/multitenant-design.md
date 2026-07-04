@@ -78,8 +78,51 @@ tests/
   `external_thread_id`, `product_slug`, `window_until`, `last_in_at`/`last_out_at`.
   Несколько тредов на лида = чаты по разным продуктам/каналам.
 - Доменные таблицы (знания/продукты/настройки/алерты) получают `branch_id`.
-- **RBAC:** `user` (telegram_id, name) + `membership` (user_id, branch_id, role):
+- **RBAC:** `app_user` (telegram_id, name) + `membership` (user_id, branch_id, role):
   `super_admin` (branch_id NULL) / `branch_admin` / `branch_viewer`.
+
+## Контроль доступа (enforcement)
+
+Модель ролей в `app/domain/enums.py` (`Role`); хранение — в `membership`.
+`super_admin` имеет `branch_id = NULL` (вся платформа), остальные привязаны к одному
+филиалу. Принуждение — в `app/admin/_branch.py`:
+
+- `branch_ids_from_request(request)` — **view-фильтр**: пересекает cookie
+  `stepan2_branch` с `request.state.allowed_branch_ids`. `None` = super_admin (видит всё).
+  **Инвариант безопасности:** scoped-пользователь не может выйти за пределы своих
+  филиалов, подделав cookie — сервер всегда пересекает с `allowed_branch_ids`.
+- `allowed_branch_ids(request)` — **право действия** (write/manage), игнорирует cookie.
+- `is_branch_forbidden(branch_id, allowed)` — per-row tenant-guard: `True`, если строка
+  чужого филиала. Применяется во всех chat/knowledge/product/channel/coach роутах перед
+  чтением/записью (защита от IDOR).
+- `is_super_admin(request)` / `require_super_admin(request)` — FastAPI-зависимость,
+  отдаёт 403 всем, кроме super_admin.
+
+**Только super_admin** (`Depends(require_super_admin)` на роутере или проверка в хендлере):
+
+- Управление участниками — `/ui/members/**` (см. ниже).
+- CRUD филиалов — `/ui/branches/**`.
+- Платформенный kill-switch бота (`agent-toggle scope=platform`).
+- Сырой SQLAdmin-дашборд `/admin/**` — `AdminGuardMiddleware` пропускает только
+  super_admin, **всегда** (даже при `auth_enabled=false`), т.к. SQLAdmin даёт прямой
+  CRUD по `membership`/`branch`/`app_setting` (иначе — самоэскалация роли).
+
+### Управление участниками (`/ui/members/**`, super_admin only)
+
+`_routes_members.py` + `_ui_members.py`. Таблица участников с инлайн-редакторами:
+
+- добавить участника (telegram_id + имя + роль + филиал → `app_user` + `membership`);
+- сменить роль или филиал в строке (dropdown, автосохранение);
+- удалить участника.
+
+Пункты меню «Участники» и «Филиалы» скрыты для не-super_admin
+(`app_shell(..., is_super=...)`). Гард самолокаута: super_admin не может изменить роль,
+сменить филиал или удалить **собственный** membership через этот UI — чтобы нельзя было
+случайно лишить себя доступа.
+
+**Известный пробел:** различие `branch_admin` vs `branch_viewer` пока не принуждается в
+рантайме (`rbac.py` описывает грант-таблицу `Action`, но она не подключена к роутам) —
+любой branch-scoped пользователь может писать в своём филиале, не только admin.
 
 ## Каналы и фолоап-роутинг
 

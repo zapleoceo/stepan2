@@ -16,7 +16,7 @@ from starlette.types import ASGIApp
 from app.adapters.db.session import engine
 from app.admin.api import router as admin_meta_router
 from app.admin.setup import mount_admin
-from app.api._auth import AuthMiddleware
+from app.api._auth import AdminGuardMiddleware, AuthMiddleware
 from app.api._routes_auth import router as auth_router
 from app.api.ui import router as ui_router
 from app.api.webhooks import router as webhooks_router
@@ -108,6 +108,7 @@ def create_app() -> FastAPI:
     """Build the HTTP app: health probe, webhook router, admin dashboard."""
     app = FastAPI(title="stepan2", lifespan=_lifespan)
     app.add_middleware(_PartialShellMiddleware)
+    app.add_middleware(AdminGuardMiddleware)  # gate /admin before it reaches SQLAdmin
     app.add_middleware(AuthMiddleware)  # added last → outermost → runs first
 
     @app.get("/", include_in_schema=False)

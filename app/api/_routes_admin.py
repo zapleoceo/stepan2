@@ -462,7 +462,7 @@ async def branch_filter(
     if bid.strip():
         resp.set_cookie(
             _BRANCH_COOKIE, bid.strip(), path="/", max_age=86400 * 30,
-            httponly=False, samesite="lax",
+            httponly=False, samesite="lax", secure=True,
         )
     else:
         resp.delete_cookie(_BRANCH_COOKIE, path="/")
