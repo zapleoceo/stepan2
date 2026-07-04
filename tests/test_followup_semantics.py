@@ -173,6 +173,17 @@ async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_se
     assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
+async def test_followup_queues_during_quiet_hours(db_session) -> None:
+    """Quiet hours hold the SEND (OutboxSender.send_next), not the queue — a nudge armed
+    at 23:50 must already be sitting in outbox, ready the instant quiet hours lift."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    always_quiet = _cfg(quiet_start="0", quiet_end="24")
+    assert always_quiet.is_quiet_hour() is True
+    assert await _svc(db_session, bid, cfg=always_quiet).run() == 1
+    row = await _pending(db_session, tid)
+    assert row is not None and row.source == "followup"
+
+
 async def test_lead_spoke_last_not_followed_up(db_session) -> None:
     bid, tid, _lead, thread = await _world(db_session, timer_due=True)
     thread.last_in_at = _NOW - timedelta(minutes=10)  # newer than last_out

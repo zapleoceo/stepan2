@@ -194,8 +194,10 @@ async def _reply_thread(branch_id: int, thread_id: int, llm: BrokerLLM) -> bool:
 async def schedule_followups(ctx: dict[str, Any]) -> int:
     """Set follow-up timers for cold threads and queue proactive messages.
 
-    Runs every 10 minutes (between ingest and reply); quiet hours are respected.
-    Only fires when followup_enabled=true in branch settings."""
+    Runs every 10 minutes (between ingest and reply). Quiet hours do NOT block queueing —
+    only the send (OutboxSender.send_next) holds a follow-up until quiet hours end, so a
+    nudge queued at 23:50 is ready to go out the instant quiet hours lift instead of
+    losing a whole cron cycle. Only fires when followup_enabled=true in branch settings."""
     sent = 0
     llm = BrokerLLM()
     async with session_scope() as session:
@@ -205,8 +207,6 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
             assert branch.id is not None
             branch_cfg = await get_settings(session, branch.id)
             if not branch_cfg.followup_enabled:
-                continue
-            if branch_cfg.is_quiet_hour():
                 continue
             knowledge = KnowledgeService(session, branch.id, llm)
             svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)

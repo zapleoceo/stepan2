@@ -49,8 +49,10 @@ async def test_reply_pending_ignores_quiet_hours(db_session, monkeypatch) -> Non
     assert called == [b.id]  # reached threads_awaiting_reply despite is_quiet_hour()=True
 
 
-async def test_schedule_followups_still_respects_quiet_hours(db_session, monkeypatch) -> None:
-    """The proactive nudge path is the one quiet hours are FOR — it must still skip."""
+async def test_schedule_followups_queues_during_quiet_hours(db_session, monkeypatch) -> None:
+    """Queueing (generation) is NOT held by quiet hours — only the SEND is (see
+    OutboxSender.send_next). A nudge queued at 23:50 must be sitting ready to go out the
+    instant quiet hours lift, not lose the whole cron cycle waiting to even be generated."""
     b = Branch(name="Q", lang="id")
     db_session.add(b)
     await db_session.flush()
@@ -66,18 +68,18 @@ async def test_schedule_followups_still_respects_quiet_hours(db_session, monkeyp
     async def _fake_get_settings(_session, _branch_id):
         return _ALWAYS_QUIET
 
-    class _BoomFollowupService:
+    class _FakeFollowupService:
         def __init__(self, *_a, **_kw) -> None:
             ran.append(1)
 
         async def run(self) -> int:
-            raise AssertionError("FollowupService.run must not be called during quiet hours")
+            return 3
 
     monkeypatch.setattr(worker_main, "_platform_agent_on", _fake_platform_on)
     monkeypatch.setattr(wiring, "active_branches", _fake_active_branches)
     monkeypatch.setattr(worker_main, "get_settings", _fake_get_settings)
-    monkeypatch.setattr(worker_main, "FollowupService", _BoomFollowupService)
+    monkeypatch.setattr(worker_main, "FollowupService", _FakeFollowupService)
 
     sent = await worker_main.schedule_followups({})
-    assert sent == 0
-    assert ran == []  # FollowupService never even constructed
+    assert sent == 3
+    assert ran == [1]  # FollowupService WAS constructed and run despite quiet hours

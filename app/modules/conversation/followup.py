@@ -81,8 +81,11 @@ class FollowupService:
         cfg = self.settings
         if not cfg.followup_enabled or not cfg.followup_schedule_h:
             return 0
-        if not cfg.agent_enabled or cfg.is_quiet_hour():
-            return 0  # global OFF / night: generation fully skipped (S1 semantics)
+        if not cfg.agent_enabled:
+            return 0  # global OFF: no generation at all
+        # Quiet hours do NOT block generation here — only the SEND (OutboxSender.send_next)
+        # holds a follow-up-sourced row until quiet hours end. Queueing now means it's ready
+        # to go out the moment quiet hours lift, instead of losing that whole cron cycle.
         now = datetime.now(UTC).replace(tzinfo=None)
         rows = (
             await self.session.execute(
