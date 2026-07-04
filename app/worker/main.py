@@ -249,7 +249,14 @@ async def _send_thread(
     thread_id: int,
     channels: dict[int | None, Channel],
 ) -> int:
-    """Send the next due line of one thread via its channel; skip when wiring is absent."""
+    """Send the next due line of one thread via its channel; skip when wiring is absent.
+
+    Same advisory lock as reply_pending, same reason: a slow send (network, IG throttling)
+    can push this tick past the next cron firing, and two overlapping ticks both reading the
+    same 'pending' row with no lock means TWO real sends to the lead (confirmed live: thread
+    1730 got the same reply delivered twice, ~15s apart, each tick unaware of the other)."""
+    if not await wiring.try_lock_thread(session, thread_id):
+        return 0  # another tick already owns this thread's outbox right now
     thread = await ThreadRepo(session, branch_id).by_id(thread_id)
     if thread is None:
         return 0
