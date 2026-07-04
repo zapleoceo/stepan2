@@ -903,10 +903,69 @@ def _fb_ad_url(ad_id: object, business_id: str, account_id: str) -> str:
     return _h.escape(f"{base}selected_ad_ids={ad_id}")
 
 
-def _ad_funnel_html(rows: list, business_id: str = "", account_id: str = "") -> str:
-    """Per-ad funnel table: leads from each ad → pipeline / won / conv%, + FB deep link."""
+def admap_cell_inner(
+    ad_id: object, mapped: str | None, suggested: str | None,
+    products: list[tuple[str, str]],
+) -> str:
+    """Inner HTML of the product-mapping cell: a <select> (upserts the map on change) plus,
+    when the ad is still unmapped, a one-click ⚡ suggestion chip from history. Shared by
+    the reports table and the POST /ui/ads/{ad_id}/product response so both render identically."""
+    aid = _h.escape(str(ad_id))
+    opts = f'<option value="">— {_h.escape(t("rep.ad_no_product"))} —</option>'
+    for slug, title in products:
+        sel = " selected" if mapped == slug else ""
+        opts += f'<option value="{_h.escape(slug)}"{sel}>{_h.escape(title)}</option>'
+    sel_html = (
+        f'<select class="admap-sel" name="product" hx-post="/ui/ads/{aid}/product"'
+        f' hx-trigger="change" hx-target="#admap-{aid}" hx-swap="innerHTML">{opts}</select>'
+    )
+    hint = ""
+    if not mapped and suggested:
+        title = dict(products).get(suggested, suggested)
+        hint = (
+            f'<button class="admap-sug" hx-post="/ui/ads/{aid}/product"'
+            f' hx-vals=\'{{"product":"{_h.escape(suggested)}"}}\' hx-trigger="click"'
+            f' hx-target="#admap-{aid}" hx-swap="innerHTML"'
+            f' title="{_h.escape(t("rep.ad_suggest_hint"))}">⚡ {_h.escape(title)}</button>'
+        )
+    return sel_html + hint
+
+
+def _ad_menu_cell(ad_id: object, ad_media_id: object, fb_url: str) -> str:
+    """Ad-id cell: a <details> menu (open this ad's chats | open in FB) + an IG-post link."""
+    aid = _h.escape(str(ad_id))
+    items = (
+        f'<a href="/ui/inbox?ad_id={aid}">💬 {_h.escape(t("rep.ad_open_chats"))}</a>'
+        f'<a href="{fb_url}" target="_blank" rel="noreferrer">'
+        f'↗ {_h.escape(t("rep.ad_open_fb"))}</a>'
+    )
+    cell = (
+        f'<details class="admenu"><summary>{aid}</summary>'
+        f'<div class="admenu-pop">{items}</div></details>'
+    )
+    if ad_media_id:
+        post = ig_post_url(str(ad_media_id))
+        if post:
+            cell += (
+                f' <a class="ad-ig" href="{_h.escape(post)}" target="_blank" rel="noreferrer"'
+                f' data-ig="{_h.escape(str(ad_media_id))}" title="IG post">📷</a>'
+            )
+    return cell
+
+
+def _ad_funnel_html(
+    rows: list, business_id: str = "", account_id: str = "", *,
+    mappings: dict[str, str] | None = None,
+    suggestions: dict[str, str] | None = None,
+    products: list[tuple[str, str]] | None = None,
+) -> str:
+    """Per-ad funnel table: leads from each ad → pipeline / won / conv%, an ad-action menu,
+    and (single-branch only) an operator product-mapping column with a history suggestion."""
     if not rows:
         return ""
+    mappings = mappings or {}
+    suggestions = suggestions or {}
+    show_map = bool(products)  # product column only when a single branch is in scope
     hdr = (
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
         f'{_h.escape(t("rep.ad_funnel"))}</h3>'
@@ -917,29 +976,27 @@ def _ad_funnel_html(rows: list, business_id: str = "", account_id: str = "") -> 
         won = int(won or 0)
         conv = round(won / total * 100, 1) if total else 0.0
         fb = _fb_ad_url(ad_id, business_id, account_id)
-        ad_cell = (
-            f'<a href="{fb}" target="_blank" rel="noreferrer"'
-            f' style="color:#4da6ff;font-family:ui-monospace,monospace;font-size:.7rem">'
-            f'{_h.escape(str(ad_id))}</a>'
-        )
-        if ad_media_id:
-            post = ig_post_url(str(ad_media_id))
-            if post:
-                ad_cell += (
-                    f' <a href="{_h.escape(post)}" target="_blank" rel="noreferrer"'
-                    f' title="IG post" style="text-decoration:none">📷</a>'
-                )
+        cell_inner = admap_cell_inner(
+            ad_id, mappings.get(str(ad_id)), suggestions.get(str(ad_id)), products or [])
+        map_cell = (
+            f'<td class="admap" id="admap-{_h.escape(str(ad_id))}">'
+            f'{cell_inner}'
+            f'</td>'
+        ) if show_map else ""
         body += (
-            f'<tr><td>{ad_cell}</td>'
+            f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb)}</td>'
+            f'{map_cell}'
             f'<td class="rep-n">{total}</td>'
             f'<td class="rep-n" style="color:#9b7aff">{int(pipeline or 0)}</td>'
             f'<td class="rep-n" style="color:#51cf66">{won}</td>'
             f'<td class="rep-n" style="color:#868e96">{int(dormant or 0)}</td>'
             f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
         )
+    map_th = f'<th>{_h.escape(t("rep.ad_product"))}</th>' if show_map else ""
     return (
         f'{hdr}<table class="rep-tbl"><thead><tr>'
         f'<th>{_h.escape(t("rep.ad"))}</th>'
+        f'{map_th}'
         f'<th style="text-align:right">{_h.escape(t("rep.total"))}</th>'
         f'<th style="text-align:right">{_h.escape(t("rep.pipeline"))}</th>'
         f'<th style="text-align:right">{_h.escape(t("rep.won"))}</th>'
@@ -1037,6 +1094,9 @@ def reports_panel_html(
     date_from: str = "",
     date_to: str = "",
     active_range: str = "",
+    ad_mappings: dict[str, str] | None = None,
+    ad_suggestions: dict[str, str] | None = None,
+    products: list[tuple[str, str]] | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1124,7 +1184,7 @@ def reports_panel_html(
         f'<div class="kpi-row">{kpis}</div>'
         f'{_funnel_line_html(stage_counts)}'
         f'{status_bar}'
-        f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id)}'
+        f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">{act_lbl}</h3>'
         f'<div class="kpi-row">'
         f'{_kpi("rep.msgs_in", str(total_in), "#4da6ff")}'

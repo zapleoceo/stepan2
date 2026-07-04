@@ -28,7 +28,10 @@ from ._query import (
     fetch_report_data,
     fetch_stage_counts,
 )
-from ._routes_admin import _agent_toggles_html  # noqa: F401 (re-exported for tests)
+from ._routes_admin import (
+    _ad_editor_data,
+    _agent_toggles_html,  # noqa: F401 (re-exported for tests)
+)
 from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
 from ._routes_channels import router as _channels_router
@@ -76,11 +79,11 @@ _THREAD_TMPL = (
 # ─── full pages ───────────────────────────────────────────────────────────────
 
 @router.get("/inbox", response_class=HTMLResponse)
-async def inbox(request: Request, stage: str = "") -> HTMLResponse:
+async def inbox(request: Request, stage: str = "", ad_id: str = "") -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
-                                  is_super=is_super_admin(request)))
+                                  ad_id=ad_id.strip(), is_super=is_super_admin(request)))
 
 
 @router.get("/knowledge", response_class=HTMLResponse)
@@ -127,7 +130,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 
 
 @router.get("/threads", response_class=HTMLResponse)
-async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
+async def threads_partial(request: Request, stage: str = "", ad_id: str = "") -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     conditions, params = [], {}
@@ -140,6 +143,10 @@ async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
     elif s:
         conditions.append("l.stage = :stage")
         params["stage"] = s
+    ad = ad_id.strip()
+    if ad:  # "open this ad's chats" from the reports ad-funnel table
+        conditions.append("ct.ad_id = :ad_id")
+        params["ad_id"] = ad
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (
@@ -163,7 +170,10 @@ async def reports_page(request: Request) -> HTMLResponse:
         stage_counts, hour_in, hour_out, ad_funnel, discovery = (
             await fetch_report_data(session, branch_ids)
         )
-    panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery)
+        products, ad_mappings, ad_suggestions = await _ad_editor_data(session, branch_ids)
+    panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
+                               ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
+                               products=products)
     return HTMLResponse(app_shell(lang, panel, active_nav="reports",
                                   is_super=is_super_admin(request)))
 

@@ -90,6 +90,12 @@ _CSS = (
     "display:flex;flex-direction:column;overflow:hidden}"
     ".thr-h{padding:.56rem .8rem;border-bottom:1px solid #2d3748;font-size:.82rem;"
     "font-weight:600;color:#e8eef4;flex-shrink:0}"
+    ".ad-filter{display:flex;align-items:center;gap:.4rem;padding:.35rem .8rem;flex-shrink:0;"
+    "font-size:.68rem;color:#8899aa;background:#1a2230;border-bottom:1px solid #2d3748}"
+    ".ad-filter-id{font-family:ui-monospace,monospace;color:#4da6ff;font-size:.64rem}"
+    ".ad-filter-x{margin-left:auto;color:#8899aa;text-decoration:none;font-weight:700;"
+    "padding:0 .3rem;border-radius:3px}"
+    ".ad-filter-x:hover{background:#2d3748;color:#e8eef4}"
     ".ti-q{width:calc(100% - 1rem);margin:.4rem .5rem;padding:.34rem .55rem;flex-shrink:0;"
     "background:#0f1621;border:1px solid #2d3748;border-radius:6px;color:#e8eef4;"
     "font-size:.76rem;outline:none}.ti-q:focus{border-color:#206bc4}"
@@ -200,6 +206,23 @@ _CSS = (
     "padding:.25rem .4rem;border-bottom:1px solid #2d3748}"
     ".rep-tbl td{padding:.25rem .4rem;border-bottom:1px solid #1a2033}"
     ".rep-n{text-align:right;font-weight:700;color:#e8eef4}"
+    # ad-funnel: click-to-open menu on the ad id, product-mapping select + suggestion chip
+    ".admenu{display:inline-block;position:relative}"
+    ".admenu>summary{list-style:none;cursor:pointer;color:#4da6ff;"
+    "font-family:ui-monospace,monospace;font-size:.7rem}"
+    ".admenu>summary::-webkit-details-marker{display:none}"
+    ".admenu-pop{position:absolute;z-index:20;top:1.2rem;left:0;background:#1a2230;"
+    "border:1px solid #2d3748;border-radius:5px;padding:.25rem;min-width:180px;"
+    "box-shadow:0 6px 20px rgba(0,0,0,.4);display:flex;flex-direction:column}"
+    ".admenu-pop a{padding:.4rem .55rem;border-radius:4px;color:#e8eef4;text-decoration:none;"
+    "font-size:.72rem;white-space:nowrap}"
+    ".admenu-pop a:hover{background:#2d3748}"
+    ".ad-ig{text-decoration:none;margin-left:.15rem}"
+    ".admap-sel{background:#161b26;border:1px solid #2d3748;color:#e8eef4;border-radius:4px;"
+    "padding:.15rem .3rem;font-size:.68rem;max-width:150px}"
+    ".admap-sug{background:none;border:1px dashed #4a5568;color:#ffa94d;border-radius:4px;"
+    "cursor:pointer;font-size:.64rem;padding:.1rem .35rem;margin-left:.3rem}"
+    ".admap-sug:hover{border-color:#ffa94d;background:#26211a}"
     ".hchart{display:flex;align-items:flex-end;gap:2px;height:64px;margin-top:.3rem}"
     ".hbar{display:flex;flex-direction:column;align-items:center;flex:1;height:100%}"
     ".hbar-l{font-size:.52rem;color:#4a5568;margin-top:1px;line-height:1}"
@@ -1275,7 +1298,7 @@ _FAVICON = (
 
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
-    stage: str = "", is_super: bool = True,
+    stage: str = "", ad_id: str = "", is_super: bool = True,
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1537,14 +1560,26 @@ def app_shell(
     elif active_nav == "inbox":
         _show_thr = True
         _qs = f"?stage={stage}" if stage else ""
+        # ad_id narrows only the thread list (funnel stays branch-wide); an active ad
+        # filter shows a dismissable chip linking back to the unfiltered inbox.
+        _thr_params = "&".join(
+            f"{k}={_h.escape(v)}" for k, v in (("stage", stage), ("ad_id", ad_id)) if v)
+        _thr_qs = f"?{_thr_params}" if _thr_params else ""
+        _ad_chip = (
+            f'<div class="ad-filter">{_h.escape(t("inbox.ad_filter"))} '
+            f'<span class="ad-filter-id">{_h.escape(ad_id)}</span>'
+            f'<a class="ad-filter-x" href="/ui/inbox{_qs}" title="{_h.escape(t("inbox.ad_clear"))}"'
+            f'>✕</a></div>'
+        ) if ad_id else ""
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'
             f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
+            f'{_ad_chip}'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
             f' data-help="{_h.escape(t("hint.search"))}"'
             f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'
-            f'<div id="tl" hx-get="/ui/threads{_qs}" hx-trigger="load, every 30s"'
+            f'<div id="tl" hx-get="/ui/threads{_thr_qs}" hx-trigger="load, every 30s"'
             f' hx-swap="innerHTML"></div>'
         )
     else:

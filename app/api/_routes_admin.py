@@ -11,6 +11,8 @@ from sqlalchemy import text
 from app.adapters.db.session import session_scope
 from app.admin._branch import allowed_branch_ids, branch_ids_from_request, is_super_admin
 from app.domain.clock import utc_now
+from app.modules.ads import AdMappingService
+from app.modules.knowledge.repository import ProductRepo
 from app.modules.settings import schema as settings_schema
 from app.modules.settings.service import invalidate
 
@@ -22,7 +24,9 @@ from ._query import (
     fetch_broker_log,
     fetch_discovery_metrics,
 )
+from ._routes_chat import _actor_name
 from ._ui_panels import (
+    admap_cell_inner,
     broker_log_panel_html,
     leads_panel_html,
     outbox_count_html,
@@ -104,6 +108,46 @@ _QUICK_RANGES: dict[str, timedelta] = {
 }
 
 
+async def _ad_editor_data(
+    session, branch_ids: list[int] | None,
+) -> tuple[list[tuple[str, str]], dict[str, str], dict[str, str]]:
+    """(products, ad→product mappings, history suggestions) for the ad-funnel editor.
+
+    Editor is single-branch only (the map is per branch); returns empties otherwise so a
+    cross-branch report renders the funnel read-only without a product column."""
+    if not branch_ids or len(branch_ids) != 1:
+        return [], {}, {}
+    branch_id = branch_ids[0]
+    products = [(p.slug, p.title) for p in await ProductRepo(session, branch_id).active()]
+    svc = AdMappingService(session, branch_id)
+    return products, await svc.all_mappings(), await svc.suggest_from_history()
+
+
+@router.post("/ads/{ad_id}/product", response_class=HTMLResponse)
+async def ad_product_map(
+    ad_id: str, request: Request, product: str = Form(default=""),
+) -> HTMLResponse:
+    """Upsert (or clear) the ad→product mapping for the operator's single active branch;
+    returns the re-rendered mapping cell inner HTML for the htmx swap."""
+    apply_lang(request)
+    branch_ids = branch_ids_from_request(request)
+    if not branch_ids or len(branch_ids) != 1:
+        return HTMLResponse('<span class="emp">—</span>', status_code=400)
+    branch_id = branch_ids[0]
+    slug = product.strip()
+    async with session_scope() as session:
+        products = [(p.slug, p.title) for p in await ProductRepo(session, branch_id).active()]
+        valid = {s for s, _ in products}
+        svc = AdMappingService(session, branch_id)
+        if slug and slug in valid:
+            await svc.upsert(ad_id, slug, actor=_actor_name(request))
+        elif not slug:
+            await svc.clear(ad_id)
+        mapped = await svc.product_for_ad(ad_id)
+        suggested = (await svc.suggest_from_history()).get(ad_id)
+    return HTMLResponse(admap_cell_inner(ad_id, mapped, suggested, products))
+
+
 @router.get("/reports/panel", response_class=HTMLResponse)
 async def reports_panel(
     request: Request, date_from: str = "", date_to: str = "",
@@ -175,13 +219,16 @@ async def reports_panel(
                 {"b": branch_ids[0]})).all()
             fbm = {k: v for k, v in fb}
             fb_bid, fb_acct = fbm.get("fb_business_id", ""), fbm.get("fb_account_id", "")
+        products, ad_mappings, ad_suggestions = await _ad_editor_data(session, branch_ids)
     stage_counts = {r[0]: int(r[1]) for r in sc}
     hour_in = {int(r[0]): int(r[1]) for r in hi}
     hour_out = {int(r[0]): int(r[1]) for r in ho}
     return HTMLResponse(
         reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
                            fb_business_id=fb_bid, fb_account_id=fb_acct,
-                           date_from=df, date_to=dt_, active_range=active_range))
+                           date_from=df, date_to=dt_, active_range=active_range,
+                           ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
+                           products=products))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)
