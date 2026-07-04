@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html as _h
+from datetime import date
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -124,13 +125,16 @@ async def reports_panel(
         date_and += " AND l.branch_id = ANY(:bids)"
         params["bids"] = branch_ids
     if df:
-        # CAST(... AS date), not ::date — asyncpg needs a typed bind, and SQLAlchemy's
-        # text() colon-parameter syntax collides with Postgres's "::" cast operator.
-        date_and += " AND l.created_at >= CAST(:df AS date)"
-        params["df"] = df
+        # A real date.fromisoformat() object, not the ISO string — asyncpg needs a typed
+        # bind to compare against a timestamp column (a bare string 500s), and stacking an
+        # explicit "::date"/CAST(...AS date) around a bound string collides with
+        # SQLAlchemy's own ":name" bind-parameter syntax or re-triggers the same str-vs-date
+        # mismatch, so the fix is entirely in what Python value gets bound.
+        date_and += " AND l.created_at >= :df"
+        params["df"] = date.fromisoformat(df)
     if dt_:
-        date_and += " AND l.created_at < (CAST(:dt AS date) + INTERVAL '1 day')"
-        params["dt"] = dt_
+        date_and += " AND l.created_at < (:dt + INTERVAL '1 day')"
+        params["dt"] = date.fromisoformat(dt_)
     lead_where = ("WHERE" + date_and[4:]) if date_and else ""
     # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.
     _sc = f"SELECT l.stage, COUNT(*) FROM lead l {lead_where} GROUP BY l.stage"  # noqa: S608
