@@ -97,6 +97,31 @@ tests/
   чтением/записью (защита от IDOR).
 - `is_super_admin(request)` / `require_super_admin(request)` — FastAPI-зависимость,
   отдаёт 403 всем, кроме super_admin.
+- `writable_branch_ids(request)` / `is_branch_write_forbidden(branch_id, writable)` —
+  право **записи** по филиалам. `None` = пишет везде (super_admin); `[]` = только чтение
+  (branch_viewer); `[id…]` = branch_admin своих филиалов.
+
+### Роли на запись: `branch_admin` vs `branch_viewer`
+
+Грант-таблица `app/modules/auth/rbac.py` (`Action` × `Role`, `can(role, action)`) —
+единственный источник «кто что может». На логине из membership'ов считается claim `wr`
+(филиалы, где роль даёт `Action.WRITE`) и кладётся в подписанную сессию рядом с `br`
+(чтение) и `sa` (super).
+
+Принуждение централизовано в `WriteGuardMiddleware`: любой изменяющий `POST /ui/**`
+блокируется (403) для сессии без права записи (`sa=False`, `wr=[]` → branch_viewer). Так
+ни один из ~30 write-роутов нельзя забыть закрыть. Исключение — «read-support» POST'ы,
+которые нужны для **чтения** и ничего не мутируют (см. `_is_read_support_post`): перевод
+сообщений/черновика (`/translate`, `/tr-draft`, `/tr`), анализ чата (`/analyze/`),
+догрузка истории (`/load-context`), смена view-cookie (`/branch-filter`).
+
+**Fail-closed:** сессия, выпущенная до появления claim `wr` (старый cookie), не имеет
+права записи до перелогина — admin'ы перелогиниваются один раз, viewer'ы остаются
+read-only. Кросс-филиальную запись у пользователя со смешанными ролями дополнительно
+ограничивает per-row `is_branch_forbidden` в каждом write-роуте.
+
+> UI пока показывает viewer'у кнопки записи (Send/Edit), которые вернут 403 — граница
+> безопасности серверная; скрытие контролов в UI — отдельная косметическая доработка.
 
 **Только super_admin** (`Depends(require_super_admin)` на роутере или проверка в хендлере):
 
@@ -120,9 +145,8 @@ tests/
 сменить филиал или удалить **собственный** membership через этот UI — чтобы нельзя было
 случайно лишить себя доступа.
 
-**Известный пробел:** различие `branch_admin` vs `branch_viewer` пока не принуждается в
-рантайме (`rbac.py` описывает грант-таблицу `Action`, но она не подключена к роутам) —
-любой branch-scoped пользователь может писать в своём филиале, не только admin.
+Различие `branch_admin` vs `branch_viewer` теперь принуждается в рантайме
+(`WriteGuardMiddleware` + claim `wr`, см. раздел «Роли на запись» выше).
 
 ## Каналы и фолоап-роутинг
 

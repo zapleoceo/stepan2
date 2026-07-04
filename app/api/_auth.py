@@ -55,11 +55,16 @@ def verify_telegram_login(
 
 def mint_session(
     *, telegram_id: int, user_id: int, name: str, is_super: bool, branch_ids: list[int],
+    writable_branch_ids: list[int] | None = None,
 ) -> str:
     return sign(
         {
             "tg": telegram_id, "uid": user_id, "nm": name,
-            "sa": is_super, "br": branch_ids, "iat": int(time.time()),
+            "sa": is_super, "br": branch_ids,
+            # branches where this user may WRITE (branch_admin); a subset of `br`.
+            # A branch_viewer has [] here — read-only. super_admin (sa) spans all.
+            "wr": list(writable_branch_ids or []),
+            "iat": int(time.time()),
         },
         _secret(),
     )
@@ -88,8 +93,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
         sess = read_session(request)
         if sess is not None:
             request.state.user = sess
+            is_super = bool(sess.get("sa"))
             request.state.allowed_branch_ids = (
-                None if sess.get("sa") else list(sess.get("br") or [])
+                None if is_super else list(sess.get("br") or [])
+            )
+            # Deny-by-default for writes: a session minted before "wr" existed (or a
+            # branch_viewer) has no writable branches. super_admin writes everywhere.
+            request.state.writable_branch_ids = (
+                None if is_super else list(sess.get("wr") or [])
             )
             return await call_next(request)
 
@@ -116,4 +127,43 @@ class AdminGuardMiddleware(BaseHTTPMiddleware):
             sess = read_session(request)
             if sess is None or not sess.get("sa"):
                 return RedirectResponse(url="/ui/inbox", status_code=303)
+        return await call_next(request)
+
+
+def _is_read_support_post(path: str) -> bool:
+    """POSTs a branch_viewer may still call — they don't mutate business data, they
+    support READING: message/draft translation caches, 'analyze this chat', loading
+    older history, and setting the (server-clamped) branch-filter view cookie."""
+    if path == "/ui/branch-filter":
+        return True
+    if "/analyze/" in path:  # /ui/coach/analyze/{id} — grades a chat, writes nothing
+        return True
+    return path.endswith(("/translate", "/tr-draft", "/tr", "/load-context"))
+
+
+class WriteGuardMiddleware(BaseHTTPMiddleware):
+    """Enforce branch_admin vs branch_viewer: a viewer is read-only, so it may not reach
+    any state-changing /ui POST. Enforcement is centralized here (not sprinkled across
+    ~30 write routes) so no mutating route can be forgotten. super_admin passes; the
+    read-support POSTs above are always allowed. Reads the session cookie directly (like
+    AdminGuard) so it doesn't depend on cross-middleware request.state propagation.
+
+    A user with WRITE on *some* branch passes here; cross-branch writes are still confined
+    by the per-row branch guards (is_branch_forbidden) every write route already runs."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        if (
+            settings().auth_enabled
+            and request.method == "POST"
+            and request.url.path.startswith("/ui/")
+            and not _is_read_support_post(request.url.path)
+        ):
+            sess = read_session(request)
+            # No session → AuthMiddleware already redirected; here, deny writes to a
+            # non-super session (sa=False) with no writable branches (viewer, or a
+            # pre-"wr" cookie — fail closed until re-login).
+            if sess is not None and not sess.get("sa") and not sess.get("wr"):
+                resp = Response(status_code=403)
+                resp.headers["HX-Reswap"] = "none"  # htmx: don't blank the panel on deny
+                return resp
         return await call_next(request)

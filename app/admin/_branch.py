@@ -61,3 +61,16 @@ def require_super_admin(request: Request) -> None:
     management, branch CRUD, the platform-wide bot kill switch)."""
     if not is_super_admin(request):
         raise HTTPException(status_code=403, detail="Super admin only")
+
+
+def writable_branch_ids(request: Request) -> list[int] | None:
+    """Branches where the caller may WRITE (branch_admin). None = write anywhere
+    (super_admin / auth disabled); [] = read-only (branch_viewer). The blanket viewer
+    block lives in WriteGuardMiddleware; this helper is for per-branch precision when a
+    write route needs to reject one branch of a mixed-role user."""
+    return getattr(getattr(request, "state", None), "writable_branch_ids", None)
+
+
+def is_branch_write_forbidden(branch_id: int, writable: list[int] | None) -> bool:
+    """True when the caller may not WRITE to branch_id; [] (read-only) denies everything."""
+    return writable is not None and branch_id not in writable

@@ -142,7 +142,7 @@ async def test_tg_login_mints_super_admin_session(db_session, monkeypatch) -> No
     assert sess["uid"] == u.id
 
 
-async def test_tg_login_mints_branch_scoped_session(db_session, monkeypatch) -> None:
+async def test_tg_login_viewer_gets_no_write(db_session, monkeypatch) -> None:
     from app.adapters.db.models import Branch, Membership, User
     from app.domain.enums import Role
 
@@ -158,7 +158,28 @@ async def test_tg_login_mints_branch_scoped_session(db_session, monkeypatch) -> 
     sess, _ = await _run_tg_login(db_session, monkeypatch, 555)
     assert sess is not None
     assert sess["sa"] is False          # NOT super_admin
-    assert sess["br"] == [b.id]         # confined to their branch
+    assert sess["br"] == [b.id]         # can READ their branch
+    assert sess["wr"] == []             # branch_viewer → NO write anywhere
+
+
+async def test_tg_login_admin_gets_write_on_own_branch(db_session, monkeypatch) -> None:
+    from app.adapters.db.models import Branch, Membership, User
+    from app.domain.enums import Role
+
+    b = Branch(name="Jakarta", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    u = User(telegram_id=556, name="Manager")
+    db_session.add(u)
+    await db_session.flush()
+    db_session.add(Membership(user_id=u.id, branch_id=b.id, role=Role.BRANCH_ADMIN))
+    await db_session.flush()
+
+    sess, _ = await _run_tg_login(db_session, monkeypatch, 556)
+    assert sess is not None
+    assert sess["sa"] is False
+    assert sess["br"] == [b.id]
+    assert sess["wr"] == [b.id]         # branch_admin → write on own branch
 
 
 async def test_tg_login_unknown_user_rejected(db_session, monkeypatch) -> None:

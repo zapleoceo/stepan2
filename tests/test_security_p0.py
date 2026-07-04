@@ -250,9 +250,18 @@ def _cookie_client(sess: dict | None, *, auth_enabled: bool = True) -> TestClien
         tok = mint_session(
             telegram_id=sess["tg"], user_id=sess["uid"], name=sess.get("nm", ""),
             is_super=sess["sa"], branch_ids=sess.get("br", []),
+            writable_branch_ids=sess.get("wr", []),
         )
         c.cookies.set(SESSION_COOKIE, tok)
     return c
+
+
+def _clear_auth_env() -> None:
+    import os as _os
+
+    from app.config import settings as _settings
+    _os.environ.pop("STEPAN2_AUTH_ENABLED", None)
+    _settings.cache_clear()
 
 
 def test_admin_dashboard_blocks_non_super_admin() -> None:
@@ -288,6 +297,91 @@ def test_admin_dashboard_closed_when_auth_disabled() -> None:
         from app.config import settings as _settings
         _os.environ.pop("STEPAN2_AUTH_ENABLED", None)
         _settings.cache_clear()
+
+
+# ─── branch_viewer is read-only: WriteGuardMiddleware blocks mutating POSTs ────
+
+def test_read_support_post_classification() -> None:
+    from app.api._auth import _is_read_support_post
+    # read-support (a viewer may call these — they don't mutate business data)
+    assert _is_read_support_post("/ui/branch-filter") is True
+    assert _is_read_support_post("/ui/coach/analyze/7") is True
+    assert _is_read_support_post("/ui/chat/7/translate") is True
+    assert _is_read_support_post("/ui/chat/7/tr-draft") is True
+    assert _is_read_support_post("/ui/chat/7/msg/5/tr") is True
+    assert _is_read_support_post("/ui/chat/7/pending/5/tr") is True
+    assert _is_read_support_post("/ui/chat/7/load-context") is True
+    # genuine writes — NOT read-support
+    assert _is_read_support_post("/ui/chat/7/send") is False
+    assert _is_read_support_post("/ui/chat/7/msg/5/delete") is False
+    assert _is_read_support_post("/ui/knowledge/3/save") is False
+    assert _is_read_support_post("/ui/settings/save") is False
+    assert _is_read_support_post("/ui/coach/say") is False
+
+
+def test_write_guard_blocks_viewer_allows_admin_and_super() -> None:
+    """A branch_viewer (wr=[]) may not POST a write; branch_admin (wr=[1]) and
+    super_admin (sa) may. Uses /ui/chat/1/send — a write route — expecting the guard's
+    403 for the viewer, and NOT-403 (the route runs, may 4xx/5xx on the empty test DB)
+    for the others."""
+    try:
+        viewer = _cookie_client({"tg": 3, "uid": 3, "sa": False, "br": [1], "wr": []})
+        assert viewer.post("/ui/chat/1/send", data={"text": "hi"}).status_code == 403
+
+        admin = _cookie_client({"tg": 4, "uid": 4, "sa": False, "br": [1], "wr": [1]})
+        assert admin.post("/ui/chat/1/send", data={"text": "hi"}).status_code != 403
+
+        su = _cookie_client({"tg": 1, "uid": 1, "sa": True, "br": [], "wr": []})
+        assert su.post("/ui/chat/1/send", data={"text": "hi"}).status_code != 403
+    finally:
+        _clear_auth_env()
+
+
+def test_write_guard_allows_viewer_read_support_posts() -> None:
+    """A viewer must still be able to translate / analyze / load history / switch branch —
+    those POSTs are read-support and must NOT be 403'd."""
+    try:
+        viewer = _cookie_client({"tg": 3, "uid": 3, "sa": False, "br": [1], "wr": []})
+        assert viewer.post("/ui/chat/1/translate").status_code != 403
+        assert viewer.post("/ui/coach/analyze/1").status_code != 403
+        assert viewer.post("/ui/branch-filter", data={"bid": "1"}).status_code != 403
+    finally:
+        _clear_auth_env()
+
+
+def test_write_guard_passthrough_when_auth_disabled() -> None:
+    """Auth off (dev/local) → no enforcement, writes pass (matches every other guard)."""
+    try:
+        c = _cookie_client(None, auth_enabled=False)
+        assert c.post("/ui/chat/1/send", data={"text": "hi"}).status_code != 403
+    finally:
+        _clear_auth_env()
+
+
+def test_write_guard_denies_pre_wr_cookie_fail_closed() -> None:
+    """A non-super session minted before the 'wr' claim existed has no writable branches →
+    writes are denied until re-login (fail closed, not grandfathered-open)."""
+    try:
+        from app.api._auth import SESSION_COOKIE, mint_session
+
+        # simulate an old cookie: mint without writable_branch_ids at all
+        old = _cookie_client(None)
+        tok = mint_session(telegram_id=9, user_id=9, name="Old", is_super=False,
+                           branch_ids=[1])  # no writable_branch_ids kwarg → wr=[]
+        old.cookies.set(SESSION_COOKIE, tok)
+        assert old.post("/ui/chat/1/send", data={"text": "hi"}).status_code == 403
+    finally:
+        _clear_auth_env()
+
+
+def test_writable_branch_helpers() -> None:
+    from app.admin._branch import is_branch_write_forbidden, writable_branch_ids
+    assert writable_branch_ids(_req()) is None                 # no state → super/all
+    assert writable_branch_ids(_req(allowed=None)) is None      # (allowed unused here)
+    assert is_branch_write_forbidden(1, None) is False          # super writes anywhere
+    assert is_branch_write_forbidden(1, []) is True             # viewer writes nowhere
+    assert is_branch_write_forbidden(1, [1]) is False           # admin of branch 1
+    assert is_branch_write_forbidden(2, [1]) is True            # not admin of branch 2
 
 
 # ─── coach analyze must not read another branch's chat + KB (IDOR) ────────────

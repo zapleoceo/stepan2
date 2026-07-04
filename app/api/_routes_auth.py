@@ -17,6 +17,7 @@ from app.api._auth import (
 from app.api._ui_html import _FAVICON
 from app.config import settings
 from app.domain.enums import Role
+from app.modules.auth.rbac import Action, can
 from app.modules.auth.repository import MembershipRepo, UserRepo
 from app.modules.auth.service import AuthService
 
@@ -49,9 +50,15 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
         memberships = await MembershipRepo(s).memberships_for_user(user.id)
         is_super = any(m.role == Role.SUPER_ADMIN for m in memberships)
         branch_ids = [m.branch_id for m in memberships if m.branch_id is not None]
+        # Branches where this role grants WRITE (branch_admin) — the rbac grant table is
+        # the single source of who-may-write. branch_viewer → [] (read-only).
+        writable = [
+            m.branch_id for m in memberships
+            if m.branch_id is not None and can(m.role, Action.WRITE)
+        ]
         token = mint_session(
             telegram_id=tg_id, user_id=user.id, name=user.name or "",
-            is_super=is_super, branch_ids=branch_ids,
+            is_super=is_super, branch_ids=branch_ids, writable_branch_ids=writable,
         )
 
     resp = RedirectResponse(url="/ui/inbox", status_code=303)
