@@ -125,15 +125,17 @@ async def reports_panel(
         date_and += " AND l.branch_id = ANY(:bids)"
         params["bids"] = branch_ids
     if df:
-        # A real date.fromisoformat() object, not the ISO string — asyncpg needs a typed
-        # bind to compare against a timestamp column (a bare string 500s), and stacking an
-        # explicit "::date"/CAST(...AS date) around a bound string collides with
-        # SQLAlchemy's own ":name" bind-parameter syntax or re-triggers the same str-vs-date
-        # mismatch, so the fix is entirely in what Python value gets bound.
-        date_and += " AND l.created_at >= :df"
+        # Both halves of the fix are needed: bind a real date object (asyncpg 500s on a
+        # bare ISO string — it needs a typed value to compare against a timestamp column),
+        # AND keep the explicit CAST(:df AS date) (without it, Postgres's untyped-parameter
+        # inference in "$n + INTERVAL '1 day'" resolves $n as interval, not date, and
+        # "timestamp < interval" then fails to parse). Cast with CAST(name AS type), never
+        # a double-colon cast right after the bind name — that collides with SQLAlchemy's
+        # own bind-parameter syntax.
+        date_and += " AND l.created_at >= CAST(:df AS date)"
         params["df"] = date.fromisoformat(df)
     if dt_:
-        date_and += " AND l.created_at < (:dt + INTERVAL '1 day')"
+        date_and += " AND l.created_at < (CAST(:dt AS date) + INTERVAL '1 day')"
         params["dt"] = date.fromisoformat(dt_)
     lead_where = ("WHERE" + date_and[4:]) if date_and else ""
     # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.

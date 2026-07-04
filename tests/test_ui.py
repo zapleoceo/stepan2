@@ -1181,11 +1181,13 @@ def test_reports_date_form_auto_submits_on_change() -> None:
 
 
 def test_reports_panel_date_filter_binds_are_asyncpg_safe() -> None:
-    """date_from/date_to must be bound as real date objects, not ISO strings — asyncpg
-    needs a typed value to compare against a timestamp column (a bare string 500s), and
-    wrapping a still-string bind in ':name::type'/CAST(:name AS type) just moves the same
-    str-vs-date mismatch (or collides with SQLAlchemy's own ':name' bind syntax). This
-    previously made picking EITHER report date 500 instead of refreshing."""
+    """Two distinct bugs previously made picking EITHER report date 500 instead of
+    refreshing: (1) binding a bare ISO string for date_from/date_to — asyncpg needs a
+    real date object to compare against a timestamp column; (2) leaving the parameter
+    untyped in "$n + INTERVAL '1 day'" — Postgres then infers $n as interval, not date,
+    and "timestamp < interval" fails to parse, so the CAST(name AS date) form must stay
+    (not a double-colon cast right after the bind name, which collides with SQLAlchemy's
+    own bind-parameter syntax)."""
     import inspect
     import re
 
@@ -1193,7 +1195,8 @@ def test_reports_panel_date_filter_binds_are_asyncpg_safe() -> None:
 
     src = inspect.getsource(_routes_admin.reports_panel)
     assert not re.search(r":\w+::\w+", src)
-    assert "CAST(:df" not in src and "CAST(:dt" not in src
+    assert "CAST(:df AS date)" in src
+    assert "CAST(:dt AS date)" in src
     assert 'params["df"] = date.fromisoformat(df)' in src
     assert 'params["dt"] = date.fromisoformat(dt_)' in src
 
