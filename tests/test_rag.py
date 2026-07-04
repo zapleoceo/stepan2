@@ -150,6 +150,43 @@ async def test_watcher_detects_edits(db_session) -> None:
     assert await branch_needs_reindex(db_session, bid) is True
 
 
+class _IntentLLM:
+    def __init__(self, payload: str) -> None:
+        self._payload = payload
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        return self._payload, {"cost_usd": 0.0}
+
+    async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_coach_answers_a_question_without_editing(db_session) -> None:
+    from app.modules.conversation.coach_service import propose_edit
+    bid = await _seed(db_session)
+    llm = _IntentLLM('{"intent":"answer","answer":"The price is 13M, per playbook_price."}')
+    edit = await propose_edit(db_session, bid, "berapa harganya?", llm)
+    assert edit.status == "answered"
+    assert "13M" in edit.summary and edit.old_text is None  # an answer, not a KB write
+
+
+async def test_coach_clarifies_before_ambiguous_edit(db_session) -> None:
+    from app.modules.conversation.coach_service import propose_edit
+    bid = await _seed(db_session)
+    llm = _IntentLLM('{"intent":"clarify","summary":"Which doc should this go in?"}')
+    edit = await propose_edit(db_session, bid, "add a note about parking", llm)
+    assert edit.status == "clarify" and edit.old_text is None  # asks, doesn't write
+
+
+async def test_coach_proposes_edit_that_needs_confirm(db_session) -> None:
+    from app.modules.conversation.coach_service import propose_edit
+    bid = await _seed(db_session)
+    llm = _IntentLLM('{"intent":"edit","slug":"playbook_price","old_text":"The price and refund'
+                     ' policy.","new_text":"The price is 13M.","summary":"set price"}')
+    edit = await propose_edit(db_session, bid, "set the price to 13M", llm)
+    assert edit.status == "proposed" and edit.new_text == "The price is 13M."  # awaits Apply
+
+
 async def test_coach_edit_makes_branch_need_reindex(db_session) -> None:
     """A Coach edit changes doc.content AND bumps updated_at, so the RAG watcher rebuilds —
     without the bump the index kept serving the OLD text (the reported gap)."""

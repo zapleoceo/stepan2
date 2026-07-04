@@ -38,6 +38,13 @@ _CSS = (
     "html,body{height:100%;overflow-x:hidden}"
     "body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
     "background:#0f1117;color:#d0d7de;font-size:14px}"
+    # coach 'thinking' indicator — shown only while the htmx request is in flight
+    ".coach-think{display:none;align-items:center;gap:.5rem;padding:.35rem .85rem;"
+    "font-size:.78rem;color:#8899aa;flex-shrink:0}"
+    ".htmx-request.coach-think{display:flex}"
+    ".spin{width:.9rem;height:.9rem;border:2px solid #2d3748;border-top-color:#4da6ff;"
+    "border-radius:50%;display:inline-block;animation:spin .7s linear infinite;flex-shrink:0}"
+    "@keyframes spin{to{transform:rotate(360deg)}}"
     ".sid{width:210px;flex-shrink:0;background:#141925;border-right:1px solid #2d3748;"
     "display:flex;flex-direction:column;transition:width .15s}"
     ".sid-top{padding:.7rem .9rem .45rem;border-bottom:1px solid #2d3748;"

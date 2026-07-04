@@ -16,18 +16,26 @@ from app.modules.knowledge.repository import KnowledgeRepo
 from app.ports.llm import LLMPort
 
 _SYSTEM = (
-    "You are a Knowledge Base editor for an AI sales assistant bot.\n"
-    "The manager wants to modify the bot's behavior by editing the knowledge base.\n\n"
+    "You are the Knowledge Base assistant for an AI sales bot. The FULL knowledge base is "
+    "below; read ALL of it before answering.\n\n"
     "CURRENT KNOWLEDGE BASE:\n{docs}\n\n"
-    "Propose a minimal targeted change. Reply with JSON ONLY (no markdown):\n"
-    '{{"slug":"doc_slug","old_text":"exact verbatim text","new_text":"replacement",'
-    '"summary":"one-line description"}}\n\n'
-    "If clarification is needed:\n"
-    '{{"slug":null,"old_text":null,"new_text":null,"summary":"your question"}}\n\n'
+    "Decide the manager's INTENT from their message and reply with JSON ONLY (no markdown):\n"
+    "1) A QUESTION about the bot / KB / products → answer it FROM the knowledge base:\n"
+    '   {{"intent":"answer","answer":"your answer, citing the relevant doc"}}\n'
+    "2) A CLEAR command to CHANGE the KB where you know EXACTLY where → propose the edit "
+    "(NOT applied until the manager confirms):\n"
+    '   {{"intent":"edit","slug":"doc_slug","old_text":"exact verbatim substring",'
+    '"new_text":"replacement","summary":"one-line description"}}\n'
+    "3) A change whose target is unclear, OR new data you must place carefully → ASK where "
+    "BEFORE touching anything:\n"
+    '   {{"intent":"clarify","summary":"which document/section should this go in? ..."}}\n\n'
     "RULES:\n"
-    "- old_text MUST be a verbatim substring of the named document\n"
-    "- Keep changes minimal\n"
-    "- Use the same language as the document"
+    "- NEVER invent facts; answers/edits use only what's in the KB (or the manager's explicit "
+    "new data).\n"
+    "- For an edit, old_text MUST be a verbatim substring of the named document; keep it "
+    "minimal.\n"
+    "- When unsure WHERE to add data, choose 'clarify' — never guess.\n"
+    "- Use the same language as the manager."
 )
 
 
@@ -37,11 +45,12 @@ async def propose_edit(
     request: str,
     llm: LLMPort,
 ) -> CoachingEdit:
-    """Ask the LLM to propose a KB doc change and persist the result."""
+    """Coach turn: answer a question FROM the KB, propose a KB edit (confirm-before-write),
+    or ask where to place new data. Persisted as a CoachingEdit row for the chat history.
+
+    Latency isn't critical (a manager waits, not a live lead), so the WHOLE KB goes in uncut
+    and chat:deep absorbs it — full context beats truncated snippets."""
     docs = await KnowledgeRepo(session, branch_id).list()
-    # Coach isn't latency-critical (a manager waits a few seconds, not a live lead), so feed
-    # the WHOLE KB uncut and let chat:deep absorb it — full context beats truncated snippets
-    # when reasoning about which doc to change and how.
     docs_text = "\n\n".join(
         f"=== {d.slug} ({d.title or d.slug}) ===\n{d.content}" for d in docs
     )
@@ -59,17 +68,25 @@ async def propose_edit(
         )
         data: dict = json.loads(cleaned)
     except Exception as exc:  # noqa: BLE001
-        data = {"slug": None, "old_text": None, "new_text": None, "summary": f"Ошибка LLM: {exc}"}
+        data = {"intent": "clarify", "summary": f"Ошибка LLM: {exc}"}
 
-    status = "proposed" if data.get("old_text") else "clarify"
+    intent = data.get("intent") or ("edit" if data.get("old_text") else "clarify")
+    if intent == "answer":
+        status = "answered"
+        summary = data.get("answer") or data.get("summary")
+        slug = old_text = new_text = None
+    elif intent == "edit" and data.get("old_text"):
+        status = "proposed"
+        summary, slug = data.get("summary"), data.get("slug")
+        old_text, new_text = data.get("old_text"), data.get("new_text")
+    else:  # clarify, or an edit that never named a target
+        status = "clarify"
+        summary = data.get("summary")
+        slug = old_text = new_text = None
+
     edit = CoachingEdit(
-        branch_id=branch_id,
-        request=request,
-        status=status,
-        slug=data.get("slug"),
-        old_text=data.get("old_text"),
-        new_text=data.get("new_text"),
-        summary=data.get("summary"),
+        branch_id=branch_id, request=request, status=status,
+        slug=slug, old_text=old_text, new_text=new_text, summary=summary,
     )
     session.add(edit)
     await session.flush()

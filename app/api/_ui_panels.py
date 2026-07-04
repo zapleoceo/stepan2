@@ -181,12 +181,14 @@ def _coach_pair(
             f'</div>'
         )
     summ = _h.escape(summary or "")
+    label = _h.escape(t(f"coach.st.{status}")) if t(f"coach.st.{status}") != f"coach.st.{status}" \
+        else _h.escape(status)
     return (
         f'<div class="bb bb-o mgr"><div class="bt">{_h.escape(req)}</div>'
         f'<div class="bm">{mgr} · {_ago(created_at)}</div></div>'  # type: ignore[arg-type]
         f'<div class="bb bb-i" id="ce-{edit_id}">'
         f'<div class="bt">{summ}{diff}{actions}</div>'
-        f'<div class="bm">Coach{slug_str} · {_h.escape(status)}</div>'
+        f'<div class="bm">Coach{slug_str} · {label}</div>'
         f'</div>'
     )
 
@@ -220,13 +222,19 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
         for r in edits
     )
 
+    thinking = _h.escape(t("coach.thinking"))
     return (
         f'<div class="ch"><span class="ch-n">Coach KB</span></div>'
         f'{rules_section}'
         f'<div class="msgs" id="coach-msgs">{history}</div>'
+        # visible while the request is in flight (chat:deep can take seconds) — htmx toggles
+        # .htmx-request on the form, and #coach-thinking (an htmx-indicator) shows.
+        f'<div id="coach-thinking" class="htmx-indicator coach-think">'
+        f'<span class="spin"></span> {thinking}</div>'
         f'<div class="fin">'
         f'<form class="fin-row"'
         f' hx-post="/ui/coach/say" hx-target="#coach-msgs" hx-swap="beforeend"'
+        f' hx-indicator="#coach-thinking"'
         f' hx-on::after-request="this.reset();scrollMsgs(\'coach\')">'
         f'<input type="hidden" name="branch_id" value="{branch_id}">'
         f'<textarea name="request" rows="2" placeholder="{ph}"'
