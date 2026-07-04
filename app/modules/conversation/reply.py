@@ -200,7 +200,8 @@ class ReplyService:
     def _needs_captured(decision: Decision, lead: Lead) -> bool:
         if decision.discovery_complete or decision.has_needs():
             return True
-        return parse_needs(lead.needs).has_needs()
+        stored = parse_needs(lead.needs)
+        return stored.discovery_complete or stored.has_needs()
 
     async def _handoff(self, lead: Lead, thread, subtype: str | None) -> None:
         """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event.

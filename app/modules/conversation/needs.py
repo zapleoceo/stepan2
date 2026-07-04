@@ -19,8 +19,11 @@ class NeedsProfile:
     discovery_complete: bool = False
 
     def has_needs(self) -> bool:
-        """At least one pain or gain captured — enough to present against a real need."""
-        return bool(self.pains or self.gains)
+        """A pain AND a gain captured — the emotional layer (cost of inaction) reached, not
+        just a surface goal. A lone job/pain/gain is too shallow to present against: live
+        chats showed the model gating on a single shallow item and jumping to a feature dump
+        right after the lead stated a goal, skipping SPIN's implication/need-payoff beats."""
+        return bool(self.pains and self.gains)
 
     def to_json(self) -> str:
         return json.dumps({

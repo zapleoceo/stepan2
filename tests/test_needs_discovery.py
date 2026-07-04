@@ -85,9 +85,14 @@ async def test_gate_blocks_presenting_without_needs(db_session) -> None:
                     ready=False, needs_manager=False)
     assert svc._stage_for(bare, lead) == Stage.QUALIFYING  # forced back to discovery
 
-    with_need = Decision(reply="...", stage=Stage.PRESENTING, product_slug="vibe",
+    pain_only = Decision(reply="...", stage=Stage.PRESENTING, product_slug="vibe",
                          ready=False, needs_manager=False, pains=["scared to fail"])
-    assert svc._stage_for(with_need, lead) == Stage.PRESENTING  # need captured → allowed
+    assert svc._stage_for(pain_only, lead) == Stage.QUALIFYING  # a lone pain is still shallow
+
+    with_need = Decision(reply="...", stage=Stage.PRESENTING, product_slug="vibe",
+                         ready=False, needs_manager=False,
+                         pains=["scared to fail"], gains=["a stable job"])
+    assert svc._stage_for(with_need, lead) == Stage.PRESENTING  # pain + gain → allowed
 
 
 async def test_gate_allows_presenting_when_lead_already_has_needs(db_session) -> None:

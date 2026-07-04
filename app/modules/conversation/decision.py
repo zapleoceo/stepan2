@@ -48,8 +48,9 @@ class Decision:
     hard_stop: bool = False
 
     def has_needs(self) -> bool:
-        """At least one pain or gain captured — the minimum to present against a need."""
-        return bool(self.pains or self.gains)
+        """A pain AND a gain captured — the emotional layer reached, not just a goal. See
+        NeedsProfile.has_needs (app/modules/conversation/needs.py) for the full rationale."""
+        return bool(self.pains and self.gains)
 
 
 def _strip_fences(raw: str) -> str:
