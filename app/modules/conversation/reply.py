@@ -113,16 +113,15 @@ class ReplyService:
             return None
         base = self._scheduled_at()
         outbox: Outbox | None = None
-        bubbles = list(_split_bubbles(decision.reply))
-        last_i = len(bubbles) - 1
-        for i, bubble in enumerate(bubbles):
+        meta_line = _fmt_llm_meta(self._last_llm_meta)
+        for i, bubble in enumerate(_split_bubbles(decision.reply)):
             outbox = await self.outbox.add(
                 Outbox(
                     branch_id=self.branch_id,
                     thread_id=thread_id,
                     text=bubble,
                     scheduled_at=base + timedelta(seconds=i * _BUBBLE_GAP_S),
-                    llm_info=_fmt_llm_meta(self._last_llm_meta) if i == last_i else None,
+                    llm_info=meta_line,  # every bubble of the reply shows the same broker line
                 )
             )
         lead = await self.session.get(Lead, thread.lead_id)

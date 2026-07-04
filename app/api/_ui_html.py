@@ -212,7 +212,8 @@ _CSS = (
     "align-items:center;gap:.2rem}"
     ".bb-o .bm{justify-content:flex-end}"
     ".b-llm{font-size:.66rem;color:#93a1b3;opacity:.95;margin-top:.2rem;"
-    "font-family:ui-monospace,monospace;letter-spacing:.1px}"
+    "font-family:ui-monospace,monospace;letter-spacing:.1px;"
+    "white-space:nowrap;overflow-x:auto}"
     ".bb-o .b-llm{text-align:right}"
     # per-message translate and delete buttons — hidden until bubble hover
     ".trx,.delx{background:none;border:none;color:#4a5568;cursor:pointer;"
@@ -402,6 +403,11 @@ _CSS = (
     "transition:transform .2s ease}"
     "body.chat-open #main{transform:translateX(0)}"
     "body.chat-open .mnav{display:none}body.chat-open .mback{display:block}"
+    # the fixed ‹ back button sits top-left over #main — pad the header so it does not
+    # cover the lead avatar
+    "body.chat-open .ch{padding-left:2.9rem}"
+    # touch has no hover: keep the per-message translate/delete buttons visible
+    ".trx,.delx{opacity:.5}"
     # give tables room to scroll horizontally instead of overflowing the viewport
     ".tbl,.rep-tbl{min-width:520px}"
     "}"
