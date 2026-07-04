@@ -143,10 +143,10 @@ def test_app_shell_lang_buttons_highlight_active() -> None:
     assert '"lb on" href="/ui/lang/ru"' in html
 
 
-def test_chat_summary_translate_toggles_and_pull_to_refresh() -> None:
+def test_chat_summary_translate_toggles_and_no_ptr_emulation() -> None:
     """Summary-translate button toggles its popup (trChat) with a close hook (trClose),
     a background poll no longer auto-scrolls (smartScroll gone from the poll path), and
-    mobile pull-to-refresh is wired (native gesture is killed by overflow:hidden)."""
+    the flaky pull-to-refresh touch emulation is GONE (removed by owner request)."""
     from app.api._ui_html import app_shell, chat_panel_html
     _set_lang("en")
     panel = chat_panel_html(7, "Bob", "qualifying", [], [])
@@ -154,7 +154,8 @@ def test_chat_summary_translate_toggles_and_pull_to_refresh() -> None:
     assert 'hx-post="/ui/chat/7/translate"' not in panel
     shell = app_shell("en", "", active_nav="inbox")
     assert "function trChat(" in shell and "function trClose(" in shell
-    assert "location.reload()" in shell             # pull-to-refresh handler present
+    assert "touchstart" not in shell                # PTR emulation removed
+    assert "location.reload()" not in shell
 
 
 def test_app_shell_opens_chats_at_the_bottom() -> None:
@@ -395,6 +396,43 @@ def test_direct_full_page_load_has_help_overlay_for_its_own_section(client: Test
     assert resp.status_code == 200
     assert 'id="hov-title"' in resp.text
     assert "Branches" in resp.text
+
+
+# ─── language switch keeps the current view ────────────────────────────────────
+
+def test_lang_switch_returns_to_the_open_chat(client: TestClient) -> None:
+    """Switching language from inside a chat must NOT eject the manager to the inbox —
+    the middleware wraps any /ui/** path in the full shell, so redirect right back."""
+    resp = client.get(
+        "/ui/lang/ru",
+        headers={"referer": "https://stepan2.zapleo.com/ui/chat/452"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/ui/chat/452"
+    assert "stepan2_lang=ru" in resp.headers.get("set-cookie", "")
+
+
+def test_lang_switch_preserves_query_and_defends_the_redirect(client: TestClient) -> None:
+    # query string survives (e.g. a filtered inbox view)
+    ok = client.get(
+        "/ui/lang/en",
+        headers={"referer": "https://stepan2.zapleo.com/ui/inbox?stage=ready"},
+        follow_redirects=False,
+    )
+    assert ok.headers["location"] == "/ui/inbox?stage=ready"
+    # foreign/absolute referers and non-/ui/ paths fall back to the inbox (no open redirect)
+    for ref in ("https://evil.example/ui/../../etc", "https://x.y/elsewhere", ""):
+        r = client.get("/ui/lang/id", headers={"referer": ref}, follow_redirects=False)
+        assert r.headers["location"] == "/ui/inbox" or r.headers["location"].startswith("/ui/")
+        assert not r.headers["location"].startswith("http")
+    # the switcher itself as referer must not loop
+    loop = client.get(
+        "/ui/lang/en",
+        headers={"referer": "https://stepan2.zapleo.com/ui/lang/ru"},
+        follow_redirects=False,
+    )
+    assert loop.headers["location"] == "/ui/inbox"
 
 
 def test_inbox_has_help_button(client: TestClient) -> None:
@@ -713,7 +751,7 @@ def test_admin_root_redirects_to_ui() -> None:
     assert resp.headers["location"] == "/ui/inbox"
 
 
-# ─── lang switch: must redirect to full-page URL ──────────────────────────────
+# ─── lang switch: stay on the current view (path-only redirect) ────────────────
 
 def test_lang_switch_from_full_page_preserves_referer() -> None:
     client = TestClient(app, follow_redirects=False)
@@ -722,19 +760,20 @@ def test_lang_switch_from_full_page_preserves_referer() -> None:
         headers={"Referer": "http://testserver/ui/inbox"},
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == "http://testserver/ui/inbox"
+    assert resp.headers["location"] == "/ui/inbox"  # path-only, same view
     assert "stepan2_lang=ru" in resp.headers.get("set-cookie", "")
 
 
-def test_lang_switch_from_partial_redirects_to_inbox() -> None:
-    """HTMX partial URLs must NOT be used as redirect targets after lang switch."""
+def test_lang_switch_from_partial_stays_on_that_view() -> None:
+    """Partial URLs are safe redirect targets now — _PartialShellMiddleware wraps them
+    in the full shell on direct load, so switching language keeps the open panel."""
     client = TestClient(app, follow_redirects=False)
     resp = client.get(
         "/ui/lang/ru",
         headers={"Referer": "http://testserver/ui/settings/panel"},
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/ui/inbox"
+    assert resp.headers["location"] == "/ui/settings/panel"
 
 
 def test_lang_switch_no_referer_redirects_to_inbox() -> None:

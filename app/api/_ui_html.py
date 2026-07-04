@@ -1356,26 +1356,11 @@ def app_shell(
         "fetch('/ui/chat/'+tid+'/tr-draft',{method:'POST',headers:{'HX-Request':'true'},"
         "body:fd}).then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
         ".catch(function(){out.textContent='';});}"
-        # touch pull-to-refresh. NOT the browser-native gesture: our app-shell layout
-        # (html/body overflow:hidden, inner scroll containers — same as any web chat app)
-        # structurally disables native PTR in every mobile engine; the only 'native' fix
-        # is making the document itself the scroller, which this layout can't do. So we
-        # emulate: at the top of the touched scroll region (or the document as fallback,
-        # with a 2px tolerance — Opera Mobile rests at 1-2px after overscroll), a >90px
-        # downward drag reloads. Gated on touch events, not viewport width: desktop-mode
-        # browsing on a phone is still a touch device and must keep the gesture.
-        "(function(){var sy=0,pull=false;"
-        "function topOf(el){return el?el.scrollTop:0;}"
-        "document.addEventListener('touchstart',function(e){"
-        "var t=e.target;"
-        "var reg=t.closest?(t.closest('.msgs')||t.closest('.thr')||"
-        "t.closest('.pnl-body')||t.closest('#tl')):null;"
-        "var top=reg?topOf(reg):topOf(document.scrollingElement||document.body);"
-        "if(top<=2){sy=e.touches[0].clientY;pull=true;}else pull=false;},"
-        "{passive:true});"
-        "document.addEventListener('touchmove',function(e){if(!pull)return;"
-        "if(e.touches[0].clientY-sy>90){pull=false;location.reload();}},{passive:true});"
-        "document.addEventListener('touchend',function(){pull=false;});})();"
+        # No pull-to-refresh emulation. The app-shell layout (html/body overflow:hidden,
+        # inner scroll containers — same as any web chat) structurally disables the native
+        # gesture in every mobile engine, and the hand-rolled touch handler proved flaky
+        # across engines/regions (removed by owner request). Content live-updates via its
+        # own poll cycle; a deliberate reload is the browser's reload button.
         # resize + collapse init (runs once after DOM ready)
         "(function(){"
         "var sb=document.querySelector('.sid');"

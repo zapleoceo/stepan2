@@ -69,9 +69,6 @@ _THREAD_TMPL = (
     " DESC NULLS LAST LIMIT 100"
 )
 
-_FULL_PAGE_PATHS = {"/ui/inbox", "/ui/coach", "/ui/knowledge", "/ui/reports"}
-
-
 # ─── full pages ───────────────────────────────────────────────────────────────
 
 @router.get("/inbox", response_class=HTMLResponse)
@@ -164,11 +161,16 @@ async def set_lang(code: str, request: Request) -> RedirectResponse:
     from urllib.parse import urlparse  # noqa: PLC0415
 
     lang = code if code in LANGS else "en"
-    # HTMX pushes partial URLs (/ui/*/panel) to the address bar; redirect
-    # to a known full-page path to avoid rendering raw HTML without CSS.
-    raw_ref = request.headers.get("referer", "")
-    path = urlparse(raw_ref).path if raw_ref else ""
-    target = raw_ref if path in _FULL_PAGE_PATHS else "/ui/inbox"
+    # Return to the exact view the manager was on — switching language must not eject
+    # them from an open chat. Any /ui/** path is safe: _PartialShellMiddleware wraps
+    # partial URLs (/ui/chat/123, /ui/settings/panel …) in the full shell on direct
+    # load. Path-only (never the raw referer) so this can't become an open redirect.
+    parsed = urlparse(request.headers.get("referer", ""))
+    path = parsed.path or ""
+    if path.startswith("/ui/") and not path.startswith("/ui/lang/"):
+        target = path + (f"?{parsed.query}" if parsed.query else "")
+    else:
+        target = "/ui/inbox"
     resp = RedirectResponse(target, status_code=303)
     resp.set_cookie(
         LANG_COOKIE, lang, max_age=60 * 60 * 24 * 365,
