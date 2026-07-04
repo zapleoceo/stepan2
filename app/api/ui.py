@@ -20,7 +20,12 @@ from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
-from ._query import _branch_where, fetch_ad_funnel, fetch_coach_data
+from ._query import (
+    _branch_where,
+    fetch_coach_data,
+    fetch_report_data,
+    fetch_stage_counts,
+)
 from ._routes_admin import _agent_toggles_html  # noqa: F401 (re-exported for tests)
 from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
@@ -47,38 +52,21 @@ _THREAD_TMPL = (
     " COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) AS last_act,"
     " l.phone_e164, ct.product_slug, l.ig_username, l.avatar_url,"
     " l.follower_count, l.following_count, l.agent_enabled,"
-    " (SELECT m.text FROM message m WHERE m.thread_id = ct.id"
-    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_msg,"
-    " (SELECT m.direction FROM message m WHERE m.thread_id = ct.id"
-    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) last_dir,"
-    " (SELECT COUNT(*) FROM message m WHERE m.thread_id = ct.id"
-    "  AND m.direction = 'in') cnt_in,"
-    " (SELECT COUNT(*) FROM message m WHERE m.thread_id = ct.id"
-    "  AND m.direction = 'out') cnt_out,"
+    " lm.text AS last_msg, lm.direction AS last_dir,"
+    " mc.cnt_in, mc.cnt_out,"
     " b.name AS branch_name"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " JOIN branch b ON b.id = l.branch_id"
+    " LEFT JOIN LATERAL ("
+    "  SELECT m.text, m.direction FROM message m WHERE m.thread_id = ct.id"
+    "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) lm ON TRUE"
+    " LEFT JOIN LATERAL ("
+    "  SELECT COUNT(*) FILTER (WHERE m.direction = 'in') AS cnt_in,"
+    "         COUNT(*) FILTER (WHERE m.direction = 'out') AS cnt_out"
+    "  FROM message m WHERE m.thread_id = ct.id) mc ON TRUE"
     " {where}"
     " ORDER BY COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at)"
     " DESC NULLS LAST LIMIT 100"
-)
-
-_STAGE_COUNTS_Q = (  # noqa: S608
-    "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
-)
-_HOUR_IN_Q = (  # noqa: S608
-    "SELECT EXTRACT(HOUR FROM m.occurred_at)::int AS h, COUNT(*)"
-    " FROM message m JOIN channel_thread ct ON ct.id = m.thread_id"
-    " JOIN lead l ON l.id = ct.lead_id"
-    " WHERE m.direction='in' {and_where}"
-    " GROUP BY h"
-)
-_HOUR_OUT_Q = (  # noqa: S608
-    "SELECT EXTRACT(HOUR FROM m.occurred_at)::int AS h, COUNT(*)"
-    " FROM message m JOIN channel_thread ct ON ct.id = m.thread_id"
-    " JOIN lead l ON l.id = ct.lead_id"
-    " WHERE m.direction='out' {and_where}"
-    " GROUP BY h"
 )
 
 _FULL_PAGE_PATHS = {"/ui/inbox", "/ui/coach", "/ui/knowledge", "/ui/reports"}
@@ -126,14 +114,8 @@ async def coach_page(request: Request) -> HTMLResponse:
 async def funnel_partial(request: Request) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
     async with session_scope() as session:
-        rows = (
-            await session.execute(
-                text(_STAGE_COUNTS_Q.format(where=where)), params
-            )
-        ).all()
-    counts = {r[0]: int(r[1]) for r in rows}
+        counts = await fetch_stage_counts(session, branch_ids)
     return HTMLResponse(funnel_html(counts))
 
 
@@ -167,29 +149,11 @@ async def threads_partial(request: Request, stage: str = "") -> HTMLResponse:
 async def reports_page(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
-    and_where = ("AND l.branch_id = ANY(:bids)" if branch_ids else "")
     async with session_scope() as session:
-        sc_rows = (
-            await session.execute(
-                text(_STAGE_COUNTS_Q.format(where=where)), params
-            )
-        ).all()
-        hi_rows = (
-            await session.execute(
-                text(_HOUR_IN_Q.format(and_where=and_where)), params
-            )
-        ).all()
-        ho_rows = (
-            await session.execute(
-                text(_HOUR_OUT_Q.format(and_where=and_where)), params
-            )
-        ).all()
-        ad_funnel = await fetch_ad_funnel(session, branch_ids)
-    stage_counts = {r[0]: int(r[1]) for r in sc_rows}
-    hour_in = {int(r[0]): int(r[1]) for r in hi_rows}
-    hour_out = {int(r[0]): int(r[1]) for r in ho_rows}
-    panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel)
+        stage_counts, hour_in, hour_out, ad_funnel, discovery = (
+            await fetch_report_data(session, branch_ids)
+        )
+    panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery)
     return HTMLResponse(app_shell(lang, panel, active_nav="reports"))
 
 
