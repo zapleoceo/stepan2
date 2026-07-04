@@ -15,12 +15,10 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, Lead, Outbox
+from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
-from .needs import needs_summary, parse_needs
-from .prompt import build_messages
-from .reply import _retrieval_query
+from .engine import DecisionEngine, _fmt_llm_meta
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -118,34 +116,16 @@ class FollowupService:
     async def _queue_followup(
         self, thread_id: int, product_slug: str | None, sent_so_far: int, now: datetime,
     ) -> bool:
-        from app.modules.budget import BudgetService  # noqa: PLC0415 (avoid module cycle)
-        budget = BudgetService(self.session, self.branch_id)
-        if await budget.over_budget():
-            logger.warning("branch=%d over daily LLM budget — followups held", self.branch_id)
-            return False
-        thread = await self.threads.by_id(thread_id)
-        since = thread.context_cleared_at if thread is not None else None
-        dialog = await self.messages.dialog(thread_id, since=since)
-        if not dialog:
+        engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
+        ctx = await engine.prepare(thread_id, workflow="followup")
+        if ctx is None:
             return False
         lang = await self._lang()
-        context = await self.knowledge.knowledge_context(
-            product_slug, query=_retrieval_query(dialog))
-        notes = await self.coaching.active_manager_notes()
-        lead = await self.session.get(Lead, thread.lead_id) if thread is not None else None
-        needs_block = needs_summary(parse_needs(lead.needs if lead is not None else None))
-        messages = build_messages(context, dialog, lang, coaching_notes=notes,
-                                  needs_block=needs_block)
         total = len(self.settings.followup_schedule_h)
-        messages.append({
-            "role": "user",
-            "content": _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total),
-        })
-        raw, meta = await self.llm.chat(
-            messages, capability="chat:smart", require_json_schema=True,
-            workflow="followup", thread_id=thread_id, branch_id=self.branch_id,
+        raw, meta = await engine.complete(
+            ctx, thread_id, lang=lang, workflow="followup",
+            extra_user_msg=_FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total),
         )
-        await budget.record(float(meta.get("cost_usd") or 0.0))
         from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
         try:
             decision = parse_decision(raw)
@@ -159,7 +139,6 @@ class FollowupService:
             return False
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: lead answered while we were generating (S1 guard)
-        from .reply import _fmt_llm_meta  # noqa: PLC0415 (same package, avoid cycle)
         await self.outbox.add(Outbox(
             branch_id=self.branch_id,
             thread_id=thread_id,
