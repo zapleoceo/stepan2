@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     # Telegram bot token for manager alerts (BotFather token — never in VCS)
     tg_bot_token: str = Field(default="", description="Telegram bot token for manager pings")
+    public_url: str = Field(default="https://stepan2.zapleo.com",
+                            description="base URL for chat deep-links in manager alerts")
 
     # Admin/super-admin bootstrap (Telegram id of the first super_admin)
     bootstrap_super_admin: int = Field(default=0)

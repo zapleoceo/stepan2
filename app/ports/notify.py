@@ -14,5 +14,6 @@ class NotifierPort(Protocol):
         kind: str,           # ready_deal | ready_openhouse | needs_manager
         summary_en: str,
         summary_ru: str,
+        link: str | None = None,
     ) -> None:
         ...

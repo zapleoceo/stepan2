@@ -9,6 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ManagerAlert
 from app.adapters.db.repository import BranchScoped
+from app.config import settings
 from app.ports.notify import NotifierPort
 
 
@@ -47,11 +48,16 @@ class AlertService:
             )
         )
         if self._notifier is not None:  # row is the CRM record; the ping is best-effort
+            link = (
+                f"{settings().public_url.rstrip('/')}/ui/chat/{thread_id}"
+                if thread_id is not None else None
+            )
             await self._notifier.notify_manager(
                 branch_id=self.branch_id,
                 lead_id=lead_id,
                 kind=kind,
                 summary_en=summary_en,
                 summary_ru=summary_ru,
+                link=link,
             )
         return alert

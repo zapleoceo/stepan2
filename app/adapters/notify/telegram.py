@@ -30,8 +30,10 @@ class TelegramNotifier:
         kind: str,
         summary_en: str,
         summary_ru: str,
+        link: str | None = None,
     ) -> None:
-        text = _render(kind=kind, lead_id=lead_id, summary_en=summary_en, summary_ru=summary_ru)
+        text = _render(kind=kind, lead_id=lead_id, summary_en=summary_en,
+                       summary_ru=summary_ru, link=link)
         await self._send(text)
 
     async def _send(self, text: str) -> dict[str, Any] | None:
@@ -51,10 +53,15 @@ class TelegramNotifier:
         return response.json()
 
 
-def _render(*, kind: str, lead_id: int, summary_en: str, summary_ru: str) -> str:
-    """Bilingual EN/RU manager message — one block per language under a kind header."""
-    return (
+def _render(
+    *, kind: str, lead_id: int, summary_en: str, summary_ru: str, link: str | None = None,
+) -> str:
+    """Bilingual EN/RU manager message — one block per language, plus a chat deep-link."""
+    body = (
         f"<b>{kind}</b> · lead #{lead_id}\n\n"
         f"EN: {summary_en}\n"
         f"RU: {summary_ru}"
     )
+    if link:
+        body += f'\n\n💬 <a href="{link}">open chat</a>'
+    return body
