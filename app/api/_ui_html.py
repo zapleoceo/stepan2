@@ -398,6 +398,11 @@ _CSS = (
     ".kb-grp{margin:.15rem 0}"
     ".kb-grp>summary{cursor:pointer;font-size:.72rem;text-transform:uppercase;"
     "letter-spacing:.04em;color:#6b7685;padding:.3rem .55rem;user-select:none}"
+    # outer branch group (only when the KB view spans >1 branch)
+    ".kb-branch{margin:.15rem 0;border-left:2px solid #2d3748}"
+    ".kb-branch>summary{cursor:pointer;font-size:.74rem;font-weight:700;color:#8aa4d6;"
+    "padding:.35rem .55rem;user-select:none;background:#161b26}"
+    ".kb-branch .kb-grp{margin-left:.5rem}"
     ".ch-slug{font-family:ui-monospace,monospace;font-size:.72rem;color:#4da6ff;"
     "margin-left:.4rem}"
     ".kb-by{font-size:.7rem;color:#6b7685}"

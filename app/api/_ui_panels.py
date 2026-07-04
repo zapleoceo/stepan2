@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html as _h
 import json as _json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from ._i18n import current_lang, t
 from ._ui_html import _ago, _as_dt, ig_post_url
@@ -115,6 +115,25 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
         dt += timedelta(hours=tz.get(branch_id, 0))
         return dt.strftime("%H:%M:%S")
 
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    def _eta(status: object, scheduled: object) -> str:
+        # this queue is pending-only, so 'sent time' is always blank — show instead when the
+        # send is due (scheduled_at, ± the ~20s poll; a snapshot at page load).
+        if str(status) != "pending":
+            return "—"
+        dt = _as_dt(scheduled)
+        if dt is None:
+            return "—"
+        secs = (dt - now).total_seconds()
+        if secs <= 5:
+            return f'<span style="color:#51cf66">{_h.escape(t("outbox.now"))}</span>'
+        if secs < 60:
+            return _h.escape(t("outbox.in_s", n=int(secs)))
+        if secs < 3600:
+            return _h.escape(t("outbox.in_m", n=int(secs // 60)))
+        return _h.escape(t("outbox.in_h", n=round(secs / 3600, 1)))
+
     trows = "".join(
         f'<tr>'
         f'<td>{_chat_link(r[1])}</td>'
@@ -122,7 +141,7 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
         f'<td style="color:#6b7685;font-size:.72rem">{_h.escape(str(r[3]))}</td>'
         f'<td style="color:#d0d7de;font-size:.77rem">{_h.escape(str(r[4] or "")[:70])}</td>'
         f'<td style="color:#4a5568;font-size:.7rem;white-space:nowrap">{_ts(r[5], r[7])}</td>'
-        f'<td style="color:#6b7685;font-size:.7rem;white-space:nowrap">{_ts(r[6], r[7])}</td>'
+        f'<td style="color:#93a1b3;font-size:.7rem;white-space:nowrap">{_eta(r[2], r[5])}</td>'
         f'</tr>'
         for r in rows  # (id, thread_id, status, source, text, scheduled_at, sent_at, branch_id)
     )
@@ -137,7 +156,7 @@ def outbox_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) ->
         f'<th>{_h.escape(t("outbox.source"))}</th>'
         f'<th>Text</th>'
         f'<th>{_h.escape(t("outbox.scheduled"))}</th>'
-        f'<th>{_h.escape(t("outbox.sent"))}</th></tr></thead>'
+        f'<th>{_h.escape(t("outbox.eta"))}</th></tr></thead>'
         f'<tbody>{trows or "<tr><td colspan=6 style=color:#4a5568>—</td></tr>"}</tbody>'
         f'</table></div>'
     )

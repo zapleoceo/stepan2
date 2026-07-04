@@ -377,6 +377,11 @@ _TR: dict[str, dict[str, str]] = {
     "outbox.scheduled": {"ru": "Запланир.",    "en": "Scheduled",   "id": "Dijadwalkan"},
     "outbox.chat":      {"ru": "Чат",          "en": "Chat",        "id": "Chat"},
     "outbox.sent":      {"ru": "Отправлено",   "en": "Sent",        "id": "Terkirim"},
+    "outbox.eta":       {"ru": "Уйдёт",        "en": "Send in",     "id": "Kirim dlm"},
+    "outbox.now":       {"ru": "сейчас",       "en": "now",         "id": "sekarang"},
+    "outbox.in_s":      {"ru": "через {n}с",   "en": "in {n}s",     "id": "{n}s lagi"},
+    "outbox.in_m":      {"ru": "через {n} мин","en": "in {n} min",  "id": "{n} mnt lagi"},
+    "outbox.in_h":      {"ru": "через {n} ч",  "en": "in {n}h",     "id": "{n} jam lagi"},
     # broker log page
     "nav.log":          {"ru": "Лог брокера",  "en": "Broker log",  "id": "Log broker"},
     "log.title":        {"ru": "Лог вызовов брокера", "en": "Broker call log",

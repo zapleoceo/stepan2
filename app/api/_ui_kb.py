@@ -39,9 +39,9 @@ def _tabs(active: str) -> str:
 
 
 def kb_tree_html(docs: list, active_id: int | None = None) -> str:
-    """Persona-tab sidebar: docs grouped by category into collapsible groups. When the view
-    spans >1 branch, groups are prefixed with the branch name ('Branch · Category') so
-    per-branch copies of the same slug don't read as duplicates."""
+    """Persona-tab sidebar: docs grouped by category. When the view spans >1 branch, each
+    branch's category groups are wrapped in an outer collapsible branch group
+    (Branch → Category → docs) so per-branch copies of a slug don't read as duplicates."""
     lang = current_lang()
     branches = sorted({d[7] for d in docs if len(d) > 7})
     multi = len(branches) > 1
@@ -53,18 +53,24 @@ def kb_tree_html(docs: list, active_id: int | None = None) -> str:
     out = [_tabs("persona")]
     for br in (branches or [""]):
         cats = by_branch.get(br, {})
+        cat_groups = []
         for cat in (*_CAT_ORDER, _OTHER):
             rows = cats.get(cat)
             if not rows:
                 continue
             rows.sort(key=lambda r: (r[5] or 0, str(r[1])))
             items = "".join(_tree_item(d, active_id) for d in rows)
-            label = _cat_label(cat, lang)
-            if multi:
-                label = f"{br} · {label}"
-            out.append(
-                f'<details class="kb-grp" open><summary>{_h.escape(label)}'
+            cat_groups.append(
+                f'<details class="kb-grp" open><summary>{_h.escape(_cat_label(cat, lang))}'
                 f'</summary>{items}</details>')
+        if not cat_groups:
+            continue
+        if multi:  # outer branch layer wrapping this branch's category groups
+            out.append(
+                f'<details class="kb-branch" open><summary>{_h.escape(br)}</summary>'
+                f'{"".join(cat_groups)}</details>')
+        else:
+            out.extend(cat_groups)
     if len(out) == 1:
         out.append('<div class="emp">—</div>')
     return f'<div id="kb-side">{"".join(out)}</div>'
