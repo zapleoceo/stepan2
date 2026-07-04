@@ -77,17 +77,19 @@ class MessageRepo(BranchScoped[Message]):
         return (await self.session.exec(q)).first()
 
     async def duplicate_by_content(
-        self, thread_id: int, direction: str, text: str, occurred_at: datetime
+        self, thread_id: int, direction: str, text: str, occurred_at: datetime,
+        window: timedelta = _DEDUP_WINDOW,
     ) -> bool:
-        """Same-text message already in this thread within a 2s window — the pending→main
-        inbox id drift reappears the same message under a new external id, so item-level
-        dedup misses it. Text-only (callers exclude media: placeholders collide)."""
+        """Same-text message already in this thread within ±window — the pending→main
+        inbox id drift (and our own outgoing polled back under a different IG id) reappears
+        the same message under a new external id, so item-level dedup misses it. Text-only
+        (callers exclude media: placeholders collide)."""
         q = self._q().where(
             Message.thread_id == thread_id,
             Message.direction == direction,
             Message.text == text,
-            Message.occurred_at >= occurred_at - _DEDUP_WINDOW,
-            Message.occurred_at <= occurred_at + _DEDUP_WINDOW,
+            Message.occurred_at >= occurred_at - window,
+            Message.occurred_at <= occurred_at + window,
         ).limit(1)
         return (await self.session.exec(q)).first() is not None
 

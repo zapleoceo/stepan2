@@ -85,6 +85,45 @@ async def test_own_reply_recorded_as_manager_and_moves_last_out(db_session) -> N
     assert thread.followups_sent == 2
 
 
+async def test_own_send_polled_back_under_new_id_is_deduped(db_session) -> None:
+    """OutboxSender already recorded the bot's send (send-API item id). The inbox poll
+    re-surfaces the SAME message under a different item id, so external-id dedup misses it
+    — content dedup on the out path must drop the poll-back echo (real prod dupe: one
+    bubble showed up twice in the chat + LLM context)."""
+    bid, cid, _, thread = await _world(db_session)
+    db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,
+                           external_id="send-api-id-1", direction="out", sent_by="agent",
+                           text="Halo Kak! Ada yang bisa aku bantu?",
+                           occurred_at=_NOW - timedelta(seconds=90)))
+    await db_session.flush()
+    # same text, DIFFERENT external id, a couple minutes later (poll latency) → the echo
+    polled_back = InboundMessage(
+        external_thread_id="ig-1", sender_id="own1", direction="out",
+        external_id="inbox-poll-id-2", text="Halo Kak! Ada yang bisa aku bantu?",
+        occurred_at=_NOW)
+    created = await IngestService(db_session, bid).ingest(cid, [polled_back])
+    assert created == []  # poll-back echo dropped
+    n = len((await db_session.exec(
+        select(Message).where(Message.thread_id == thread.id))).all())
+    assert n == 1  # only the original send-record remains
+
+
+async def test_genuine_manual_reply_from_ig_app_still_stored(db_session) -> None:
+    """A human typing a NOVEL reply in the IG app must still be recorded — the content
+    dedup only drops exact-text poll-back echoes, never a real distinct message."""
+    bid, cid, _, thread = await _world(db_session)
+    db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,
+                           external_id="bot-send-1", direction="out", sent_by="agent",
+                           text="Halo Kak!", occurred_at=_NOW - timedelta(seconds=30)))
+    await db_session.flush()
+    manual = InboundMessage(
+        external_thread_id="ig-1", sender_id="own1", direction="out",
+        external_id="manual-1", text="Kak, ini nomor WA tim kami: 0811...",
+        occurred_at=_NOW)
+    created = await IngestService(db_session, bid).ingest(cid, [manual])
+    assert len(created) == 1 and created[0].text.startswith("Kak, ini nomor WA")
+
+
 async def test_media_message_flags_pending_stubs_asset_and_records_seen(db_session) -> None:
     bid, cid, _, _ = await _world(db_session)
     seen = _NOW - timedelta(minutes=1)

@@ -22,6 +22,10 @@ from .repository import MessageRepo
 logger = logging.getLogger(__name__)
 
 WINDOW = timedelta(hours=24)  # private-channel reply window (e.g. MBS 24h)
+# Our own send recorded at send-time vs the same message polled back with IG's own
+# timestamp can drift by a few seconds plus poll latency; a lead/manager never re-sends
+# the identical full text within minutes, so this wide window drops only the echo.
+_OUT_ECHO_WINDOW = timedelta(minutes=5)
 
 
 class IngestService:
@@ -76,6 +80,16 @@ class IngestService:
             channel_id, inbound.external_thread_id
         )
         if thread is None:
+            return None
+        # OutboxSender already recorded every message the bot/manager sent through our
+        # queue, tagging it with the send-API's item id. The inbox poll re-surfaces that
+        # same message under a DIFFERENT item id, so external-id dedup misses it and we'd
+        # store our own send twice (one bubble showed up 2x in the chat + the LLM context).
+        # A genuine manual reply typed in the IG app carries novel text, so a wide content
+        # window here drops only the poll-back echo, never a real human message.
+        if await self.messages.duplicate_by_content(
+            thread.id, "out", inbound.text, inbound.occurred_at, window=_OUT_ECHO_WINDOW
+        ):
             return None
         msg = await self.messages.add(
             Message(
