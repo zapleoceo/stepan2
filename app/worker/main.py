@@ -144,6 +144,10 @@ async def _platform_agent_on(session: AsyncSession) -> bool:
 async def reply_pending(ctx: dict[str, Any]) -> int:
     """Decide and enqueue the agent reply for every thread awaiting one. Returns enqueued.
 
+    Quiet hours do NOT apply here — they throttle proactive follow-ups (see
+    schedule_followups), never a reply to something the lead already said. A lead who
+    writes at 3am still gets answered; only the BOT-initiated nudge waits for daytime.
+
     Each thread runs in its OWN transaction so a poison thread (bad LLM JSON, DB error)
     can't roll back replies already committed for other threads/branches this tick."""
     enqueued = 0
@@ -159,9 +163,6 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
             cfg = await get_settings(session, branch.id)
             if not cfg.agent_enabled:
                 logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
-                continue
-            if cfg.is_quiet_hour():
-                logger.info("branch %s: quiet hours — skip reply_pending", branch.id)
                 continue
             thread_ids = await wiring.threads_awaiting_reply(session, branch.id)
         for thread_id in thread_ids:
