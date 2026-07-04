@@ -52,17 +52,17 @@ def _fmt_llm_meta(meta: dict) -> str | None:
     elapsed = meta.get("elapsed_ms")
     req = meta.get("request_id")
     parts: list[str] = []
-    if elapsed is not None:  # order: time · id · cost · tokens · model (one line, no wrap)
+    if elapsed is not None:  # order: time·id·cost·tokens·model — tight, one line, truncates
         parts.append(f"{elapsed / 1000:.1f}s" if elapsed >= 1000 else f"{elapsed}ms")
     if req:
         parts.append(f"id {str(req)[:8]}")
     if cost is not None:
         parts.append("free" if not cost else f"${cost:.4f}")
     if t_in or t_out:
-        parts.append(f"{t_in}↑ {t_out}↓")
+        parts.append(f"{t_in}↑{t_out}↓")
     if model:
         parts.append(model)
-    return " · ".join(parts) if parts else None
+    return "·".join(parts) if parts else None
 
 
 @dataclass
