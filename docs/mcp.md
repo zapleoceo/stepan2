@@ -8,7 +8,18 @@ Stepan.
 Claude Desktop ──stdio──▶ mcp_server/stepan_mcp.py ──HTTPS+Bearer──▶ stepan2.zapleo.com/mcp/*
 ```
 
-Полная инструкция по установке и настройке клиента — в [`mcp_server/README.md`](../mcp_server/README.md).
+Два транспорта:
+
+- **Local stdio** (`mcp_server/stepan_mcp.py`) — для клиента с локальным Python
+  (Claude Desktop, Claude Code). Инструкция — в [`mcp_server/README.md`](../mcp_server/README.md).
+- **Remote Streamable HTTP** (`app/api/mcp_remote.py`, смонтирован на `/connector/mcp`) —
+  для клиентов, которым можно дать только URL (claude.ai web «Custom connector»).
+  Токен передаётся заголовком `Authorization: Bearer` **или** `?key=<token>` в URL
+  (capability-URL для веб-клиентов без заголовков). DNS-rebinding-защита выключена
+  (за Cloudflare/nginx Host непредсказуем; каждый запрос и так за токен-гейтом).
+
+`MCP_SECRET` может содержать **несколько токенов через запятую** — каждому вызывающему
+(владелец, партнёр, интеграция) свой, независимо отзываемый.
 
 ## Инструменты
 
