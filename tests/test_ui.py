@@ -1120,6 +1120,7 @@ def test_composer_textarea_auto_grows() -> None:
 
 def test_nav_order_matches_requested_grouping() -> None:
     from app.api._ui_html import app_shell
+    _set_lang("en")  # labels come from the i18n contextvar, not app_shell's lang arg
     html = app_shell("en", "<div>x</div>", active_nav="inbox")
     labels = ["Inbox", "Outbox", "Coach KB", "Knowledge", "Products",
               "Reports", "Leads", "Members", "Settings", "Branches", "Broker log"]
