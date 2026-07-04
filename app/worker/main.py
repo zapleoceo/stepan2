@@ -258,6 +258,16 @@ async def _send_thread(
     return 1 if await sender.send_next(thread_id) is not None else 0
 
 
+# IG's private-API unsend call has been observed taking 40-90s (likely IG-side
+# throttling after a send burst) with no internal timeout of its own — batching many
+# threads' worth of revokes in one tick reliably blows past ARQ's 120s job_timeout.
+# Revoking is idempotent-ish (a retried revoke of an already-gone message just fails
+# gracefully) so a kill+retry here is not the correctness hazard reply/send batching
+# was, but it wastes the whole tick on nothing — cap it so at least SOME progress
+# commits every cycle instead of none.
+_DELETION_THREAD_CAP = 3
+
+
 async def process_deletions(ctx: dict[str, Any]) -> int:
     """Carry out requested IG unsends: revoke in IG first, delete locally on success."""
     from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
@@ -284,7 +294,8 @@ async def process_deletions(ctx: dict[str, Any]) -> int:
                         thread = await ThreadRepo(session, branch.id).by_id(msg.thread_id)
                         if thread is not None:
                             by_thread[msg.thread_id] = thread.external_thread_id
-                for ext_thread in set(by_thread.values()):
+                threads_this_tick = list(set(by_thread.values()))[:_DELETION_THREAD_CAP]
+                for ext_thread in threads_this_tick:
                     done += await svc.process(channel_id, ext_thread, port)  # type: ignore[arg-type]
     return done
 
