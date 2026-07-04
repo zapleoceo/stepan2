@@ -9,7 +9,7 @@ One broken thread never aborts the rest (per-thread try)."""
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -19,6 +19,7 @@ from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
 from .engine import DecisionEngine, _fmt_llm_meta
+from .reply import _BUBBLE_GAP_S, _split_bubbles
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -139,14 +140,16 @@ class FollowupService:
             return False
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: lead answered while we were generating (S1 guard)
-        await self.outbox.add(Outbox(
-            branch_id=self.branch_id,
-            thread_id=thread_id,
-            text=decision.reply,
-            source="followup",
-            scheduled_at=now,
-            llm_info=_fmt_llm_meta(meta),
-        ))
+        meta_line = _fmt_llm_meta(meta)
+        for i, bubble in enumerate(_split_bubbles(decision.reply)):
+            await self.outbox.add(Outbox(
+                branch_id=self.branch_id,
+                thread_id=thread_id,
+                text=bubble,
+                source="followup",
+                scheduled_at=now + timedelta(seconds=i * _BUBBLE_GAP_S),
+                llm_info=meta_line,
+            ))
         # consume the timer so run() won't re-pick it; the step count is bumped only
         # when the row actually sends (OutboxSender), so a failed send never burns a step
         thread = await self.threads.by_id(thread_id)

@@ -185,6 +185,20 @@ async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_se
     assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
+async def test_followup_splits_bubbles_like_a_normal_reply(db_session) -> None:
+    """A nudge that comes back with the '|||' bubble marker must be split into separate
+    outbox rows, same as enqueue_reply — otherwise the raw marker leaks into the sent
+    text (observed live: chat 1778 got 'Kak rkhaa... ||| Banyak lho...' as one message)."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    payload = json.dumps({"reply": "Bubble one ||| Bubble two", "stage": "qualifying"})
+    assert await _svc(db_session, bid, llm=FakeLLM(payload)).run() == 1
+    rows = (await db_session.exec(
+        select(Outbox).where(Outbox.thread_id == tid).order_by(Outbox.id))).all()
+    assert [r.text for r in rows] == ["Bubble one", "Bubble two"]
+    assert all("|||" not in r.text for r in rows)
+    assert rows[1].scheduled_at > rows[0].scheduled_at  # staggered like a normal reply
+
+
 async def test_followup_queues_during_quiet_hours(db_session) -> None:
     """Quiet hours hold the SEND (OutboxSender.send_next), not the queue — a nudge armed
     at 23:50 must already be sitting in outbox, ready the instant quiet hours lift."""
