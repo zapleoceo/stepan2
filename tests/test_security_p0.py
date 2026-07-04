@@ -36,11 +36,16 @@ from app.modules.crm.service import is_safe_webhook_url  # noqa: E402
 
 # ─── act-on permission ignores the view-filter cookie ─────────────────────────
 
-def _req(cookie: str = "", allowed=...):
+def _req(cookie: str = "", allowed=..., writable=...):
     scope = {"type": "http", "headers": [(b"cookie", f"stepan2_branch={cookie}".encode())]}
     req = Request(scope)
     if allowed is not ...:
         req.state.allowed_branch_ids = allowed
+        # Default: a write test mirrors read scope (viewer vs admin is set explicitly via
+        # `writable`). Zero-branch member → writable=[] → write routes deny.
+        req.state.writable_branch_ids = allowed if writable is ... else writable
+    elif writable is not ...:
+        req.state.writable_branch_ids = writable
     return req
 
 
@@ -382,6 +387,47 @@ def test_writable_branch_helpers() -> None:
     assert is_branch_write_forbidden(1, []) is True             # viewer writes nowhere
     assert is_branch_write_forbidden(1, [1]) is False           # admin of branch 1
     assert is_branch_write_forbidden(2, [1]) is True            # not admin of branch 2
+
+
+async def test_mixed_role_writes_own_admin_branch_not_viewer_branch(
+    db_session, monkeypatch,
+) -> None:
+    """A user who is branch_admin of B1 and branch_viewer of B2 (br=[1,2], wr=[1]) may
+    write to a B1 thread but NOT a B2 thread — even though they can READ both."""
+    import contextlib
+
+    from app.api._routes_chat import chat_bot_toggle
+
+    b1 = Branch(name="B1", lang="id")
+    b2 = Branch(name="B2", lang="id")
+    db_session.add_all([b1, b2])
+    await db_session.flush()
+    t1 = await _thread(db_session, b1.id)
+    t2 = await _thread(db_session, b2.id)
+
+    @contextlib.asynccontextmanager
+    async def fake_scope():
+        yield db_session
+
+    monkeypatch.setattr("app.api._routes_chat.session_scope", fake_scope)
+    from sqlalchemy import text as _text
+
+    # reads both branches (allowed=[1,2]) but writes only B1 (writable=[1])
+    mixed = _req(allowed=[b1.id, b2.id], writable=[b1.id])
+
+    async def _enabled(tid_thread) -> bool:
+        row = (await db_session.execute(
+            _text("SELECT l.agent_enabled FROM channel_thread ct"
+                  " JOIN lead l ON l.id=ct.lead_id WHERE ct.id=:t"), {"t": tid_thread})).first()
+        return bool(row[0])
+
+    before_b2 = await _enabled(t2)
+    await chat_bot_toggle(t2, mixed)               # write to viewer-branch → blocked
+    assert await _enabled(t2) == before_b2          # unchanged
+
+    before_b1 = await _enabled(t1)
+    await chat_bot_toggle(t1, mixed)               # write to admin-branch → allowed
+    assert await _enabled(t1) != before_b1          # flipped
 
 
 # ─── coach analyze must not read another branch's chat + KB (IDOR) ────────────

@@ -13,7 +13,12 @@ from app.adapters.db.models import Outbox, StageEvent, ThreadLog
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.adapters.notify.telegram import TelegramNotifier
-from app.admin._branch import allowed_branch_ids, is_branch_forbidden, is_super_admin
+from app.admin._branch import (
+    allowed_branch_ids,
+    is_branch_forbidden,
+    is_super_admin,
+    writable_branch_ids,
+)
 from app.config import settings
 from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.needs_translate import translated_needs
@@ -224,7 +229,7 @@ async def chat_send(
     apply_lang(request)
     text_body = text_body.strip()
     src = source if source in _AGENT_SOURCES else "manager"
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None or not text_body:
@@ -266,7 +271,7 @@ async def chat_since(
 async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
     """Flip the per-lead agent_enabled flag for this thread's lead; re-render the pill."""
     apply_lang(request)
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -294,7 +299,7 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
 async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
     """Toggle the lead's is_blocked flag; blocking also mutes the bot. Re-render the pill."""
     apply_lang(request)
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         info = (
             await session.execute(
@@ -335,7 +340,7 @@ async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
     """Clear context: mark everything up to now as OUT of Stepan's context. Messages stay
     in the DB and in the chat window (greyed) — Stepan just stops feeding them to the LLM."""
     apply_lang(request)
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     now = datetime.now(UTC).replace(tzinfo=None)
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
@@ -383,7 +388,7 @@ async def chat_stage(
     apply_lang(request)
     if stage not in _VALID_STAGES:
         stage = "new"
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
@@ -464,7 +469,7 @@ async def chat_product(
     not a hard filter). Empty value clears the binding."""
     apply_lang(request)
     new_slug = product.strip() or None
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
@@ -526,7 +531,7 @@ async def chat_product(
 @router.post("/chat/{thread_id}/suggest", response_class=HTMLResponse)
 async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
@@ -671,7 +676,7 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
     """Retract a message. Outgoing → request an IG unsend (worker revokes, then the
     row disappears); inbound → we can't unsend the lead's message, so only our local
     copy is removed. Never claims a retraction that didn't happen in IG."""
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
@@ -710,7 +715,7 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
 @router.post("/chat/{thread_id}/pending/{oid}/delete", response_class=HTMLResponse)
 async def pending_delete(thread_id: int, oid: int, request: Request) -> HTMLResponse:
     """Cancel a queued (unsent) reply — mark the outbox row skipped so the sender drops it."""
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")

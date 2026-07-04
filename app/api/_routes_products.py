@@ -6,7 +6,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import actor_from_request, branch_ids_from_request, is_branch_forbidden
+from app.admin._branch import (
+    actor_from_request,
+    branch_ids_from_request,
+    is_branch_forbidden,
+    is_branch_write_forbidden,
+    writable_branch_ids,
+)
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 
 from ._i18n import apply_lang
@@ -75,14 +81,14 @@ async def products_save(
     apply_lang(request)
     active = bool(is_active)
     actor = actor_from_request(request)
-    branch_ids = branch_ids_from_request(request)
+    writable = writable_branch_ids(request)
     async with session_scope() as session:
         prev = (await session.execute(
             text("SELECT branch_id, slug, content FROM product WHERE id=:id"),
             {"id": prod_id})).first()
         if prev is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-        if is_branch_forbidden(prev[0], branch_ids):
+        if is_branch_write_forbidden(prev[0], writable):  # WRITE role required for this branch
             return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         await session.execute(
             text("UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s,"
@@ -122,8 +128,10 @@ async def products_create(
     sort_order: int = Form(default=0),
 ) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    branch_id = branch_ids[0] if branch_ids else 1
+    # Create in a branch the caller may WRITE (super: None → default branch 1). The
+    # WriteGuardMiddleware already blocks a pure viewer, so `writable` is never [] here.
+    writable = writable_branch_ids(request)
+    branch_id = writable[0] if writable else 1
     slug = slug.strip().lower().replace(" ", "_")
     if not slug:
         return HTMLResponse(
@@ -179,8 +187,8 @@ async def products_history(prod_id: int, request: Request) -> HTMLResponse:
 @router.post("/products/restore", response_class=HTMLResponse)
 async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    bid = branch_ids[0] if branch_ids else None
+    writable = writable_branch_ids(request)  # scope by WRITE right, not view (viewer can't)
+    bid = writable[0] if writable else None
     async with session_scope() as session:
         out = await restore_revision(session, bid, rev_id, actor=actor_from_request(request))
         if out is None:
@@ -196,12 +204,12 @@ async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLRes
 
 @router.post("/products/{prod_id}/delete")
 async def products_delete(prod_id: int, request: Request) -> RedirectResponse:
-    branch_ids = branch_ids_from_request(request)
+    writable = writable_branch_ids(request)  # delete only from a branch the caller may WRITE
     async with session_scope() as session:
-        if branch_ids:
+        if writable:
             await session.execute(
                 text("DELETE FROM product WHERE id=:id AND branch_id=ANY(:bids)"),  # noqa: S608
-                {"id": prod_id, "bids": branch_ids},
+                {"id": prod_id, "bids": writable},
             )
         else:
             await session.execute(

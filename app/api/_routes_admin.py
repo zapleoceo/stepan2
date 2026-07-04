@@ -9,7 +9,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import allowed_branch_ids, branch_ids_from_request, is_super_admin
+from app.admin._branch import (
+    allowed_branch_ids,
+    branch_ids_from_request,
+    is_branch_write_forbidden,
+    is_super_admin,
+    writable_branch_ids,
+)
 from app.domain.clock import utc_now
 from app.modules.ads import AdMappingService
 from app.modules.knowledge.repository import ProductRepo
@@ -135,6 +141,8 @@ async def ad_product_map(
     if not branch_ids or len(branch_ids) != 1:
         return HTMLResponse('<span class="emp">—</span>', status_code=400)
     branch_id = branch_ids[0]
+    if is_branch_write_forbidden(branch_id, writable_branch_ids(request)):  # WRITE role required
+        return HTMLResponse('<span class="emp">—</span>', status_code=403)
     slug = product.strip()
     async with session_scope() as session:
         products = [(p.slug, p.title) for p in await ProductRepo(session, branch_id).active()]
@@ -285,8 +293,9 @@ async def settings_save_by_key(
     field = settings_schema.field_for(key)
     if field is None:
         return HTMLResponse("", status_code=400)
-    branch_ids = branch_ids_from_request(request)
-    bid = branch_ids[0] if branch_ids else 1
+    # Settings write → scope by WRITE right (viewer can't); middleware blocks a pure viewer.
+    writable = writable_branch_ids(request)
+    bid = writable[0] if writable else 1
     val = value.strip()
     async with session_scope() as session:
         if field.kind == "secret" and not val:
@@ -378,11 +387,13 @@ async def agent_toggle(
             if is_super:
                 new = not await _read_flag(session, None, _PLATFORM_KEY)
                 await _write_flag(session, None, _PLATFORM_KEY, new)
-        elif selected is not None:
+        elif selected is not None and not is_branch_write_forbidden(
+            selected, writable_branch_ids(request)
+        ):
             # The branch-scope button only renders when a single branch is selected (see
             # _agent_toggles_html) — a POST for scope=branch with no branch actually
             # selected (e.g. a stale form from an "all branches" view) is a no-op, not a
-            # silent branch-1 guess.
+            # silent branch-1 guess. A branch_viewer of the selected branch can't flip it.
             new = not await _read_flag(session, selected, _BRANCH_KEY)
             await _write_flag(session, selected, _BRANCH_KEY, new)
             invalidate(selected)

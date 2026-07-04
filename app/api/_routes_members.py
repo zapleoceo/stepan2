@@ -72,7 +72,9 @@ async def members_create(
         elif name.strip():
             user.name = name.strip()
             session.add(user)
-        await MembershipRepo(session).create(user.id, bid, Role(role))
+        # upsert, not create: one role per (user, branch) — a user can hold different
+        # roles in different branches, but never two conflicting rows for the same branch.
+        await MembershipRepo(session).upsert(user.id, bid, Role(role))
         html = await _render_panel(session)
     return HTMLResponse(html)
 

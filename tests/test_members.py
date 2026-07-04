@@ -57,6 +57,52 @@ async def test_members_create_reuses_existing_user(db_session, monkeypatch) -> N
     assert memberships[0].branch_id is None  # platform-wide (empty branch_id → None)
 
 
+async def test_members_create_supports_mixed_roles_across_branches(
+    db_session, monkeypatch,
+) -> None:
+    """A user can be branch_admin of one branch and branch_viewer of another — separate
+    memberships, distinct roles."""
+    _patch_scope(monkeypatch, db_session)
+    b1 = Branch(name="B1", lang="id")
+    b2 = Branch(name="B2", lang="id")
+    db_session.add_all([b1, b2])
+    await db_session.flush()
+
+    await rm.members_create(
+        _req(allowed=None), telegram_id=900, name="Mix",
+        role="branch_admin", branch_id=str(b1.id))
+    user = await rm.UserRepo(db_session).get_by_telegram_id(900)
+    await rm.members_create(
+        _req(allowed=None), telegram_id=900, name="",
+        role="branch_viewer", branch_id=str(b2.id))
+
+    ms = {m.branch_id: m.role for m in
+          await rm.MembershipRepo(db_session).memberships_for_user(user.id)}
+    assert ms[b1.id] == Role.BRANCH_ADMIN
+    assert ms[b2.id] == Role.BRANCH_VIEWER
+
+
+async def test_members_create_upserts_one_role_per_branch(db_session, monkeypatch) -> None:
+    """Re-adding a user to the SAME branch re-assigns the role instead of creating a
+    second, conflicting membership row."""
+    _patch_scope(monkeypatch, db_session)
+    b = Branch(name="B", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+
+    await rm.members_create(
+        _req(allowed=None), telegram_id=901, name="U",
+        role="branch_viewer", branch_id=str(b.id))
+    await rm.members_create(
+        _req(allowed=None), telegram_id=901, name="",
+        role="branch_admin", branch_id=str(b.id))  # same branch again → upsert
+
+    user = await rm.UserRepo(db_session).get_by_telegram_id(901)
+    ms = await rm.MembershipRepo(db_session).memberships_for_user(user.id)
+    assert len(ms) == 1                       # not duplicated
+    assert ms[0].role == Role.BRANCH_ADMIN    # role re-assigned
+
+
 async def test_members_set_role_updates_and_rerenders(db_session, monkeypatch) -> None:
     _patch_scope(monkeypatch, db_session)
     user = User(telegram_id=1, name="Carol")

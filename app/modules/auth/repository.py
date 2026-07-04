@@ -54,6 +54,23 @@ class MembershipRepo:
         await self.session.flush()
         return m
 
+    async def upsert(
+        self, user_id: int, branch_id: int | None, role: Role,
+    ) -> Membership:
+        """One role per (user, branch): re-assign the role if a membership already exists,
+        else create it. Keeps mixed-role users well-defined — a user has at most one role
+        per branch, so `br`/`wr` (read/write sets) never see a duplicate/ambiguous branch."""
+        q = select(Membership).where(
+            Membership.user_id == user_id, Membership.branch_id == branch_id
+        )
+        existing = (await self.session.exec(q)).first()
+        if existing is not None:
+            existing.role = role
+            self.session.add(existing)
+            await self.session.flush()
+            return existing
+        return await self.create(user_id, branch_id, role)
+
     async def update_role(self, membership_id: int, role: Role) -> bool:
         m = await self.get(membership_id)
         if m is None:

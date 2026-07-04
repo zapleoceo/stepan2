@@ -9,7 +9,12 @@ from starlette.datastructures import FormData
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import actor_from_request as _actor
-from app.admin._branch import branch_ids_from_request, is_branch_forbidden
+from app.admin._branch import (
+    branch_ids_from_request,
+    is_branch_forbidden,
+    is_branch_write_forbidden,
+    writable_branch_ids,
+)
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 from app.modules.knowledge.reindex import reindex_branch
 from app.modules.knowledge.sections import reassemble
@@ -84,14 +89,14 @@ async def knowledge_save(doc_id: int, request: Request) -> HTMLResponse:
     title = str(form.get("title") or "").strip()
     content = _content_from_form(form)
     actor = _actor(request)
-    branch_ids = branch_ids_from_request(request)
+    writable = writable_branch_ids(request)
     async with session_scope() as session:
         prev = (await session.execute(
             text("SELECT branch_id, slug, content FROM knowledge_doc WHERE id=:id"),
             {"id": doc_id})).first()
         if prev is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-        if is_branch_forbidden(prev[0], branch_ids):
+        if is_branch_write_forbidden(prev[0], writable):  # WRITE role required for this branch
             return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         await session.execute(
             text("UPDATE knowledge_doc SET title=:t, content=:c,"
@@ -129,8 +134,10 @@ async def knowledge_history(doc_id: int, request: Request) -> HTMLResponse:
 @router.post("/knowledge/restore", response_class=HTMLResponse)
 async def knowledge_restore(request: Request, rev_id: int = Form(...)) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    bid = branch_ids[0] if branch_ids else None
+    # Scope the restore by WRITE right, not the view filter — a viewer can't restore.
+    # (WriteGuardMiddleware already blocks a pure viewer, so `writable` is never [] here.)
+    writable = writable_branch_ids(request)
+    bid = writable[0] if writable else None
     async with session_scope() as session:
         out = await restore_revision(session, bid, rev_id, actor=_actor(request))
         if out is None:
@@ -153,9 +160,14 @@ async def knowledge_reindex(request: Request) -> HTMLResponse:
     branch_ids = branch_ids_from_request(request)
     if not branch_ids:
         return HTMLResponse(f'<span class="kb-reix-msg">{t("kb.reindex_pick")}</span>')
+    # Reindex only the selected branches the caller may WRITE (super: writable=None → all).
+    writable = writable_branch_ids(request)
+    targets = [b for b in branch_ids if not is_branch_write_forbidden(b, writable)]
+    if not targets:
+        return HTMLResponse('<span class="kb-reix-msg">Forbidden</span>', status_code=403)
     stored = 0
     async with session_scope() as session:
-        for bid in branch_ids:
+        for bid in targets:
             stored += await reindex_branch(session, bid, BrokerLLM())
     return HTMLResponse(
         f'<span class="kb-reix-msg">{t("kb.reindexed")}: {stored}</span>')

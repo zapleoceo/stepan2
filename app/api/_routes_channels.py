@@ -14,7 +14,11 @@ from app.adapters.channels.ig_client import build_ig_client
 from app.adapters.crypto import encrypt
 from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
-from app.admin._branch import allowed_branch_ids, is_branch_forbidden
+from app.admin._branch import (
+    allowed_branch_ids,
+    is_branch_forbidden,
+    writable_branch_ids,
+)
 from app.config import settings
 from app.domain.enums import ChannelKind
 from app.modules.channels.service import ChannelService
@@ -99,7 +103,7 @@ async def channel_create(
     is_active: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
-    if is_branch_forbidden(branch_id, allowed_branch_ids(request)):
+    if is_branch_forbidden(branch_id, writable_branch_ids(request)):  # WRITE role required
         return HTMLResponse(_FORBIDDEN, status_code=403)
     kind_val = kind if kind in (k.value for k in ChannelKind) else ChannelKind.INSTAGRAM.value
     async with session_scope() as session:
@@ -146,7 +150,7 @@ async def channel_save(
     is_active: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
-    allowed = allowed_branch_ids(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, allowed) is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
@@ -180,7 +184,7 @@ async def channel_delete(ch_id: int, request: Request) -> HTMLResponse:
     dropping only leads left with no thread on any other channel (see ChannelService)."""
     apply_lang(request)
     async with session_scope() as session:
-        branch_id = await _channel_branch(session, ch_id, allowed_branch_ids(request))
+        branch_id = await _channel_branch(session, ch_id, writable_branch_ids(request))
         if branch_id is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         result = await ChannelService(session, branch_id).purge(ch_id)
@@ -246,7 +250,7 @@ async def ig_login_start(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
+        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
         lang, tz = await _channel_geo(session, ch_id)
     if session_json.strip():
@@ -317,7 +321,7 @@ async def ig_login_verify(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
+        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
     flow = _ig_flows.get(flow_id)
     if not flow or flow["channel_id"] != ch_id:
@@ -360,7 +364,7 @@ async def meta_connect(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
+        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
             return HTMLResponse(_ch_meta_form(ch_id, error="Forbidden"))
     if not token.strip():
         return HTMLResponse(_ch_meta_form(ch_id, error="Access token is required"))
@@ -403,7 +407,7 @@ async def wa_connect(
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, allowed_branch_ids(request)) is None:
+        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
             return HTMLResponse(_ch_wa_form(ch_id, error="Forbidden"))
     if not base_url.strip() or not instance.strip() or not api_key.strip():
         return HTMLResponse(_ch_wa_form(ch_id, error="All three fields are required"))
