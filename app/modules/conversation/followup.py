@@ -49,8 +49,12 @@ _FOLLOWUP_Q = (  # noqa: S608
 _FOLLOWUP_NUDGE = (
     "[System: the lead has not replied since your last message. This is follow-up"
     " attempt {n} of {total}. Write a short friendly follow-up in {lang} to"
-    " re-engage them naturally — vary the angle, do not mention the wait or the"
-    " attempt number. Return the JSON as usual.]"
+    " re-engage them. CHANGE THE ANGLE from your previous messages — do NOT re-send"
+    " the same open-house / alumni / 'ada sesi' line again. Pick a DIFFERENT lever"
+    " each attempt: a concrete case tied to their stated need, a cheaper entry point"
+    " (Skill Booster / bootcamp) if price was the sticking point, or a low-friction"
+    " yes/no question instead of an open one. Never mention the wait or the attempt"
+    " number. Return the JSON as usual.]"
 )
 
 
