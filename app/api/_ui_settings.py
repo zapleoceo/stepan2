@@ -55,8 +55,8 @@ def _control(f: S.SettingField, value: str, lang: str) -> str:
         hidden = (f'<input type="hidden" name="value" value="{_h.escape(value)}" '
                   f'{_HX} {hx_vals}>')
         return (
-            f'<div class="multi-grp" style="display:flex;flex-wrap:wrap;gap:.35rem .7rem;'
-            f'justify-content:flex-end;max-width:{f.width}">{boxes}{hidden}</div>'
+            f'<div class="multi-grp" style="display:flex;flex-wrap:wrap;gap:.4rem .8rem;'
+            f'justify-content:flex-start">{boxes}{hidden}</div>'
         )
     if f.choices:  # fixed-option dropdown (e.g. knowledge_backend)
         opts = "".join(
@@ -92,10 +92,19 @@ def field_html(f: S.SettingField, value: str, lang: str, *, saved: bool = False)
     check = ' <span style="color:#51cf66">✓</span>' if saved else ""
     help_txt = S.tr(f.help, lang) if f.help else ""
     help_html = f'<div style="{_HELP}">{_h.escape(help_txt)}</div>' if help_txt else ""
+    label = f'<div style="{_LBL}">{_h.escape(S.tr(f.label, lang))}{check}</div>'
+    if f.kind == "multi":
+        # A wide control (checkbox group) can't share the row — the label collapses to one word
+        # per line. Stack it: label + help on top, control full-width below.
+        return (
+            f'<div class="set-fld" style="{_ROW};display:block">'
+            f'{label}{help_html}'
+            f'<div style="margin-top:.5rem">{_control(f, value, lang)}</div>'
+            f'</div>'
+        )
     return (
         f'<div class="set-fld" style="{_ROW}">'
-        f'<div style="min-width:0">'
-        f'<div style="{_LBL}">{_h.escape(S.tr(f.label, lang))}{check}</div>{help_html}</div>'
+        f'<div style="min-width:0">{label}{help_html}</div>'
         f'<div style="flex-shrink:0">{_control(f, value, lang)}</div>'
         f'</div>'
     )
