@@ -335,6 +335,8 @@ _TR: dict[str, dict[str, str]] = {
     "seg.student":      {"ru": "школьники",  "en": "students",    "id": "pelajar"},
     "seg.non_target":   {"ru": "нецелевые",  "en": "non-target",  "id": "non-target"},
     "seg.unclear":      {"ru": "не ясно",    "en": "unclear",     "id": "belum jelas"},
+    "aud.adult":        {"ru": "Взрослые",   "en": "Adults",      "id": "Dewasa"},
+    "aud.student":      {"ru": "Школьники",  "en": "Students",    "id": "Pelajar"},
     # segment tooltips — HOW each lead_type is decided (mirrors the LEAD TYPE block in
     # app/modules/conversation/prompt.py, the same rules the classifier applies live)
     "segdesc.hot": {

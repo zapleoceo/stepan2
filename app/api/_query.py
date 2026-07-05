@@ -58,13 +58,16 @@ async def fetch_segment_dist(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
 ) -> list:
-    """Leads by segment (lead_type) with a won count each. Rows: (lead_type, total, won),
-    biggest first. NULL lead_type (not yet classified) is bucketed as 'unclear'."""
+    """Leads by (audience, intent segment) with a won count each. Rows:
+    (audience, lead_type, total, won). NULL audience → 'adult', NULL lead_type → 'unclear'.
+    The renderer orders; here we just aggregate the two-axis breakdown."""
     won = func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0))
+    aud = func.coalesce(Lead.audience, "adult")
     seg = func.coalesce(Lead.lead_type, "unclear")
     q = (
-        select(seg.label("seg"), func.count().label("total"), won.label("won"))
-        .group_by(seg)
+        select(aud.label("aud"), seg.label("seg"),
+               func.count().label("total"), won.label("won"))
+        .group_by(aud, seg)
         .order_by(func.count().desc())
     )
     if branch_ids:

@@ -26,36 +26,63 @@ def test_decision_rejects_unknown_lead_type() -> None:
     assert d.lead_type is None
 
 
-def test_prompt_contract_has_lead_type() -> None:
+def test_decision_parses_audience_independent_of_lead_type() -> None:
+    d = parse_decision(
+        '{"reply":"hi","stage":"qualifying","lead_type":"hot","audience":"student"}')
+    assert d.lead_type == "hot"      # a student can still be hot
+    assert d.audience == "student"
+
+
+def test_decision_remaps_legacy_student_lead_type_to_audience() -> None:
+    # Old/cached contract emitted student as a lead_type — it must land on the audience axis.
+    d = parse_decision('{"reply":"hi","stage":"qualifying","lead_type":"student"}')
+    assert d.lead_type is None
+    assert d.audience == "student"
+
+
+def test_prompt_contract_has_both_axes() -> None:
     assert "LEAD TYPE" in _DECISION_CONTRACT
     assert '"lead_type"' in _DECISION_CONTRACT
+    assert "AUDIENCE" in _DECISION_CONTRACT
+    assert '"audience"' in _DECISION_CONTRACT
 
 
-async def test_segment_dist_groups_and_buckets_null(db_session) -> None:
+async def test_segment_dist_groups_by_audience_and_intent(db_session) -> None:
     branch = Branch(name="T", lang="id")
     db_session.add(branch)
     await db_session.flush()
     bid = branch.id
-    # 2 warm (1 won via 'ready'), 1 student, 1 unclassified (NULL → 'unclear')
-    db_session.add(Lead(branch_id=bid, lead_type="warm", stage="ready", created_at=_NOW))
-    db_session.add(Lead(branch_id=bid, lead_type="warm", stage="qualifying", created_at=_NOW))
-    db_session.add(Lead(branch_id=bid, lead_type="student", stage="dormant", created_at=_NOW))
-    db_session.add(Lead(branch_id=bid, lead_type=None, stage="new", created_at=_NOW))
+    # adults: 2 warm (1 won); students: 1 hot (won), 1 cold; 1 unclassified adult (NULLs)
+    db_session.add(Lead(branch_id=bid, audience="adult", lead_type="warm",
+                        stage="ready", created_at=_NOW))
+    db_session.add(Lead(branch_id=bid, audience="adult", lead_type="warm",
+                        stage="qualifying", created_at=_NOW))
+    db_session.add(Lead(branch_id=bid, audience="student", lead_type="hot",
+                        stage="ready", created_at=_NOW))
+    db_session.add(Lead(branch_id=bid, audience="student", lead_type="cold",
+                        stage="new", created_at=_NOW))
+    db_session.add(Lead(branch_id=bid, audience=None, lead_type=None,
+                        stage="new", created_at=_NOW))
     await db_session.flush()
-    rows = {r[0]: (int(r[1]), int(r[2] or 0)) for r in await fetch_segment_dist(db_session, [bid])}
-    assert rows["warm"] == (2, 1)     # 2 warm, 1 of them won
-    assert rows["student"] == (1, 0)
-    assert rows["unclear"] == (1, 0)  # NULL bucketed as 'unclear'
+    rows = {(str(r[0]), str(r[1])): (int(r[2]), int(r[3] or 0))
+            for r in await fetch_segment_dist(db_session, [bid])}
+    assert rows[("adult", "warm")] == (2, 1)      # 2 warm adults, 1 won
+    assert rows[("student", "hot")] == (1, 1)     # a hot student — intent kept, not hidden
+    assert rows[("student", "cold")] == (1, 0)
+    assert rows[("adult", "unclear")] == (1, 0)   # NULLs → adult / unclear
 
 
-def test_segment_widget_renders() -> None:
+def test_segment_widget_renders_audience_subtrees() -> None:
     from app.api._i18n import _lang
     from app.api._ui_panels import reports_panel_html
     _lang.set("en")
     html = reports_panel_html(
         {"new": 3}, {}, {}, [], None,
-        segments=[("warm", 10, 2), ("student", 6, 0), ("unclear", 20, 0)])
+        segments=[("adult", "warm", 10, 2), ("student", "hot", 4, 2),
+                  ("adult", "unclear", 20, 0)])
     assert "seg-tree" in html
     assert "Lead segments" in html
-    assert "won 20%" in html  # warm: 2/10
-    assert "/ui/inbox?lead_type=warm" in html  # leaf links to that segment's chats
+    assert "Adults" in html and "Students" in html     # both audience roots shown
+    assert "won 20%" in html                           # adult warm: 2/10
+    assert "won 50%" in html                            # student hot: 2/4
+    assert "/ui/inbox?lead_type=hot" in html

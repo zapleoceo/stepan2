@@ -1334,41 +1334,39 @@ def _date_range_form_html(date_from: str, date_to: str, active_range: str = "") 
     )
 
 
-_SEG_META = (  # (key, colour, i18n label) — display order
+_SEG_META = (  # (key, colour, i18n label) — intent segments only; 'student' is an audience now
     ("hot", "#ff6b6b", "seg.hot"),
     ("warm", "#51cf66", "seg.warm"),
     ("cold", "#4da6ff", "seg.cold"),
     ("no_budget", "#9b7aff", "seg.no_budget"),
-    ("student", "#ffa94d", "seg.student"),
     ("non_target", "#868e96", "seg.non_target"),
     ("unclear", "#4a5568", "seg.unclear"),
 )
+_AUD_ORDER = ("adult", "student")  # audience sub-trees render top-to-bottom in this order
 
 
-def _segment_tree_html(segments: list) -> str:
-    """Lead-segment funnel as a server-rendered SVG tree: root (all leads) branches into
-    each segment, link thickness ∝ volume, each leaf shows count · share · won%. Renders
-    instantly with the htmx panel swap — no client JS / CDN. Empty until leads are classified."""
+def _segment_subtree_svg(rows: list, root_label: str) -> str:
+    """One audience's segment tree: a root node (its total) branching into each intent
+    segment, link thickness ∝ volume, ordered by win probability. `rows` = [(key, n, won)]."""
     meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
-    rows = []
-    for s in segments:
-        key, n, won = str(s[0]), int(s[1]), int(s[2] or 0)
+    leaves = []
+    for key, n, won in rows:
         if n <= 0:
             continue
         color, lbl = meta.get(key, ("#4a5568", "seg.unclear"))
-        rows.append((color, _h.escape(t(lbl)), n, won, key))
-    if not rows:
+        leaves.append((color, _h.escape(t(lbl)), n, won, key))
+    if not leaves:
         return ""
     # Order by win probability (won/count) desc; ties (incl. 0%) fall back to volume.
-    rows.sort(key=lambda r: (r[3] / r[2] if r[2] else 0, r[2]), reverse=True)
-    total = sum(r[2] for r in rows)
-    n_seg = len(rows)
+    leaves.sort(key=lambda r: (r[3] / r[2] if r[2] else 0, r[2]), reverse=True)
+    total = sum(r[2] for r in leaves)
+    n_seg = len(leaves)
     row_h, top, w, node_x, node_w, node_h = 46, 14, 620, 372, 236, 34
     link_x0, mid_x = 128, 250
     height = top * 2 + n_seg * row_h
     root_cy = height // 2
     links, nodes = "", ""
-    for i, (color, label, cnt, won, key) in enumerate(rows):
+    for i, (color, label, cnt, won, key) in enumerate(leaves):
         cy = top + row_h // 2 + i * row_h
         thick = max(2, round(cnt / total * 34))
         links += (
@@ -1397,18 +1395,50 @@ def _segment_tree_html(segments: list) -> str:
         f'<rect x="6" y="{root_cy - 30}" width="122" height="60" rx="8" fill="#1a2230"'
         f' stroke="#2d3748"/>'
         f'<text x="67" y="{root_cy - 7}" text-anchor="middle" fill="#8899aa"'
-        f' font-size="10">{_h.escape(t("rep.total"))}</text>'
+        f' font-size="10">{root_label}</text>'
         f'<text x="67" y="{root_cy + 16}" text-anchor="middle" fill="#e8eef4"'
         f' font-size="22" font-weight="700">{total}</text>'
     )
-    svg = (
+    return (
         f'<svg viewBox="0 0 {w} {height}" style="width:100%;max-width:660px;height:auto"'
         f' xmlns="http://www.w3.org/2000/svg">{links}{root}{nodes}</svg>'
     )
+
+
+def _segment_tree_html(segments: list) -> str:
+    """Two-axis lead breakdown: one segment sub-tree per audience (adults, then students),
+    each root showing that audience's total, branching into intent segments by win rate.
+    Rows: (audience, lead_type, total, won); a legacy 3-tuple is treated as audience 'adult'.
+    Server-rendered SVG — instant on the htmx swap, no client JS. Empty until classified."""
+    by_aud: dict[str, list] = {}
+    for s in segments:
+        if len(s) >= 4:
+            aud, key, n, won = str(s[0]), str(s[1]), int(s[2]), int(s[3] or 0)
+        else:  # legacy (lead_type, total, won) with no audience axis
+            aud, key, n, won = "adult", str(s[0]), int(s[1]), int(s[2] or 0)
+        if n <= 0:
+            continue
+        by_aud.setdefault(aud, []).append((key, n, won))
+    if not by_aud:
+        return ""
+    auds = [a for a in _AUD_ORDER if a in by_aud] + [a for a in by_aud if a not in _AUD_ORDER]
+    single = len(auds) == 1
+    blocks = ""
+    for aud in auds:
+        # With one audience, keep the familiar "Total leads" root; else name each audience.
+        root_label = _h.escape(t("rep.total") if single else t(f"aud.{aud}"))
+        svg = _segment_subtree_svg(by_aud[aud], root_label)
+        if not svg:
+            continue
+        cap = "" if single else (
+            f'<div style="font-size:.72rem;color:#8899aa;margin:.6rem 0 .1rem;'
+            f'font-weight:600">{_h.escape(t(f"aud.{aud}"))}</div>')
+        blocks += f'{cap}<div class="seg-tree">{svg}</div>'
+    if not blocks:
+        return ""
     return (
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
-        f'{_h.escape(t("seg.title"))}</h3>'
-        f'<div class="seg-tree">{svg}</div>'
+        f'{_h.escape(t("seg.title"))}</h3>{blocks}'
     )
 
 

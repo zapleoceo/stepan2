@@ -14,9 +14,13 @@ from .sanitize import clean_reply
 
 logger = logging.getLogger(__name__)
 
-# Lead segment the model classifies once it has signal — for routing (Phase 2) + reporting.
+# Intent segment (temperature) the model classifies once it has signal — for routing +
+# reporting. 'student' is NOT here: being school-age is an audience, orthogonal to intent
+# (a student can be hot/warm/cold), so it lives on _AUDIENCES instead.
 _LEAD_TYPES = frozenset(
-    {"hot", "warm", "cold", "no_budget", "student", "non_target", "unclear"})
+    {"hot", "warm", "cold", "no_budget", "non_target", "unclear"})
+# Audience axis — WHO the lead is, independent of how ready they are to buy.
+_AUDIENCES = frozenset({"adult", "student"})
 
 
 def _coerce_stage(value: object) -> Stage:
@@ -40,7 +44,8 @@ class Decision:
     manager_question: str | None = None
     kb_gap: str | None = None
     ready_subtype: str | None = None  # 'deal' | 'openhouse' when ready
-    lead_type: str | None = None  # segment (hot|warm|cold|no_budget|student|non_target|unclear)
+    lead_type: str | None = None  # intent segment (hot|warm|cold|no_budget|non_target|unclear)
+    audience: str | None = None  # who they are (adult|student), orthogonal to lead_type
     reply_language: str | None = None  # lead's language code when they wrote in another
     # The lead's phone / WhatsApp number if they shared one in the chat (raw digits as written).
     # Persisted to lead.phone_e164, and a captured phone is what gates a real deal hand-off.
@@ -92,6 +97,10 @@ def parse_decision(raw_json: str) -> Decision:
     subtype = str(data.get("ready_subtype") or "").lower().strip()
     lang = str(data.get("reply_language") or "").lower().strip()
     ltype = str(data.get("lead_type") or "").lower().strip()
+    aud = str(data.get("audience") or "").lower().strip()
+    if ltype == "student":  # legacy/cached contract emitted student as a segment — remap it
+        aud = aud or "student"
+        ltype = ""
     return Decision(
         reply=clean_reply(reply),
         stage=stage,
@@ -102,6 +111,7 @@ def parse_decision(raw_json: str) -> Decision:
         kb_gap=data.get("kb_gap") or None,
         ready_subtype=subtype if subtype in ("deal", "openhouse") else None,
         lead_type=ltype if ltype in _LEAD_TYPES else None,
+        audience=aud if aud in _AUDIENCES else None,
         reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
         phone=(str(data.get("phone")).strip() or None) if data.get("phone") else None,
         jobs=_str_list(data.get("jobs")),

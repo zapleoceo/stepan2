@@ -220,22 +220,29 @@ _DECISION_CONTRACT = (
     "chosen direction after a couple of turns.\n"
     "- 'no_budget': wants it but can't/won't pay - 'gapunya duit', price shock ('kirain 100k'), "
     "no income.\n"
-    "- 'student': school-age / a minor - a TARGET segment for us, NOT a blocker. Any program is "
-    "open to them at a 10% student discount, a parent pays, and once paid they can join the "
-    "adult group. Route toward the parent; keep selling the discounted path.\n"
     "- 'non_target': wrong audience (asks for something we don't teach), off-topic, trolling, or "
     "an explicit 'I don't want it'.\n"
     "- 'unclear': not enough signal yet.\n"
     "This drives routing + reporting; keep your reply this turn guided by the rules above.\n\n"
+    "AUDIENCE - a SEPARATE axis from LEAD TYPE: it says WHO the lead is, not how ready they "
+    "are. ALWAYS also classify a school-age lead's temperature (a student can be hot/warm/cold "
+    "just like anyone). Emit one, null until you know:\n"
+    "- 'student': school-age / a minor ('masih sekolah', 'masih SMA/SMP', a teen). A TARGET, "
+    "NOT a blocker - any program is open at a 10% student discount, a parent pays, and once "
+    "paid they join the adult group. Route toward the parent; keep selling the discounted path. "
+    "NEVER mark a student non_target just for being a student.\n"
+    "- 'adult': a working adult / decision-maker who pays for themselves.\n"
+    "This drives routing, reporting AND the sell path - never let it erase the temperature.\n\n"
     "Return ONLY this JSON (no prose, no markdown fences):\n"
     '{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, '
-    '"ready_subtype": str|null, "lead_type": str|null, "phone": str|null, '
+    '"ready_subtype": str|null, "lead_type": str|null, "audience": str|null, "phone": str|null, '
     '"needs_manager": bool, "manager_question": str|null, "kb_gap": str|null, '
     '"reply_language": str|null, "jobs": [str], "pains": [str], "gains": [str], '
     '"discovery_complete": bool}}\n'
     "phone: the lead's phone / WhatsApp number if they wrote one in the chat (raw digits as "
     "given, e.g. '08123456789' or '+62812...'), else null. Fill it the turn they share it.\n"
-    "lead_type: hot|warm|cold|no_budget|student|non_target|unclear (see LEAD TYPE above).\n"
+    "lead_type: hot|warm|cold|no_budget|non_target|unclear (see LEAD TYPE above).\n"
+    "audience: adult|student|null (see AUDIENCE above) - independent of lead_type.\n"
     "reply: the message text, with '|||' between bubbles when split.\n"
     "jobs/pains/gains: what you've learned about the lead so far - jobs (what they want to "
     "achieve), pains (fears/obstacles), gains (desired outcomes). Short phrases in the lead's "

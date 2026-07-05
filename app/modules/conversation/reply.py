@@ -246,7 +246,10 @@ class ReplyService:
             lead.preferred_language = decision.reply_language  # lead switched language — remember
             self.session.add(lead)
         if decision.lead_type and decision.lead_type != lead.lead_type:
-            lead.lead_type = decision.lead_type  # segment — persisted for routing + reporting
+            lead.lead_type = decision.lead_type  # intent segment — for routing + reporting
+            self.session.add(lead)
+        if decision.audience and decision.audience != lead.audience:
+            lead.audience = decision.audience  # who they are (adult/student) — reporting + path
             self.session.add(lead)
         # Capture a phone the lead typed in-chat (channel metadata rarely carries one). This
         # must land BEFORE _stage_for so the same turn the lead sends their number can pass the
