@@ -38,6 +38,16 @@ _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
 # After this many lead turns the discovery gate stops forcing more questions — a lead who
 # hasn't yielded a real need by now won't from a third question; present on what we have.
 _DISCOVERY_TURN_CAP = 2
+# A static KB rule alone wasn't reliable (live testing kept seeing a 3rd-4th discovery
+# question) — this is injected into the prompt AT THE EXACT TURN the cap is exceeded, the
+# same mechanism the reply-guard uses for its correction nudge, so it lands as an immediate
+# instruction rather than competing with the rest of a large static prompt.
+_DISCOVERY_CAP_NUDGE = (
+    "[System: you have already asked discovery questions for {n} turns without the lead "
+    "voicing a clear need — do NOT ask another discovery question this turn. If they asked "
+    "something directly, answer it now with the fact from the product card. Otherwise "
+    "present the best-fit product with its value and price. Return the JSON as usual.]"
+)
 
 
 def _normalize_phone(raw: str) -> str | None:
@@ -187,8 +197,15 @@ class ReplyService:
             lead_type=lead.lead_type if lead is not None else None,
             last_inbound=last_in.text if last_in is not None else "", mode=mode,
             smart_stages=smart_stages)
+        extra_user_msg = None
+        needs_captured = ctx.stored_needs.discovery_complete or ctx.stored_needs.has_needs()
+        if not needs_captured:
+            inbound_count = await self.messages.inbound_count(thread_id)
+            if inbound_count > _DISCOVERY_TURN_CAP:
+                extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
         raw, meta = await engine.complete(
-            ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill)
+            ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
+            extra_user_msg=extra_user_msg)
         try:
             decision = parse_decision(raw)
         except ValueError:
