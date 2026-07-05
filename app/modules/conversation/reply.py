@@ -98,10 +98,16 @@ class ReplyService:
         self.coaching = CoachingNoteRepo(session, branch_id)
         self._last_llm_meta: dict = {}
 
-    async def decide(self, thread_id: int) -> Decision | None:
-        """Run the model over the thread; None if the thread is foreign or has no dialog."""
+    async def decide(self, thread_id: int, workflow: str = "reply") -> Decision | None:
+        """Run the model over the thread; None if the thread is foreign or has no dialog.
+
+        workflow tags the broker-log row and gates billing: 'sim' (sandbox testing) routes
+        exactly like a real reply but is logged distinctly and does NOT charge the branch's
+        daily LLM budget."""
+        bill = workflow != "sim"
+        route_wf = "reply" if workflow == "sim" else workflow  # sim mirrors reply routing
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
-        ctx = await engine.prepare(thread_id, workflow="reply")
+        ctx = await engine.prepare(thread_id, workflow=workflow)
         if ctx is None:
             return None
         newest = ctx.dialog[-1] if ctx.dialog else None
@@ -120,20 +126,20 @@ class ReplyService:
             self.session.add(lead)
         mode = self.settings.reply_routing if self.settings is not None else "hybrid"
         cap = pick_capability(
-            workflow="reply", stage=lead.stage if lead is not None else None,
+            workflow=route_wf, stage=lead.stage if lead is not None else None,
             lead_type=lead.lead_type if lead is not None else None,
             last_inbound=last_in.text if last_in is not None else "", mode=mode)
         raw, meta = await engine.complete(
-            ctx, thread_id, lang=lang, workflow="reply", capability=cap)
+            ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill)
         try:
             decision = parse_decision(raw)
         except ValueError:
             if cap == FAST:  # a broken cheap decision escalates to the strong model, once
                 logger.warning(
-                    "reply: unparseable fast decision branch=%d thread=%d — retrying on smart",
-                    self.branch_id, thread_id)
+                    "%s: unparseable fast decision branch=%d thread=%d — retrying on smart",
+                    workflow, self.branch_id, thread_id)
                 raw, meta = await engine.complete(
-                    ctx, thread_id, lang=lang, workflow="reply", capability=SMART)
+                    ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill)
                 decision = parse_decision(raw)
             else:
                 raise

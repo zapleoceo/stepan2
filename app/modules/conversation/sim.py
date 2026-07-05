@@ -68,8 +68,8 @@ class SimService:
         at, n = await _next_at(self.session, th.id)
         self.session.add(Message(
             branch_id=branch_id, thread_id=th.id, channel_id=th.channel_id,
-            external_id=f"sim-in-{n}", direction="in", sent_by="lead",
-            text=text, occurred_at=at))
+            external_id=f"sim-{th.id}-in-{n}",  # unique across sim threads sharing one channel
+            direction="in", sent_by="lead", text=text, occurred_at=at))
         th.last_in_at = at
         self.session.add(th)
         await self.session.flush()
@@ -77,7 +77,7 @@ class SimService:
         cfg = await get_settings(self.session, branch_id)
         reply = ReplyService(self.session, branch_id, self.llm,
                              KnowledgeService(self.session, branch_id, self.llm), cfg)
-        decision = await reply.decide(th.id)
+        decision = await reply.decide(th.id, workflow="sim")  # tagged in log, not billed
         if decision is None:
             return {"ok": False, "detail": "no decision (over budget / empty / voice-hold)"}
 
@@ -86,7 +86,7 @@ class SimService:
         for i, b in enumerate(bubbles):
             self.session.add(Message(
                 branch_id=branch_id, thread_id=th.id, channel_id=th.channel_id,
-                external_id=f"sim-out-{n}-{i}", direction="out", sent_by="agent",
+                external_id=f"sim-{th.id}-out-{n}-{i}", direction="out", sent_by="agent",
                 text=b, occurred_at=base + timedelta(seconds=i),
                 llm_info=reply._last_llm_meta.get("model")))  # noqa: SLF001
         th.last_out_at = base

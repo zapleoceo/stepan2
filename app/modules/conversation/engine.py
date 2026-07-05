@@ -120,6 +120,7 @@ class DecisionEngine:
         workflow: str,
         extra_user_msg: str | None = None,
         capability: str = "chat:smart",
+        bill: bool = True,
     ) -> tuple[str, dict]:
         """Build the prompt, call the model, record the spend; returns (raw, meta).
 
@@ -141,5 +142,6 @@ class DecisionEngine:
             messages, capability=capability, require_json_schema=True,
             workflow=workflow, thread_id=thread_id, branch_id=self.branch_id,
         )
-        await ctx.budget.record(float(meta.get("cost_usd") or 0.0))
+        if bill:  # sandbox sim runs don't charge the branch's daily LLM budget
+            await ctx.budget.record(float(meta.get("cost_usd") or 0.0))
         return raw, meta
