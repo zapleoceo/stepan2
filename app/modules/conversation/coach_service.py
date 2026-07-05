@@ -60,14 +60,21 @@ _SYSTEM = (
 )
 
 
-async def propose_edit(
-    session: AsyncSession,
-    branch_id: int,
-    request: str,
-    llm: LLMPort,
+async def create_pending_edit(
+    session: AsyncSession, branch_id: int, request: str,
 ) -> CoachingEdit:
-    """Coach turn: answer a question FROM the KB, propose a KB edit (confirm-before-write),
-    or ask where to place new data. Persisted as a CoachingEdit row for the chat history.
+    """Persist the manager's question IMMEDIATELY as a 'thinking' row, before the slow
+    chat:deep call — so the question is never lost if they navigate away mid-generation."""
+    edit = CoachingEdit(branch_id=branch_id, request=request, status="thinking")
+    session.add(edit)
+    await session.flush()
+    return edit
+
+
+async def generate_into_edit(
+    session: AsyncSession, branch_id: int, edit: CoachingEdit, llm: LLMPort,
+) -> CoachingEdit:
+    """Run the chat:deep coach turn and fill the (already-persisted) edit with the result.
 
     Latency isn't critical (a manager waits, not a live lead), so the WHOLE KB goes in uncut
     and chat:deep absorbs it — full context beats truncated snippets."""
@@ -77,7 +84,7 @@ async def propose_edit(
     )
     messages = [
         {"role": "system", "content": _SYSTEM.format(docs=docs_text)},
-        {"role": "user", "content": request},
+        {"role": "user", "content": edit.request},
     ]
     data: dict = {"intent": "clarify", "summary": "Ошибка LLM"}
     for attempt in range(3):  # reasoning model can return an empty/non-JSON body — retry
@@ -98,25 +105,34 @@ async def propose_edit(
 
     intent = data.get("intent") or ("edit" if data.get("old_text") else "clarify")
     if intent == "answer":
-        status = "answered"
-        summary = data.get("answer") or data.get("summary")
-        slug = old_text = new_text = None
+        edit.status = "answered"
+        edit.summary = data.get("answer") or data.get("summary")
+        edit.slug = edit.old_text = edit.new_text = None
     elif intent == "edit" and data.get("old_text"):
-        status = "proposed"
-        summary, slug = data.get("summary"), data.get("slug")
-        old_text, new_text = data.get("old_text"), data.get("new_text")
+        edit.status = "proposed"
+        edit.summary, edit.slug = data.get("summary"), data.get("slug")
+        edit.old_text, edit.new_text = data.get("old_text"), data.get("new_text")
     else:  # clarify, or an edit that never named a target
-        status = "clarify"
-        summary = data.get("summary")
-        slug = old_text = new_text = None
+        edit.status = "clarify"
+        edit.summary = data.get("summary")
+        edit.slug = edit.old_text = edit.new_text = None
 
-    edit = CoachingEdit(
-        branch_id=branch_id, request=request, status=status,
-        slug=slug, old_text=old_text, new_text=new_text, summary=summary,
-    )
     session.add(edit)
     await session.flush()
     return edit
+
+
+async def propose_edit(
+    session: AsyncSession,
+    branch_id: int,
+    request: str,
+    llm: LLMPort,
+) -> CoachingEdit:
+    """Synchronous coach turn (create the row + generate in one go). Kept for callers/tests
+    that want the finished edit back; the interactive route uses the two split functions so
+    generation can run in the background."""
+    edit = await create_pending_edit(session, branch_id, request)
+    return await generate_into_edit(session, branch_id, edit, llm)
 
 
 async def analyze_chat(

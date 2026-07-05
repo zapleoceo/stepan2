@@ -82,6 +82,8 @@ _TR: dict[str, dict[str, str]] = {
                      "id": "Mencari jawaban / tempat menambah…"},
     "coach.think4": {"ru": "Формулирую…", "en": "Composing…", "id": "Menyusun…"},
     "coach.st.answered": {"ru": "ответ",       "en": "answer",      "id": "jawaban"},
+    "coach.st.thinking": {"ru": "думает…",     "en": "thinking…",   "id": "memproses…"},
+    "coach.generating":  {"ru": "Готовлю ответ…", "en": "Generating…", "id": "Menyiapkan…"},
     "coach.st.clarify":  {"ru": "уточнение",   "en": "clarify",     "id": "klarifikasi"},
     "coach.st.proposed": {"ru": "предложено",  "en": "proposed",    "id": "diusulkan"},
     "coach.st.applied":  {"ru": "применено",   "en": "applied",     "id": "diterapkan"},

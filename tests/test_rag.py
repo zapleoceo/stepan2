@@ -170,6 +170,39 @@ async def test_coach_answers_a_question_without_editing(db_session) -> None:
     assert "13M" in edit.summary and edit.old_text is None  # an answer, not a KB write
 
 
+async def test_coach_question_persisted_before_generation(db_session) -> None:
+    """The question is saved as a 'thinking' row BEFORE the slow LLM call — so navigating
+    away mid-generation never loses it. generate_into_edit then fills the same row."""
+    from app.modules.conversation.coach_service import (
+        create_pending_edit,
+        generate_into_edit,
+    )
+    bid = await _seed(db_session)
+
+    edit = await create_pending_edit(db_session, bid, "berapa harganya?")
+    assert edit.id is not None
+    assert edit.status == "thinking"        # question is durable immediately
+    assert edit.request == "berapa harganya?"
+
+    llm = _IntentLLM('{"intent":"answer","answer":"13M."}')
+    filled = await generate_into_edit(db_session, bid, edit, llm)
+    assert filled.id == edit.id             # same row, updated in place
+    assert filled.status == "answered" and "13M" in filled.summary
+
+
+def test_coach_thinking_bubble_self_polls() -> None:
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _coach_response
+    _lang.set("en")
+    html = _coach_response(42, "hi?", "thinking", None, None, None, None, None)
+    assert 'hx-get="/ui/coach/edit/42"' in html     # polls for the answer
+    assert 'hx-trigger="every 2s"' in html
+    assert 'id="ce-42"' in html
+    # a finished edit does NOT poll
+    done = _coach_response(42, "hi?", "answered", None, None, None, "13M", None)
+    assert "hx-get=" not in done
+
+
 async def test_coach_clarifies_before_ambiguous_edit(db_session) -> None:
     from app.modules.conversation.coach_service import propose_edit
     bid = await _seed(db_session)

@@ -225,9 +225,20 @@ def _coach_bubbles(
         else _h.escape(status)
     # the coach's response bubble only — the manager's own bubble is rendered separately
     # (optimistically on send, or by _coach_pair for history).
+    if status == "thinking":
+        # answer is generating in the background — self-replace via poll until it lands, so
+        # the answer shows up even if the manager left the page and came back.
+        body = f'<span class="spin"></span> {_h.escape(t("coach.generating"))}'
+        poll = (
+            f' hx-get="/ui/coach/edit/{edit_id}" hx-trigger="every 2s"'
+            f' hx-swap="outerHTML" hx-target="this"'
+        )
+    else:
+        body = f'{summ}{diff}{actions}'
+        poll = ""
     resp = (
-        f'<div class="bb bb-i" id="ce-{edit_id}">'
-        f'<div class="bt">{summ}{diff}{actions}</div>'
+        f'<div class="bb bb-i" id="ce-{edit_id}"{poll}>'
+        f'<div class="bt">{body}</div>'
         f'<div class="bm">Coach{slug_str} · {label}</div>'
         f'</div>'
     )
