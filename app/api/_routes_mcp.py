@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
+from app.modules.conversation.sim import SimService
 from app.modules.leads import ops
 from app.modules.mcp.tokens import authorize_mcp
 
@@ -33,6 +34,12 @@ class _PhoneReq(BaseModel):
 
 class _MoveReq(_PhoneReq):
     stage: str
+
+
+class _SimSayReq(BaseModel):
+    branch_id: int
+    session_key: str
+    message: str
 
 
 def _op_response(res: ops.LeadOpResult) -> dict:
@@ -92,3 +99,16 @@ async def call_failed(req: _PhoneReq, authorization: str | None = Header(default
     async with session_scope() as session:
         lead = await _resolve(session, req)
         return _op_response(await ops.call_failed(session, lead, req.note, BrokerLLM()))
+
+
+@router.post("/sim_say")
+async def sim_say(
+    req: _SimSayReq, authorization: str | None = Header(default=None),
+) -> dict:
+    """One turn of a sandboxed lead conversation through the real reply path (see
+    SimService) — for testing Stepan's behavior against the KB without touching prod/IG.
+    session_key scopes the sandbox thread; repeat calls with the same key continue it."""
+    await _auth(authorization)
+    async with session_scope() as session:
+        return await SimService(session, BrokerLLM()).say(
+            req.branch_id, req.session_key, req.message)

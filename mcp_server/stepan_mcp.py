@@ -84,5 +84,16 @@ async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
     return await _post("/mcp/move_lead", {"phone": phone, "stage": stage, "note": note})
 
 
+@mcp.tool()
+async def sim_say(branch_id: int, session_key: str, message: str) -> dict:
+    """Send one message to Stepan as a simulated lead, through the REAL reply engine
+    (RAG + guard + routing) but fully sandboxed — never touches production leads or
+    Instagram, not billed. `session_key` names the sandbox thread; reuse it across calls
+    to continue the same conversation, or pick a fresh one to start over. Returns the
+    bot's reply plus the decided stage/product/lead_type/needs_manager."""
+    return await _post("/mcp/sim_say", {
+        "branch_id": branch_id, "session_key": session_key, "message": message})
+
+
 if __name__ == "__main__":
     mcp.run()
