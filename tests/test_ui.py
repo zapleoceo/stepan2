@@ -927,6 +927,7 @@ def test_landing_is_public_and_generic() -> None:
     assert "ig.me" in body                        # "Talk to Stepan" demo CTA
     assert "A peek inside" in body                 # illustrative UI mockups
     assert "Connected to Meta" in body             # meta integration + attribution
+    assert "Lead segments" in body and "<svg" in body  # analytics dashboard
     assert "Illustrative" in body                  # labelled sample data, not real
     low = body.lower()
     assert "it step" not in low and "itstep" not in low  # client not revealed

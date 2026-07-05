@@ -5,6 +5,8 @@ renders for anonymous visitors without the app shell. No mention of any specific
 # ruff: noqa: E501 — inline CSS/HTML string; long lines are inherent, not code smell
 from __future__ import annotations
 
+from app.api._landing_analytics import analytics_section
+
 # Secondary contact link in the footer (the main demo is the in-page chat widget).
 _DEMO_IG = "https://ig.me/m/zapleo_ceo"
 
@@ -198,6 +200,11 @@ footer{border-top:1px solid var(--line);padding:2.2rem 0;color:var(--mut);font-s
 .uni .tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.45rem}
 .uni .tg{font-size:.62rem;background:rgba(77,166,255,.14);color:#7db8ff;border:1px solid rgba(77,166,255,.3);border-radius:6px;padding:.14rem .45rem}
 .push{display:flex;align-items:center;gap:.5rem;font-size:.72rem;color:#8fe3ac;margin-top:.6rem}
+/* analytics dashboard */
+.anl{display:flex;flex-direction:column;gap:1.2rem;margin-top:2.4rem}
+.apanel{background:#0d0f15;border:1px solid var(--line);border-radius:16px;padding:1.1rem 1.2rem;box-shadow:0 22px 55px rgba(0,0,0,.5)}
+.atitle{font-size:.85rem;font-weight:600;margin-bottom:.7rem;color:var(--ink)}
+.asub{font-weight:400;color:var(--mut);font-size:.72rem}
 @media (max-width:760px){.shots{grid-template-columns:1fr}.meta{grid-template-columns:1fr}}
 """
 
@@ -386,6 +393,8 @@ def landing_html() -> str:
         "</div>"
         "<p class=\"mnote\">Illustrative — sample data, not a real account.</p>"
         "</div></section>"
+        # analytics dashboard
+        + analytics_section() +
         # capabilities
         "<section><div class=\"wrap\">"
         "<div class=\"kick\">What it does</div>"
