@@ -89,6 +89,33 @@ async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
         return _fmt(await ops.move_lead(session, lead, stage, note))
 
 
+@mcp.tool()
+async def sim_say(branch_id: int, session_key: str, text: str) -> dict:
+    """Talk to Stepan AS A LEAD and get his sales reply — the REAL reply engine (same
+    hybrid fast/smart routing leads hit), NOT the coach. Use to test his answers against
+    the knowledge base with real or invented lead messages.
+
+    branch_id is REQUIRED — Stepan is branch-scoped (KB, products, persona, language differ
+    per branch). session_key names an isolated conversation (reuse it across turns to keep
+    context; pick a new one to start a fresh scenario). Fully sandboxed: nothing is sent to
+    Instagram and no real lead is touched.
+
+    Returns Stepan's reply plus what the engine decided: funnel stage, product, captured
+    needs (jobs/pains/gains), ready/needs_manager flags, and the LLM cost/model meta."""
+    from app.modules.conversation.sim import SimService  # noqa: PLC0415
+    async with session_scope() as session:
+        return await SimService(session, BrokerLLM()).say(branch_id, session_key, text)
+
+
+@mcp.tool()
+async def sim_reset(branch_id: int, session_key: str) -> dict:
+    """Wipe a sim conversation so the next sim_say starts fresh (clears its messages and
+    resets the sandbox lead's needs/stage). Only affects the sandbox, never real leads."""
+    from app.modules.conversation.sim import SimService  # noqa: PLC0415
+    async with session_scope() as session:
+        return await SimService(session, BrokerLLM()).reset(branch_id, session_key)
+
+
 def connector_app():  # noqa: ANN201
     """The token-guarded Streamable HTTP ASGI app to mount at /connector. Accepts write
     tokens from the env secret or the mcp_token table (UI-managed)."""
