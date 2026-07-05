@@ -745,7 +745,8 @@ def _source_bar(
     return f'<div class="srcbar">{thumb}{lbl}</div>'
 
 
-def _thread_item(row: object, active_tid: int | None, show_branch: bool = False) -> str:
+def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
+                 filter_qs: str = "") -> str:
     (tid, name, stage, last_act, phone, product_slug,
      ig_username, avatar_url, follower_count, following_count, agent_enabled,
      last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h) = row  # type: ignore[misc]
@@ -782,11 +783,15 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
         if not agent_enabled else ""
     )
     search_idx = _h.escape(f"{name or ''} {ig_username or ''}".lower())
+    # Preserve the active inbox filter in the pushed URL, so a full reload (F5 / background
+    # nav) rebuilds the shell with the same filtered thread list, not the whole inbox.
+    _chat_url = f"/ui/chat/{tid}?{filter_qs}" if filter_qs else f"/ui/chat/{tid}"
+    _back_url = f"/ui/inbox?{filter_qs}" if filter_qs else "/ui/inbox"
     return (
         f'<a class="ti{on}" data-search="{search_idx}"'
-        f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="true"'
+        f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="{_h.escape(_chat_url)}"'
         f' onclick="setOn(this);setOpenThread({tid})"'
-        f' href="/ui/inbox">'
+        f' href="{_h.escape(_back_url)}">'
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
         f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
@@ -799,11 +804,12 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False)
 
 
 def thread_list_html(
-    threads: list, active_tid: int | None = None, show_branch: bool = False
+    threads: list, active_tid: int | None = None, show_branch: bool = False,
+    filter_qs: str = "",
 ) -> str:
     if not threads:
         return f'<div class="emp">{_h.escape(t("inbox.empty"))}</div>'
-    return "".join(_thread_item(r, active_tid, show_branch) for r in threads)
+    return "".join(_thread_item(r, active_tid, show_branch, filter_qs) for r in threads)
 
 
 _LINK_RE = re.compile(r"(https?://[^\s<]+)")

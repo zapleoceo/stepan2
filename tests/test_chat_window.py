@@ -64,6 +64,18 @@ def test_thread_list_no_active_marks_none() -> None:
     assert 'class="ti on"' not in html
 
 
+def test_thread_row_preserves_active_filter_in_chat_url() -> None:
+    """Opening a chat from a filtered inbox must push a URL that keeps the filter, so a full
+    reload rebuilds the same filtered list instead of the whole inbox."""
+    from app.api._ui_html import thread_list_html
+    _set_lang("en")
+    html = thread_list_html([_thread_row(7)], filter_qs="stage=ready")
+    assert 'hx-push-url="/ui/chat/7?stage=ready"' in html
+    assert 'href="/ui/inbox?stage=ready"' in html
+    plain = thread_list_html([_thread_row(7)])            # no filter → plain chat url
+    assert 'hx-push-url="/ui/chat/7"' in plain
+
+
 def test_thread_card_shows_bot_off_indicator() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")

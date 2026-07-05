@@ -12,6 +12,7 @@ Full pages registered here:
 from __future__ import annotations
 
 import html as _h
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -183,7 +184,13 @@ async def threads_partial(
     # Show the branch on each card only when the view spans more than one branch,
     # so cross-branch inboxes stay visually distinct (single-branch view stays clean).
     show_branch = not branch_ids or len(branch_ids) > 1
-    return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch))
+    # Carry the active filter into each row's chat URL so opening a chat (and any later full
+    # reload of it) keeps the filtered list rather than reverting to the whole inbox.
+    filter_qs = urlencode({k: v for k, v in
+                           (("stage", s), ("lead_type", lt), ("ad_id", ad), ("grp", grp.strip()))
+                           if v})
+    return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
+                                         filter_qs=filter_qs))
 
 
 @router.get("/reports", response_class=HTMLResponse)
