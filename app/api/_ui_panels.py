@@ -1345,9 +1345,11 @@ _SEG_META = (  # (key, colour, i18n label) — intent segments only; 'student' i
 _AUD_ORDER = ("adult", "unknown", "student")  # sub-tree order; 'unknown' = not yet classified
 
 
-def _segment_subtree_svg(rows: list, root_label: str) -> str:
+def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
     """One audience's segment tree: a root node (its total) branching into each intent
-    segment, link thickness ∝ volume, ordered by win probability. `rows` = [(key, n, won)]."""
+    segment, link thickness ∝ volume, ordered by win probability. `rows` = [(key, n, won)].
+    Each leaf links to the inbox filtered by BOTH this audience and that intent, so the
+    opened list matches the leaf's exact count."""
     meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
     leaves = []
     for key, n, won in rows:
@@ -1379,7 +1381,8 @@ def _segment_subtree_svg(rows: list, root_label: str) -> str:
         desc = _h.escape(t(f"segdesc.{key}"))
         tip = t("seg.tip", label=label, cnt=cnt, pct=pct, won_pct=won_pct, desc=desc)
         nodes += (
-            f'<a href="/ui/inbox?lead_type={key}" style="cursor:pointer">'
+            f'<a href="/ui/inbox?lead_type={key}{f"&audience={aud_key}" if aud_key else ""}"'
+            f' style="cursor:pointer">'
             f'<g><title>{tip}</title>'
             f'<rect x="{node_x}" y="{y}" width="{node_w}" height="{node_h}" rx="6"'
             f' fill="#141925" stroke="#2d3748"/>'
@@ -1427,7 +1430,7 @@ def _segment_tree_html(segments: list) -> str:
     for aud in auds:
         # With one audience, keep the familiar "Total leads" root; else name each audience.
         root_label = _h.escape(t("rep.total") if single else t(f"aud.{aud}"))
-        svg = _segment_subtree_svg(by_aud[aud], root_label)
+        svg = _segment_subtree_svg(by_aud[aud], root_label, aud_key=aud)
         if not svg:
             continue
         cap = "" if single else (

@@ -101,8 +101,9 @@ class Settings(BaseSettings):
 
     # ── LLM cost / quality knobs ────────────────────────────────────────────────
     llm_read_timeout_s: float = Field(
-        default=20.0, description="HTTP read timeout for normal broker calls (translate/embed/"
-                                  "suggest)")
+        default=60.0, description="HTTP read timeout for normal broker calls (chat:fast/translate/"
+                                  "embed/suggest); the broker can be spiky, 20s cut off simple "
+                                  "replies — waiting longer is cheaper than dropping the answer")
     llm_read_timeout_slow_s: float = Field(
         default=90.0, description="HTTP read timeout for chat:smart/chat:edit (long JSON, "
                                   "provider fallback); keep < worker_job_timeout_s")

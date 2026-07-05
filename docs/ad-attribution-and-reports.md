@@ -113,9 +113,12 @@ JS едет инлайном во фрагменте (`_AD_FUNNEL_JS`), обра
   `coalesce(lead_type,'unclear')`, won = стадии `ready|handed_off`; **потребители индексируют
   total как `s[2]`**. У каждого листа hover-`<title>` (`seg.tip` + `segdesc.{type}`) с точным
   критерием — дословно из блока LEAD TYPE в `prompt.py`. Лист — SVG-ссылка на
-  `/ui/inbox?lead_type=<type>` (для `unclear` фильтр ловит и `NULL`); узел воронки — ссылка на
-  `/ui/inbox?stage=<stage>`. `threads_partial`/`inbox` принимают `lead_type`, шелл рисует
-  дисмиссабл-чип (`inbox.seg_filter`) как для рекламы. Если аудитория одна — корень остаётся
+  `/ui/inbox?lead_type=<type>&audience=<aud>` — **обе оси**, поэтому «тёплые школьники»
+  открывают ровно тех, а не всех тёплых (для `unclear`/`unknown` фильтр ловит и `NULL`); узел
+  воронки — ссылка на `/ui/inbox?stage=<stage>`. `threads_partial`/`inbox` принимают `lead_type`
+  и `audience`; шелл рисует дисмиссабл-чип (`inbox.seg_filter`, «Школьники · тёплые»). Фильтр
+  переживает открытие чата и фоновое обновление (несётся в URL чата и `#tl`-поллинг). Если
+  аудитория одна — корень остаётся
   «Всего лидов N» без разбивки.
 - **Воронка (путь лидов)** — `_funnel_flow_html`: Sankey-поток реального пути
   `вход → … → выход`, восстановленный из аудита переходов `stage_event` (`fetch_stage_flow`,

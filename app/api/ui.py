@@ -87,12 +87,13 @@ _THREAD_TMPL = (
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
+    audience: str = "",
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
                                   ad_id=ad_id.strip(), grp=grp.strip(),
-                                  lead_type=lead_type.strip(),
+                                  lead_type=lead_type.strip(), audience=audience.strip(),
                                   is_super=is_super_admin(request)))
 
 
@@ -144,6 +145,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
+    audience: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
@@ -163,6 +165,12 @@ async def threads_partial(
     elif lt:  # "open this segment's chats" from the reports segment tree
         conditions.append("l.lead_type = :lead_type")
         params["lead_type"] = lt
+    aud = audience.strip()
+    if aud == "unknown":  # tree buckets an unset audience as 'unknown' — match NULL too
+        conditions.append("(l.audience = 'unknown' OR l.audience IS NULL)")
+    elif aud:  # "open this audience's chats" — pairs with lead_type for a warm+student link
+        conditions.append("l.audience = :audience")
+        params["audience"] = aud
     ad = ad_id.strip()
     if ad:  # "open this ad's chats" from the reports ad-funnel table
         conditions.append("ct.ad_id = :ad_id")
@@ -187,8 +195,8 @@ async def threads_partial(
     # Carry the active filter into each row's chat URL so opening a chat (and any later full
     # reload of it) keeps the filtered list rather than reverting to the whole inbox.
     filter_qs = urlencode({k: v for k, v in
-                           (("stage", s), ("lead_type", lt), ("ad_id", ad), ("grp", grp.strip()))
-                           if v})
+                           (("stage", s), ("lead_type", lt), ("audience", aud),
+                            ("ad_id", ad), ("grp", grp.strip())) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))
 

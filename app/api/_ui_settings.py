@@ -39,9 +39,23 @@ def _ph(f: S.SettingField, lang: str) -> str:
     return S.tr(f.placeholder, lang) if f.placeholder else ""
 
 
-def _control(f: S.SettingField, value: str, lang: str) -> str:
+def _is_wide(f: S.SettingField) -> bool:
+    """A control too wide to sit beside its label in a ~300px card — stack it, else the label
+    column collapses to one char per line (the CAPI-token / CRM-webhook mess)."""
+    w = (f.width or "").strip()
+    if w.endswith("%"):
+        return True
+    if w.endswith("px"):
+        try:
+            return int(w[:-2]) >= 180
+        except ValueError:
+            return False
+    return False
+
+
+def _control(f: S.SettingField, value: str, lang: str, width: str | None = None) -> str:
     hx_vals = f"hx-vals='{{\"key\": \"{f.key}\"}}'"
-    style = f"{_INP};width:{f.width}"
+    style = f"{_INP};width:{width or f.width}"
     if f.kind == "multi":  # checkbox group → a comma-list saved via a hidden input
         selected = parse_smart_stages(value)  # effective set, so UI always matches behaviour
         boxes = "".join(
@@ -93,13 +107,14 @@ def field_html(f: S.SettingField, value: str, lang: str, *, saved: bool = False)
     help_txt = S.tr(f.help, lang) if f.help else ""
     help_html = f'<div style="{_HELP}">{_h.escape(help_txt)}</div>' if help_txt else ""
     label = f'<div style="{_LBL}">{_h.escape(S.tr(f.label, lang))}{check}</div>'
-    if f.kind == "multi":
-        # A wide control (checkbox group) can't share the row — the label collapses to one word
-        # per line. Stack it: label + help on top, control full-width below.
+    if f.kind == "multi" or _is_wide(f):
+        # A wide control (checkbox group, token, URL) can't share the row — the label collapses
+        # to one word per line. Stack it: label + help on top, control full-width below.
+        ctrl = _control(f, value, lang) if f.kind == "multi" else _control(f, value, lang, "100%")
         return (
             f'<div class="set-fld" style="{_ROW};display:block">'
             f'{label}{help_html}'
-            f'<div style="margin-top:.5rem">{_control(f, value, lang)}</div>'
+            f'<div style="margin-top:.5rem">{ctrl}</div>'
             f'</div>'
         )
     return (

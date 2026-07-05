@@ -1368,7 +1368,7 @@ _FAVICON = (
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
-    lead_type: str = "",
+    lead_type: str = "", audience: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1657,7 +1657,7 @@ def app_shell(
         _thr_params = "&".join(
             f"{k}={_h.escape(v)}"
             for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
-                         ("lead_type", lead_type)) if v)
+                         ("lead_type", lead_type), ("audience", audience)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
         _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
                     "dormant": t("rep.dormant")}.get(grp, "")
@@ -1669,13 +1669,18 @@ def app_shell(
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}" title="{_h.escape(t("inbox.ad_clear"))}"'
             f'>✕</a></div>'
         ) if ad_id else ""
-        # segment chip (from a clicked segment-tree leaf) — same dismissable chip, back to all
+        # segment chip (from a clicked segment-tree leaf) — same dismissable chip, back to all.
+        # Shows the audience + intent it was opened from (e.g. "Школьники · тёплые") so the
+        # filtered count matches the exact leaf that was clicked.
+        _seg_bits = " · ".join(
+            _h.escape(t(f"{pfx}.{val}"))
+            for pfx, val in (("aud", audience), ("seg", lead_type)) if val)
         _seg_chip = (
             f'<div class="ad-filter">{_h.escape(t("inbox.seg_filter"))} '
-            f'<span class="ad-filter-id">{_h.escape(t(f"seg.{lead_type}"))}</span>'
+            f'<span class="ad-filter-id">{_seg_bits}</span>'
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
-        ) if lead_type else ""
+        ) if (lead_type or audience) else ""
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'
             f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'

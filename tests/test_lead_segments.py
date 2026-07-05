@@ -105,4 +105,6 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     assert html.index("Adults") < html.index("Undetermined") < html.index("Students")
     assert "won 20%" in html                           # adult warm: 2/10
     assert "won 50%" in html                            # student hot: 2/4
-    assert "/ui/inbox?lead_type=hot" in html
+    # each leaf links to BOTH its audience and intent, so the opened list == the leaf count
+    assert "/ui/inbox?lead_type=hot&audience=student" in html
+    assert "/ui/inbox?lead_type=warm&audience=adult" in html
