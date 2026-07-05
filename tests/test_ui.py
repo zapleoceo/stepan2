@@ -986,6 +986,27 @@ def test_demo_chat_returns_stepan_reply(monkeypatch) -> None:
     assert "it step" not in low and "itstep" not in low  # never reveals the real client
 
 
+def test_demo_chat_retries_once_on_broker_failure(monkeypatch) -> None:
+    """A stuck provider (first attempt raises) is retried; the second attempt's reply wins,
+    so a transient broker timeout doesn't surface as the glitch fallback."""
+    import app.api._routes_demo as demo
+
+    calls = {"n": 0}
+
+    class _FlakyBroker:
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise TimeoutError("broker read timeout")
+            return "Back with you — what do you sell?", {}
+
+    monkeypatch.setattr(demo, "BrokerLLM", _FlakyBroker)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/demo/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert calls["n"] == 2                              # retried after the first failure
+    assert resp.json()["reply"] == "Back with you — what do you sell?"
+
+
 # ─── lang switch: stay on the current view (path-only redirect) ────────────────
 
 def test_lang_switch_from_full_page_preserves_referer() -> None:

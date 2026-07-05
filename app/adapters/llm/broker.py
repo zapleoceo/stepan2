@@ -56,6 +56,7 @@ class BrokerLLM:
         workflow: str | None = None,
         thread_id: int | None = None,
         branch_id: int | None = None,
+        read_timeout_s: float | None = None,
     ) -> tuple[str, dict[str, Any]]:
         body: dict[str, Any] = {
             "messages": messages,
@@ -64,9 +65,12 @@ class BrokerLLM:
         }
         if require_json_schema:
             body["response_format"] = {"type": "json_object"}
+        timeout = _chat_timeout(capability)
+        if read_timeout_s is not None:
+            timeout = httpx.Timeout(connect=5.0, read=read_timeout_s, write=10.0, pool=5.0)
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=_chat_timeout(capability)) as c:
+            async with httpx.AsyncClient(timeout=timeout) as c:
                 r = await c.post(
                     f"{self._url}/v1/chat",
                     params={"capability": capability},

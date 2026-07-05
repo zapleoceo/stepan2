@@ -16,6 +16,8 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 _MAX_TURNS = 16  # keep the last N messages for sane context (not a usage cap)
+_ATTEMPTS = 2  # one retry: a stuck provider fails fast, the retry lands on a fast one
+_ATTEMPT_TIMEOUT_S = 45.0  # per-attempt read cap (< the 90s broker ceiling) for snappy UX
 
 _SYSTEM = (
     "You are Stepan — an AI sales agent that businesses hire to qualify and sell to their "
@@ -113,13 +115,20 @@ async def demo_chat(request: Request) -> JSONResponse:
     if not history:
         return JSONResponse({"reply": _FALLBACK})
     messages = [{"role": "system", "content": _SYSTEM}, *history]
-    try:
-        reply, _meta = await BrokerLLM().chat(
-            messages, capability="chat:smart", max_tokens=500, temperature=0.6,
-            workflow="landing_demo",
-        )
-        reply = (reply or "").strip()
-    except Exception:  # noqa: BLE001
-        _log.exception("landing demo chat failed")
-        reply = ""
+    # Broker latency for chat:smart is spiky (provider fallback can drag to the 90s ceiling);
+    # for an interactive site chat that reads as "hung". Cap each attempt short and retry once
+    # so a stuck provider fails fast and the retry usually lands on a fast one.
+    reply = ""
+    for attempt in range(_ATTEMPTS):
+        try:
+            text, _meta = await BrokerLLM().chat(
+                messages, capability="chat:smart", max_tokens=500, temperature=0.6,
+                workflow="landing_demo", read_timeout_s=_ATTEMPT_TIMEOUT_S,
+            )
+            reply = (text or "").strip()
+            if reply:
+                break
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("landing demo attempt %d/%d failed: %s",
+                         attempt + 1, _ATTEMPTS, type(exc).__name__)
     return JSONResponse({"reply": reply or _FALLBACK})
