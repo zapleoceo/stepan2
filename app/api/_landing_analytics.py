@@ -1,32 +1,32 @@
 """Illustrative analytics dashboard for the public landing (fake data, English)."""
 from __future__ import annotations
 
-_INK = "#e8eef4"
-_MUT = "#8b98ab"
-_CARD = "#141925"
-_LINE = "#232a38"
+_INK = "#f2f4f7"
+_MUT = "#9aa3b2"
+_CARD = "#15171d"
+_LINE = "#20232b"
 
 # name, count, color, won%
 _SEGMENTS = [
-    ("Warm", 1205, "#51cf66", "67% · won 3%"),
-    ("Unclear", 422, "#8b98ab", "23% · won 1%"),
-    ("Off-target", 64, "#6b7688", "4% · won 0%"),
-    ("No budget", 45, "#7c5cff", "2% · won 7%"),
-    ("Hot", 29, "#ff6b6b", "2% · won 17%"),
-    ("Cold", 25, "#4da6ff", "1% · won 4%"),
-    ("Students", 15, "#ffa94d", "1% · won 0%"),
+    ("Warm", 1205, "#4cc38a", "67% · won 3%"),
+    ("Unclear", 422, "#8b93a3", "23% · won 1%"),
+    ("Off-target", 64, "#5b626f", "4% · won 0%"),
+    ("No budget", 45, "#9b8cff", "2% · won 7%"),
+    ("Hot", 29, "#ff5c5c", "2% · won 17%"),
+    ("Cold", 25, "#4d8dff", "1% · won 4%"),
+    ("Students", 15, "#f5a623", "1% · won 0%"),
 ]
 _TOTAL = 1805
 
 # name, count, color
 _FUNNEL = [
-    ("Entry", 1793, "#4da6ff"),
-    ("Nurturing", 78, "#ffa94d"),
-    ("Qualified", 643, "#7c5cff"),
-    ("Presenting", 1038, "#51cf66"),
-    ("Objection", 61, "#ff6b6b"),
-    ("Ready", 91, "#51cf66"),
-    ("Handed off", 12, "#38d9c9"),
+    ("Entry", 1793, "#4d8dff"),
+    ("Nurturing", 78, "#f5a623"),
+    ("Qualified", 643, "#9b8cff"),
+    ("Presenting", 1038, "#4cc38a"),
+    ("Objection", 61, "#ff5c5c"),
+    ("Ready", 91, "#4cc38a"),
+    ("Handed off", 12, "#2dd4bf"),
 ]
 
 # hourly outgoing / incoming (peak at 08:00), illustrative
@@ -96,7 +96,7 @@ def _funnel_svg() -> str:
     band = f'M{xs[0]} {base} '
     band += " ".join(f"L{cx:.0f} {ty:.0f}" for cx, ty in tops)
     band += f" L{xs[-1] + bw} {base} Z"
-    parts.append(f'<path d="{band}" fill="#51cf66" opacity="0.1"/>')
+    parts.append(f'<path d="{band}" fill="#4cc38a" opacity="0.1"/>')
     # bars
     for x, (name, cnt, col) in zip(xs, _FUNNEL, strict=True):
         h = max(10, cnt / top_cnt * max_h)
@@ -109,8 +109,8 @@ def _funnel_svg() -> str:
             f'text-anchor="middle" fill="{_INK}" font-size="11" '
             f'font-weight="700">{cnt}</text>')
     # lower branches
-    for x, name, cnt, col in [(250, "Dormant", 945, "#6b7688"),
-                              (460, "To manager", 57, "#ff6b6b")]:
+    for x, name, cnt, col in [(250, "Dormant", 945, "#5b626f"),
+                              (460, "To manager", 57, "#ff5c5c")]:
         parts.append(
             f'<rect x="{x}" y="235" width="{bw}" height="34" rx="5" '
             f'fill="{col}" opacity="0.85"/>'
@@ -135,10 +135,10 @@ def _messages_svg() -> str:
         ho = (_OUT[i] / peak) * (bot - top)
         parts.append(
             f'<rect x="{x:.1f}" y="{bot - hi:.1f}" width="{bw:.1f}" '
-            f'height="{hi:.1f}" rx="1.5" fill="#4da6ff" opacity="0.9"/>')
+            f'height="{hi:.1f}" rx="1.5" fill="#4d8dff" opacity="0.9"/>')
         parts.append(
             f'<rect x="{x:.1f}" y="{bot - hi - ho:.1f}" width="{bw:.1f}" '
-            f'height="{ho:.1f}" rx="1.5" fill="#51cf66" opacity="0.9"/>')
+            f'height="{ho:.1f}" rx="1.5" fill="#4cc38a" opacity="0.9"/>')
     for hh in (0, 6, 12, 18):
         parts.append(
             f'<text x="{left + hh * slot + slot / 2:.0f}" y="106" '

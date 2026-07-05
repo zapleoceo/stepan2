@@ -926,7 +926,10 @@ def test_landing_is_public_and_generic() -> None:
     assert 'href="/login"' in body               # login present (top-right)
     assert "ig.me" in body                        # "Talk to Stepan" demo CTA
     assert "A peek inside" in body                 # illustrative UI mockups
-    assert "Connected to Meta" in body             # meta integration + attribution
+    assert "Connected to your ad accounts" in body  # ad-cabinet pull + attribution
+    assert "Re-qualifies mid-conversation" in body  # in-chat re-qualification
+    assert "MCP connector" in body                 # CRM sync via MCP
+    assert "TikTok" in body                        # channels incl. coming-soon
     assert "Lead segments" in body and "<svg" in body  # analytics dashboard
     assert "Illustrative" in body                  # labelled sample data, not real
     low = body.lower()
