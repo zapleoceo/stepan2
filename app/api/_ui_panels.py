@@ -1224,30 +1224,66 @@ _SEG_META = (  # (key, colour, i18n label) — display order
 )
 
 
-def _segment_html(segments: list) -> str:
-    """Lead-segment distribution: a card per segment with count, share and won%. Empty until
-    the classifier has tagged leads (Phase 1 — measure the mix, no behaviour change yet)."""
-    by = {str(s[0]): (int(s[1]), int(s[2] or 0)) for s in segments}
-    total = sum(n for n, _ in by.values())
-    if not total:
-        return ""
-    cards = ""
-    for key, color, lbl in _SEG_META:
-        n, won = by.get(key, (0, 0))
-        if not n:
+def _segment_tree_html(segments: list) -> str:
+    """Lead-segment funnel as a server-rendered SVG tree: root (all leads) branches into
+    each segment, link thickness ∝ volume, each leaf shows count · share · won%. Renders
+    instantly with the htmx panel swap — no client JS / CDN. Empty until leads are classified."""
+    meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
+    rows = []
+    for s in segments:
+        key, n, won = str(s[0]), int(s[1]), int(s[2] or 0)
+        if n <= 0:
             continue
-        pct = round(n / total * 100)
-        won_pct = round(won / n * 100, 1)
-        cards += (
-            f'<div class="seg-card" style="border-top:2px solid {color}">'
-            f'<div class="seg-n" style="color:{color}">{n}</div>'
-            f'<div class="seg-l">{_h.escape(t(lbl))}</div>'
-            f'<div class="seg-s">{pct}% · won {won_pct}%</div></div>'
+        color, lbl = meta.get(key, ("#4a5568", "seg.unclear"))
+        rows.append((color, _h.escape(t(lbl)), n, won))
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: r[2], reverse=True)
+    total = sum(r[2] for r in rows)
+    n_seg = len(rows)
+    row_h, top, w, node_x, node_w, node_h = 46, 14, 620, 372, 236, 34
+    link_x0, mid_x = 128, 250
+    height = top * 2 + n_seg * row_h
+    root_cy = height // 2
+    links, nodes = "", ""
+    for i, (color, label, cnt, won) in enumerate(rows):
+        cy = top + row_h // 2 + i * row_h
+        thick = max(2, round(cnt / total * 34))
+        links += (
+            f'<path d="M{link_x0},{root_cy} C{mid_x},{root_cy} {mid_x},{cy} {node_x},{cy}"'
+            f' fill="none" stroke="{color}" stroke-width="{thick}" opacity="0.5"/>'
         )
+        pct = round(cnt / total * 100)
+        won_pct = round(won / cnt * 100) if cnt else 0
+        y = cy - node_h // 2
+        nodes += (
+            f'<g><title>{label}: {cnt} ({pct}%) · won {won}</title>'
+            f'<rect x="{node_x}" y="{y}" width="{node_w}" height="{node_h}" rx="6"'
+            f' fill="#141925" stroke="#2d3748"/>'
+            f'<rect x="{node_x}" y="{y}" width="4" height="{node_h}" rx="2" fill="{color}"/>'
+            f'<text x="{node_x + 14}" y="{cy - 2}" fill="{color}" font-size="12"'
+            f' font-weight="600">{label}</text>'
+            f'<text x="{node_x + node_w - 10}" y="{cy - 1}" text-anchor="end" fill="#e8eef4"'
+            f' font-size="14" font-weight="700">{cnt}</text>'
+            f'<text x="{node_x + 14}" y="{cy + 11}" fill="#6b7685" font-size="9">'
+            f'{pct}% · won {won_pct}%</text></g>'
+        )
+    root = (
+        f'<rect x="6" y="{root_cy - 30}" width="122" height="60" rx="8" fill="#1a2230"'
+        f' stroke="#2d3748"/>'
+        f'<text x="67" y="{root_cy - 7}" text-anchor="middle" fill="#8899aa"'
+        f' font-size="10">{_h.escape(t("rep.total"))}</text>'
+        f'<text x="67" y="{root_cy + 16}" text-anchor="middle" fill="#e8eef4"'
+        f' font-size="22" font-weight="700">{total}</text>'
+    )
+    svg = (
+        f'<svg viewBox="0 0 {w} {height}" style="width:100%;max-width:660px;height:auto"'
+        f' xmlns="http://www.w3.org/2000/svg">{links}{root}{nodes}</svg>'
+    )
     return (
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
         f'{_h.escape(t("seg.title"))}</h3>'
-        f'<div class="seg-row">{cards}</div>'
+        f'<div class="seg-tree">{svg}</div>'
     )
 
 
@@ -1273,7 +1309,6 @@ def reports_panel_html(
     pipeline = sum(stage_counts.get(s, 0) for s in _pipeline)
     won = sum(stage_counts.get(s, 0) for s in _won)
     dormant = stage_counts.get("dormant", 0)
-    manager_n = stage_counts.get("manager", 0)
     conv = round(won / total * 100, 1) if total else 0.0
 
     def _kpi(label: str, value: str, color: str = "#e8eef4") -> str:
@@ -1295,26 +1330,6 @@ def reports_panel_html(
             _kpi("rep.discovered", f"{discovery.get('pct', 0):g}%", "#4da6ff")
             + _kpi("rep.disc_len", f"{discovery.get('avg_msgs', 0):g}", "#4da6ff")
         )
-
-    # distribution bar (pipeline / won / dormant / manager)
-    bar_parts = [
-        (pipeline, "#9b7aff"), (won, "#51cf66"),
-        (dormant, "#868e96"), (manager_n, "#ff6b6b"),
-    ]
-    bar_segs = "".join(
-        f'<div style="flex-grow:{n};background:{c};display:flex;align-items:center;'
-        f'justify-content:center;color:rgba(0,0,0,.7);font-size:.6rem;font-weight:700;'
-        f'min-width:16px" title="{round(n/total*100,1) if total else 0}%">'
-        f'{round(n/total*100,1) if total else 0}%</div>'
-        for n, c in bar_parts if n
-    )
-    status_bar = (
-        f'<div style="display:flex;height:18px;border-radius:3px;overflow:hidden;'
-        f'gap:1px;margin:.5rem 0 .9rem">{bar_segs}</div>'
-    )
-
-    # The per-stage breakdown table lived here but duplicated the one-line funnel above
-    # (same numbers, same colours) — removed in favour of the period message stats below.
 
     # message totals for the period (drives the "N messages" headline over the chart)
     total_in = sum(hour_in.values())
@@ -1362,10 +1377,9 @@ def reports_panel_html(
         f'<div class="pnl-body">'
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
-        f'{mini_act}'
+        f'{_segment_tree_html(segments or [])}'
         f'{_funnel_line_html(stage_counts)}'
-        f'{_segment_html(segments or [])}'
-        f'{status_bar}'
+        f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'
     )

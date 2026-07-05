@@ -169,13 +169,8 @@ _CSS = (
     "padding:.12rem .3rem;border-radius:3px}"
     # reports panel
     ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
-    # lead-segment cards
-    ".seg-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem}"
-    ".seg-card{flex:1;min-width:88px;background:#141925;border:1px solid #2d3748;"
-    "border-radius:6px;padding:.4rem .55rem;text-align:center}"
-    ".seg-n{font-size:1.15rem;font-weight:700;line-height:1.1}"
-    ".seg-l{font-size:.64rem;color:#8899aa;margin-top:.1rem}"
-    ".seg-s{font-size:.58rem;color:#6b7685;margin-top:.15rem}"
+    # lead-segment tree (svg)
+    ".seg-tree{margin:.1rem 0 .7rem;overflow-x:auto}"
     # one-line sales funnel
     ".fnl-line{display:flex;gap:.3rem;align-items:stretch}"
     ".fnl-step{flex:1;min-width:0;background:#141925;border:1px solid #2d3748;"
@@ -208,10 +203,10 @@ _CSS = (
     "padding:.5rem .75rem;min-width:90px}"
     ".kpi-n{font-size:1.5rem;font-weight:800;line-height:1.15}"
     ".kpi-l{font-size:.64rem;color:#6b7685;margin-top:.1rem}"
-    ".rep-tbl{width:100%;border-collapse:collapse;font-size:.77rem;margin-bottom:.7rem}"
+    ".rep-tbl{width:auto;border-collapse:collapse;font-size:.77rem;margin-bottom:.7rem}"
     ".rep-tbl th{text-align:left;color:#6b7685;font-weight:600;font-size:.65rem;"
-    "padding:.25rem .4rem;border-bottom:1px solid #2d3748}"
-    ".rep-tbl td{padding:.25rem .4rem;border-bottom:1px solid #1a2033}"
+    "padding:.25rem .55rem;border-bottom:1px solid #2d3748;white-space:nowrap}"
+    ".rep-tbl td{padding:.25rem .55rem;border-bottom:1px solid #1a2033;white-space:nowrap}"
     ".rep-n{text-align:right;font-weight:700;color:#e8eef4}"
     # ad-funnel: sortable headers + per-column filter row
     ".rep-sort{cursor:pointer;user-select:none;white-space:nowrap}"
@@ -510,7 +505,7 @@ _CSS = (
     # touch has no hover: keep the per-message translate/delete buttons visible
     ".trx,.delx{opacity:.5}"
     # give tables room to scroll horizontally instead of overflowing the viewport
-    ".tbl,.rep-tbl{min-width:520px}"
+    ".tbl{min-width:520px}"
     "}"
 )
 

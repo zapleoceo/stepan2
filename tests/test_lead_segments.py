@@ -55,6 +55,6 @@ def test_segment_widget_renders() -> None:
     html = reports_panel_html(
         {"new": 3}, {}, {}, [], None,
         segments=[("warm", 10, 2), ("student", 6, 0), ("unclear", 20, 0)])
-    assert "seg-card" in html
+    assert "seg-tree" in html
     assert "Lead segments" in html
-    assert "won 20.0%" in html  # warm: 2/10
+    assert "won 20%" in html  # warm: 2/10
