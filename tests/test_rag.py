@@ -107,6 +107,22 @@ async def test_reindex_splits_oversized_embed_batches(db_session) -> None:
     assert stored == total and total >= 3  # every chunk embedded despite the batch cap
 
 
+class _DeadEmbedLLM(_BagLLM):
+    """Every embed call fails (broker down) — every chunk gets dropped."""
+
+    async def embed(self, texts, **k):  # noqa: ANN001, ANN003, ANN201
+        raise RuntimeError("502 broker down")
+
+
+async def test_incomplete_reindex_keeps_watermark_for_retry(db_session) -> None:
+    """A transient embed failure that drops chunks must NOT advance the watermark, or a
+    partial index locks in silently (the prod chat-1 156/278-chunk incident)."""
+    bid = await _seed(db_session)
+    stored = await reindex_branch(db_session, bid, _DeadEmbedLLM())
+    assert stored == 0  # all chunks dropped
+    assert await branch_needs_reindex(db_session, bid) is True  # not marked done → retries
+
+
 async def test_retrieve_empty_when_no_index(db_session) -> None:
     bid = await _seed(db_session)
     assert await RagService(db_session, bid, _BagLLM()).retrieve("price") == []

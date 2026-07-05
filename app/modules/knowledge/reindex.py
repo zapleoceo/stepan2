@@ -79,6 +79,13 @@ async def branch_needs_reindex(session: AsyncSession, branch_id: int) -> bool:
 async def reindex_branch(session: AsyncSession, branch_id: int, llm: LLMPort) -> int:
     """Rebuild the branch index and advance its watermark. Returns chunks stored."""
     started = _utcnow()
-    stored = await RagService(session, branch_id, llm).reindex()
+    rag = RagService(session, branch_id, llm)
+    stored = await rag.reindex()
+    if rag.incomplete:
+        # transient embed failure dropped chunks — leave the watermark so the next tick
+        # retries; advancing it would lock in a partial index (silent KB-context loss).
+        logger.warning("reindex branch=%d incomplete (%d chunks) — watermark not advanced,"
+                       " will retry", branch_id, stored)
+        return stored
     await _set_watermark(session, branch_id, started)
     return stored

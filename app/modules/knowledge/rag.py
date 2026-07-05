@@ -39,6 +39,7 @@ class RagService:
         self.llm = llm
         self.docs = KnowledgeRepo(session, branch_id)
         self.products = ProductRepo(session, branch_id)
+        self.incomplete = False  # True after reindex() if any chunk couldn't be embedded
 
     async def _sources(self) -> list[_Source]:
         """(source_type, slug, title, content) for everything indexable in this branch."""
@@ -54,12 +55,16 @@ class RagService:
         return out
 
     async def reindex(self) -> int:
-        """Rebuild the whole branch index; returns the number of chunks stored."""
+        """Rebuild the whole branch index; returns the number of chunks stored. Sets
+        `self.incomplete` when a transient embed failure dropped chunks — the caller must
+        NOT advance the watermark then, or a partial index locks in (chat-1-index bug)."""
         rows = self._chunk_rows(await self._sources())
         await self.session.execute(
             delete(KnowledgeChunk).where(KnowledgeChunk.branch_id == self.branch_id))
         stored = await self._embed_and_store(rows)
-        logger.info("rag reindex branch=%d: %d chunks", self.branch_id, stored)
+        self.incomplete = stored < len(rows)
+        logger.info("rag reindex branch=%d: %d/%d chunks%s", self.branch_id, stored,
+                    len(rows), " (INCOMPLETE)" if self.incomplete else "")
         return stored
 
     async def reindex_source(self, source_type: str, slug: str) -> int:
