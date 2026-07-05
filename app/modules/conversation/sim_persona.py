@@ -63,11 +63,12 @@ class LeadActor:
         msgs = [{"role": "system", "content": self.system}]
         for who, txt in transcript:
             msgs.append({"role": "user" if who == "stepan" else "assistant", "content": txt})
-        if not transcript or transcript[-1][0] == "lead":
-            msgs.append({"role": "user",
-                         "content": "[Mulai / lanjutkan chat — kirim pesan Kakak berikutnya.]"})
+        nudge = ("[Kamu baru buka DM admin. Tulis SATU pesan pembuka singkat sesuai "
+                 "personamu untuk MEMULAI obrolan — jangan akhiri.]" if not transcript
+                 else "[Balas pesan admin di atas dengan satu pesan singkat sesuai personamu.]")
+        msgs.append({"role": "user", "content": nudge})
         raw, _ = await self.llm.chat(
-            msgs, capability="chat:fast", max_tokens=160, temperature=0.9,
+            msgs, capability="chat:fast", max_tokens=260, temperature=0.9,
             workflow="sim_lead", branch_id=self.branch_id)
         return (raw or "").strip()
 
@@ -96,16 +97,24 @@ async def run_persona(
         if len(transcript) >= _MAX_TOTAL_TURNS * 2:
             ended, reason = True, "max_turns"
             break
-        lead_msg = await actor.next(transcript)
-        if _END in lead_msg or not lead_msg.strip():
-            ended, reason = True, "lead_ended"
-            break
+        raw = await actor.next(transcript)
+        end_signal = _END in raw
+        lead_msg = raw.replace(_END, "").strip()
+        if not lead_msg:                       # pure [END] / empty
+            if not transcript:                 # can't end before it starts — seed an opener
+                lead_msg, end_signal = "Halo kak, mau nanya soal kursusnya dong", False
+            else:
+                ended, reason = True, "lead_ended"
+                break
         r = await svc.say(branch_id, session_key, lead_msg)
         if not r.get("ok"):
             ended, reason = True, r.get("detail")
             break
         transcript += [("lead", lead_msg), ("stepan", r["reply"])]
         last = r
+        if end_signal:                         # message sent, then the lead is done
+            ended, reason = True, "lead_ended"
+            break
         if r.get("ready") or r.get("needs_manager"):
             ended, reason = True, "ready" if r.get("ready") else "handoff"
             break
