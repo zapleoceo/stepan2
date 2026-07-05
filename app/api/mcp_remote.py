@@ -11,15 +11,12 @@ state and no sticky routing needed.
 """
 from __future__ import annotations
 
-import hmac
-
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from starlette.responses import JSONResponse
-from starlette.types import Receive, Scope, Send
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
+from app.api._mcp_auth import split_tokens, token_guard
 from app.config import settings
 from app.modules.leads import ops
 
@@ -93,37 +90,7 @@ async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
         return _fmt(await ops.move_lead(session, lead, stage, note))
 
 
-def _authorized(scope: Scope) -> bool:
-    # MCP_SECRET may hold several comma-separated tokens (owner, partner, integration) —
-    # each independently revocable.
-    tokens = [t.strip() for t in settings().mcp_secret.split(",") if t.strip()]
-    if not tokens:
-        return False
-    headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-    token = headers.get("authorization", "").removeprefix("Bearer ").strip()
-    if not token:  # capability-URL fallback: ?key=<token> for header-less web clients
-        qs = scope.get("query_string", b"").decode()
-        for part in qs.split("&"):
-            if part.startswith("key="):
-                token = part[4:]
-                break
-    return bool(token) and any(hmac.compare_digest(token, t) for t in tokens)
-
-
-class _TokenGuard:
-    """ASGI wrapper: reject unauthorized calls before they reach the MCP app."""
-
-    def __init__(self, app) -> None:  # noqa: ANN001
-        self._app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and not _authorized(scope):
-            await JSONResponse({"error": "unauthorized"}, status_code=401)(
-                scope, receive, send)
-            return
-        await self._app(scope, receive, send)
-
-
 def connector_app():  # noqa: ANN201
-    """The token-guarded Streamable HTTP ASGI app to mount at /connector."""
-    return _TokenGuard(mcp.streamable_http_app())
+    """The token-guarded Streamable HTTP ASGI app to mount at /connector. MCP_SECRET may
+    hold several comma-separated tokens (owner, partner, integration) — each revocable."""
+    return token_guard(mcp.streamable_http_app(), lambda: split_tokens(settings().mcp_secret))

@@ -19,6 +19,8 @@ from app.admin.setup import mount_admin
 from app.api._auth import AdminGuardMiddleware, AuthMiddleware, WriteGuardMiddleware
 from app.api._routes_auth import router as auth_router
 from app.api._routes_mcp import router as mcp_router
+from app.api.mcp_reader import mcp as mcp_reader
+from app.api.mcp_reader import reader_app
 from app.api.mcp_remote import connector_app
 from app.api.mcp_remote import mcp as mcp_connector
 from app.api.ui import router as ui_router
@@ -103,9 +105,10 @@ class _PartialShellMiddleware(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """No DB I/O on boot — schema/seed live in migrations. The remote MCP connector's
-    Streamable-HTTP session manager needs its task group running for its lifetime."""
-    async with mcp_connector.session_manager.run():
+    """No DB I/O on boot — schema/seed live in migrations. Each mounted Streamable-HTTP
+    MCP (write connector + read-only reader) needs its session-manager task group running
+    for the app's lifetime."""
+    async with mcp_connector.session_manager.run(), mcp_reader.session_manager.run():
         yield
 
 
@@ -132,7 +135,8 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router)
     app.include_router(mcp_router)
-    app.mount("/connector", connector_app())  # remote Streamable-HTTP MCP (web clients)
+    app.mount("/connector", connector_app())  # remote write MCP (funnel ops, web clients)
+    app.mount("/reader", reader_app())         # read-only MCP (dialogs + analysis)
     app.include_router(webhooks_router)
     app.include_router(admin_meta_router)
     app.include_router(ui_router)

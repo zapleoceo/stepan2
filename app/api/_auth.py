@@ -26,7 +26,7 @@ SESSION_MAX_AGE_S = 60 * 60 * 24 * 30  # 30 days
 
 # Reachable without a session (exact path or prefix).
 _PUBLIC_PREFIXES = ("/healthz", "/login", "/api/tg_login", "/logout", "/webhooks/",
-                    "/mcp/", "/connector")
+                    "/mcp/", "/connector", "/reader")
 
 
 def _secret() -> str:

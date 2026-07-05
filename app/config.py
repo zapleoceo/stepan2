@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     tg_login_bot_username: str = Field(default="")
     # Bearer token for the MCP connector's /mcp API. Empty → the API is disabled (403).
     mcp_secret: str = Field(default="", description="Bearer token gating the /mcp lead-ops API")
+    # Separate token(s) for the READ-ONLY reader MCP at /reader (dialogs + analysis). Kept
+    # apart from mcp_secret so a reviewer's read access can't move the funnel.
+    mcp_read_secret: str = Field(
+        default="", description="Bearer token(s) gating the read-only /reader MCP")
 
     # CRM read link (the gate that stops Stepan re-touching a lead a manager already owns).
     crm_read_timeout_s: float = Field(default=8.0, description="per-request CRM read timeout")
