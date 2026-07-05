@@ -29,8 +29,13 @@ _BARE_OK = re.compile(r"^https?://(www\.)?itstep\.id/?$", re.IGNORECASE)
 _RISKY_RE = re.compile(
     r"\b(gratis|free|akses|access|link|lab|trial|reserve|reservein|slot|voucher|"
     r"kupon|promo|diskon|discount|beasiswa|scholarship|garansi|jaminan|refund|"
-    r"sertifikat cisco|cyberops|template|tutorial|download|kirim(?:kan)? (?:link|file|akses))\b",
+    r"sertifikat cisco|cyberops|template|tutorial|download|kirim(?:kan)? (?:link|file|akses)|"
+    r"harga|biaya|tarif|cicilan|angsuran)\b",
     re.IGNORECASE)
+# A concrete money figure (e.g. "Rp 297.000", "1.670.000/bulan", "500 ribu") — the exact
+# shape of the chat-452 fabrication, which carried no "diskon/promo/gratis" trigger word.
+_PRICE_RE = re.compile(
+    r"\brp\.?\s?\d[\d.,]*|\d[\d.,]*\s?(?:ribu|juta|rb\b)", re.IGNORECASE)
 
 # Bahasa hand-off when a clean reply can't be produced — never invents, defers to a human.
 SAFE_FALLBACK = (
@@ -87,8 +92,10 @@ def ungrounded_urls(reply: str, context: str) -> list[str]:
 
 
 def is_risky(reply: str) -> bool:
-    """Cheap gate: does the reply look like it might hand out an offer/resource/link?"""
-    return bool(_URL_RE.search(reply or "") or _RISKY_RE.search(reply or ""))
+    """Cheap gate: does the reply look like it might hand out an offer/resource/link,
+    or state a concrete price (the shape of the chat-452 fabrication)?"""
+    text = reply or ""
+    return bool(_URL_RE.search(text) or _RISKY_RE.search(text) or _PRICE_RE.search(text))
 
 
 async def verify_grounding(

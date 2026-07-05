@@ -44,7 +44,11 @@ def test_ungrounded_url_flagged_grounded_allowed() -> None:
 def test_is_risky_detects_offers_and_links() -> None:
     assert guard.is_risky("aku kirim link akses lab gratis ya")
     assert guard.is_risky(f"ini {_FAKE_LINK}")
-    assert not guard.is_risky("Vibe Coding harganya 13 juta, bisa dicicil.")
+    # a concrete price is now risky too — chat 452 fabricated "cuma Rp 297.000" with no
+    # diskon/promo/gratis trigger word, so a bare figure must reach the LLM verify step
+    assert guard.is_risky("Vibe Coding harganya 13 juta, bisa dicicil.")
+    assert guard.is_risky("cuma Rp 297.000 aja, murah banget")
+    assert not guard.is_risky("Vibe Coding itu program yang seru banget buat belajar coding.")
 
 
 # ─── integration through the real reply path (SimService) ───────────────────────

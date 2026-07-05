@@ -185,6 +185,20 @@ async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_se
     assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
+async def test_followup_nudge_goes_through_the_reply_guard(db_session) -> None:
+    """Followup nudges used to bypass the reply guard entirely (only ReplyService.decide
+    called it) — a fabricated link in a nudge would ship unblocked. Must be caught the same
+    way a live reply's fabrication is."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    db_session.add(AppSetting(branch_id=bid, key="reply_guard", value="urls"))
+    invalidate(bid)
+    fake_link = "https://lab.itstep.id/cybersecurity-practice?access=HANDAYANI2024"
+    payload = json.dumps({"reply": f"cek di {fake_link} ya", "stage": "qualifying"})
+    assert await _svc(db_session, bid, llm=FakeLLM(payload)).run() == 1
+    row = await _pending(db_session, tid)
+    assert row is not None and fake_link not in row.text  # guard scrubbed the fabricated link
+
+
 async def test_followup_splits_bubbles_like_a_normal_reply(db_session) -> None:
     """A nudge that comes back with the '|||' bubble marker must be split into separate
     outbox rows, same as enqueue_reply — otherwise the raw marker leaks into the sent

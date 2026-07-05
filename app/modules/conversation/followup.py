@@ -19,7 +19,7 @@ from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
 from .engine import DecisionEngine, _fmt_llm_meta
-from .reply import _BUBBLE_GAP_S, _split_bubbles
+from .reply import _BUBBLE_GAP_S, _split_bubbles, guard_decision
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -158,6 +158,11 @@ class FollowupService:
                     "followup: unparseable decision branch=%d thread=%d — attempt not burned",
                     self.branch_id, thread_id)
                 return False
+        if not decision.reply:
+            return False
+        decision, meta = await guard_decision(
+            self.session, self.branch_id, self.settings, self.llm,
+            engine, ctx, thread_id, lang, "followup", True, decision, meta)
         if not decision.reply:
             return False
         if await self._lead_replied_meanwhile(thread_id):

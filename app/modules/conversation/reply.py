@@ -75,6 +75,58 @@ def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
 
 
+async def guard_prompt(session: AsyncSession, branch_id: int) -> str | None:
+    """The reply-guard checker prompt, editable per branch via the `guard_verify` KB
+    doc (resolved through a shared-KB link); None → guard.py's built-in default."""
+    from app.modules.knowledge.repository import KnowledgeRepo  # noqa: PLC0415
+    from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
+    kb = await effective_kb_branch(session, branch_id)
+    doc = await KnowledgeRepo(session, kb).by_slug("guard_verify")
+    return doc.content if doc and (doc.content or "").strip() else None
+
+
+async def guard_decision(
+    session: AsyncSession, branch_id: int, branch_settings: BranchSettings | None,
+    llm: LLMPort, engine: DecisionEngine, ctx, thread_id: int, lang: str, workflow: str,
+    bill: bool, decision: Decision, meta: dict,
+) -> tuple[Decision, dict]:
+    """Block fabricated facts: ungrounded links (deterministic) + an LLM grounding
+    check on risky replies. One correcting regeneration, then a safe hand-off — never
+    send the fabrication. Off when reply_guard='off'. Shared by live replies AND
+    follow-up nudges — a fabrication doesn't care which path generated it.
+
+    Returns (decision, meta) — meta is the regen's broker-log line when a regen
+    happened, else the meta passed in unchanged."""
+    mode = branch_settings.reply_guard if branch_settings is not None else "full"
+    if mode == "off" or not decision.reply:
+        return decision, meta
+    context = engine.last_context
+    issues = guard.ungrounded_urls(decision.reply, context)
+    if mode == "full" and guard.is_risky(decision.reply):
+        issues += await guard.verify_grounding(
+            llm, decision.reply, context, branch_id=branch_id,
+            thread_id=thread_id, bill=bill, system=await guard_prompt(session, branch_id))
+    if not issues:
+        return decision, meta
+    logger.warning("guard: branch=%d thread=%d fabrication → regen: %s",
+                   branch_id, thread_id, issues[:3])
+    raw, regen_meta = await engine.complete(
+        ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+        extra_user_msg=guard.CORRECTION.format(issues="; ".join(issues[:5])))
+    try:
+        fixed = parse_decision(raw)
+    except ValueError:
+        fixed = decision
+    # Only ungrounded URLs are re-checked deterministically (LLM re-verify would double
+    # cost); a still-fabricated link means we can't trust the draft → hand off.
+    if fixed.reply and not guard.ungrounded_urls(fixed.reply, context):
+        return fixed, regen_meta
+    logger.error("guard: branch=%d thread=%d unfixable fabrication → hand-off",
+                 branch_id, thread_id)
+    from dataclasses import replace  # noqa: PLC0415
+    return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True), regen_meta
+
+
 class ReplyService:
     """Decide and enqueue the agent's reply for one branch's thread."""
 
@@ -147,57 +199,16 @@ class ReplyService:
                 decision = parse_decision(raw)
             else:
                 raise
+        decision, meta = await guard_decision(
+            self.session, self.branch_id, self.settings, self.llm,
+            engine, ctx, thread_id, lang, workflow, bill, decision, meta)
         self._last_llm_meta = meta
-        decision = await self._guard_reply(engine, ctx, thread_id, lang, workflow, bill, decision)
         if lead is not None:
             merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
                                  decision.gains, decision.discovery_complete)
             lead.needs = merged.to_json()
             self.session.add(lead)
         return decision
-
-    async def _guard_reply(self, engine, ctx, thread_id, lang, workflow, bill, decision):
-        """Block fabricated facts: ungrounded links (deterministic) + an LLM grounding
-        check on risky replies. One correcting regeneration, then a safe hand-off — never
-        send the fabrication. Off when reply_guard='off'."""
-        mode = self.settings.reply_guard if self.settings is not None else "full"
-        if mode == "off" or not decision.reply:
-            return decision
-        context = engine.last_context
-        issues = guard.ungrounded_urls(decision.reply, context)
-        if mode == "full" and guard.is_risky(decision.reply):
-            issues += await guard.verify_grounding(
-                self.llm, decision.reply, context, branch_id=self.branch_id,
-                thread_id=thread_id, bill=bill, system=await self._guard_prompt())
-        if not issues:
-            return decision
-        logger.warning("guard: branch=%d thread=%d fabrication → regen: %s",
-                       self.branch_id, thread_id, issues[:3])
-        raw, meta = await engine.complete(
-            ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
-            extra_user_msg=guard.CORRECTION.format(issues="; ".join(issues[:5])))
-        self._last_llm_meta = meta
-        try:
-            fixed = parse_decision(raw)
-        except ValueError:
-            fixed = decision
-        # Only ungrounded URLs are re-checked deterministically (LLM re-verify would double
-        # cost); a still-fabricated link means we can't trust the draft → hand off.
-        if fixed.reply and not guard.ungrounded_urls(fixed.reply, context):
-            return fixed
-        logger.error("guard: branch=%d thread=%d unfixable fabrication → hand-off",
-                     self.branch_id, thread_id)
-        from dataclasses import replace  # noqa: PLC0415
-        return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True)
-
-    async def _guard_prompt(self) -> str | None:
-        """The reply-guard checker prompt, editable per branch via the `guard_verify` KB
-        doc (resolved through a shared-KB link); None → guard.py's built-in default."""
-        from app.modules.knowledge.repository import KnowledgeRepo  # noqa: PLC0415
-        from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
-        kb = await effective_kb_branch(self.session, self.branch_id)
-        doc = await KnowledgeRepo(self.session, kb).by_slug("guard_verify")
-        return doc.content if doc and (doc.content or "").strip() else None
 
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.
