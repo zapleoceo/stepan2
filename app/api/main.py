@@ -136,6 +136,8 @@ def create_app() -> FastAPI:
         return {"ok": True, "service": "stepan2"}
 
     app.include_router(auth_router)
+    from app.api._routes_demo import router as demo_router  # noqa: PLC0415
+    app.include_router(demo_router)  # public landing demo chat (/demo/chat)
     app.include_router(mcp_router)
     app.mount("/connector", connector_app())  # remote write MCP (funnel ops, web clients)
     app.mount("/reader", reader_app())         # read-only MCP (dialogs + analysis)

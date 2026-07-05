@@ -933,6 +933,44 @@ def test_landing_path_is_public_in_auth() -> None:
     from app.api._auth import _is_public
     assert _is_public("/") is True
     assert _is_public("/ui/inbox") is False       # "/" prefix must not open everything
+    assert _is_public("/demo/chat") is True        # public demo endpoint
+
+
+def test_landing_has_in_page_chat_widget() -> None:
+    client = TestClient(app, follow_redirects=False)
+    body = client.get("/").text
+    assert "openStepan()" in body                  # CTAs open the widget
+    assert "/demo/chat" in body                    # widget calls the demo endpoint
+    assert 'id="stp-w"' in body                    # the chat panel is present
+
+
+def test_demo_chat_empty_returns_fallback_without_llm() -> None:
+    """No/blank messages → a graceful fallback and NO broker call."""
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/demo/chat", json={"messages": []})
+    assert resp.status_code == 200
+    assert resp.json()["reply"]                     # some non-empty fallback
+
+
+def test_demo_chat_returns_stepan_reply(monkeypatch) -> None:
+    """A real turn calls the broker (chat:smart) and returns its text; the system prompt
+    positions Stepan as selling itself."""
+    import app.api._routes_demo as demo
+
+    captured = {}
+
+    class _FakeBroker:
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            captured["system"] = messages[0]["content"]
+            captured["cap"] = kw.get("capability")
+            return "Love it — what do you sell?", {}
+
+    monkeypatch.setattr(demo, "BrokerLLM", _FakeBroker)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/demo/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert resp.json()["reply"] == "Love it — what do you sell?"
+    assert captured["cap"] == "chat:smart"          # full-strength model, no downgrade
+    assert "sell YOURSELF" in captured["system"]     # demo persona: Stepan sells itself
 
 
 # ─── lang switch: stay on the current view (path-only redirect) ────────────────

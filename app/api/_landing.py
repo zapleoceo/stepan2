@@ -5,8 +5,49 @@ renders for anonymous visitors without the app shell. No mention of any specific
 # ruff: noqa: E501 — inline CSS/HTML string; long lines are inherent, not code smell
 from __future__ import annotations
 
-# Where "Talk to Stepan" sends a visitor — the live demo Instagram DM.
+# Secondary contact link in the footer (the main demo is the in-page chat widget).
 _DEMO_IG = "https://ig.me/m/zapleo_ceo"
+
+_WIDGET_JS = r"""
+var STP={msgs:[],busy:false};
+var STP_GREET="Hey 👋 I'm Stepan. Quick one — what do you sell, and where do most of your leads come from (Instagram, WhatsApp, ads)?";
+function stpAdd(role,text){
+  STP.msgs.push({role:role,content:text});
+  var b=document.getElementById('stp-body');
+  var d=document.createElement('div');
+  d.className='stp-msg '+(role==='user'?'u':'a');
+  d.textContent=text; b.appendChild(d); b.scrollTop=b.scrollHeight;
+}
+function stpTyping(on){
+  var t=document.getElementById('stp-typing');
+  if(on&&!t){var b=document.getElementById('stp-body');t=document.createElement('div');t.id='stp-typing';t.className='stp-msg a stp-typ';t.innerHTML='<span></span><span></span><span></span>';b.appendChild(t);b.scrollTop=b.scrollHeight;}
+  if(!on&&t)t.remove();
+}
+function openStepan(){
+  document.getElementById('stp-w').classList.add('on');
+  document.getElementById('stp-fab').style.display='none';
+  if(!STP.msgs.length)stpAdd('assistant',STP_GREET);
+  document.getElementById('stp-in').focus();
+}
+function closeStepan(){
+  document.getElementById('stp-w').classList.remove('on');
+  document.getElementById('stp-fab').style.display='';
+}
+async function sendStepan(){
+  var inp=document.getElementById('stp-in');var text=(inp.value||'').trim();
+  if(!text||STP.busy)return;
+  inp.value='';inp.style.height='auto';stpAdd('user',text);STP.busy=true;stpTyping(true);
+  try{
+    var r=await fetch('/demo/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:STP.msgs})});
+    var j=await r.json();stpTyping(false);stpAdd('assistant',(j&&j.reply)||'…');
+  }catch(e){stpTyping(false);stpAdd('assistant','Connection hiccup — try again?');}
+  STP.busy=false;inp.focus();
+}
+function stpKey(e){
+  var ta=e.target;ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,110)+'px';
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendStepan();}
+}
+"""
 
 _CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
@@ -77,6 +118,27 @@ footer{border-top:1px solid var(--line);padding:2.2rem 0;color:var(--mut);font-s
 .foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem}
 @media (max-width:760px){.steps,.grid{grid-template-columns:1fr 1fr}.cmp{grid-template-columns:1fr}.hero{padding:3.5rem 0 2.5rem}}
 @media (max-width:460px){.steps,.grid{grid-template-columns:1fr}}
+/* chat widget */
+.stp-fab{position:fixed;right:20px;bottom:20px;z-index:60;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border:none;border-radius:999px;padding:.85rem 1.3rem;font-weight:700;font-size:.92rem;box-shadow:0 8px 26px rgba(77,166,255,.4);cursor:pointer;transition:transform .12s}
+.stp-fab:hover{transform:translateY(-2px)}
+.stp-w{position:fixed;right:20px;bottom:20px;z-index:61;width:370px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 40px);background:var(--card);border:1px solid var(--line);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.55);display:none;flex-direction:column;overflow:hidden}
+.stp-w.on{display:flex}
+.stp-hd{display:flex;align-items:center;gap:.6rem;padding:.85rem 1rem;border-bottom:1px solid var(--line);background:linear-gradient(135deg,rgba(77,166,255,.14),rgba(124,92,255,.14))}
+.stp-hd b{font-size:.95rem}.stp-hd small{display:block;font-size:.66rem;color:var(--mut)}
+.stp-x{margin-left:auto;background:none;border:none;color:var(--mut);font-size:1.4rem;cursor:pointer;line-height:1}
+.stp-body{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
+.stp-msg{max-width:82%;padding:.55rem .8rem;border-radius:14px;font-size:.9rem;line-height:1.4;white-space:pre-wrap;word-wrap:break-word}
+.stp-msg.a{align-self:flex-start;background:#1c2431;border:1px solid var(--line);border-bottom-left-radius:5px}
+.stp-msg.u{align-self:flex-end;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border-bottom-right-radius:5px}
+.stp-typ{display:flex;gap:4px;align-items:center}
+.stp-typ span{width:6px;height:6px;border-radius:50%;background:var(--mut);animation:stpb 1s infinite}
+.stp-typ span:nth-child(2){animation-delay:.15s}.stp-typ span:nth-child(3){animation-delay:.3s}
+@keyframes stpb{0%,60%,100%{opacity:.3}30%{opacity:1}}
+.stp-foot{display:flex;gap:.5rem;padding:.7rem;border-top:1px solid var(--line);align-items:flex-end}
+.stp-foot textarea{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:10px;color:var(--ink);padding:.55rem .7rem;font-size:.9rem;resize:none;font-family:inherit;max-height:110px}
+.stp-foot textarea:focus{outline:none;border-color:var(--acc)}
+.stp-send{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border:none;border-radius:10px;width:40px;height:38px;font-size:1rem;cursor:pointer}
+@media (max-width:460px){.stp-w{right:8px;bottom:8px;width:calc(100vw - 16px);height:calc(100vh - 16px)}.stp-fab{right:12px;bottom:12px}}
 """
 
 
@@ -145,8 +207,7 @@ def landing_html() -> str:
         "<b>sells</b> to your leads in Instagram &amp; WhatsApp — like your sharpest rep, "
         "24/7, in any language.</p>"
         "<div class=\"cta\">"
-        f"<a class=\"btn btn-p\" href=\"{_DEMO_IG}\" target=\"_blank\" rel=\"noopener\">"
-        "Talk to Stepan →</a>"
+        "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan →</button>"
         "<a class=\"btn btn-g\" href=\"#how\">See how it works</a>"
         "</div>"
         "<p class=\"note\">The best demo is Stepan itself — message it and watch it qualify "
@@ -202,15 +263,29 @@ def landing_html() -> str:
         "in real time. Pricing is tailored to your volume; that's a conversation, not a "
         "checkout.</p>"
         "<div class=\"cta\">"
-        f"<a class=\"btn btn-p\" href=\"{_DEMO_IG}\" target=\"_blank\" rel=\"noopener\">"
-        "Talk to Stepan →</a></div>"
+        "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan →</button></div>"
         "</div></div></section>"
         # footer
         "<footer><div class=\"wrap foot\">"
         "<div class=\"brand\" style=\"font-size:1rem\"><span class=\"logo\" "
         "style=\"width:24px;height:24px;font-size:.8rem\">S</span>Stepan</div>"
         "<div>AI sales agent for Instagram &amp; WhatsApp · "
+        f"<a href=\"{_DEMO_IG}\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--acc)\">"
+        "Instagram</a> · "
         "<a href=\"/login\" style=\"color:var(--acc)\">Log in</a></div>"
         "</div></footer>"
+        # live demo chat widget — Stepan sells itself (POST /demo/chat)
+        "<button class=\"stp-fab\" id=\"stp-fab\" onclick=\"openStepan()\">💬 Chat with Stepan</button>"
+        "<div id=\"stp-w\" class=\"stp-w\">"
+        "<div class=\"stp-hd\"><span class=\"logo\">S</span>"
+        "<div><b>Stepan</b><small>Live demo · a real conversation</small></div>"
+        "<button class=\"stp-x\" onclick=\"closeStepan()\" aria-label=\"Close\">×</button></div>"
+        "<div id=\"stp-body\" class=\"stp-body\"></div>"
+        "<div class=\"stp-foot\">"
+        "<textarea id=\"stp-in\" rows=\"1\" placeholder=\"Message like one of your leads…\""
+        " onkeydown=\"stpKey(event)\"></textarea>"
+        "<button class=\"stp-send\" onclick=\"sendStepan()\" aria-label=\"Send\">➤</button></div>"
+        "</div>"
+        f"<script>{_WIDGET_JS}</script>"
         "</body></html>"
     )
