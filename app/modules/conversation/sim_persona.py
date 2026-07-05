@@ -87,8 +87,10 @@ class LeadActor:
                  "personamu untuk MEMULAI obrolan — jangan akhiri.]" if not transcript
                  else "[Balas pesan admin di atas dengan satu pesan singkat sesuai personamu.]")
         msgs.append({"role": "user", "content": nudge})
+        # chat:smart: a weak actor quits early and role-confuses; a strong one sustains a
+        # realistic, persistent hard-lead conversation. Not billed to the branch (sim_lead).
         raw, _ = await self.llm.chat(
-            msgs, capability="chat:fast", max_tokens=260, temperature=0.9,
+            msgs, capability="chat:smart", max_tokens=260, temperature=0.8,
             workflow="sim_lead", branch_id=self.branch_id)
         return (raw or "").strip()
 
