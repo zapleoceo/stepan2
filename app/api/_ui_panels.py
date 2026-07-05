@@ -1382,55 +1382,105 @@ _SEG_META = (  # (key, colour, i18n label) — intent segments only; 'student' i
 _AUD_ORDER = ("adult", "unknown", "student")  # sub-tree order; 'unknown' = not yet classified
 
 
-def _seg_stage_chips(aud_key: str, lead_type: str, stages: dict) -> str:
-    """Clickable stage chips shown INSIDE a segment card — one per non-empty stage, each
-    opening exactly that audience + segment + stage's chats."""
-    chips = []
-    for st in _ALL_STAGES:
-        c = int(stages.get(st, 0) or 0)
-        if c <= 0:
-            continue
-        col = _STAGE_COLOR.get(st, "#868e96")
-        slbl = _h.escape(t(f"stage.{st}"))
-        chips.append(
-            f'<a class="ssf-chip" style="border-left:3px solid {col}"'
-            f' href="/ui/inbox?audience={aud_key}&lead_type={lead_type}&stage={st}"'
-            f' title="{slbl}"><b>{c}</b>{slbl}</a>')
-    return f'<div class="ssf-chips">{"".join(chips)}</div>' if chips else ""
-
-
-def _segment_cards_html(aud_key: str, leaves: list, seg_stage_map: dict) -> str:
-    """One audience's intent segments as HTML cards (win-rate order): each card = colour bar +
-    name + count + share%/won%, with the per-stage breakdown chips INSIDE it. The card header
-    opens that audience+segment; each chip opens audience+segment+stage."""
+def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
+    """One audience's segment tree: a root node (its total) branching into each intent
+    segment, link thickness ∝ volume, ordered by win probability. `rows` = [(key, n, won)].
+    Each leaf links to the inbox filtered by BOTH this audience and that intent, so the
+    opened list matches the leaf's exact count."""
     meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
-    total = sum(n for _k, n, _w in leaves) or 1
+    leaves = []
+    for key, n, won in rows:
+        if n <= 0:
+            continue
+        color, lbl = meta.get(key, ("#4a5568", "seg.unclear"))
+        leaves.append((color, _h.escape(t(lbl)), n, won, key))
+    if not leaves:
+        return ""
+    # Order by win probability (won/count) desc; ties (incl. 0%) fall back to volume.
+    leaves.sort(key=lambda r: (r[3] / r[2] if r[2] else 0, r[2]), reverse=True)
+    total = sum(r[2] for r in leaves)
+    n_seg = len(leaves)
+    row_h, top, w, node_x, node_w, node_h = 46, 14, 620, 372, 236, 34
+    link_x0, mid_x = 128, 250
+    height = top * 2 + n_seg * row_h
+    root_cy = height // 2
+    links, nodes = "", ""
+    for i, (color, label, cnt, won, key) in enumerate(leaves):
+        cy = top + row_h // 2 + i * row_h
+        thick = max(2, round(cnt / total * 34))
+        links += (
+            f'<path d="M{link_x0},{root_cy} C{mid_x},{root_cy} {mid_x},{cy} {node_x},{cy}"'
+            f' fill="none" stroke="{color}" stroke-width="{thick}" opacity="0.5"/>'
+        )
+        pct = round(cnt / total * 100)
+        won_pct = round(won / cnt * 100) if cnt else 0
+        y = cy - node_h // 2
+        desc = _h.escape(t(f"segdesc.{key}"))
+        tip = t("seg.tip", label=label, cnt=cnt, pct=pct, won_pct=won_pct, desc=desc)
+        nodes += (
+            f'<a href="/ui/inbox?lead_type={key}{f"&audience={aud_key}" if aud_key else ""}"'
+            f' style="cursor:pointer">'
+            f'<g><title>{tip}</title>'
+            f'<rect x="{node_x}" y="{y}" width="{node_w}" height="{node_h}" rx="6"'
+            f' fill="#141925" stroke="#2d3748"/>'
+            f'<rect x="{node_x}" y="{y}" width="4" height="{node_h}" rx="2" fill="{color}"/>'
+            f'<text x="{node_x + 14}" y="{cy - 2}" fill="{color}" font-size="12"'
+            f' font-weight="600">{label}</text>'
+            f'<text x="{node_x + node_w - 10}" y="{cy - 1}" text-anchor="end" fill="#e8eef4"'
+            f' font-size="14" font-weight="700">{cnt}</text>'
+            f'<text x="{node_x + 14}" y="{cy + 11}" fill="#6b7685" font-size="9">'
+            f'{pct}% · won {won_pct}%</text></g></a>'
+        )
+    root = (
+        f'<rect x="6" y="{root_cy - 30}" width="122" height="60" rx="8" fill="#1a2230"'
+        f' stroke="#2d3748"/>'
+        f'<text x="67" y="{root_cy - 7}" text-anchor="middle" fill="#8899aa"'
+        f' font-size="10">{root_label}</text>'
+        f'<text x="67" y="{root_cy + 16}" text-anchor="middle" fill="#e8eef4"'
+        f' font-size="22" font-weight="700">{total}</text>'
+    )
+    return (
+        f'<svg viewBox="0 0 {w} {height}" style="width:100%;max-width:660px;height:auto"'
+        f' xmlns="http://www.w3.org/2000/svg">{links}{root}{nodes}</svg>'
+    )
+
+
+def _segment_stage_rows_html(aud_key: str, leaves: list, seg_stage_map: dict) -> str:
+    """Under an audience's Sankey, the funnel breakdown INSIDE each intent segment: one row
+    per lead_type (same win-rate order as the tree), a clickable chip per non-empty stage.
+    Each chip opens exactly that audience + segment + stage's chats. `seg_stage_map` =
+    {lead_type: {stage: count}}."""
+    meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
     ordered = sorted(leaves, key=lambda r: (r[2] / r[1] if r[1] else 0, r[1]), reverse=True)
-    cards = []
-    for key, n, won in ordered:
+    rows = []
+    for key, _n, _won in ordered:
+        stages = seg_stage_map.get(key, {})
+        chips = []
+        for st in _ALL_STAGES:
+            c = int(stages.get(st, 0) or 0)
+            if c <= 0:
+                continue
+            col = _STAGE_COLOR.get(st, "#868e96")
+            slbl = _h.escape(t(f"stage.{st}"))
+            chips.append(
+                f'<a class="ssf-chip" style="border-left:3px solid {col}"'
+                f' href="/ui/inbox?audience={aud_key}&lead_type={key}&stage={st}"'
+                f' title="{slbl}"><b>{c}</b>{slbl}</a>')
+        if not chips:
+            continue
         color, lbl = meta.get(key, ("#8899aa", "seg.unclear"))
-        share = round(n / total * 100)
-        won_pct = round(won / n * 100) if n else 0
-        _d = t(f"segdesc.{key}")
-        desc = _h.escape(_d) if _d != f"segdesc.{key}" else ""
-        chips = _seg_stage_chips(aud_key, key, seg_stage_map.get(key, {}))
-        cards.append(
-            f'<div class="seg-card" style="border-left:4px solid {color}">'
-            f'<a class="sc-hd" href="/ui/inbox?audience={aud_key}&lead_type={key}"'
-            f' title="{desc}">'
-            f'<span class="sc-name" style="color:{color}">{_h.escape(t(lbl))}</span>'
-            f'<span class="sc-n">{n}</span>'
-            f'<span class="sc-sub">{share}% · won {won_pct}%</span></a>'
-            f'{chips}</div>')
-    return f'<div class="seg-cards">{"".join(cards)}</div>'
+        rows.append(
+            f'<div class="ssf-row"><span class="ssf-seg" style="color:{color}">'
+            f'{_h.escape(t(lbl))}</span><div class="ssf-chips">{"".join(chips)}</div></div>')
+    return f'<div class="ssf">{"".join(rows)}</div>' if rows else ""
 
 
 def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> str:
-    """Three-level lead breakdown as HTML cards: per audience (adults, undetermined, students)
-    a header with its total, then one card per intent segment (win-rate order) with the stage
-    breakdown chips INSIDE each card. Rows: (audience, lead_type, total, won); a legacy 3-tuple
-    is audience 'adult'. `seg_stage_by_aud` = {aud: {lead_type: {stage: count}}}. Server-rendered,
-    responsive, no client JS. Empty until classified."""
+    """Three-level lead breakdown: one Sankey per audience (adults, then students), branching
+    into intent segments by win rate, and under it the funnel breakdown INSIDE each segment
+    (clickable stage chips). Rows: (audience, lead_type, total, won); a legacy 3-tuple is
+    audience 'adult'. `seg_stage_by_aud` = {aud: {lead_type: {stage: count}}}.
+    Server-rendered — instant on the htmx swap, no client JS. Empty until classified."""
     by_aud: dict[str, list] = {}
     for s in segments:
         if len(s) >= 4:
@@ -1446,14 +1496,16 @@ def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> 
     single = len(auds) == 1
     blocks = ""
     for aud in auds:
-        leaves = by_aud[aud]
-        total = sum(n for _k, n, _w in leaves)
-        # With one audience, keep the familiar "Total leads" header; else name each audience.
-        name = _h.escape(t("rep.total") if single else t(f"aud.{aud}"))
-        cards = _segment_cards_html(aud, leaves, (seg_stage_by_aud or {}).get(aud, {}))
-        blocks += (
-            f'<div class="aud-blk"><div class="aud-hd">{name} <b>{total}</b></div>'
-            f'{cards}</div>')
+        # With one audience, keep the familiar "Total leads" root; else name each audience.
+        root_label = _h.escape(t("rep.total") if single else t(f"aud.{aud}"))
+        svg = _segment_subtree_svg(by_aud[aud], root_label, aud_key=aud)
+        if not svg:
+            continue
+        cap = "" if single else (
+            f'<div style="font-size:.72rem;color:#8899aa;margin:.6rem 0 .1rem;'
+            f'font-weight:600">{_h.escape(t(f"aud.{aud}"))}</div>')
+        rows = _segment_stage_rows_html(aud, by_aud[aud], (seg_stage_by_aud or {}).get(aud, {}))
+        blocks += f'{cap}<div class="seg-tree">{svg}</div>{rows}'
     if not blocks:
         return ""
     return (
