@@ -279,7 +279,8 @@ async def reports_panel(
                            date_from=df, date_to=dt_, active_range=active_range,
                            ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
                            products=products, segments=segments, stage_flow=stage_flow,
-                           stage_reach=stage_reach))
+                           stage_reach=stage_reach,
+                           total_leads=sum(int(s[1]) for s in segments)))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)

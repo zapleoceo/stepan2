@@ -50,6 +50,7 @@ async def test_stage_flow_groups_edges_and_scopes_branch(db_session) -> None:
     assert reach["new"] == 2                      # 2 distinct leads passed through new (not 3)
     assert reach["presenting"] == 2
     assert reach["dormant"] == 1
+    assert reach["*"] == 2                         # distinct movers (branch 2 lead excluded)
 
 
 def test_flow_widget_renders_and_falls_back() -> None:
@@ -60,4 +61,18 @@ def test_flow_widget_renders_and_falls_back() -> None:
     html = _funnel_flow_html(flow)
     assert "<svg" in html
     assert html.count("<path") == 3           # one link per edge
+    assert "Entry point:" in html             # node hover describes how the stage is determined
     assert _funnel_flow_html([]) == ""        # empty → caller falls back to line funnel
+
+
+def test_flow_no_movement_bucket() -> None:
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _funnel_flow_html
+    _lang.set("en")
+    flow = [("new", "presenting", 90), ("new", "dormant", 40)]
+    reach = {"new": 100, "presenting": 90, "dormant": 40, "*": 100}
+    # 130 total, 100 moved → 30 never moved
+    html = _funnel_flow_html(flow, reach, total_leads=130)
+    assert "no movement · 30" in html
+    # entry + no-movement reconcile to the base; no bucket when everyone moved
+    assert "no movement" not in _funnel_flow_html(flow, reach, total_leads=100)

@@ -128,10 +128,14 @@ async def fetch_stage_reach(
     if until is not None:
         q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
     seen: dict[str, set[int]] = {}
+    movers: set[int] = set()
     for lid, frm, to in (await session.execute(q)).all():
         seen.setdefault(frm, set()).add(lid)
         seen.setdefault(to, set()).add(lid)
-    return {s: len(ids) for s, ids in seen.items()}
+        movers.add(lid)
+    out = {s: len(ids) for s, ids in seen.items()}
+    out["*"] = len(movers)  # distinct leads with any transition — for the "no movement" bucket
+    return out
 
 
 _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where

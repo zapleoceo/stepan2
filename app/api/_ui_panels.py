@@ -1156,15 +1156,20 @@ _FLOW_SPINE = ("new", "nurturing", "qualifying", "presenting", "objection", "rea
 _FLOW_EXITS = ("dormant", "manager")
 
 
-def _funnel_flow_html(flow: list, reach: dict[str, int] | None = None) -> str:
+def _funnel_flow_html(
+    flow: list, reach: dict[str, int] | None = None, total_leads: int = 0,
+) -> str:
     """The whole funnel as a server-rendered SVG flow (Sankey-style): each lead's real path
     from first message (entry) through every stage transition to an exit, reconstructed from the
     stage_event audit log. Link thickness ∝ distinct leads on that transition; node bar/label =
     distinct leads that passed through the stage (`reach`) — a real headcount ≤ total leads, so
     the entry bar never reads higher than the lead base. Falls back to edge-derived throughput
-    when `reach` is absent. Back-edges (e.g. presenting→qualifying) curve, so churn and drop-off
-    are visible, not just the happy path. Empty (→ caller falls back to the line funnel) when
-    there's no transition history for the window."""
+    when `reach` is absent. `total_leads` (all leads in the window) drives the standalone
+    "no movement" bucket = leads that entered but have no transition yet, so entry + no-movement
+    reconcile to the whole base. Each node has a hover <title> explaining how the stage is
+    determined. Back-edges (e.g. presenting→qualifying) curve, so churn and drop-off are visible,
+    not just the happy path. Empty (→ caller falls back to the line funnel) when there's no
+    transition history for the window."""
     edges = [(str(a), str(b), int(c)) for a, b, c in flow if int(c) > 0 and str(a) != str(b)]
     if not edges:
         return ""
@@ -1218,12 +1223,31 @@ def _funnel_flow_html(flow: list, reach: dict[str, int] | None = None) -> str:
         lbl = _h.escape(t("flow.entry") if s == "new" else t(f"stage.{s}"))
         below = s in _FLOW_EXITS
         ty = y + h / 2 + 12 if below else y - h / 2 - 5
+        desc = _h.escape(t("flow.entry_desc") if s == "new" else t(f"sdesc.{s}"))
         nodes += (
-            f'<g><title>{lbl}: {t_s}</title>'
+            f'<g><title>{lbl}: {t_s} — {desc}</title>'
             f'<rect x="{x - bar_w / 2:.0f}" y="{y - h / 2:.0f}" width="{bar_w}" height="{h:.0f}"'
             f' rx="3" fill="{col}"/>'
             f'<text x="{x:.0f}" y="{ty:.0f}" text-anchor="middle" fill="#9aa7b5"'
             f' font-size="9">{lbl} · {t_s}</text></g>'
+        )
+    # "no movement": leads that entered (first message) but have no transition logged yet, so
+    # entry + this = the whole base. A standalone dashed node under the entry (no links flow to
+    # it — that is the point: they never moved).
+    moved = reach.get("*", 0) if reach else 0
+    stuck = max(0, total_leads - moved)
+    if stuck > 0:
+        sx, sy = left, bot_y
+        sh = max(10.0, min(96.0, stuck / max_tp * 96))
+        slbl = _h.escape(t("flow.stuck"))
+        sdesc = _h.escape(t("flow.stuck_desc"))
+        nodes += (
+            f'<g><title>{slbl}: {stuck} — {sdesc}</title>'
+            f'<rect x="{sx - bar_w / 2:.0f}" y="{sy - sh / 2:.0f}" width="{bar_w}"'
+            f' height="{sh:.0f}" rx="3" fill="#3a4250" stroke="#4a5568"'
+            f' stroke-dasharray="3 2"/>'
+            f'<text x="{sx:.0f}" y="{sy + sh / 2 + 12:.0f}" text-anchor="middle" fill="#6b7685"'
+            f' font-size="9">{slbl} · {stuck}</text></g>'
         )
     svg = (
         f'<svg viewBox="0 0 {vw} {vh}" style="width:100%;max-width:720px;height:auto"'
@@ -1331,7 +1355,7 @@ def _segment_tree_html(segments: list) -> str:
         if n <= 0:
             continue
         color, lbl = meta.get(key, ("#4a5568", "seg.unclear"))
-        rows.append((color, _h.escape(t(lbl)), n, won))
+        rows.append((color, _h.escape(t(lbl)), n, won, key))
     if not rows:
         return ""
     rows.sort(key=lambda r: r[2], reverse=True)
@@ -1342,7 +1366,7 @@ def _segment_tree_html(segments: list) -> str:
     height = top * 2 + n_seg * row_h
     root_cy = height // 2
     links, nodes = "", ""
-    for i, (color, label, cnt, won) in enumerate(rows):
+    for i, (color, label, cnt, won, key) in enumerate(rows):
         cy = top + row_h // 2 + i * row_h
         thick = max(2, round(cnt / total * 34))
         links += (
@@ -1352,8 +1376,10 @@ def _segment_tree_html(segments: list) -> str:
         pct = round(cnt / total * 100)
         won_pct = round(won / cnt * 100) if cnt else 0
         y = cy - node_h // 2
+        desc = _h.escape(t(f"segdesc.{key}"))
+        tip = t("seg.tip", label=label, cnt=cnt, pct=pct, won_pct=won_pct, desc=desc)
         nodes += (
-            f'<g><title>{label}: {cnt} ({pct}%) · won {won}</title>'
+            f'<g><title>{tip}</title>'
             f'<rect x="{node_x}" y="{y}" width="{node_w}" height="{node_h}" rx="6"'
             f' fill="#141925" stroke="#2d3748"/>'
             f'<rect x="{node_x}" y="{y}" width="4" height="{node_h}" rx="2" fill="{color}"/>'
@@ -1400,6 +1426,7 @@ def reports_panel_html(
     segments: list | None = None,
     stage_flow: list | None = None,
     stage_reach: dict[str, int] | None = None,
+    total_leads: int = 0,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1476,7 +1503,7 @@ def reports_panel_html(
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
         f'{_segment_tree_html(segments or [])}'
-        f'{_funnel_flow_html(stage_flow or [], stage_reach) or _funnel_line_html(stage_counts)}'
+        f'{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}'  # noqa: E501
         f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'

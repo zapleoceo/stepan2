@@ -334,6 +334,81 @@ _TR: dict[str, dict[str, str]] = {
     "seg.student":      {"ru": "школьники",  "en": "students",    "id": "pelajar"},
     "seg.non_target":   {"ru": "нецелевые",  "en": "non-target",  "id": "non-target"},
     "seg.unclear":      {"ru": "не ясно",    "en": "unclear",     "id": "belum jelas"},
+    # segment tooltips — HOW each lead_type is decided (mirrors the LEAD TYPE block in
+    # app/modules/conversation/prompt.py, the same rules the classifier applies live)
+    "segdesc.hot": {
+        "ru": "Явное намерение записаться / оплатить / забронировать сейчас "
+              "(«как записаться / хочу пойти / как оплатить»)",
+        "en": "Explicit intent to enrol / pay / reserve now ('how to sign up / I want in / "
+              "how to pay')",
+        "id": "Niat jelas untuk daftar / bayar / pesan sekarang ('cara daftar / mau ikut / "
+              "gimana bayar')",
+    },
+    "segdesc.warm": {
+        "ru": "Реальный интерес: вовлечён, всплыла настоящая потребность, блокеров нет — "
+              "основной путь продажи",
+        "en": "Genuine interest: engaged, a real need surfaced, no blocker — the main sell path",
+        "id": "Minat nyata: terlibat, kebutuhan muncul, tanpa penghalang — jalur jual utama",
+    },
+    "segdesc.cold": {
+        "ru": "Низкий интерес: размытые или односложные ответы, «просто смотрю / спрашиваю», "
+              "без выбранного направления после пары ходов",
+        "en": "Low intent: vague or one-word replies, 'just looking / asking', no chosen "
+              "direction after a couple of turns",
+        "id": "Minat rendah: jawaban samar / satu kata, 'cuma lihat / nanya', tanpa arah "
+              "setelah beberapa giliran",
+    },
+    "segdesc.no_budget": {
+        "ru": "Хочет, но не может / не будет платить — «нет денег», шок от цены, нет дохода",
+        "en": "Wants it but can't / won't pay — 'no money', price shock, no income",
+        "id": "Mau tapi tak bisa / tak mau bayar — 'gapunya duit', kaget harga, tanpa penghasilan",
+    },
+    "segdesc.student": {
+        "ru": "Школьник / несовершеннолетний / структурный блокер (нет телефона, нечем "
+              "платить) — независимо от того, насколько заинтересован",
+        "en": "At school / a minor / a structural blocker (no phone, no way to pay) — "
+              "regardless of how interested they sound",
+        "id": "Masih sekolah / di bawah umur / penghalang struktural (tanpa HP, tak bisa bayar) "
+              "— seberapa pun tertariknya",
+    },
+    "segdesc.non_target": {
+        "ru": "Не та аудитория (просит то, чему не учим), оффтоп, троллинг или явное «не хочу»",
+        "en": "Wrong audience (asks for something we don't teach), off-topic, trolling, or an "
+              "explicit 'I don't want it'",
+        "id": "Audiens salah (minta yang tak kami ajar), di luar topik, trolling, atau tegas "
+              "'tidak mau'",
+    },
+    "segdesc.unclear": {
+        "ru": "Пока недостаточно сигнала (до ~3 содержательных сообщений) или лид ещё не "
+              "классифицирован",
+        "en": "Not enough signal yet (under ~3 substantive messages) or the lead is not "
+              "classified yet",
+        "id": "Sinyal belum cukup (di bawah ~3 pesan berarti) atau lead belum diklasifikasi",
+    },
+    "seg.tip": {
+        "ru": "{label}: {cnt} ({pct}% от всех) · won {won_pct}% (дошли до ready/handed_off). "
+              "{desc}",
+        "en": "{label}: {cnt} ({pct}% of all) · won {won_pct}% (reached ready/handed_off). {desc}",
+        "id": "{label}: {cnt} ({pct}% dari semua) · won {won_pct}% (sampai ready/handed_off). "
+              "{desc}",
+    },
+    "flow.entry_desc": {
+        "ru": "Точка входа: уникальные лиды, прошедшие через стартовую стадию (первое "
+              "сообщение → первый переход)",
+        "en": "Entry point: distinct leads that passed through the starting stage (first "
+              "message → first transition)",
+        "id": "Titik masuk: lead unik yang melewati tahap awal (pesan pertama → transisi "
+              "pertama)",
+    },
+    "flow.stuck": {"ru": "без движения", "en": "no movement", "id": "tanpa gerakan"},
+    "flow.stuck_desc": {
+        "ru": "Написали первое сообщение, но ни одного перехода по стадиям ещё не "
+              "зафиксировано (совсем свежие или пока не обработаны)",
+        "en": "Sent a first message but have no recorded stage transition yet (brand-new or "
+              "not processed yet)",
+        "id": "Kirim pesan pertama tapi belum ada perpindahan tahap tercatat (baru atau belum "
+              "diproses)",
+    },
     "chat.block":       {"ru": "Заблокировать (спам)", "en": "Block (spam)",
                          "id": "Blokir (spam)"},
     "chat.blocked":     {"ru": "заблок.", "en": "blocked", "id": "diblokir"},
