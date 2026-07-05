@@ -141,6 +141,37 @@ async def test_ready_without_phone_keeps_selling(db_session) -> None:
     assert lead.agent_enabled is True
 
 
+def test_normalize_phone() -> None:
+    from app.modules.conversation.reply import _normalize_phone
+    assert _normalize_phone("0812 3456 7890") == "+6281234567890"   # ID local trunk → +62
+    assert _normalize_phone("+62 812-3456-7890") == "+6281234567890"
+    assert _normalize_phone("81234567890") == "+81234567890"        # bare digits keep as-is
+    assert _normalize_phone("call me") is None                      # no digits
+    assert _normalize_phone("123") is None                          # too short to be a number
+
+
+async def test_stage_ready_without_phone_is_gated(db_session) -> None:
+    # The model put stage='ready' directly (not the flag) with no phone — must NOT hand off
+    # (the lead-1561 defect). Gate keeps it selling until a contact exists.
+    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.PRESENTING)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(ready=False, stage=Stage.READY))
+    assert lead.stage == Stage.PRESENTING
+    assert lead.agent_enabled is True
+    assert lead.handed_off_at is None
+
+
+async def test_phone_captured_from_decision_enables_handoff(db_session) -> None:
+    notifier = FakeNotifier()
+    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.PRESENTING)
+    # Lead typed their WA number this turn: decision.phone is captured → phone gate now passes.
+    await _svc(db_session, bid, notifier=notifier).enqueue_reply(
+        tid, _decision(ready=True, stage=Stage.PRESENTING, phone="0812 3456 7890"),
+    )
+    assert lead.phone_e164 == "+6281234567890"  # local 08… normalised to +62…
+    assert lead.stage == Stage.READY
+    assert lead.agent_enabled is False
+
+
 async def test_needs_manager_moves_to_manager_and_mutes(db_session) -> None:
     notifier = FakeNotifier()
     bid, tid, lead = await _world(db_session, phone="+6281234567890")

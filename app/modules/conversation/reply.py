@@ -38,6 +38,22 @@ _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
 _DISCOVERY_TURN_CAP = 5
 
 
+def _normalize_phone(raw: str) -> str | None:
+    """Best-effort E.164 for a phone the lead typed. Indonesian local '08…' → '+628…';
+    a leading '+' is kept; bare digits get a '+'. Returns None if the digit count is
+    implausible (so a stray number in a message doesn't get mistaken for a phone)."""
+    s = raw.strip()
+    plus = s.startswith("+")
+    digits = re.sub(r"\D", "", s)
+    if not digits:
+        return None
+    if not plus and digits.startswith("0"):  # Indonesian local trunk prefix → country code
+        digits = "62" + digits[1:]
+    if not 8 <= len(digits) <= 15:  # E.164 allows up to 15 digits; below 8 isn't a real number
+        return None
+    return "+" + digits
+
+
 def _script_lang(text: str) -> str | None:
     """Cyrillic in the lead's own text -> 'ru', independent of the model's self-report.
 
@@ -169,17 +185,26 @@ class ReplyService:
         if decision.lead_type and decision.lead_type != lead.lead_type:
             lead.lead_type = decision.lead_type  # segment — persisted for routing + reporting
             self.session.add(lead)
+        # Capture a phone the lead typed in-chat (channel metadata rarely carries one). This
+        # must land BEFORE _stage_for so the same turn the lead sends their number can pass the
+        # hand-off gate — a manager can't work a deal without a contact.
+        if decision.phone and not lead.phone_e164:
+            normalized = _normalize_phone(decision.phone)
+            if normalized:
+                lead.phone_e164 = normalized
+                self.session.add(lead)
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return
         # The bound product's kind decides deal-vs-RSVP: an event product is ALWAYS an
         # openhouse-style RSVP (notify team, bot stays on), regardless of what the model
         # guessed — the model only picks the subtype for non-event products.
+        ready = self._is_ready(decision)
         eff_subtype = decision.ready_subtype
-        if decision.ready and thread.product_slug \
+        if ready and thread.product_slug \
                 and await self._product_kind(thread.product_slug) == "event":
             eff_subtype = "openhouse"
-        if decision.ready and eff_subtype == "openhouse":
+        if ready and eff_subtype == "openhouse":
             await self._handoff_openhouse(lead, thread)
         inbound = await self.messages.inbound_count(thread.id)
         new_stage = self._stage_for(decision, lead, inbound, eff_subtype)
@@ -189,7 +214,7 @@ class ReplyService:
             branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
             from_stage=str(lead.stage), to_stage=str(new_stage), actor="bot",
             reason="needs_manager" if decision.needs_manager else
-                   ("ready" if decision.ready else "model decision"),
+                   ("ready" if ready else "model decision"),
         ))
         lead.stage = new_stage
         if new_stage == Stage.MANAGER:
@@ -223,18 +248,26 @@ class ReplyService:
         self.session.add(lead)
         logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
 
+    @staticmethod
+    def _is_ready(decision: Decision) -> bool:
+        """Readiness is either the `ready` flag OR the model putting stage='ready' directly.
+        Both must go through the same phone gate — otherwise a model that writes stage='ready'
+        hands a lead to a manager with no contact (the exact defect on lead 1561)."""
+        return decision.ready or decision.stage == Stage.READY
+
     def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0,
                    ready_subtype: str | None = None) -> Stage:
-        if decision.ready and ready_subtype == "openhouse":
+        ready = self._is_ready(decision)
+        if ready and ready_subtype == "openhouse":
             # An event RSVP is a notify-only side channel (see _handoff_openhouse) — it's
             # a sale (of a seat, not a course) but NOT a hand-off: the bot keeps talking,
             # so never let it force READY/MANAGER and silence the account.
             return decision.stage
-        if decision.ready and lead.phone_e164:
+        if ready and lead.phone_e164:
             return Stage.READY
         if decision.needs_manager:
             return Stage.MANAGER
-        if decision.ready:  # ready without a contact — keep selling until we have one
+        if ready:  # ready without a contact — keep selling / ask for the phone, don't hand off
             return Stage.PRESENTING
         # Discovery gate: don't present until a real need (pain + gain) is captured — the
         # code backstop behind the prompt's discover-first rule. BUT it's an EARLY gate, not

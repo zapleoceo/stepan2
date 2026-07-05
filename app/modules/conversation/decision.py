@@ -42,6 +42,9 @@ class Decision:
     ready_subtype: str | None = None  # 'deal' | 'openhouse' when ready
     lead_type: str | None = None  # segment (hot|warm|cold|no_budget|student|non_target|unclear)
     reply_language: str | None = None  # lead's language code when they wrote in another
+    # The lead's phone / WhatsApp number if they shared one in the chat (raw digits as written).
+    # Persisted to lead.phone_e164, and a captured phone is what gates a real deal hand-off.
+    phone: str | None = None
     # Discovered customer profile (Value Proposition Canvas): what the lead is trying to
     # achieve (jobs), their obstacles/fears (pains), and the outcomes they want (gains).
     jobs: list[str] = field(default_factory=list)
@@ -100,6 +103,7 @@ def parse_decision(raw_json: str) -> Decision:
         ready_subtype=subtype if subtype in ("deal", "openhouse") else None,
         lead_type=ltype if ltype in _LEAD_TYPES else None,
         reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
+        phone=(str(data.get("phone")).strip() or None) if data.get("phone") else None,
         jobs=_str_list(data.get("jobs")),
         pains=_str_list(data.get("pains")),
         gains=_str_list(data.get("gains")),

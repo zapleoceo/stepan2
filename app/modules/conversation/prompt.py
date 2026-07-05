@@ -121,6 +121,14 @@ _DECISION_CONTRACT = (
     "with NO contact left behind. ⚠️ A WhatsApp shared just to RECEIVE materials is NOT 'ready' "
     "- keep ready=false, keep selling, the bot stays on. ready=true is ONLY for a lead who "
     "wants to ENROL / reserve / pay now.\n\n"
+    "PHONE BEFORE HAND-OFF (hard rule): a deal only goes to a manager once we have the lead's "
+    "phone / WhatsApp number - without it the manager cannot follow up. So the MOMENT a lead "
+    "signals they want to enrol / pay / book ('Gass', 'siap', 'mau daftar', 'gimana bayar') and "
+    "you don't yet have their number, your very NEXT reply ASKS for it ('boleh minta nomor WA "
+    "Kakak buat amankan seat-nya?') and you keep ready=false that turn. Set ready=true ONLY on "
+    "the turn where a phone number is in hand. Whenever the lead writes a phone/WhatsApp number, "
+    "copy it into the `phone` field (raw digits). NEVER write 'ready' in the `stage` field "
+    "yourself - signal readiness only through ready=true; the system decides the stage.\n\n"
     "PROACTIVELY CLOSE - don't wait to be asked. Once value is built and no objection is live, "
     "propose the NEXT concrete step YOURSELF: reserve a seat in the next batch, join the free "
     "open house, or a quick call with the team ('mau aku bantu amankan tempat buat batch "
@@ -199,9 +207,12 @@ _DECISION_CONTRACT = (
     "This drives routing + reporting; keep your reply this turn guided by the rules above.\n\n"
     "Return ONLY this JSON (no prose, no markdown fences):\n"
     '{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, '
-    '"ready_subtype": str|null, "lead_type": str|null, "needs_manager": bool, '
-    '"manager_question": str|null, "kb_gap": str|null, "reply_language": str|null, '
-    '"jobs": [str], "pains": [str], "gains": [str], "discovery_complete": bool}}\n'
+    '"ready_subtype": str|null, "lead_type": str|null, "phone": str|null, '
+    '"needs_manager": bool, "manager_question": str|null, "kb_gap": str|null, '
+    '"reply_language": str|null, "jobs": [str], "pains": [str], "gains": [str], '
+    '"discovery_complete": bool}}\n'
+    "phone: the lead's phone / WhatsApp number if they wrote one in the chat (raw digits as "
+    "given, e.g. '08123456789' or '+62812...'), else null. Fill it the turn they share it.\n"
     "lead_type: hot|warm|cold|no_budget|student|non_target|unclear (see LEAD TYPE above).\n"
     "reply: the message text, with '|||' between bubbles when split.\n"
     "jobs/pains/gains: what you've learned about the lead so far - jobs (what they want to "
@@ -217,9 +228,10 @@ _DECISION_CONTRACT = (
     "discovery, keep digging for the pain.\n"
     "reply_language: the ISO code of the language you're replying in, e.g. 'en','ru','id','ms' "
     "- only when it differs from '{lang}', else null.\n"
-    "stage: EXACTLY one of new, nurturing, qualifying, presenting, objection, ready, dormant. "
-    "Use 'qualifying' while DISCOVERING (the default until a need is captured); 'presenting' "
-    "ONLY after a need is on the table.\n"
+    "stage: EXACTLY one of new, nurturing, qualifying, presenting, objection, dormant. Use "
+    "'qualifying' while DISCOVERING (the default until a need is captured); 'presenting' ONLY "
+    "after a need is on the table. Do NOT use 'ready' here - readiness is signalled ONLY via the "
+    "`ready` flag, and the system sets the ready stage once a phone is captured.\n"
     "product_slug: the slug of the product the lead wants, from the catalog above; null if "
     "unsure.\n"
     "ready: true ONLY when the lead gave a contact (name + phone/WhatsApp, or a filled form) "

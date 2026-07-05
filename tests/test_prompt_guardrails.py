@@ -45,3 +45,16 @@ def test_proactive_close_and_openhouse_bridge() -> None:
 def test_events_vs_courses_recognizes_cheap_price() -> None:
     assert "EVENTS vs COURSES" in _DECISION_CONTRACT
     assert "kirain 100k" in _DECISION_CONTRACT
+
+
+def test_phone_before_handoff_rule_and_field() -> None:
+    assert "PHONE BEFORE HAND-OFF" in _DECISION_CONTRACT
+    assert '"phone"' in _DECISION_CONTRACT
+
+
+def test_decision_parses_phone() -> None:
+    from app.modules.conversation.decision import parse_decision
+    d = parse_decision('{"reply":"hi","stage":"presenting","phone":"0812345"}')
+    assert d.phone == "0812345"
+    d2 = parse_decision('{"reply":"hi","stage":"presenting"}')
+    assert d2.phone is None
