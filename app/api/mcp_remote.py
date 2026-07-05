@@ -116,6 +116,24 @@ async def sim_reset(branch_id: int, session_key: str) -> dict:
         return await SimService(session, BrokerLLM()).reset(branch_id, session_key)
 
 
+@mcp.tool()
+async def sim_persona(
+    branch_id: int, persona: str, session_key: str, max_turns: int = 3,
+) -> dict:
+    """Run an auto-dialogue: an LLM plays a lead of a given archetype and talks to Stepan
+    (the real reply engine) up to max_turns turns, then returns the transcript + what the
+    engine decided (stage, captured jobs/pains/gains, ready/handoff). Bounded + resumable —
+    call again with the same session_key to continue until `ended` is true.
+
+    Personas: hot_ready, budget_student, skeptic_diy, confused_explorer, career_switcher,
+    freelancer_upskill, parent_for_child, corporate_bulk, ghoster_busy, wrong_fit.
+    Use a SIM/test branch_id (not a live branch). Fully sandboxed; nothing reaches Instagram."""
+    from app.modules.conversation.sim_persona import run_persona  # noqa: PLC0415
+    async with session_scope() as session:
+        return await run_persona(session, branch_id, persona, session_key,
+                                 BrokerLLM(), max_turns=max_turns)
+
+
 def connector_app():  # noqa: ANN201
     """The token-guarded Streamable HTTP ASGI app to mount at /connector. Accepts write
     tokens from the env secret or the mcp_token table (UI-managed)."""
