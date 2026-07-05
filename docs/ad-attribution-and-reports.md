@@ -99,14 +99,22 @@ JS едет инлайном во фрагменте (`_AD_FUNNEL_JS`), обра
 фрагмента) в `app/api/_ui_panels.py`; все скоупятся тем же окном, что и KPI — по
 `lead.created_at` (старт диалога) + фильтру филиалов:
 
-- **Сегменты лидов** — `_segment_tree_html`: дерево «Всего лидов N» → лист на каждый
-  `lead_type`, толщина связи ∝ объёму, на листе count · доля% · won%. Данные —
-  `fetch_segment_dist` (`coalesce(lead_type,'unclear')`, won = стадии `ready|handed_off`).
-  У каждого листа hover-`<title>` (`seg.tip` + `segdesc.{type}`) с точным критерием, как
-  определяется тип — дословно из блока LEAD TYPE в `prompt.py`, теми же правилами что живой
-  классификатор. Лист — SVG-ссылка на `/ui/inbox?lead_type=<type>` (для `unclear` фильтр ловит
-  и `NULL`); узел воронки — ссылка на `/ui/inbox?stage=<stage>`. `threads_partial`/`inbox`
-  принимают `lead_type`, шелл рисует дисмиссабл-чип (`inbox.seg_filter`) как для рекламы.
+- **Сегменты лидов** — `_segment_tree_html`: **две оси**. Классификация лида разложена на
+  `lead_type` (намерение/температура: `hot|warm|cold|no_budget|non_target|unclear`) и
+  `audience` (кто это: `adult|student`) — ортогонально, поэтому школьник может быть ещё и
+  «горячим» (раньше `student` занимал единственный слот `lead_type` и стирал температуру →
+  won% школьников всегда 0). Рендер — **под-дерево на каждую аудиторию** (сначала «Взрослые»,
+  потом «Школьники»), у каждого свой корень с total, ветвящийся в сегменты, **отсортированные
+  по вероятности успеха** (won/count по убыванию, добор по объёму). Толщина связи ∝ объёму, на
+  листе count · доля% · won%. Данные — `fetch_segment_dist`, строки
+  `(audience, lead_type, total, won)` c `coalesce(audience,'adult')`,
+  `coalesce(lead_type,'unclear')`, won = стадии `ready|handed_off`; **потребители индексируют
+  total как `s[2]`**. У каждого листа hover-`<title>` (`seg.tip` + `segdesc.{type}`) с точным
+  критерием — дословно из блока LEAD TYPE в `prompt.py`. Лист — SVG-ссылка на
+  `/ui/inbox?lead_type=<type>` (для `unclear` фильтр ловит и `NULL`); узел воронки — ссылка на
+  `/ui/inbox?stage=<stage>`. `threads_partial`/`inbox` принимают `lead_type`, шелл рисует
+  дисмиссабл-чип (`inbox.seg_filter`) как для рекламы. Если аудитория одна — корень остаётся
+  «Всего лидов N» без разбивки.
 - **Воронка (путь лидов)** — `_funnel_flow_html`: Sankey-поток реального пути
   `вход → … → выход`, восстановленный из аудита переходов `stage_event` (`fetch_stage_flow`,
   строки `from_stage,to_stage,count`, self-переходы отфильтрованы). Счёт —
@@ -131,16 +139,22 @@ JS едет инлайном во фрагменте (`_AD_FUNNEL_JS`), обра
 - **Пресеты периода** — `_QUICK_RANGES` (в `_ui_panels.py` для кнопок и в `_routes_admin.py`
   для `timedelta`): 1h/2h/4h/8h/12h/24h/7d/30d/60d/90d/весь. Держать оба списка в синхроне.
 
-## Переклассификация лидов (`lead_type`)
+## Переклассификация лидов (`lead_type` + `audience`)
 
-`lead_type` живьём проставляется только как побочный эффект решения при ответе
-(`ReplyService._apply_decision`), поэтому у исторических лидов он NULL (→ «не ясно» в дереве).
+`lead_type` и `audience` живьём проставляются только как побочный эффект решения при ответе
+(`ReplyService._apply_decision`), поэтому у исторических лидов они NULL (→ «не ясно» / «Взрослые»
+в дереве). Миграция `031_lead_audience.sql` перенесла существующих `lead_type='student'` на
+`audience='student'` и сбросила их `lead_type` в `unclear` — температура восстановится на
+следующем ответе в диалоге.
+
 `scripts/reclassify_lead_types.py` — one-off бэкофилл по образцу `rederive_needs.py`: берёт
-ТОЛЬКО сообщения лида (`direction='in'`), гонит через брокер (`chat:smart`) с теми же 7
-определениями типов, что и живой промпт (скопированы в скрипт дословно), пишет `lead.lead_type`.
-Идемпотентно и резюмируемо (каждый лид — своя транзакция), флаги `--branch/--limit/--dry`.
-Запуск в контейнере: `docker exec -e PYTHONPATH=/app stepan2-worker python -m
-scripts.reclassify_lead_types`.
+ТОЛЬКО сообщения лида (`direction='in'`), гонит через брокер (`chat:smart`), пишет `lead.lead_type`.
+⚠️ **Скрипт написан под старую одно-осевую модель** (7 типов, включая `student` как `lead_type`) —
+прогон как есть вернёт `student` обратно в `lead_type` в обход оси `audience`. Перед бэкофиллом
+его надо привести к двум осям (6 типов + отдельный `audience`), синхронно с блоками LEAD TYPE /
+AUDIENCE в `prompt.py`. Идемпотентно и резюмируемо (каждый лид — своя транзакция), флаги
+`--branch/--limit/--dry`. Запуск в контейнере: `docker exec -e PYTHONPATH=/app stepan2-worker
+python -m scripts.reclassify_lead_types`.
 
 ## Миграция
 
