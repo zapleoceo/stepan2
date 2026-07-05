@@ -463,6 +463,19 @@ _CSS = (
     ".act-btn:hover{background:rgba(32,107,196,.28);color:#4da6ff;border-color:#206bc4}"
     ".act-btn.primary{background:#206bc4;color:#fff;border-color:#206bc4}"
     ".act-btn.primary:hover{background:#1a5aaa}"
+    # two-position bot toggle (OFF | ON) — sliding knob
+    ".bot-tog{position:relative;display:inline-flex;align-items:center;background:#12161f;"
+    "border:1px solid #2d3748;border-radius:999px;padding:2px;cursor:pointer;font-size:.66rem;"
+    "font-weight:700;line-height:1;letter-spacing:.04em;user-select:none}"
+    ".bot-tog .seg{position:relative;z-index:1;padding:.22rem .5rem;border-radius:999px;"
+    "color:#6b7685;transition:color .2s}"
+    ".bot-tog .knob{position:absolute;top:2px;bottom:2px;width:calc(50% - 2px);border-radius:999px;"
+    "transition:left .2s ease,background .2s;z-index:0}"
+    ".bot-tog.off .knob{left:2px;background:#ff6b6b}"
+    ".bot-tog.on .knob{left:calc(50% - 0px);background:#51cf66}"
+    ".bot-tog.off .seg.off{color:#1a0808}"
+    ".bot-tog.on .seg.on{color:#08160a}"
+    ".bot-tog:hover{border-color:#3a4759}"
     # suggest box
     ".sug-box{padding:.45rem .75rem;background:#1a1f2e;border-top:1px solid #2d3748;"
     "display:flex;flex-direction:column;gap:.3rem;flex-shrink:0}"
@@ -1012,18 +1025,23 @@ _STAGES = (
 
 
 def chat_bot_pill_html(tid: int, enabled: bool) -> str:
-    """Per-lead bot ON/OFF pill shown in the chat header (hx-swap=outerHTML)."""
-    lbl = _h.escape(t("bot.on" if enabled else "bot.off"))
-    color = "#51cf66" if enabled else "#ff6b6b"
-    bg = "rgba(31,58,31,.35)" if enabled else "rgba(58,31,31,.35)"
+    """Per-lead bot toggle in the chat header — a two-position switch (OFF | ON) whose knob
+    slides to the active side. Submitting flips agent_enabled (hx-swap=outerHTML)."""
+    state = "on" if enabled else "off"
+    off_lbl = _h.escape(t("bot.off"))
+    on_lbl = _h.escape(t("bot.on"))
+    title = _h.escape(t("bot.on" if enabled else "bot.off"))
     return (
         f'<form id="bot-pill-{tid}" style="display:inline;margin:0"'
         f' data-help="{_h.escape(t("hint.bot_chat"))}"'
         f' hx-post="/ui/chat/{tid}/bot-toggle"'
         f' hx-target="#bot-pill-{tid}" hx-swap="outerHTML">'
-        f'<button type="submit" class="act-btn"'
-        f' style="background:{bg};border-color:{color};color:{color}"'
-        f' title="{lbl}">🤖 {lbl}</button>'
+        f'<button type="submit" class="bot-tog {state}" title="{title}"'
+        f' aria-label="{title}">'
+        f'<span class="knob"></span>'
+        f'<span class="seg off">{off_lbl}</span>'
+        f'<span class="seg on">{on_lbl}</span>'
+        f'</button>'
         f'</form>'
     )
 

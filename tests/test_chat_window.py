@@ -304,7 +304,8 @@ def test_chat_bot_pill_reflects_on_state() -> None:
     from app.api._ui_html import chat_bot_pill_html
     _set_lang("en")
     html = chat_bot_pill_html(3, enabled=True)
-    assert "ON" in html
+    assert "ON" in html and "OFF" in html          # both segments of the toggle
+    assert 'class="bot-tog on"' in html            # knob on the ON side
     assert 'hx-post="/ui/chat/3/bot-toggle"' in html
 
 
@@ -312,7 +313,7 @@ def test_chat_bot_pill_reflects_off_state() -> None:
     from app.api._ui_html import chat_bot_pill_html
     _set_lang("en")
     html = chat_bot_pill_html(3, enabled=False)
-    assert "OFF" in html
+    assert 'class="bot-tog off"' in html            # knob on the OFF side
 
 
 def test_chat_header_includes_bot_pill() -> None:
