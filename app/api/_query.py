@@ -59,10 +59,10 @@ async def fetch_segment_dist(
     since: datetime | None = None, until: datetime | None = None,
 ) -> list:
     """Leads by (audience, intent segment) with a won count each. Rows:
-    (audience, lead_type, total, won). NULL audience → 'adult', NULL lead_type → 'unclear'.
-    The renderer orders; here we just aggregate the two-axis breakdown."""
+    (audience, lead_type, total, won). NULL audience → 'unknown' (its own block, NOT lumped
+    into adults), NULL lead_type → 'unclear'. The renderer orders; here we just aggregate."""
     won = func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0))
-    aud = func.coalesce(Lead.audience, "adult")
+    aud = func.coalesce(Lead.audience, "unknown")  # not-yet-classified stays distinct
     seg = func.coalesce(Lead.lead_type, "unclear")
     q = (
         select(aud.label("aud"), seg.label("seg"),

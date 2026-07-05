@@ -1342,7 +1342,7 @@ _SEG_META = (  # (key, colour, i18n label) — intent segments only; 'student' i
     ("non_target", "#868e96", "seg.non_target"),
     ("unclear", "#4a5568", "seg.unclear"),
 )
-_AUD_ORDER = ("adult", "student")  # audience sub-trees render top-to-bottom in this order
+_AUD_ORDER = ("adult", "unknown", "student")  # sub-tree order; 'unknown' = not yet classified
 
 
 def _segment_subtree_svg(rows: list, root_label: str) -> str:

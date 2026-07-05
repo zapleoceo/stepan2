@@ -69,7 +69,7 @@ async def test_segment_dist_groups_by_audience_and_intent(db_session) -> None:
     assert rows[("adult", "warm")] == (2, 1)      # 2 warm adults, 1 won
     assert rows[("student", "hot")] == (1, 1)     # a hot student — intent kept, not hidden
     assert rows[("student", "cold")] == (1, 0)
-    assert rows[("adult", "unclear")] == (1, 0)   # NULLs → adult / unclear
+    assert rows[("unknown", "unclear")] == (1, 0)  # NULL audience → own 'unknown' block, not adult
 
 
 async def test_segment_dist_row_shape_total_at_index_2(db_session) -> None:
@@ -97,10 +97,12 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     html = reports_panel_html(
         {"new": 3}, {}, {}, [], None,
         segments=[("adult", "warm", 10, 2), ("student", "hot", 4, 2),
-                  ("adult", "unclear", 20, 0)])
+                  ("unknown", "unclear", 30, 0), ("adult", "unclear", 20, 0)])
     assert "seg-tree" in html
     assert "Lead segments" in html
-    assert "Adults" in html and "Students" in html     # both audience roots shown
+    # three audience blocks: adults, the not-yet-classified block, students
+    assert "Adults" in html and "Undetermined" in html and "Students" in html
+    assert html.index("Adults") < html.index("Undetermined") < html.index("Students")
     assert "won 20%" in html                           # adult warm: 2/10
     assert "won 50%" in html                            # student hot: 2/4
     assert "/ui/inbox?lead_type=hot" in html
