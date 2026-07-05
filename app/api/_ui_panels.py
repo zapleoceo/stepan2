@@ -1140,6 +1140,84 @@ def _ad_funnel_html(
 _FUNNEL_PIPELINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready")
 _FUNNEL_SIDE = ("handed_off", "dormant", "manager")
 
+# Flow diagram: pipeline spine on the top lane, terminal exits on the bottom lane.
+_FLOW_SPINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready", "handed_off")
+_FLOW_EXITS = ("dormant", "manager")
+
+
+def _funnel_flow_html(flow: list) -> str:
+    """The whole funnel as a server-rendered SVG flow (Sankey-style): each lead's real path
+    from first message (new) through every stage transition to an exit, reconstructed from the
+    stage_event audit log. Bar height ∝ throughput, link thickness ∝ transition count, links
+    coloured by target stage; back-edges (e.g. presenting→qualifying) curve, so churn and drop
+    -off are visible, not just the happy path. Empty (→ caller falls back to the line funnel)
+    when there's no transition history for the window."""
+    edges = [(str(a), str(b), int(c)) for a, b, c in flow if int(c) > 0 and str(a) != str(b)]
+    if not edges:
+        return ""
+    out_sum: dict[str, int] = {}
+    in_sum: dict[str, int] = {}
+    for a, b, c in edges:
+        out_sum[a] = out_sum.get(a, 0) + c
+        in_sum[b] = in_sum.get(b, 0) + c
+    tp = {s: max(out_sum.get(s, 0), in_sum.get(s, 0)) for s in set(out_sum) | set(in_sum)}
+    max_tp = max(tp.values(), default=1) or 1
+    max_c = max((c for _, _, c in edges), default=1) or 1
+
+    vw, vh, bar_w = 700, 210, 16
+    left, right, top_y, bot_y = 46, vw - 46, 66, 168
+    step = (right - left) / (len(_FLOW_SPINE) - 1)
+    pos: dict[str, tuple[float, float]] = {
+        s: (left + i * step, top_y) for i, s in enumerate(_FLOW_SPINE)
+    }
+    pos["dormant"] = (left + 2 * step, bot_y)
+    pos["manager"] = (left + 4 * step, bot_y)
+
+    def bar_h(s: str) -> float:
+        return max(10.0, min(96.0, tp.get(s, 0) / max_tp * 96))
+
+    links = ""
+    for a, b, c in sorted(edges, key=lambda e: e[2]):  # thin first so thick links draw on top
+        if a not in pos or b not in pos:
+            continue
+        x0, y0 = pos[a]
+        x1, y1 = pos[b]
+        fwd = x1 >= x0
+        sx = x0 + bar_w / 2 if fwd else x0 - bar_w / 2
+        tx = x1 - bar_w / 2 if fwd else x1 + bar_w / 2
+        w = max(1.0, min(22.0, c / max_c * 22))
+        mx = (sx + tx) / 2
+        links += (
+            f'<path d="M{sx:.0f},{y0:.0f} C{mx:.0f},{y0:.0f} {mx:.0f},{y1:.0f} {tx:.0f},{y1:.0f}"'
+            f' fill="none" stroke="{_STAGE_COLOR.get(b, "#4a5568")}" stroke-width="{w:.1f}"'
+            f' opacity="0.3"/>'
+        )
+    nodes = ""
+    for s, (x, y) in pos.items():
+        t_s = tp.get(s, 0)
+        if t_s <= 0:
+            continue
+        h = bar_h(s)
+        col = _STAGE_COLOR.get(s, "#4a5568")
+        lbl = _h.escape(t(f"stage.{s}"))
+        below = s in _FLOW_EXITS
+        ty = y + h / 2 + 12 if below else y - h / 2 - 5
+        nodes += (
+            f'<g><title>{lbl}: {t_s}</title>'
+            f'<rect x="{x - bar_w / 2:.0f}" y="{y - h / 2:.0f}" width="{bar_w}" height="{h:.0f}"'
+            f' rx="3" fill="{col}"/>'
+            f'<text x="{x:.0f}" y="{ty:.0f}" text-anchor="middle" fill="#9aa7b5"'
+            f' font-size="9">{lbl} · {t_s}</text></g>'
+        )
+    svg = (
+        f'<svg viewBox="0 0 {vw} {vh}" style="width:100%;max-width:720px;height:auto"'
+        f' xmlns="http://www.w3.org/2000/svg">{links}{nodes}</svg>'
+    )
+    return (
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:.9rem 0 .35rem">'
+        f'{_h.escape(t("rep.funnel"))}</h3><div class="seg-tree">{svg}</div>'
+    )
+
 
 def _funnel_line_html(stage_counts: dict[str, int]) -> str:
     """One-line sales funnel: each pipeline stage as a step (count + % of total), a tooltip
@@ -1304,6 +1382,7 @@ def reports_panel_html(
     ad_suggestions: dict[str, str] | None = None,
     products: list[tuple[str, str]] | None = None,
     segments: list | None = None,
+    stage_flow: list | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1380,7 +1459,7 @@ def reports_panel_html(
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
         f'{_segment_tree_html(segments or [])}'
-        f'{_funnel_line_html(stage_counts)}'
+        f'{_funnel_flow_html(stage_flow or []) or _funnel_line_html(stage_counts)}'
         f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'

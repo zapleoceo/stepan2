@@ -93,6 +93,37 @@ JS едет инлайном во фрагменте (`_AD_FUNNEL_JS`), обра
 наличии группы, `l.stage IN (…)`; шелл инбокса рисует дисмиссабл-чип (реклама + метка группы)
 со ссылкой назад на нефильтрованный список.
 
+## Визуализация воронки (страница «Отчёты»)
+
+Три блока рисуются server-side как inline-SVG (без CDN/JS, чтобы переживать htmx-своп
+фрагмента) в `app/api/_ui_panels.py`; все скоупятся тем же окном, что и KPI — по
+`lead.created_at` (старт диалога) + фильтру филиалов:
+
+- **Сегменты лидов** — `_segment_tree_html`: дерево «Всего лидов N» → лист на каждый
+  `lead_type`, толщина связи ∝ объёму, на листе count · доля% · won%. Данные —
+  `fetch_segment_dist` (`coalesce(lead_type,'unclear')`, won = стадии `ready|handed_off`).
+- **Воронка (путь лидов)** — `_funnel_flow_html`: Sankey-поток реального пути
+  `new → … → выход`, восстановленный из аудита переходов `stage_event` (`fetch_stage_flow`,
+  строки `from_stage,to_stage,count`, self-переходы отфильтрованы). Спайн-стадии — верхняя
+  дорожка, терминалы `dormant`/`manager` — нижняя; высота бара ∝ throughput
+  `max(вход,выход)`, толщина связи ∝ числу переходов, цвет — по целевой стадии, back-edges
+  (напр. `presenting→qualifying`) гнутся — видно откаты и отвалы, не только happy path. Если
+  за окно истории переходов нет, блок пуст и `reports_panel_html` откатывается на старую
+  линейную `_funnel_line_html`.
+- **Пресеты периода** — `_QUICK_RANGES` (в `_ui_panels.py` для кнопок и в `_routes_admin.py`
+  для `timedelta`): 1h/2h/4h/8h/12h/24h/7d/30d/60d/90d/весь. Держать оба списка в синхроне.
+
+## Переклассификация лидов (`lead_type`)
+
+`lead_type` живьём проставляется только как побочный эффект решения при ответе
+(`ReplyService._apply_decision`), поэтому у исторических лидов он NULL (→ «не ясно» в дереве).
+`scripts/reclassify_lead_types.py` — one-off бэкофилл по образцу `rederive_needs.py`: берёт
+ТОЛЬКО сообщения лида (`direction='in'`), гонит через брокер (`chat:smart`) с теми же 7
+определениями типов, что и живой промпт (скопированы в скрипт дословно), пишет `lead.lead_type`.
+Идемпотентно и резюмируемо (каждый лид — своя транзакция), флаги `--branch/--limit/--dry`.
+Запуск в контейнере: `docker exec -e PYTHONPATH=/app stepan2-worker python -m
+scripts.reclassify_lead_types`.
+
 ## Миграция
 
 `migrations/versions/20260705_0200_b8c9d0e1f2a3_ad_product_map.py` — таблица

@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import case, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, ChannelThread, Lead
+from app.adapters.db.models import Branch, ChannelThread, Lead, StageEvent
 
 _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
@@ -65,6 +65,34 @@ async def fetch_segment_dist(
     q = (
         select(seg.label("seg"), func.count().label("total"), won.label("won"))
         .group_by(seg)
+        .order_by(func.count().desc())
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    return list((await session.execute(q)).all())
+
+
+async def fetch_stage_flow(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> list:
+    """Stage-transition edges from the audit log (stage_event), for the funnel-flow diagram.
+    Rows: (from_stage, to_stage, count), busiest first. Scoped to leads whose conversation
+    started in the window (Lead.created_at) so it agrees with the KPIs and segment tree.
+    Reconstructs the real path first-message → every transition → exit, back-edges included."""
+    q = (
+        select(
+            StageEvent.from_stage,
+            StageEvent.to_stage,
+            func.count().label("n"),
+        )
+        .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
+        .where(StageEvent.from_stage != StageEvent.to_stage)  # type: ignore[arg-type]
+        .group_by(StageEvent.from_stage, StageEvent.to_stage)
         .order_by(func.count().desc())
     )
     if branch_ids:
