@@ -97,7 +97,7 @@ async def test_gate_blocks_presenting_without_needs(db_session) -> None:
 
 async def test_gate_stops_forcing_discovery_after_turn_cap(db_session) -> None:
     """A non-yielding lead must not be interrogated forever: once they've taken enough turns
-    the gate stops blocking, so Stepan presents on what he has instead of a sixth question."""
+    the gate stops blocking, so Stepan presents on what he has instead of a third question."""
     b = Branch(name="T", lang="id")
     db_session.add(b)
     await db_session.flush()
@@ -107,8 +107,8 @@ async def test_gate_stops_forcing_discovery_after_turn_cap(db_session) -> None:
     svc = _svc(db_session, b.id)
     bare = Decision(reply="here's the fit...", stage=Stage.PRESENTING, product_slug="vibe",
                     ready=False, needs_manager=False)
-    assert svc._stage_for(bare, lead, inbound_count=2) == Stage.QUALIFYING   # early → keep digging
-    assert svc._stage_for(bare, lead, inbound_count=6) == Stage.PRESENTING   # past cap → present
+    assert svc._stage_for(bare, lead, inbound_count=1) == Stage.QUALIFYING   # early → keep digging
+    assert svc._stage_for(bare, lead, inbound_count=2) == Stage.PRESENTING   # past cap → present
 
 
 async def test_gate_allows_presenting_when_lead_already_has_needs(db_session) -> None:

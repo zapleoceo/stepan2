@@ -36,8 +36,8 @@ _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
 # After this many lead turns the discovery gate stops forcing more questions — a lead who
-# hasn't yielded a real need by now won't from a sixth question; present on what we have.
-_DISCOVERY_TURN_CAP = 5
+# hasn't yielded a real need by now won't from a third question; present on what we have.
+_DISCOVERY_TURN_CAP = 2
 
 
 def _normalize_phone(raw: str) -> str | None:
