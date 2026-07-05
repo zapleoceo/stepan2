@@ -192,9 +192,11 @@ class ReplyService:
 
     async def _guard_prompt(self) -> str | None:
         """The reply-guard checker prompt, editable per branch via the `guard_verify` KB
-        doc; None → guard.py's built-in default."""
+        doc (resolved through a shared-KB link); None → guard.py's built-in default."""
         from app.modules.knowledge.repository import KnowledgeRepo  # noqa: PLC0415
-        doc = await KnowledgeRepo(self.session, self.branch_id).by_slug("guard_verify")
+        from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
+        kb = await effective_kb_branch(self.session, self.branch_id)
+        doc = await KnowledgeRepo(self.session, kb).by_slug("guard_verify")
         return doc.content if doc and (doc.content or "").strip() else None
 
     async def _lang(self, lead: Lead | None = None) -> str:
