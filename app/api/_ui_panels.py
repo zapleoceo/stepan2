@@ -1359,7 +1359,8 @@ def _segment_tree_html(segments: list) -> str:
         rows.append((color, _h.escape(t(lbl)), n, won, key))
     if not rows:
         return ""
-    rows.sort(key=lambda r: r[2], reverse=True)
+    # Order by win probability (won/count) desc; ties (incl. 0%) fall back to volume.
+    rows.sort(key=lambda r: (r[3] / r[2] if r[2] else 0, r[2]), reverse=True)
     total = sum(r[2] for r in rows)
     n_seg = len(rows)
     row_h, top, w, node_x, node_w, node_h = 46, 14, 620, 372, 236, 34
