@@ -97,7 +97,9 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     html = reports_panel_html(
         {"new": 3}, {}, {}, [], None,
         segments=[("adult", "warm", 10, 2), ("student", "hot", 4, 2),
-                  ("unknown", "unclear", 30, 0), ("adult", "unclear", 20, 0)])
+                  ("unknown", "unclear", 30, 0), ("adult", "unclear", 20, 0)],
+        segment_stages={"adult": {"warm": {"qualifying": 7, "presenting": 3}},
+                        "student": {"hot": {"ready": 4}}})
     assert "seg-tree" in html
     assert "Lead segments" in html
     # three audience blocks: adults, the not-yet-classified block, students
@@ -107,4 +109,7 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     assert "won 50%" in html                            # student hot: 2/4
     # each leaf links to BOTH its audience and intent, so the opened list == the leaf count
     assert "/ui/inbox?lead_type=hot&audience=student" in html
+    # stage boxes to the right of each segment link to audience + segment + stage
+    assert "/ui/inbox?lead_type=warm&audience=adult&stage=presenting" in html
+    assert "/ui/inbox?lead_type=hot&audience=student&stage=ready" in html
     assert "/ui/inbox?lead_type=warm&audience=adult" in html

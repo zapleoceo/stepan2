@@ -1382,11 +1382,14 @@ _SEG_META = (  # (key, colour, i18n label) — intent segments only; 'student' i
 _AUD_ORDER = ("adult", "unknown", "student")  # sub-tree order; 'unknown' = not yet classified
 
 
-def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
+def _segment_subtree_svg(
+    rows: list, root_label: str, aud_key: str = "", seg_stage_map: dict | None = None,
+) -> str:
     """One audience's segment tree: a root node (its total) branching into each intent
     segment, link thickness ∝ volume, ordered by win probability. `rows` = [(key, n, won)].
-    Each leaf links to the inbox filtered by BOTH this audience and that intent, so the
-    opened list matches the leaf's exact count."""
+    To the RIGHT of each segment node, a row of small stage boxes (the funnel inside that
+    segment): one box per non-empty stage with its count, clickable to that
+    audience+segment+stage's chats. `seg_stage_map` = {lead_type: {stage: count}}."""
     meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
     leaves = []
     for key, n, won in rows:
@@ -1400,8 +1403,14 @@ def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
     leaves.sort(key=lambda r: (r[3] / r[2] if r[2] else 0, r[2]), reverse=True)
     total = sum(r[2] for r in leaves)
     n_seg = len(leaves)
-    row_h, top, w, node_x, node_w, node_h = 46, 14, 620, 372, 236, 34
+    ssm = seg_stage_map or {}
+    row_h, top, node_x, node_w, node_h = 46, 14, 372, 236, 34
     link_x0, mid_x = 128, 250
+    bx0, bw, bh, bgap = node_x + node_w + 12, 44, 32, 6  # stage boxes right of each node
+    max_boxes = max(
+        (sum(1 for st in _ALL_STAGES if int(ssm.get(k, {}).get(st, 0) or 0) > 0)
+         for _c, _l, _n, _w, k in leaves), default=0)
+    w = bx0 + max_boxes * (bw + bgap) if max_boxes else node_x + node_w + 10
     height = top * 2 + n_seg * row_h
     root_cy = height // 2
     links, nodes = "", ""
@@ -1417,8 +1426,9 @@ def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
         y = cy - node_h // 2
         desc = _h.escape(t(f"segdesc.{key}"))
         tip = t("seg.tip", label=label, cnt=cnt, pct=pct, won_pct=won_pct, desc=desc)
+        aud_q = f"&audience={aud_key}" if aud_key else ""
         nodes += (
-            f'<a href="/ui/inbox?lead_type={key}{f"&audience={aud_key}" if aud_key else ""}"'
+            f'<a href="/ui/inbox?lead_type={key}{aud_q}"'
             f' style="cursor:pointer">'
             f'<g><title>{tip}</title>'
             f'<rect x="{node_x}" y="{y}" width="{node_w}" height="{node_h}" rx="6"'
@@ -1431,6 +1441,25 @@ def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
             f'<text x="{node_x + 14}" y="{cy + 11}" fill="#6b7685" font-size="9">'
             f'{pct}% · won {won_pct}%</text></g></a>'
         )
+        # stage boxes to the right — the funnel inside this segment
+        by, j = cy - bh // 2, 0
+        for st in _ALL_STAGES:
+            c = int(ssm.get(key, {}).get(st, 0) or 0)
+            if c <= 0:
+                continue
+            bx = bx0 + j * (bw + bgap)
+            j += 1
+            scol = _STAGE_COLOR.get(st, "#868e96")
+            stip = f"{_h.escape(t(f'stage.{st}'))}: {c}"
+            nodes += (
+                f'<a href="/ui/inbox?lead_type={key}{aud_q}&stage={st}" style="cursor:pointer">'
+                f'<g><title>{stip}</title>'
+                f'<rect x="{bx}" y="{by}" width="{bw}" height="{bh}" rx="5"'
+                f' fill="#141925" stroke="#2d3748"/>'
+                f'<rect x="{bx}" y="{by}" width="{bw}" height="3" rx="1.5" fill="{scol}"/>'
+                f'<text x="{bx + bw / 2:.0f}" y="{cy + 5}" text-anchor="middle" fill="#e8eef4"'
+                f' font-size="13" font-weight="700">{c}</text></g></a>'
+            )
     root = (
         f'<rect x="6" y="{root_cy - 30}" width="122" height="60" rx="8" fill="#1a2230"'
         f' stroke="#2d3748"/>'
@@ -1440,16 +1469,17 @@ def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
         f' font-size="22" font-weight="700">{total}</text>'
     )
     return (
-        f'<svg viewBox="0 0 {w} {height}" style="width:100%;max-width:660px;height:auto"'
+        f'<svg viewBox="0 0 {w} {height}" style="width:100%;max-width:{w}px;height:auto"'
         f' xmlns="http://www.w3.org/2000/svg">{links}{root}{nodes}</svg>'
     )
 
 
-def _segment_tree_html(segments: list) -> str:
+def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> str:
     """Two-axis lead breakdown: one segment sub-tree per audience (adults, then students),
-    each root showing that audience's total, branching into intent segments by win rate.
-    Rows: (audience, lead_type, total, won); a legacy 3-tuple is treated as audience 'adult'.
-    Server-rendered SVG — instant on the htmx swap, no client JS. Empty until classified."""
+    each root showing that audience's total, branching into intent segments by win rate, with
+    the stage funnel drawn as boxes to the right of each segment. Rows: (audience, lead_type,
+    total, won); a legacy 3-tuple is audience 'adult'. `seg_stage_by_aud` =
+    {aud: {lead_type: {stage: count}}}. Server-rendered SVG — no client JS."""
     by_aud: dict[str, list] = {}
     for s in segments:
         if len(s) >= 4:
@@ -1467,7 +1497,8 @@ def _segment_tree_html(segments: list) -> str:
     for aud in auds:
         # With one audience, keep the familiar "Total leads" root; else name each audience.
         root_label = _h.escape(t("rep.total") if single else t(f"aud.{aud}"))
-        svg = _segment_subtree_svg(by_aud[aud], root_label, aud_key=aud)
+        svg = _segment_subtree_svg(by_aud[aud], root_label, aud_key=aud,
+                                   seg_stage_map=(seg_stage_by_aud or {}).get(aud, {}))
         if not svg:
             continue
         cap = "" if single else (
@@ -1497,6 +1528,7 @@ def reports_panel_html(
     ad_suggestions: dict[str, str] | None = None,
     products: list[tuple[str, str]] | None = None,
     segments: list | None = None,
+    segment_stages: dict | None = None,
     stage_flow: list | None = None,
     stage_reach: dict[str, int] | None = None,
     total_leads: int = 0,
@@ -1575,7 +1607,7 @@ def reports_panel_html(
         f'<div class="pnl-body">'
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
-        f'{_segment_tree_html(segments or [])}'
+        f'{_segment_tree_html(segments or [], segment_stages)}'
         f'{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}'  # noqa: E501
         f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501

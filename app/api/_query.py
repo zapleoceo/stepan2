@@ -79,6 +79,29 @@ async def fetch_segment_dist(
     return list((await session.execute(q)).all())
 
 
+async def fetch_audience_segment_stage_dist(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> list:
+    """Leads by (audience, intent segment, funnel stage) — the mini-funnel boxes shown to the
+    RIGHT of each segment node. Rows: (audience, lead_type, stage, count). NULL audience →
+    'unknown', NULL lead_type → 'unclear' (matches fetch_segment_dist's bucketing)."""
+    aud = func.coalesce(Lead.audience, "unknown")
+    seg = func.coalesce(Lead.lead_type, "unclear")
+    q = (
+        select(aud.label("aud"), seg.label("seg"),
+               Lead.stage.label("stage"), func.count().label("cnt"))
+        .group_by(aud, seg, Lead.stage)
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    return list((await session.execute(q)).all())
+
+
 async def fetch_stage_flow(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
