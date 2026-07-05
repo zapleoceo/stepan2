@@ -1533,7 +1533,14 @@ def app_shell(
         "function setFnl(el){"
         "document.querySelectorAll('.fseg.on,.fchip.on,.fnl-all.on')"
         ".forEach(e=>e.classList.remove('on'));"
-        "el.classList.add('on');}"
+        "el.classList.add('on');"
+        # Filtering by a funnel step is an htmx partial swap of #tl's content — but #tl keeps
+        # its own hx-get for the 30s poll. Without syncing it, the next poll re-fetches the
+        # OLD (usually unfiltered) list and yanks you out of the filter. Point the poll at the
+        # step's own threads URL so the background refresh stays on the same filter.
+        "var tl=document.getElementById('tl');"
+        "var g=el.getAttribute('hx-get');"
+        "if(tl&&g){tl.setAttribute('hx-get',g);}}"
         "function sendSuggest(tid){"
         "var ta=document.getElementById('sug-ta-'+tid);"
         "if(!ta||!ta.value.trim())return;"
