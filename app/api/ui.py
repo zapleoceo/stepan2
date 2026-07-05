@@ -101,8 +101,13 @@ async def inbox(
 async def knowledge_page(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
     branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids, col="k.branch_id")
     async with session_scope() as session:
+        # A linked branch has no KB of its own — show its source's docs (read-only edits
+        # land on the shared source). Resolves the "empty / 403 KB tab" on such branches.
+        if branch_ids:
+            from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
+            branch_ids = list({await effective_kb_branch(session, b) for b in branch_ids})
+        where, params = _branch_where(branch_ids, col="k.branch_id")
         q = (
             "SELECT k.id, k.slug, k.title, k.content, k.category, k.sort_order,"  # noqa: S608
             " k.updated_by, b.name"

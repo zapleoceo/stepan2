@@ -28,6 +28,7 @@ from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import ThreadRepo
 from app.modules.knowledge.service import KnowledgeService
+from app.modules.knowledge.source import effective_kb_branch
 from app.modules.leads.ingest import IngestService
 from app.modules.settings.service import get_settings
 from app.ports.notify import NotifierPort
@@ -184,8 +185,9 @@ async def _reply_thread(branch_id: int, thread_id: int, llm: BrokerLLM) -> bool:
             if not await wiring.try_lock_thread(session, thread_id):
                 return False  # another tick already owns this thread right now
             cfg = await get_settings(session, branch_id)
+            kb = await effective_kb_branch(session, branch_id)  # shared-KB link, if any
             reply = ReplyService(
-                session, branch_id, llm, KnowledgeService(session, branch_id, llm),
+                session, branch_id, llm, KnowledgeService(session, kb, llm),
                 branch_settings=cfg, notifier=_build_notifier(cfg),
             )
             decision = await reply.decide(thread_id)
@@ -214,7 +216,8 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
             branch_cfg = await get_settings(session, branch.id)
             if not branch_cfg.followup_enabled:
                 continue
-            knowledge = KnowledgeService(session, branch.id, llm)
+            kb = await effective_kb_branch(session, branch.id)
+            knowledge = KnowledgeService(session, kb, llm)
             svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)
             sent += await svc.run()  # timers are armed by OutboxSender after bot sends
     return sent

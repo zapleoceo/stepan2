@@ -66,6 +66,9 @@ async def _set_watermark(session: AsyncSession, branch_id: int, when: datetime) 
 
 
 async def branch_needs_reindex(session: AsyncSession, branch_id: int) -> bool:
+    from .source import effective_kb_branch  # noqa: PLC0415 (avoid import cycle)
+    if await effective_kb_branch(session, branch_id) != branch_id:
+        return False  # linked branch — reads the source's index, has none of its own
     last = await _last_edit(session, branch_id)
     if last is None:
         return False  # no content to index

@@ -75,8 +75,10 @@ class SimService:
         await self.session.flush()
 
         cfg = await get_settings(self.session, branch_id)
+        from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
+        kb = await effective_kb_branch(self.session, branch_id)
         reply = ReplyService(self.session, branch_id, self.llm,
-                             KnowledgeService(self.session, branch_id, self.llm), cfg)
+                             KnowledgeService(self.session, kb, self.llm), cfg)
         decision = await reply.decide(th.id, workflow="sim")  # tagged in log, not billed
         if decision is None:
             return {"ok": False, "detail": "no decision (over budget / empty / voice-hold)"}

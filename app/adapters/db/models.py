@@ -23,6 +23,9 @@ class Branch(SQLModel, table=True):
     lang: str = Field(default="id", description="язык общения филиала")
     tz_offset_h: int = Field(default=7)
     is_active: bool = Field(default=True)
+    # When set, this branch READS its knowledge base (persona/products/docs/RAG) from
+    # another branch instead of its own — one shared source of truth. Chats/leads stay own.
+    kb_source_branch_id: int | None = Field(default=None, foreign_key="branch.id")
     created_at: datetime = Field(default_factory=_utcnow)
 
 

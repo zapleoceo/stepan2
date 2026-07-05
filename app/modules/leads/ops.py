@@ -179,10 +179,12 @@ async def _queue_call_failed_message(
     from app.modules.conversation.engine import DecisionEngine, _fmt_llm_meta  # noqa: PLC0415
     from app.modules.conversation.reply import _BUBBLE_GAP_S, _split_bubbles  # noqa: PLC0415
     from app.modules.knowledge.service import KnowledgeService  # noqa: PLC0415
+    from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
 
     lang = await _lang(session, lead)
+    kb = await effective_kb_branch(session, lead.branch_id)
     engine = DecisionEngine(session, lead.branch_id, llm,
-                            KnowledgeService(session, lead.branch_id, llm))
+                            KnowledgeService(session, kb, llm))
     ctx = await engine.prepare(thread_id, workflow="call_failed")
     if ctx is None:
         return False

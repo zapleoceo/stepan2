@@ -574,6 +574,8 @@ def branch_edit_html(
     tz: int,
     is_active: bool,
     seeded: bool = False,
+    kb_source_branch_id: int | None = None,
+    other_branches: list[tuple[int, str]] | None = None,
 ) -> str:
     """Form for creating or editing a branch."""
     title = _h.escape(t("br.new" if bid is None else "br.edit_title"))
@@ -628,11 +630,46 @@ def branch_edit_html(
         f'<div class="frm-grp" style="display:flex;align-items:center;gap:.5rem">'
         f'<input type="checkbox" name="is_active" id="br-active" {active_checked}>'
         f'<label class="frm-lbl" for="br-active" style="margin:0">{active_lbl}</label></div>'
-        f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
-        f'</form>'
+        + (_kb_link_field(kb_source_branch_id, other_branches or [])
+           if bid is not None else "")
+        + f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
+        + '</form>'
+        + (_kb_copy_section(bid, kb_source_branch_id, other_branches or [])
+           if bid is not None else "")
         + (_channels_section(bid) if bid is not None else "")
         + '</div>'
     )
+
+
+def _kb_link_field(kb_source: int | None, others: list[tuple[int, str]]) -> str:
+    """Inside the branch form: link this branch's KB to another (live). Saved on Save."""
+    opts = '<option value="">— своя база знаний —</option>' + "".join(
+        f'<option value="{i}" {"selected" if i == kb_source else ""}>{_h.escape(nm)}</option>'
+        for i, nm in others)
+    return (
+        '<div class="frm-grp"><label class="frm-lbl">База знаний из филиала</label>'
+        f'<select class="act-sel" name="kb_source_branch_id"'
+        f' style="width:100%;padding:.32rem .35rem">{opts}</select></div>')
+
+
+def _kb_copy_section(bid: int, kb_source: int | None, others: list[tuple[int, str]]) -> str:
+    """Below the form: a one-time copy of another branch's KB, and the linked-note."""
+    linked = ('<div class="hint" style="color:#e2b33d;margin:.3rem 0">База берётся из '
+              'другого филиала (read-only здесь). Правь её в филиале-источнике.</div>'
+              if kb_source else "")
+    if not others:
+        return linked
+    opts = "".join(f'<option value="{i}">{_h.escape(nm)}</option>' for i, nm in others)
+    return (
+        '<div style="margin-top:.7rem;border-top:1px solid #2d3748;padding-top:.6rem">'
+        + linked +
+        f'<form hx-post="/ui/branches/{bid}/copy-kb" hx-target="#panel" hx-swap="innerHTML"'
+        ' hx-confirm="Скопировать базу знаний из выбранного филиала? Текущая база этого'
+        ' филиала будет заменена." style="display:flex;gap:.4rem;align-items:center">'
+        '<span class="hint" style="min-width:96px">Скопировать из:</span>'
+        f'<select class="act-sel" name="src_branch_id" style="flex:1">{opts}</select>'
+        '<button class="btn-sm" type="submit">Скопировать</button></form>'
+        + '</div>')
 
 
 def _channels_section(bid: int) -> str:

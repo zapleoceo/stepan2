@@ -155,8 +155,10 @@ async def analyze_chat(
     # the full KB + a full chat through the reasoning model overran the broker's ~100s
     # gateway (504). The relevant chunks are exactly the facts to grade the bot against.
     from app.modules.knowledge.rag import RagService  # noqa: PLC0415 (avoid import cycle)
-    chunks = await RagService(session, branch_id, llm).retrieve(convo[-3000:], k=20,
-                                                                thread_id=thread_id)
+    from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
+    kb = await effective_kb_branch(session, branch_id)
+    chunks = await RagService(session, kb, llm).retrieve(convo[-3000:], k=20,
+                                                         thread_id=thread_id)
     if chunks:
         docs_text = "\n\n".join(f"=== {title} ===\n{txt}" for title, txt in chunks)
     else:  # index empty (never reindexed) → fall back to the raw docs
