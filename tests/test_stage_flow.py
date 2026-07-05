@@ -9,7 +9,7 @@ os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
 from datetime import UTC, datetime  # noqa: E402
 
 from app.adapters.db.models import Branch, Lead, StageEvent  # noqa: E402
-from app.api._query import fetch_stage_flow  # noqa: E402
+from app.api._query import fetch_stage_flow, fetch_stage_reach  # noqa: E402
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
@@ -45,6 +45,11 @@ async def test_stage_flow_groups_edges_and_scopes_branch(db_session) -> None:
     assert rows[("new", "dormant")] == 1
     assert ("new", "new") not in rows            # self-edge filtered
     assert sum(1 for (f, _t) in rows if _t == "dormant") == 1  # branch 2 excluded
+    # reach = distinct leads that touched each stage (≤ total leads), not summed edge counts
+    reach = await fetch_stage_reach(db_session, [b1.id])
+    assert reach["new"] == 2                      # 2 distinct leads passed through new (not 3)
+    assert reach["presenting"] == 2
+    assert reach["dormant"] == 1
 
 
 def test_flow_widget_renders_and_falls_back() -> None:

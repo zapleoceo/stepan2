@@ -32,6 +32,7 @@ from ._query import (
     fetch_discovery_metrics,
     fetch_segment_dist,
     fetch_stage_flow,
+    fetch_stage_reach,
 )
 from ._routes_chat import _actor_name
 from ._ui_panels import (
@@ -268,6 +269,7 @@ async def reports_panel(
         products, ad_mappings, ad_suggestions = await _ad_editor_data(session, branch_ids)
         segments = await fetch_segment_dist(session, branch_ids, since=since_dt, until=until_dt)
         stage_flow = await fetch_stage_flow(session, branch_ids, since=since_dt, until=until_dt)
+        stage_reach = await fetch_stage_reach(session, branch_ids, since=since_dt, until=until_dt)
     stage_counts = {r[0]: int(r[1]) for r in sc}
     hour_in = {int(r[0]): int(r[1]) for r in hi}
     hour_out = {int(r[0]): int(r[1]) for r in ho}
@@ -276,7 +278,8 @@ async def reports_panel(
                            fb_business_id=fb_bid, fb_account_id=fb_acct,
                            date_from=df, date_to=dt_, active_range=active_range,
                            ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
-                           products=products, segments=segments, stage_flow=stage_flow))
+                           products=products, segments=segments, stage_flow=stage_flow,
+                           stage_reach=stage_reach))
 
 
 @router.get("/settings/panel", response_class=HTMLResponse)

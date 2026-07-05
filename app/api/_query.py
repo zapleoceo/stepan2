@@ -108,6 +108,32 @@ async def fetch_stage_flow(
     return list((await session.execute(q)).all())
 
 
+async def fetch_stage_reach(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> dict[str, int]:
+    """Distinct leads that passed through each stage (touched it as `from` or `to`), for the
+    flow node headcounts. This is a real per-stage lead count — always ≤ total leads — unlike
+    summing the per-edge link counts, which multi-counts a lead that appears on several edges
+    (so the 'new' entry bar could otherwise read higher than the whole lead base)."""
+    q = (
+        select(StageEvent.lead_id, StageEvent.from_stage, StageEvent.to_stage)
+        .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
+        .where(StageEvent.from_stage != StageEvent.to_stage)  # type: ignore[arg-type]
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    seen: dict[str, set[int]] = {}
+    for lid, frm, to in (await session.execute(q)).all():
+        seen.setdefault(frm, set()).add(lid)
+        seen.setdefault(to, set()).add(lid)
+    return {s: len(ids) for s, ids in seen.items()}
+
+
 _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where
     "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
 )

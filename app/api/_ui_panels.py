@@ -1156,13 +1156,15 @@ _FLOW_SPINE = ("new", "nurturing", "qualifying", "presenting", "objection", "rea
 _FLOW_EXITS = ("dormant", "manager")
 
 
-def _funnel_flow_html(flow: list) -> str:
+def _funnel_flow_html(flow: list, reach: dict[str, int] | None = None) -> str:
     """The whole funnel as a server-rendered SVG flow (Sankey-style): each lead's real path
-    from first message (new) through every stage transition to an exit, reconstructed from the
-    stage_event audit log. Bar height ∝ throughput, link thickness ∝ transition count, links
-    coloured by target stage; back-edges (e.g. presenting→qualifying) curve, so churn and drop
-    -off are visible, not just the happy path. Empty (→ caller falls back to the line funnel)
-    when there's no transition history for the window."""
+    from first message (entry) through every stage transition to an exit, reconstructed from the
+    stage_event audit log. Link thickness ∝ distinct leads on that transition; node bar/label =
+    distinct leads that passed through the stage (`reach`) — a real headcount ≤ total leads, so
+    the entry bar never reads higher than the lead base. Falls back to edge-derived throughput
+    when `reach` is absent. Back-edges (e.g. presenting→qualifying) curve, so churn and drop-off
+    are visible, not just the happy path. Empty (→ caller falls back to the line funnel) when
+    there's no transition history for the window."""
     edges = [(str(a), str(b), int(c)) for a, b, c in flow if int(c) > 0 and str(a) != str(b)]
     if not edges:
         return ""
@@ -1171,7 +1173,8 @@ def _funnel_flow_html(flow: list) -> str:
     for a, b, c in edges:
         out_sum[a] = out_sum.get(a, 0) + c
         in_sum[b] = in_sum.get(b, 0) + c
-    tp = {s: max(out_sum.get(s, 0), in_sum.get(s, 0)) for s in set(out_sum) | set(in_sum)}
+    edge_tp = {s: max(out_sum.get(s, 0), in_sum.get(s, 0)) for s in set(out_sum) | set(in_sum)}
+    tp = {s: (reach.get(s, edge_tp[s]) if reach else edge_tp[s]) for s in edge_tp}
     max_tp = max(tp.values(), default=1) or 1
     max_c = max((c for _, _, c in edges), default=1) or 1
 
@@ -1396,6 +1399,7 @@ def reports_panel_html(
     products: list[tuple[str, str]] | None = None,
     segments: list | None = None,
     stage_flow: list | None = None,
+    stage_reach: dict[str, int] | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1472,7 +1476,7 @@ def reports_panel_html(
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
         f'{_segment_tree_html(segments or [])}'
-        f'{_funnel_flow_html(stage_flow or []) or _funnel_line_html(stage_counts)}'
+        f'{_funnel_flow_html(stage_flow or [], stage_reach) or _funnel_line_html(stage_counts)}'
         f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'
