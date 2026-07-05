@@ -1176,8 +1176,10 @@ def _funnel_line_html(stage_counts: dict[str, int]) -> str:
 
 
 _QUICK_RANGES = (
-    ("1h", "rep.range_1h"), ("24h", "rep.range_24h"),
-    ("7d", "rep.range_7d"), ("30d", "rep.range_30d"), ("", "rep.range_all"),
+    ("1h", "rep.range_1h"), ("2h", "rep.range_2h"), ("4h", "rep.range_4h"),
+    ("8h", "rep.range_8h"), ("12h", "rep.range_12h"), ("24h", "rep.range_24h"),
+    ("7d", "rep.range_7d"), ("30d", "rep.range_30d"),
+    ("60d", "rep.range_60d"), ("90d", "rep.range_90d"), ("", "rep.range_all"),
 )
 
 

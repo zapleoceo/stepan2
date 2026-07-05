@@ -125,9 +125,15 @@ def _valid_date(value: str) -> str:
 
 _QUICK_RANGES: dict[str, timedelta] = {
     "1h": timedelta(hours=1),
+    "2h": timedelta(hours=2),
+    "4h": timedelta(hours=4),
+    "8h": timedelta(hours=8),
+    "12h": timedelta(hours=12),
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
     "30d": timedelta(days=30),
+    "60d": timedelta(days=60),
+    "90d": timedelta(days=90),
 }
 
 
