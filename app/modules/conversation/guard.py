@@ -37,6 +37,24 @@ _RISKY_RE = re.compile(
 _PRICE_RE = re.compile(
     r"\brp\.?\s?\d[\d.,]*|\d[\d.,]*\s?(?:ribu|juta|rb\b)", re.IGNORECASE)
 
+# A claim that a file/screenshot/dataset has ALREADY been sent, or delivered specifically
+# via WhatsApp — deterministically false regardless of KB content: Stepan is text-only (no
+# image/file attach capability) and Instagram-only (no WhatsApp channel). A 50-thread live
+# audit (2026-07-05) found leads left believing a screenshot/dataset had arrived when
+# nothing was ever sent (threads 1408, 1721). Illustrative alumni STORIES are fine as a
+# sales narrative — only a false ALREADY-DELIVERED claim is blocked here.
+_DELIVERY_NOUN = r"(?:screenshot|foto|gambar|file|dokumen|dataset|dm|wa|whatsapp)"
+_FALSE_DELIVERY_RE = re.compile(
+    rf"\b{_DELIVERY_NOUN}\w*\b[^.!?\n]{{0,15}}\b(?:udah|sudah)\b[^.!?\n]{{0,20}}\bkirim(?:kan)?\b"
+    rf"|\b(?:udah|sudah)\b[^.!?\n]{{0,40}}\bkirim(?:kan)?\b[^.!?\n]{{0,40}}\b{_DELIVERY_NOUN}\b",
+    re.IGNORECASE)
+
+
+def false_delivery_claims(reply: str) -> list[str]:
+    """Claims of an already-sent file/screenshot/WA delivery — always fabricated (Stepan
+    cannot attach files and has no WhatsApp channel), so this needs no KB context at all."""
+    return [m.group(0) for m in _FALSE_DELIVERY_RE.finditer(reply or "")]
+
 # Bahasa hand-off when a clean reply can't be produced — never invents, defers to a human.
 SAFE_FALLBACK = (
     "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
@@ -126,5 +144,7 @@ async def verify_grounding(
 CORRECTION = (
     "[System: your previous draft contained claims NOT in the knowledge base: {issues}. "
     "Rewrite the reply WITHOUT any of them. Never invent links, lab/resource access, free "
-    "trials, discounts, rates, certifications, dates, or statistics. If you don't have a "
-    "fact, say you'll confirm it with the team. Return the JSON as usual.]")
+    "trials, discounts, rates, certifications, dates, or statistics. Never claim you have "
+    "ALREADY sent a file/screenshot/dataset or delivered anything via WhatsApp — you cannot "
+    "attach files and have no WhatsApp channel. If you don't have a fact, say you'll confirm "
+    "it with the team. Return the JSON as usual.]")

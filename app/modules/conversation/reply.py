@@ -102,6 +102,7 @@ async def guard_decision(
         return decision, meta
     context = engine.last_context
     issues = guard.ungrounded_urls(decision.reply, context)
+    issues += guard.false_delivery_claims(decision.reply)
     if mode == "full" and guard.is_risky(decision.reply):
         issues += await guard.verify_grounding(
             llm, decision.reply, context, branch_id=branch_id,
@@ -117,9 +118,10 @@ async def guard_decision(
         fixed = parse_decision(raw)
     except ValueError:
         fixed = decision
-    # Only ungrounded URLs are re-checked deterministically (LLM re-verify would double
-    # cost); a still-fabricated link means we can't trust the draft → hand off.
-    if fixed.reply and not guard.ungrounded_urls(fixed.reply, context):
+    # Only the deterministic checks are re-verified (an LLM re-verify would double cost);
+    # a still-fabricated link/delivery claim means we can't trust the draft → hand off.
+    if fixed.reply and not guard.ungrounded_urls(fixed.reply, context) \
+            and not guard.false_delivery_claims(fixed.reply):
         return fixed, regen_meta
     logger.error("guard: branch=%d thread=%d unfixable fabrication → hand-off",
                  branch_id, thread_id)
