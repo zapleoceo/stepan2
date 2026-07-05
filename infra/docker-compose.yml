@@ -48,6 +48,15 @@ services:
       STEPAN2_MCP_READ_SECRET: ${MCP_READ_SECRET:-}
     ports:
       - "127.0.0.1:8020:8000"
+    # Give uvicorn its full --timeout-graceful-shutdown window to drain in-flight
+    # requests on a deploy recreate before docker SIGKILLs it.
+    stop_grace_period: 25s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   # Воркер на старте ВЫКЛЮЧЕН: только `docker compose --profile worker up` запустит его.
