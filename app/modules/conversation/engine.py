@@ -93,6 +93,7 @@ class DecisionEngine:
         self.threads = ThreadRepo(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
+        self.last_context = ""  # KB context of the most recent complete() — for the guard
 
     async def prepare(self, thread_id: int, workflow: str) -> DecisionContext | None:
         """None if the thread is foreign, has no dialog, or the branch is over budget."""
@@ -128,6 +129,7 @@ class DecisionEngine:
         so any caller that doesn't route keeps the strong model."""
         context = await self.knowledge.knowledge_context(
             ctx.thread.product_slug, query=_retrieval_query(ctx.dialog), thread_id=thread_id)
+        self.last_context = context  # reply-guard checks the draft against exactly this
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(
             context, ctx.dialog, lang, coaching_notes=notes,

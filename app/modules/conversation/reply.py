@@ -23,6 +23,7 @@ from app.modules.settings.service import BranchSettings
 from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
+from . import guard
 from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
 from .needs import merge_needs, parse_needs
@@ -147,12 +148,47 @@ class ReplyService:
             else:
                 raise
         self._last_llm_meta = meta
+        decision = await self._guard_reply(engine, ctx, thread_id, lang, workflow, bill, decision)
         if lead is not None:
             merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
                                  decision.gains, decision.discovery_complete)
             lead.needs = merged.to_json()
             self.session.add(lead)
         return decision
+
+    async def _guard_reply(self, engine, ctx, thread_id, lang, workflow, bill, decision):
+        """Block fabricated facts: ungrounded links (deterministic) + an LLM grounding
+        check on risky replies. One correcting regeneration, then a safe hand-off — never
+        send the fabrication. Off when reply_guard='off'."""
+        mode = self.settings.reply_guard if self.settings is not None else "full"
+        if mode == "off" or not decision.reply:
+            return decision
+        context = engine.last_context
+        issues = guard.ungrounded_urls(decision.reply, context)
+        if mode == "full" and guard.is_risky(decision.reply):
+            issues += await guard.verify_grounding(
+                self.llm, decision.reply, context, branch_id=self.branch_id,
+                thread_id=thread_id, bill=bill)
+        if not issues:
+            return decision
+        logger.warning("guard: branch=%d thread=%d fabrication → regen: %s",
+                       self.branch_id, thread_id, issues[:3])
+        raw, meta = await engine.complete(
+            ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+            extra_user_msg=guard.CORRECTION.format(issues="; ".join(issues[:5])))
+        self._last_llm_meta = meta
+        try:
+            fixed = parse_decision(raw)
+        except ValueError:
+            fixed = decision
+        # Only ungrounded URLs are re-checked deterministically (LLM re-verify would double
+        # cost); a still-fabricated link means we can't trust the draft → hand off.
+        if fixed.reply and not guard.ungrounded_urls(fixed.reply, context):
+            return fixed
+        logger.error("guard: branch=%d thread=%d unfixable fabrication → hand-off",
+                     self.branch_id, thread_id)
+        from dataclasses import replace  # noqa: PLC0415
+        return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True)
 
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.

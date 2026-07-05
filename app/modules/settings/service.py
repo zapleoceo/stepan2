@@ -56,6 +56,9 @@ class BranchSettings:
     reply_routing: str = "hybrid"
     # Comma-list of stages that keep the strong model under hybrid routing (operator-tunable).
     smart_stages: str = "presenting,objection,ready"
+    # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
+    # verify on risky replies), 'urls' (deterministic only), 'off'. See conversation.guard.
+    reply_guard: str = "full"
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -151,4 +154,5 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         meta_capi_token=raw.get("meta_capi_token", ""),
         reply_routing=raw.get("reply_routing", "hybrid"),
         smart_stages=raw.get("smart_stages", "presenting,objection,ready"),
+        reply_guard=raw.get("reply_guard", "full"),
     )
