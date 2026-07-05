@@ -5,6 +5,7 @@ budgeting uses the real broker price. Every call (reply/translate/embed/suggest)
 to broker_log — the single write point — for the /settings/log audit page."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -22,17 +23,17 @@ _DEFAULT_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_s, write=10.0, pool=5.0)
 _SLOW_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_slow_s, write=10.0, pool=5.0)
-# chat:deep = full-context analysis (the whole lead history, up to ~1M tokens in): the model
-# may think for minutes, so the read timeout is very long. NEVER use on a live reply path —
-# only background/batch jobs (Coach edits, needs re-derivation) where latency doesn't matter.
-_DEEP_TIMEOUT = httpx.Timeout(
-    connect=5.0, read=settings().llm_read_timeout_deep_s, write=15.0, pool=5.0)
 _SLOW_CAPS = frozenset({"chat:smart"})
+
+# chat:deep is submit+poll now (2026-07-05, see BrokerLLM.chat_deep) — the broker itself
+# made /v1/chat?capability=chat:deep return 400 unconditionally, because a single blocking
+# HTTP call can't reliably carry a result that sometimes takes ~8 minutes (past Cloudflare's
+# and the broker's own nginx proxy timeouts). llm_read_timeout_deep_s is now the total
+# polling budget, not one HTTP request's read timeout — each individual submit/poll call
+# uses the short _DEFAULT_TIMEOUT.
 
 
 def _chat_timeout(capability: str) -> httpx.Timeout:
-    if capability == "chat:deep":
-        return _DEEP_TIMEOUT
     return _SLOW_TIMEOUT if capability in _SLOW_CAPS else _DEFAULT_TIMEOUT
 
 
@@ -72,18 +73,6 @@ class BrokerLLM:
                     headers={"X-Project-Key": self._key},
                     json=body,
                 )
-                # chat:deep may not be enabled on the project key yet (403) — fall back to
-                # chat:smart so Coach / re-derivation keep working, and auto-upgrade the day
-                # the broker grants the capability. Grant chat:deep to switch to full context.
-                if r.status_code == 403 and capability == "chat:deep":
-                    capability = "chat:smart"
-                    body["max_tokens"] = min(max_tokens, 2000)
-                    r = await c.post(
-                        f"{self._url}/v1/chat",
-                        params={"capability": capability},
-                        headers={"X-Project-Key": self._key},
-                        json=body,
-                    )
             r.raise_for_status()
             # A 200 with a truncated body or missing keys is still a failed call — parse
             # inside the try so JSONDecodeError/KeyError also write an ok=false audit row.
@@ -96,6 +85,89 @@ class BrokerLLM:
                 "cost_usd": d["cost_usd"],
                 "elapsed_ms": int((time.perf_counter() - start) * 1000),
                 "request_id": d.get("request_id") or d.get("id") or r.headers.get("x-request-id"),
+            }
+            reply_text = d["text"]
+        except Exception as exc:
+            await _log_call(capability, workflow or "chat", thread_id, branch_id,
+                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
+                            ok=False, error=_err_text(exc))
+            raise
+        await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
+        return reply_text, meta
+
+    async def chat_deep(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        require_json_schema: bool = False,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        workflow: str | None = None,
+        thread_id: int | None = None,
+        branch_id: int | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """chat:deep — submit + poll (see module docstring for why). Falls back to
+        chat:smart on 403 (project key doesn't have the llm:deep scope yet), same as
+        the old inline fallback used to do for chat:deep through chat().
+
+        require_json_schema is accepted for signature parity with chat() but NOT sent
+        to the broker — /v1/deep doesn't take response_format at all (nemotron isn't
+        JSON-reliable). Callers that need JSON out of chat:deep must already tolerate a
+        markdown-fenced or slightly malformed body (propose_edit already does)."""
+        body: dict[str, Any] = {
+            "messages": messages, "max_tokens": max_tokens, "temperature": temperature,
+        }
+        start = time.perf_counter()
+        capability = "chat:deep"
+        try:
+            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+                r = await c.post(
+                    f"{self._url}/v1/deep",
+                    headers={"X-Project-Key": self._key},
+                    json=body,
+                )
+                if r.status_code == 403:
+                    # llm:deep not granted on this project key yet — fall back to
+                    # chat:smart so Coach keeps working; auto-upgrades the day the
+                    # broker grants the scope.
+                    return await self.chat(
+                        messages, capability="chat:smart",
+                        require_json_schema=require_json_schema,
+                        max_tokens=min(max_tokens, 2000), temperature=temperature,
+                        workflow=workflow, thread_id=thread_id, branch_id=branch_id,
+                    )
+                r.raise_for_status()
+                job = r.json()
+                job_id, poll_after_s = job["job_id"], job.get("poll_after_s") or 5
+
+                deadline = start + settings().llm_read_timeout_deep_s
+                while True:
+                    await asyncio.sleep(poll_after_s)
+                    pr = await c.get(
+                        f"{self._url}/v1/deep/{job_id}",
+                        headers={"X-Project-Key": self._key},
+                    )
+                    pr.raise_for_status()
+                    d = pr.json()
+                    if d["status"] == "done":
+                        break
+                    if d["status"] == "error":
+                        raise RuntimeError(f"chat:deep job {job_id} failed: {d.get('error')}")
+                    if time.perf_counter() > deadline:
+                        raise TimeoutError(
+                            f"chat:deep job {job_id} still pending after "
+                            f"{settings().llm_read_timeout_deep_s:.0f}s"
+                        )
+                    poll_after_s = d.get("poll_after_s") or poll_after_s
+
+            meta = {
+                "model": d["model"],
+                "tokens_in": d["tokens_in"],
+                "tokens_out": d["tokens_out"],
+                "provider": d["provider"],
+                "cost_usd": d["cost_usd"],
+                "elapsed_ms": int((time.perf_counter() - start) * 1000),
+                "request_id": d.get("request_id"),
             }
             reply_text = d["text"]
         except Exception as exc:

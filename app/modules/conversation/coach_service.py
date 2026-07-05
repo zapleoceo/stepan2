@@ -89,8 +89,8 @@ async def generate_into_edit(
     data: dict = {"intent": "clarify", "summary": "Ошибка LLM"}
     for attempt in range(3):  # reasoning model can return an empty/non-JSON body — retry
         try:
-            raw, _meta = await llm.chat(
-                messages, capability="chat:deep", require_json_schema=True,
+            raw, _meta = await llm.chat_deep(
+                messages, require_json_schema=True,
                 max_tokens=8000, temperature=0.1, workflow="coach", branch_id=branch_id,
             )
             cleaned = (

@@ -157,6 +157,9 @@ class _IntentLLM:
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
         return self._payload, {"cost_usd": 0.0}
 
+    async def chat_deep(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        return self._payload, {"cost_usd": 0.0}
+
     async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201
         return [[0.0] for _ in texts]
 

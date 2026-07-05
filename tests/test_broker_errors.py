@@ -128,20 +128,104 @@ class _SeqClient(_FakeClient):
         return self._resps.pop(0)
 
 
+class _DeepClient(_FakeClient):
+    """Fake for chat_deep: queued submit (post) + poll (get) responses."""
+
+    def __init__(self, submit_resp: _FakeResp, poll_resps: list[_FakeResp]) -> None:
+        self._submit_resp = submit_resp
+        self._poll_resps = poll_resps
+
+    async def post(self, *a: object, **k: object) -> _FakeResp:
+        return self._submit_resp
+
+    async def get(self, *a: object, **k: object) -> _FakeResp:
+        return self._poll_resps.pop(0)
+
+
+# chat_deep polls with asyncio.sleep between attempts — no-op it so these tests don't
+# actually wait poll_after_s seconds (real value: 5-20s, see deep_jobs.next_poll_after_s
+# on the broker side).
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch):  # noqa: ANN001, ANN201
+    async def _instant(_seconds):  # noqa: ANN001
+        return None
+    monkeypatch.setattr(broker_mod.asyncio, "sleep", _instant)
+
+
+async def test_chat_deep_submits_polls_and_returns_done_result(monkeypatch) -> None:
+    submit = _FakeResp({"job_id": 42, "poll_url": "/v1/deep/42", "poll_after_s": 5},
+                        status=202)
+    pending = _FakeResp({"job_id": 42, "status": "pending", "poll_after_s": 5})
+    done = _FakeResp({"job_id": 42, "status": "done", "text": "deep answer",
+                      "model": "m", "tokens_in": 1, "tokens_out": 1,
+                      "provider": "nvidia", "cost_usd": 0.0, "request_id": "r"})
+    client = _DeepClient(submit, [pending, done])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    text, meta = await _llm().chat_deep([{"role": "user", "content": "hi"}], workflow="coach")
+    assert text == "deep answer"
+    assert meta["provider"] == "nvidia"
+    assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:deep"
+
+
+class _DeepThenChatClient(_FakeClient):
+    """First post() (the /v1/deep submit — no `params` kwarg) returns 403; second post()
+    (the chat:smart fallback via chat() — has `params`) returns `ok`."""
+
+    def __init__(self, ok: _FakeResp, caps: list[str]) -> None:
+        self._ok = ok
+        self._caps = caps
+        self._calls = 0
+
+    async def post(self, *a: object, **k: object) -> _FakeResp:
+        self._calls += 1
+        if self._calls == 1:
+            return _FakeResp({}, status=403)
+        self._caps.append(k["params"]["capability"])  # type: ignore[index]
+        return self._ok
+
+
 async def test_chat_deep_falls_back_to_smart_on_403(monkeypatch) -> None:
-    """chat:deep isn't enabled on the key yet (403) — the call must retry as chat:smart so
-    Coach / re-derivation keep working, and the audit row logs the capability actually used."""
+    """Project key doesn't have llm:deep yet — chat_deep() falls back to chat:smart via
+    the ordinary chat() path, same behavior chat() used to inline for capability=chat:deep."""
     ok = _FakeResp({"text": "hi", "model": "m", "tokens_in": 1, "tokens_out": 1,
                     "provider": "p", "cost_usd": 0.0, "request_id": "r"})
     caps: list[str] = []
-    client = _SeqClient([_FakeResp({}, status=403), ok], caps)
+    client = _DeepThenChatClient(ok, caps)
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
     calls = _capture_log(monkeypatch)
-    text, _ = await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:deep",
-                                max_tokens=8000, workflow="coach")
+    text, _ = await _llm().chat_deep([{"role": "user", "content": "hi"}], max_tokens=8000,
+                                     workflow="coach")
     assert text == "hi"
-    assert caps == ["chat:deep", "chat:smart"]  # tried deep, fell back to smart
+    assert caps == ["chat:smart"]  # the submit (403) doesn't hit /v1/chat, only the fallback does
     assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:smart"
+
+
+async def test_chat_deep_error_status_raises_and_logs_failure(monkeypatch) -> None:
+    submit = _FakeResp({"job_id": 7, "poll_url": "/v1/deep/7", "poll_after_s": 5}, status=202)
+    errored = _FakeResp({"job_id": 7, "status": "error",
+                         "error": "no provider available for capability=chat:deep"})
+    client = _DeepClient(submit, [errored])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(RuntimeError, match="no provider available"):
+        await _llm().chat_deep([{"role": "user", "content": "hi"}], workflow="coach")
+    assert calls[-1]["ok"] is False
+    assert calls[-1]["cap"] == "chat:deep"
+
+
+async def test_chat_deep_gives_up_after_deadline(monkeypatch) -> None:
+    """A job that never leaves 'pending' must eventually raise TimeoutError, not poll
+    forever — llm_read_timeout_deep_s is the total wall-clock budget."""
+    from app.config import settings
+    monkeypatch.setattr(settings(), "llm_read_timeout_deep_s", 0.0)
+    submit = _FakeResp({"job_id": 9, "poll_url": "/v1/deep/9", "poll_after_s": 5}, status=202)
+    pending = _FakeResp({"job_id": 9, "status": "pending", "poll_after_s": 5})
+    client = _DeepClient(submit, [pending])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    _capture_log(monkeypatch)
+    with pytest.raises(TimeoutError, match="still pending"):
+        await _llm().chat_deep([{"role": "user", "content": "hi"}], workflow="coach")
 
 
 async def test_chat_read_timeout_raises_and_logs_failure(monkeypatch) -> None:
@@ -168,7 +252,7 @@ async def test_embed_5xx_raises_and_logs_failure(monkeypatch) -> None:
 
 @pytest.mark.parametrize(
     ("capability", "read_timeout"),
-    [("chat:smart", 90.0), ("chat:deep", 600.0), ("chat:fast", 20.0)],
+    [("chat:smart", 90.0), ("chat:fast", 20.0)],
 )
 async def test_per_capability_timeout_passed_to_client(
     monkeypatch, capability: str, read_timeout: float,

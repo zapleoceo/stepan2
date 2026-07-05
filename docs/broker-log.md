@@ -11,6 +11,21 @@
 (`suggest`). И успехи, и ошибки (`ok=false` + `error` — текст ответа брокера, полезно
 для разбора `BadRequestError`/`RateLimitError`).
 
+## `chat:deep` (Coach edits) — submit + poll, не блокирующий вызов
+
+`propose_edit()` (Coach, `coach_service.py`) — единственный вызывающий с
+`capability=chat:deep`, через `BrokerLLM.chat_deep()`. С 2026-07-05 брокер сделал
+`chat:deep` асинхронным: `POST /v1/chat?capability=chat:deep` теперь всегда 400 —
+латентность nemotron (до ~8 минут на реальных вызовах) превышает таймауты Cloudflare
+и nginx брокера, так что один блокирующий HTTP-запрос не мог надёжно донести
+результат. `chat_deep()` вместо этого: `POST /v1/deep` (получает `job_id` сразу),
+затем опрашивает `GET /v1/deep/{job_id}` с интервалом из ответа брокера
+(`poll_after_s`), пока статус не станет `done`/`error`, либо не истечёт общий бюджет
+`llm_read_timeout_deep_s` (по умолчанию 600с — теперь это общий бюджет опроса, а не
+таймаут одного HTTP-запроса). Один и тот же `broker_log`-контракт: `_log_call`
+пишет `capability="chat:deep"` независимо от того, был ли это submit+poll или
+(если `llm:deep` ещё не выдан на project key) молчаливый фоллбэк на `chat:smart`.
+
 ## Поля
 
 `request_id` (сверка с брокером) · `branch_id` · `thread_id` · `kind` (workflow) ·

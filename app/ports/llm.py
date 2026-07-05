@@ -28,3 +28,22 @@ class LLMPort(Protocol):
         branch_id: int | None = None, kind: str = "embed",
     ) -> list[list[float]]:
         ...
+
+    async def chat_deep(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        require_json_schema: bool = False,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+        workflow: str | None = None,
+        thread_id: int | None = None,
+        branch_id: int | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """chat:deep — full-context/reasoning capability. The broker made this
+        async-only (submit + poll) on 2026-07-05: nemotron's real latency (up
+        to ~8 min observed) exceeds Cloudflare's and the broker's own nginx
+        proxy timeouts, so a single blocking HTTP call could never carry the
+        result reliably. Same (text, meta) shape as chat() — callers don't
+        need to know it's polling underneath."""
+        ...
