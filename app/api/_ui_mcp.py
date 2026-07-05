@@ -48,8 +48,13 @@ def _scope_badge(scope: str) -> str:
             f'padding:0 .35rem;font-size:.7rem">{_h.escape(scope)}</span>')
 
 
+def _fmt_dt(dt: datetime | None) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M") if isinstance(dt, datetime) else "—"
+
+
 def _token_row(tk: McpToken) -> str:
-    when = tk.created_at.strftime("%Y-%m-%d %H:%M") if isinstance(tk.created_at, datetime) else ""
+    when = _fmt_dt(tk.created_at)
+    used = _fmt_dt(tk.last_used_at)
     if tk.revoked_at is not None:
         action = f'<span style="color:{_C_MUTE};font-size:.75rem">отозван</span>'
         name = f'<s style="color:{_C_MUTE}">{_h.escape(tk.label)}</s>'
@@ -68,6 +73,7 @@ def _token_row(tk: McpToken) -> str:
         f'<td style="padding:.35rem .5rem"><code style="color:{_C_MUTE}">'
         f'{_h.escape(tk.prefix)}…</code></td>'
         f'<td style="padding:.35rem .5rem;color:{_C_MUTE};font-size:.75rem">{when}</td>'
+        f'<td style="padding:.35rem .5rem;color:{_C_MUTE};font-size:.75rem">{used}</td>'
         f'<td style="padding:.35rem .5rem;text-align:right">{action}</td></tr>')
 
 
@@ -75,7 +81,7 @@ def _incoming(base_url: str, tokens: list[McpToken], new_token: str | None) -> s
     write_url = f"{base_url}/connector/mcp"
     read_url = f"{base_url}/reader/mcp"
     rows = "".join(_token_row(t) for t in tokens) or (
-        f'<tr><td colspan="5" style="padding:.5rem;color:{_C_MUTE};font-size:.8rem">'
+        f'<tr><td colspan="6" style="padding:.5rem;color:{_C_MUTE};font-size:.8rem">'
         f'Токенов пока нет</td></tr>')
     banner = _new_token_banner(new_token) if new_token else ""
     return _card(
@@ -87,7 +93,7 @@ def _incoming(base_url: str, tokens: list[McpToken], new_token: str | None) -> s
         + f'<thead><tr style="color:{_C_MUTE};font-size:.72rem;text-align:left">'
         + '<th style="padding:.2rem .5rem">Название</th><th style="padding:.2rem .5rem">Тип</th>'
         + '<th style="padding:.2rem .5rem">Префикс</th><th style="padding:.2rem .5rem">Создан</th>'
-        + '<th></th></tr></thead>'
+        + '<th style="padding:.2rem .5rem">Использован</th><th></th></tr></thead>'
         + f'<tbody>{rows}</tbody></table>'
         + '<form hx-post="/ui/mcp/token/create" hx-target="#mcp-page"'
         '  style="display:flex;gap:.4rem;margin-top:.7rem;flex-wrap:wrap">'

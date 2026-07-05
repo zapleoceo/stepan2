@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+from datetime import timedelta
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -22,6 +23,7 @@ from app.config import settings
 from app.domain.clock import utc_now
 
 SCOPES = ("write", "read")
+_TOUCH_THROTTLE = timedelta(seconds=60)  # don't rewrite last_used_at on every single call
 
 
 def hash_token(raw: str) -> str:
@@ -58,21 +60,34 @@ class McpTokenService:
         await self.session.flush()
         return True
 
-    async def active_hashes(self, scope: str) -> set[str]:
-        stmt = select(McpToken.token_hash).where(
-            McpToken.scope == scope, McpToken.revoked_at.is_(None),  # type: ignore[union-attr]
+    async def match_active(self, token_hash: str, scope: str) -> McpToken | None:
+        stmt = select(McpToken).where(
+            McpToken.token_hash == token_hash, McpToken.scope == scope,
+            McpToken.revoked_at.is_(None),  # type: ignore[union-attr]
         )
-        return set((await self.session.execute(stmt)).scalars().all())
+        return (await self.session.execute(stmt)).scalars().first()
+
+    async def touch(self, tok: McpToken) -> None:
+        """Stamp last_used_at, throttled so a burst of calls isn't a burst of writes."""
+        now = utc_now()
+        if tok.last_used_at is None or now - tok.last_used_at >= _TOUCH_THROTTLE:
+            tok.last_used_at = now
+            self.session.add(tok)
+            await self.session.flush()
 
 
 async def authorize_mcp(token: str, scope: str) -> bool:
-    """True if `token` is valid for `scope` — via the env secret or an active DB token."""
+    """True if `token` is valid for `scope` — via the env secret or an active DB token.
+    A matching DB token also gets its last_used_at stamped (throttled)."""
     if not token:
         return False
     env_secret = settings().mcp_secret if scope == "write" else settings().mcp_read_secret
     if any(hmac.compare_digest(token, t) for t in split_tokens(env_secret)):
         return True
-    presented = hash_token(token)
     async with session_scope() as session:
-        hashes = await McpTokenService(session).active_hashes(scope)
-    return any(hmac.compare_digest(presented, h) for h in hashes)
+        svc = McpTokenService(session)
+        tok = await svc.match_active(hash_token(token), scope)
+        if tok is None:
+            return False
+        await svc.touch(tok)
+        return True

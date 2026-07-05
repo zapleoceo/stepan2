@@ -22,17 +22,25 @@ async def test_create_stores_only_hash_and_prefix(db_session) -> None:
     assert row.prefix == raw[:6] and row.revoked_at is None
 
 
-async def test_active_hashes_excludes_revoked_and_other_scope(db_session) -> None:
+async def test_match_active_excludes_revoked_and_other_scope(db_session) -> None:
     svc = McpTokenService(db_session)
-    raw_r, row_r = await svc.create("reviewer", "read")
+    raw_r, _ = await svc.create("reviewer", "read")
     raw_w, _ = await svc.create("partner", "write")
     revoked_raw, revoked = await svc.create("old", "read")
     await svc.revoke(revoked.id)
 
-    read_hashes = await svc.active_hashes("read")
-    assert hash_token(raw_r) in read_hashes
-    assert hash_token(revoked_raw) not in read_hashes   # revoked dropped
-    assert hash_token(raw_w) not in read_hashes         # other scope excluded
+    assert (await svc.match_active(hash_token(raw_r), "read")) is not None
+    assert (await svc.match_active(hash_token(revoked_raw), "read")) is None  # revoked
+    assert (await svc.match_active(hash_token(raw_w), "read")) is None        # other scope
+
+
+async def test_authorize_stamps_last_used(monkeypatch, db_session) -> None:
+    monkeypatch.setattr(settings(), "mcp_read_secret", "")
+    _patch_scope(monkeypatch, db_session)
+    raw, row = await McpTokenService(db_session).create("director", "read")
+    assert row.last_used_at is None
+    await authorize_mcp(raw, "read")
+    assert row.last_used_at is not None   # stamped on use
 
 
 async def test_revoke_is_idempotent(db_session) -> None:
