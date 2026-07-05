@@ -196,3 +196,24 @@ async def test_tz_comes_from_the_branch_row_not_app_setting(db_session) -> None:
     cfg = await get_settings(db_session, b.id)
     assert cfg.tz_offset_h == 3  # sourced from the branch column, not the app_setting default (7)
     _cache.pop(b.id, None)
+
+
+def test_smart_stages_renders_checkbox_group() -> None:
+    f = S.field_for("smart_stages")
+    assert f is not None and f.kind == "multi"
+    html = field_html(f, "objection,ready", "en")
+    assert "multi-grp" in html
+    assert 'type="checkbox"' in html
+    # only the two saved stages are checked; presenting is not
+    assert 'value="objection" checked' in html
+    assert 'value="ready" checked' in html
+    assert 'value="presenting" checked' not in html
+    # a hidden input carries the comma value and does the autosave
+    assert 'type="hidden" name="value" value="objection,ready"' in html
+
+
+def test_smart_stages_untick_all_snaps_back_to_default() -> None:
+    # An empty value renders the default stages as checked (UI can't show a no-smart state).
+    html = field_html(S.field_for("smart_stages"), "", "en")
+    for st in ("presenting", "objection", "ready"):
+        assert f'value="{st}" checked' in html

@@ -104,17 +104,23 @@ SCHEMA: list[SettingSection] = [
                ("hybrid", _l("Гибрид (экономно)", "Hybrid (thrifty)", "Hybrid (hemat)")),
                ("off", _l("Всегда сильная", "Always strong", "Selalu kuat")),
            ]),
-        _f("smart_stages", "text", "presenting,objection,ready",
+        _f("smart_stages", "multi", "presenting,objection,ready",
            _l("Стадии на сильной модели", "Strong-model stages", "Tahap model kuat"),
-           ph=_l("presenting,objection,ready", "presenting,objection,ready",
-                 "presenting,objection,ready"),
-           help=_l("Гибрид: на этих стадиях отвечает сильная модель (через запятую). "
-                   "Горячие лиды и сигналы оплаты — всегда на сильной.",
-                   "Hybrid: strong model answers on these stages (comma-list). Hot leads and "
-                   "payment signals always use strong.",
-                   "Hybrid: model kuat menjawab di tahap ini (koma). Lead panas & sinyal "
-                   "bayar selalu pakai model kuat."),
-           width="230px"),
+           help=_l("Гибрид: отмеченные стадии отвечает сильная модель, остальные — дешёвая. "
+                   "Горячие лиды и сигналы оплаты — всегда на сильной. Снять все = дефолт.",
+                   "Hybrid: ticked stages use the strong model, the rest use the cheap one. "
+                   "Hot leads and payment signals always use strong. Untick all = default.",
+                   "Hybrid: tahap tercentang pakai model kuat, sisanya model murah. Lead panas "
+                   "& sinyal bayar selalu kuat. Hapus semua = default."),
+           width="260px",
+           choices=[
+               ("new", _l("новый", "new", "baru")),
+               ("nurturing", _l("прогрев", "nurturing", "nurturing")),
+               ("qualifying", _l("квалиф.", "qualifying", "kualifikasi")),
+               ("presenting", _l("презент.", "presenting", "presentasi")),
+               ("objection", _l("возраж.", "objection", "keberatan")),
+               ("ready", _l("готов", "ready", "siap")),
+           ]),
         # hidden until the RAG / tech-context / web-search features are ported — the
         # keys are still parsed + seeded, but showing dead toggles misleads the operator.
         _f("tech_usecase_enabled", "bool", "true",

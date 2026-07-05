@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html as _h
 
+from app.modules.conversation.routing import parse_smart_stages
 from app.modules.settings import schema as S
 
 _INP = (
@@ -41,6 +42,22 @@ def _ph(f: S.SettingField, lang: str) -> str:
 def _control(f: S.SettingField, value: str, lang: str) -> str:
     hx_vals = f"hx-vals='{{\"key\": \"{f.key}\"}}'"
     style = f"{_INP};width:{f.width}"
+    if f.kind == "multi":  # checkbox group → a comma-list saved via a hidden input
+        selected = parse_smart_stages(value)  # effective set, so UI always matches behaviour
+        boxes = "".join(
+            f'<label style="display:inline-flex;align-items:center;gap:.25rem;font-size:.72rem;'
+            f'color:#cdd6e0;cursor:pointer;white-space:nowrap">'
+            f'<input type="checkbox" value="{_h.escape(v)}" '
+            f'{"checked" if v in selected else ""} onchange="multiSave(this)">'
+            f'{_h.escape(S.tr(lbl, lang))}</label>'
+            for v, lbl in (f.choices or [])
+        )
+        hidden = (f'<input type="hidden" name="value" value="{_h.escape(value)}" '
+                  f'{_HX} {hx_vals}>')
+        return (
+            f'<div class="multi-grp" style="display:flex;flex-wrap:wrap;gap:.35rem .7rem;'
+            f'justify-content:flex-end;max-width:{f.width}">{boxes}{hidden}</div>'
+        )
     if f.choices:  # fixed-option dropdown (e.g. knowledge_backend)
         opts = "".join(
             f'<option value="{_h.escape(v)}" {"selected" if v == value else ""}>'
@@ -109,7 +126,16 @@ def settings_form_html(values: dict[str, str], lang: str) -> str:
     title = _h.escape(t("nav.settings"))
     autosave = _h.escape(t("set.autosave"))
     body = "".join(_section_html(sec, values, lang) for sec in S.SCHEMA)
+    # checkbox group → recompute the comma-list into the hidden input, then fire its autosave
+    script = (
+        '<script>function multiSave(cb){var g=cb.closest(".multi-grp");'
+        'var v=[].slice.call(g.querySelectorAll("input[type=checkbox]:checked"))'
+        '.map(function(c){return c.value}).join(",");'
+        'var h=g.querySelector("input[type=hidden][name=value]");h.value=v;'
+        'if(window.htmx)htmx.trigger(h,"change")}</script>'
+    )
     return (
+        f'{script}'
         f'<div class="ch"><span class="ch-n">{title}</span>'
         f'<span style="font-size:.68rem;color:#5f6b78;margin-left:.6rem">'
         f'· {autosave}</span></div>'
