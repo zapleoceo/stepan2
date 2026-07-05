@@ -249,7 +249,7 @@ _CSS = (
     ".hbar:hover .hbar-in,.hbar:hover .hbar-out{filter:brightness(1.3)}"
     ".hbar-l{font-size:.55rem;color:#6b7685;margin-top:3px;line-height:1}"
     # compact mini variant of the activity chart (placed high in the reports panel)
-    ".mini-act{margin:.55rem 0 .3rem}"
+    ".mini-act{margin:.55rem 0 .3rem;max-width:520px}"
     ".mini-act-hd{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;"
     "flex-wrap:wrap;margin-bottom:.25rem}"
     ".mini-act-t{font-size:.7rem;color:#8899aa;font-weight:600}"
