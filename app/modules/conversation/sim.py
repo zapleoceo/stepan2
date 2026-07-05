@@ -90,12 +90,23 @@ class SimService:
                 text=b, occurred_at=base + timedelta(seconds=i),
                 llm_info=reply._last_llm_meta.get("model")))  # noqa: SLF001
         th.last_out_at = base
+        # Persist the segment + stage the model decided so multi-turn funnel movement and
+        # segmentation are visible (decide() alone doesn't apply them — that's enqueue's job).
+        lead = await self.session.get(Lead, th.lead_id)
+        if lead is not None:
+            if decision.lead_type:
+                lead.lead_type = decision.lead_type
+            if decision.audience:
+                lead.audience = decision.audience
+            lead.stage = decision.stage
+            self.session.add(lead)
         self.session.add(th)
         await self.session.flush()
 
         return {
             "ok": True, "thread_id": th.id, "reply": decision.reply,
-            "stage": decision.stage, "product": decision.product_slug,
+            "stage": str(decision.stage), "product": decision.product_slug,
+            "lead_type": decision.lead_type, "audience": decision.audience,
             "ready": decision.ready, "needs_manager": decision.needs_manager,
             "discovery_complete": decision.discovery_complete,
             "jobs": decision.jobs, "pains": decision.pains, "gains": decision.gains,

@@ -123,6 +123,7 @@ async def run_persona(
         "turns_total": len(transcript) // 2,
         "transcript": [{"who": w, "text": t} for w, t in transcript],
         "stage": last.get("stage"), "product": last.get("product"),
+        "lead_type": last.get("lead_type"), "audience": last.get("audience"),
         "ready": last.get("ready"), "needs_manager": last.get("needs_manager"),
         "jobs": last.get("jobs"), "pains": last.get("pains"), "gains": last.get("gains"),
     }
