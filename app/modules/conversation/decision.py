@@ -14,6 +14,10 @@ from .sanitize import clean_reply
 
 logger = logging.getLogger(__name__)
 
+# Lead segment the model classifies once it has signal — for routing (Phase 2) + reporting.
+_LEAD_TYPES = frozenset(
+    {"hot", "warm", "cold", "no_budget", "student", "non_target", "unclear"})
+
 
 def _coerce_stage(value: object) -> Stage:
     """Model's stage → Stage. An LLM can emit anything ('greeting', a typo, nothing);
@@ -36,6 +40,7 @@ class Decision:
     manager_question: str | None = None
     kb_gap: str | None = None
     ready_subtype: str | None = None  # 'deal' | 'openhouse' when ready
+    lead_type: str | None = None  # segment (hot|warm|cold|no_budget|student|non_target|unclear)
     reply_language: str | None = None  # lead's language code when they wrote in another
     # Discovered customer profile (Value Proposition Canvas): what the lead is trying to
     # achieve (jobs), their obstacles/fears (pains), and the outcomes they want (gains).
@@ -83,6 +88,7 @@ def parse_decision(raw_json: str) -> Decision:
 
     subtype = str(data.get("ready_subtype") or "").lower().strip()
     lang = str(data.get("reply_language") or "").lower().strip()
+    ltype = str(data.get("lead_type") or "").lower().strip()
     return Decision(
         reply=clean_reply(reply),
         stage=stage,
@@ -92,6 +98,7 @@ def parse_decision(raw_json: str) -> Decision:
         manager_question=data.get("manager_question") or None,
         kb_gap=data.get("kb_gap") or None,
         ready_subtype=subtype if subtype in ("deal", "openhouse") else None,
+        lead_type=ltype if ltype in _LEAD_TYPES else None,
         reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
         jobs=_str_list(data.get("jobs")),
         pains=_str_list(data.get("pains")),

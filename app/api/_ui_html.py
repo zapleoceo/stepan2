@@ -169,6 +169,13 @@ _CSS = (
     "padding:.12rem .3rem;border-radius:3px}"
     # reports panel
     ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
+    # lead-segment cards
+    ".seg-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.6rem}"
+    ".seg-card{flex:1;min-width:88px;background:#141925;border:1px solid #2d3748;"
+    "border-radius:6px;padding:.4rem .55rem;text-align:center}"
+    ".seg-n{font-size:1.15rem;font-weight:700;line-height:1.1}"
+    ".seg-l{font-size:.64rem;color:#8899aa;margin-top:.1rem}"
+    ".seg-s{font-size:.58rem;color:#6b7685;margin-top:.15rem}"
     # one-line sales funnel
     ".fnl-line{display:flex;gap:.3rem;align-items:stretch}"
     ".fnl-step{flex:1;min-width:0;background:#141925;border:1px solid #2d3748;"

@@ -28,6 +28,7 @@ from ._query import (
     fetch_bot_enabled_count,
     fetch_coach_data,
     fetch_report_data,
+    fetch_segment_dist,
     fetch_stage_counts,
 )
 from ._routes_admin import (
@@ -185,9 +186,10 @@ async def reports_page(request: Request) -> HTMLResponse:
             await fetch_report_data(session, branch_ids)
         )
         products, ad_mappings, ad_suggestions = await _ad_editor_data(session, branch_ids)
+        segments = await fetch_segment_dist(session, branch_ids)
     panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
                                ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
-                               products=products)
+                               products=products, segments=segments)
     return HTMLResponse(app_shell(lang, panel, active_nav="reports",
                                   is_super=is_super_admin(request)))
 

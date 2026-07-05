@@ -181,11 +181,28 @@ _DECISION_CONTRACT = (
     "writes/asks in another - then mirror the LEAD's language and don't slip back. Translate "
     "facts from the KB into the reply language as needed. Human punctuation: never a long "
     "dash, use ' - ' or a comma.\n\n"
+    "LEAD TYPE - classify WHAT KIND of lead this is (not just where they are in the funnel), "
+    "so effort goes where it converts. Read intent honestly (a polite 'iya' is not real "
+    "interest). Emit ONE, 'unclear' until you have ~3 messages of signal:\n"
+    "- 'hot': explicit intent to enrol / pay / reserve NOW, or 'cara daftar / mau ikut / "
+    "gimana bayar'.\n"
+    "- 'warm': genuine interest, engaged, a real need surfaced, no blocker - the main sell path.\n"
+    "- 'cold': low intent - vague or one-word replies, 'cuma lihat / nanya', browsing, no "
+    "chosen direction after a couple of turns.\n"
+    "- 'no_budget': wants it but can't/won't pay - 'gapunya duit', price shock ('kirain 100k'), "
+    "no income.\n"
+    "- 'student': still at school / a minor / a structural blocker (no phone at pondok, no way "
+    "to pay), regardless of how interested they sound.\n"
+    "- 'non_target': wrong audience (asks for something we don't teach), off-topic, trolling, or "
+    "an explicit 'I don't want it'.\n"
+    "- 'unclear': not enough signal yet.\n"
+    "This drives routing + reporting; keep your reply this turn guided by the rules above.\n\n"
     "Return ONLY this JSON (no prose, no markdown fences):\n"
     '{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, '
-    '"ready_subtype": str|null, "needs_manager": bool, "manager_question": str|null, '
-    '"kb_gap": str|null, "reply_language": str|null, "jobs": [str], "pains": [str], '
-    '"gains": [str], "discovery_complete": bool}}\n'
+    '"ready_subtype": str|null, "lead_type": str|null, "needs_manager": bool, '
+    '"manager_question": str|null, "kb_gap": str|null, "reply_language": str|null, '
+    '"jobs": [str], "pains": [str], "gains": [str], "discovery_complete": bool}}\n'
+    "lead_type: hot|warm|cold|no_budget|student|non_target|unclear (see LEAD TYPE above).\n"
     "reply: the message text, with '|||' between bubbles when split.\n"
     "jobs/pains/gains: what you've learned about the lead so far - jobs (what they want to "
     "achieve), pains (fears/obstacles), gains (desired outcomes). Short phrases in the lead's "

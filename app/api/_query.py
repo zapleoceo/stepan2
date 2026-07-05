@@ -54,6 +54,28 @@ async def fetch_ad_funnel(
     return list((await session.execute(q)).all())
 
 
+async def fetch_segment_dist(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> list:
+    """Leads by segment (lead_type) with a won count each. Rows: (lead_type, total, won),
+    biggest first. NULL lead_type (not yet classified) is bucketed as 'unclear'."""
+    won = func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0))
+    seg = func.coalesce(Lead.lead_type, "unclear")
+    q = (
+        select(seg.label("seg"), func.count().label("total"), won.label("won"))
+        .group_by(seg)
+        .order_by(func.count().desc())
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    return list((await session.execute(q)).all())
+
+
 _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where
     "SELECT l.stage, COUNT(*) FROM lead l {where} GROUP BY l.stage"
 )

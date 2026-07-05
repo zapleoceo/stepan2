@@ -65,6 +65,8 @@ class Lead(SQLModel, table=True):
     email: str | None = Field(default=None)
     stage: Stage = Field(default=Stage.NEW, sa_type=String)
     ready_subtype: str | None = Field(default=None)
+    lead_type: str | None = Field(
+        default=None, description="segment: hot|warm|cold|no_budget|student|non_target")
     preferred_language: str | None = Field(
         default=None, description="если лид попросил другой язык — отвечаем на нём")
     needs: str | None = Field(

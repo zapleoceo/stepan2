@@ -1213,6 +1213,44 @@ def _date_range_form_html(date_from: str, date_to: str, active_range: str = "") 
     )
 
 
+_SEG_META = (  # (key, colour, i18n label) — display order
+    ("hot", "#ff6b6b", "seg.hot"),
+    ("warm", "#51cf66", "seg.warm"),
+    ("cold", "#4da6ff", "seg.cold"),
+    ("no_budget", "#9b7aff", "seg.no_budget"),
+    ("student", "#ffa94d", "seg.student"),
+    ("non_target", "#868e96", "seg.non_target"),
+    ("unclear", "#4a5568", "seg.unclear"),
+)
+
+
+def _segment_html(segments: list) -> str:
+    """Lead-segment distribution: a card per segment with count, share and won%. Empty until
+    the classifier has tagged leads (Phase 1 — measure the mix, no behaviour change yet)."""
+    by = {str(s[0]): (int(s[1]), int(s[2] or 0)) for s in segments}
+    total = sum(n for n, _ in by.values())
+    if not total:
+        return ""
+    cards = ""
+    for key, color, lbl in _SEG_META:
+        n, won = by.get(key, (0, 0))
+        if not n:
+            continue
+        pct = round(n / total * 100)
+        won_pct = round(won / n * 100, 1)
+        cards += (
+            f'<div class="seg-card" style="border-top:2px solid {color}">'
+            f'<div class="seg-n" style="color:{color}">{n}</div>'
+            f'<div class="seg-l">{_h.escape(t(lbl))}</div>'
+            f'<div class="seg-s">{pct}% · won {won_pct}%</div></div>'
+        )
+    return (
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
+        f'{_h.escape(t("seg.title"))}</h3>'
+        f'<div class="seg-row">{cards}</div>'
+    )
+
+
 def reports_panel_html(
     stage_counts: dict[str, int],
     hour_in: dict[int, int],
@@ -1227,6 +1265,7 @@ def reports_panel_html(
     ad_mappings: dict[str, str] | None = None,
     ad_suggestions: dict[str, str] | None = None,
     products: list[tuple[str, str]] | None = None,
+    segments: list | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1325,6 +1364,7 @@ def reports_panel_html(
         f'<div class="kpi-row">{kpis}</div>'
         f'{mini_act}'
         f'{_funnel_line_html(stage_counts)}'
+        f'{_segment_html(segments or [])}'
         f'{status_bar}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'

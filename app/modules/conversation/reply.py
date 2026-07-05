@@ -166,6 +166,9 @@ class ReplyService:
         if decision.reply_language and decision.reply_language != lead.preferred_language:
             lead.preferred_language = decision.reply_language  # lead switched language — remember
             self.session.add(lead)
+        if decision.lead_type and decision.lead_type != lead.lead_type:
+            lead.lead_type = decision.lead_type  # segment — persisted for routing + reporting
+            self.session.add(lead)
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return
