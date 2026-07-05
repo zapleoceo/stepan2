@@ -84,16 +84,20 @@ async def fetch_stage_flow(
     Rows: (from_stage, to_stage, count), busiest first. Scoped to leads whose conversation
     started in the window (Lead.created_at) so it agrees with the KPIs and segment tree.
     Reconstructs the real path first-message → every transition → exit, back-edges included."""
+    # count DISTINCT leads per edge, not raw events: a lead logs several transitions and the
+    # S1 history migration double-logged some, so raw event counts overstate the flow. Distinct
+    # leads make each link's thickness "how many people moved this way", comparable to the tree.
+    n = func.count(func.distinct(StageEvent.lead_id))
     q = (
         select(
             StageEvent.from_stage,
             StageEvent.to_stage,
-            func.count().label("n"),
+            n.label("n"),
         )
         .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
         .where(StageEvent.from_stage != StageEvent.to_stage)  # type: ignore[arg-type]
         .group_by(StageEvent.from_stage, StageEvent.to_stage)
-        .order_by(func.count().desc())
+        .order_by(n.desc())
     )
     if branch_ids:
         q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]

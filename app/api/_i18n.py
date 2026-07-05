@@ -584,6 +584,7 @@ _TR: dict[str, dict[str, str]] = {
     "rep.disc_len": {"ru": "Ср. глубина выявл.", "en": "Avg discovery msgs",
                      "id": "Rata2 gali"},
     "rep.funnel":  {"ru": "Воронка продаж",  "en": "Sales funnel", "id": "Corong penjualan"},
+    "flow.entry":  {"ru": "вход",            "en": "entry",        "id": "masuk"},
     "rep.from":    {"ru": "С даты",          "en": "From",         "id": "Dari"},
     "rep.to":      {"ru": "По дату",         "en": "To",           "id": "Sampai"},
     "rep.apply":   {"ru": "Показать",        "en": "Apply",        "id": "Terapkan"},

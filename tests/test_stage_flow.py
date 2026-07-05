@@ -21,14 +21,18 @@ async def test_stage_flow_groups_edges_and_scopes_branch(db_session) -> None:
     db_session.add(b2)
     await db_session.flush()
     lead1 = Lead(branch_id=b1.id, stage="presenting", created_at=_NOW)
+    lead1b = Lead(branch_id=b1.id, stage="presenting", created_at=_NOW)
     lead2 = Lead(branch_id=b2.id, stage="dormant", created_at=_NOW)
     db_session.add(lead1)
+    db_session.add(lead1b)
     db_session.add(lead2)
     await db_session.flush()
-    # branch 1: two new→presenting + one new→dormant ; branch 2: one new→dormant (excluded)
+    # branch 1: 2 distinct leads new→presenting (one logs it TWICE — must count as 1 lead), one
+    # new→dormant ; branch 2: one new→dormant (excluded by branch scope)
     for frm, to, lid, bid in [
         ("new", "presenting", lead1.id, b1.id),
-        ("new", "presenting", lead1.id, b1.id),
+        ("new", "presenting", lead1.id, b1.id),   # duplicate event, same lead → still 1 distinct
+        ("new", "presenting", lead1b.id, b1.id),
         ("new", "dormant", lead1.id, b1.id),
         ("new", "new", lead1.id, b1.id),          # no-op transition, must be filtered
         ("new", "dormant", lead2.id, b2.id),
@@ -37,7 +41,7 @@ async def test_stage_flow_groups_edges_and_scopes_branch(db_session) -> None:
                                   to_stage=to, actor="bot", created_at=_NOW))
     await db_session.flush()
     rows = {(r[0], r[1]): int(r[2]) for r in await fetch_stage_flow(db_session, [b1.id])}
-    assert rows[("new", "presenting")] == 2
+    assert rows[("new", "presenting")] == 2      # distinct leads, not 3 raw events
     assert rows[("new", "dormant")] == 1
     assert ("new", "new") not in rows            # self-edge filtered
     assert sum(1 for (f, _t) in rows if _t == "dormant") == 1  # branch 2 excluded

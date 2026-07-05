@@ -1210,7 +1210,9 @@ def _funnel_flow_html(flow: list) -> str:
             continue
         h = bar_h(s)
         col = _STAGE_COLOR.get(s, "#4a5568")
-        lbl = _h.escape(t(f"stage.{s}"))
+        # 'new' is the entry point (every lead's first message), not a "still-new" bucket —
+        # label it "entry" so its throughput doesn't read as current occupancy of stage new.
+        lbl = _h.escape(t("flow.entry") if s == "new" else t(f"stage.{s}"))
         below = s in _FLOW_EXITS
         ty = y + h / 2 + 12 if below else y - h / 2 - 5
         nodes += (
