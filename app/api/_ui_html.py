@@ -170,14 +170,19 @@ _CSS = (
     # reports panel
     ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
     # lead-segment tree (svg)
-    ".seg-tree{margin:.1rem 0 .35rem;overflow-x:auto}"
-    # per-segment stage breakdown: one row per intent segment, clickable stage chips inside it
-    ".ssf{margin:.15rem 0 1rem;display:flex;flex-direction:column;gap:.4rem}"
-    ".ssf-row{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}"
-    ".ssf-seg{font-size:.72rem;font-weight:600;min-width:88px}"
-    ".ssf-chips{display:flex;flex-wrap:wrap;gap:.28rem}"
+    # segment tree as HTML cards: audience header → segment cards → stage chips inside each
+    ".aud-blk{margin-bottom:.9rem}"
+    ".aud-hd{font-size:.78rem;color:#8899aa;font-weight:600;margin:.7rem 0 .35rem}"
+    ".aud-hd b{color:#e8eef4;font-size:.95rem;font-variant-numeric:tabular-nums}"
+    ".seg-cards{display:flex;flex-direction:column;gap:.5rem}"
+    ".seg-card{background:#141925;border:1px solid #2d3748;border-radius:9px;padding:.5rem .7rem}"
+    ".sc-hd{display:flex;align-items:baseline;gap:.5rem;text-decoration:none}"
+    ".sc-name{font-size:.82rem;font-weight:700}"
+    ".sc-n{font-size:.95rem;font-weight:700;color:#e8eef4;font-variant-numeric:tabular-nums}"
+    ".sc-sub{font-size:.62rem;color:#6b7685;margin-left:auto}"
+    ".ssf-chips{display:flex;flex-wrap:wrap;gap:.28rem;margin-top:.45rem}"
     ".ssf-chip{display:inline-flex;align-items:center;gap:.28rem;font-size:.66rem;color:#c3ccd6;"
-    "background:#141925;border:1px solid #2d3748;border-radius:6px;padding:.16rem .4rem;"
+    "background:#0f1117;border:1px solid #2d3748;border-radius:6px;padding:.16rem .4rem;"
     "text-decoration:none;transition:background .12s;white-space:nowrap}"
     ".ssf-chip:hover{background:#1c2230}"
     ".ssf-chip b{color:#e8eef4;font-variant-numeric:tabular-nums}"
