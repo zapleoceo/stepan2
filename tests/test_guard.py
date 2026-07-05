@@ -55,7 +55,7 @@ def test_false_delivery_claims_catches_already_sent_but_not_offers_to_send() -> 
     # 2026-07-05 50-thread audit: leads left believing a screenshot/dataset arrived when
     # nothing was ever sent (threads 1408, 1721) — Stepan can't attach files or use WhatsApp.
     assert guard.false_delivery_claims("Screenshotnya udah aku kirim via DM ya Kak")
-    assert guard.false_delivery_claims("data e-commerce Indonesia udah aku kirim ke WA Kakak tadi ya")
+    assert guard.false_delivery_claims("data e-commerce Indonesia udah aku kirim ke WA Kakak tadi")
     # an OFFER to send (not yet done) is a normal, allowed sales move
     assert not guard.false_delivery_claims("Boleh aku kirim link brosurnya ke sini?")
     assert not guard.false_delivery_claims("Mau aku kirim silabus lengkapnya lewat chat ini?")
