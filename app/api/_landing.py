@@ -173,7 +173,32 @@ footer{border-top:1px solid var(--line);padding:2.2rem 0;color:var(--mut);font-s
 .fnrow .v{font-weight:700;font-size:.72rem;margin-left:auto}
 .alert{display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:#8fe3ac;background:rgba(81,207,102,.1);border:1px solid rgba(81,207,102,.28);border-radius:10px;padding:.6rem .75rem}
 .mnote{text-align:center;font-size:.72rem;color:var(--mut);margin-top:1rem;opacity:.8}
-@media (max-width:760px){.shots{grid-template-columns:1fr}}
+/* meta / attribution mockup */
+.meta{display:grid;grid-template-columns:1.15fr .85fr;gap:1.4rem;margin-top:2.4rem;align-items:stretch}
+.mpanel{background:#0d0f15;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 22px 55px rgba(0,0,0,.5);display:flex;flex-direction:column}
+.mhd{display:flex;align-items:center;gap:.5rem;padding:.7rem .95rem;border-bottom:1px solid var(--line);background:#12151d;font-size:.8rem;font-weight:600}
+.mhd .dot{width:8px;height:8px;border-radius:50%;background:#51cf66;box-shadow:0 0 8px #51cf66}
+.mhd .pill{margin-left:auto;font-size:.6rem;color:#8fe3ac;background:rgba(81,207,102,.12);border:1px solid rgba(81,207,102,.28);border-radius:20px;padding:.1rem .55rem}
+.mbody{padding:1rem;display:flex;flex-direction:column;gap:.7rem}
+.adrow{display:flex;align-items:center;gap:.7rem;padding:.6rem .7rem;background:var(--card);border:1px solid var(--line);border-radius:11px}
+.adth{width:38px;height:38px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.1rem}
+.a1{background:linear-gradient(135deg,#ff8fb1,#c86fff)}.a2{background:linear-gradient(135deg,#5ac8fa,#4d7cff)}.a3{background:linear-gradient(135deg,#ffd36e,#ff9f45)}
+.adrow .an{font-size:.8rem;font-weight:600}.adrow .as{font-size:.64rem;color:var(--mut)}
+.adkpi{margin-left:auto;text-align:right}.adkpi b{font-size:.95rem;display:block}.adkpi span{font-size:.6rem;color:var(--mut)}
+.flow{display:flex;flex-direction:column;gap:.55rem;padding:.2rem 0}
+.fsrc{display:flex;align-items:center;gap:.55rem;font-size:.76rem;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:.42rem .6rem}
+.fsrc .ic{width:22px;height:22px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.8rem}
+.fsrc .ph{margin-left:auto;font-size:.6rem;color:var(--mut);font-family:ui-monospace,monospace}
+.merge{text-align:center;color:var(--acc2);font-size:1.1rem;line-height:1}
+.uni{background:linear-gradient(135deg,rgba(124,92,255,.14),rgba(77,166,255,.1));border:1px solid rgba(124,92,255,.35);border-radius:12px;padding:.8rem}
+.uni .ur{display:flex;align-items:center;gap:.5rem}
+.uni .av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#5ac8fa,#4d7cff);display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;color:#fff}
+.uni b{font-size:.85rem}.uni .ph2{margin-left:auto;font-size:.62rem;color:var(--mut);font-family:ui-monospace,monospace}
+.uni .ut{margin-top:.5rem;font-size:.66rem;color:var(--mut)}
+.uni .tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.45rem}
+.uni .tg{font-size:.62rem;background:rgba(77,166,255,.14);color:#7db8ff;border:1px solid rgba(77,166,255,.3);border-radius:6px;padding:.14rem .45rem}
+.push{display:flex;align-items:center;gap:.5rem;font-size:.72rem;color:#8fe3ac;margin-top:.6rem}
+@media (max-width:760px){.shots{grid-template-columns:1fr}.meta{grid-template-columns:1fr}}
 """
 
 
@@ -310,6 +335,56 @@ def landing_html() -> str:
         "</div></div>"
         "</div>"
         "<p class=\"mnote\">Illustrative — sample data, not a real customer.</p>"
+        "</div></section>"
+        # ── meta integration + attribution + identity resolution ──
+        "<section><div class=\"wrap\">"
+        "<div class=\"kick\">Connected to Meta</div>"
+        "<h2>Every ad measured. Every lead unified.</h2>"
+        "<p class=\"lead\">Stepan plugs straight into your Meta account — conversions flow back "
+        "so you see which ad actually earns, and the same person across different products is "
+        "merged into one profile by phone number.</p>"
+        "<div class=\"meta\">"
+        # left: per-ad performance
+        "<div class=\"mpanel\">"
+        "<div class=\"mhd\"><span class=\"dot\"></span>Ad performance · synced from Meta"
+        "<span class=\"pill\">● live</span></div>"
+        "<div class=\"mbody\">"
+        "<div class=\"adrow\"><span class=\"adth a1\">🏋️</span>"
+        "<div><div class=\"an\">Home Fitness — Reels</div>"
+        "<div class=\"as\">Leads 142 · CPL $3.10</div></div>"
+        "<div class=\"adkpi\"><b>28 booked</b><span>ROAS 4.6×</span></div></div>"
+        "<div class=\"adrow\"><span class=\"adth a2\">🥗</span>"
+        "<div><div class=\"an\">Meal Plan — Stories</div>"
+        "<div class=\"as\">Leads 96 · CPL $4.80</div></div>"
+        "<div class=\"adkpi\"><b>11 booked</b><span>ROAS 2.1×</span></div></div>"
+        "<div class=\"adrow\"><span class=\"adth a3\">💪</span>"
+        "<div><div class=\"an\">1-on-1 Coaching — Feed</div>"
+        "<div class=\"as\">Leads 54 · CPL $6.20</div></div>"
+        "<div class=\"adkpi\"><b>19 booked</b><span>ROAS 5.9×</span></div></div>"
+        "<div class=\"push\">↗ Conversions pushed back to Meta — the algorithm learns who buys."
+        "</div>"
+        "</div></div>"
+        # right: identity resolution by phone
+        "<div class=\"mpanel\">"
+        "<div class=\"mhd\"><span class=\"dot\"></span>One lead, every touchpoint</div>"
+        "<div class=\"mbody\">"
+        "<div class=\"flow\">"
+        "<div class=\"fsrc\"><span class=\"ic a1\">🏋️</span>Home Fitness ad"
+        "<span class=\"ph\">+1 ••• 4471</span></div>"
+        "<div class=\"fsrc\"><span class=\"ic a3\">💪</span>Coaching ad"
+        "<span class=\"ph\">+1 ••• 4471</span></div>"
+        "<div class=\"merge\">▼ merged by phone ▼</div>"
+        "<div class=\"uni\">"
+        "<div class=\"ur\"><span class=\"av\">M</span><b>Maya R.</b>"
+        "<span class=\"ph2\">+1 ••• 4471</span></div>"
+        "<div class=\"ut\">2 ad sources · first seen 6 days ago · now Qualifying</div>"
+        "<div class=\"tags\"><span class=\"tg\">Home Fitness</span>"
+        "<span class=\"tg\">1-on-1 Coaching</span></div>"
+        "</div>"
+        "</div>"
+        "</div></div>"
+        "</div>"
+        "<p class=\"mnote\">Illustrative — sample data, not a real account.</p>"
         "</div></section>"
         # capabilities
         "<section><div class=\"wrap\">"
