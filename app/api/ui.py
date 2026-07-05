@@ -25,7 +25,6 @@ from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     AD_FUNNEL_GROUPS,
     _branch_where,
-    fetch_audience_stage_dist,
     fetch_blocked_count,
     fetch_bot_enabled_count,
     fetch_coach_data,
@@ -217,14 +216,9 @@ async def reports_page(request: Request) -> HTMLResponse:
         )
         products, ad_mappings, ad_suggestions = await _ad_editor_data(session, branch_ids)
         segments = await fetch_segment_dist(session, branch_ids)
-        aud_stage = await fetch_audience_stage_dist(session, branch_ids)
-    audience_stages: dict[str, dict[str, int]] = {}
-    for a, st, n in aud_stage:
-        audience_stages.setdefault(str(a), {})[str(st)] = int(n)
     panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
                                ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
-                               products=products, segments=segments,
-                               audience_stages=audience_stages)
+                               products=products, segments=segments)
     return HTMLResponse(app_shell(lang, panel, active_nav="reports",
                                   is_super=is_super_admin(request)))
 
