@@ -14,8 +14,7 @@ from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
-from app.api._mcp_auth import split_tokens, token_guard
-from app.config import settings
+from app.api._mcp_auth import token_guard
 from app.modules.leads import ops
 
 _LANG_NAME = {"ru": "Russian", "en": "English", "id": "Indonesian"}
@@ -122,6 +121,7 @@ async def analyze_chat(phone: str | None = None, thread_id: int | None = None,
 
 
 def reader_app():  # noqa: ANN201
-    """The token-guarded read-only Streamable HTTP ASGI app to mount at /reader."""
-    return token_guard(mcp.streamable_http_app(),
-                       lambda: split_tokens(settings().mcp_read_secret))
+    """The token-guarded read-only Streamable HTTP ASGI app to mount at /reader. Accepts
+    read tokens from the env secret or the mcp_token table (UI-managed)."""
+    from app.modules.mcp.tokens import authorize_mcp  # noqa: PLC0415 (avoid import cycle)
+    return token_guard(mcp.streamable_http_app(), lambda t: authorize_mcp(t, "read"))

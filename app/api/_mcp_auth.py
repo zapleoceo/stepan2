@@ -7,14 +7,13 @@ secrets.
 """
 from __future__ import annotations
 
-import hmac
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
 
 
-def _extract_token(scope: Scope) -> str:
+def extract_token(scope: Scope) -> str:
     headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
     token = headers.get("authorization", "").removeprefix("Bearer ").strip()
     if not token:
@@ -29,20 +28,15 @@ def split_tokens(secret: str) -> list[str]:
     return [t.strip() for t in secret.split(",") if t.strip()]
 
 
-def token_guard(app, tokens_fn: Callable[[], list[str]]):  # noqa: ANN001, ANN201
-    """Wrap an ASGI app, rejecting HTTP calls whose token isn't in tokens_fn()."""
+def token_guard(app, authorize: Callable[[str], Awaitable[bool]]):  # noqa: ANN001, ANN201
+    """Wrap an ASGI app, rejecting HTTP calls whose token authorize() denies."""
 
     class _Guard:
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            if scope["type"] == "http":
-                tokens = tokens_fn()
-                tok = _extract_token(scope)
-                ok = bool(tokens) and bool(tok) and any(
-                    hmac.compare_digest(tok, t) for t in tokens)
-                if not ok:
-                    await JSONResponse({"error": "unauthorized"}, status_code=401)(
-                        scope, receive, send)
-                    return
+            if scope["type"] == "http" and not await authorize(extract_token(scope)):
+                await JSONResponse({"error": "unauthorized"}, status_code=401)(
+                    scope, receive, send)
+                return
             await app(scope, receive, send)
 
     return _Guard()

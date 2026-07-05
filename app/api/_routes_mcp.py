@@ -7,31 +7,21 @@ the leads.ops domain service → return JSON.
 """
 from __future__ import annotations
 
-import hmac
-
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
-from app.config import settings
 from app.modules.leads import ops
+from app.modules.mcp.tokens import authorize_mcp
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 
-def _valid_tokens() -> list[str]:
-    """MCP_SECRET may hold several comma-separated tokens so each caller (owner, a
-    partner, an integration) gets its own revocable one."""
-    return [t.strip() for t in settings().mcp_secret.split(",") if t.strip()]
-
-
-def _auth(authorization: str | None) -> None:
-    tokens = _valid_tokens()
-    if not tokens:
-        raise HTTPException(status_code=403, detail="MCP API disabled (no MCP_SECRET set)")
+async def _auth(authorization: str | None) -> None:
+    """Accept a write-scope token from the env secret or the mcp_token table."""
     token = authorization.removeprefix("Bearer ").strip() if authorization else ""
-    if not token or not any(hmac.compare_digest(token, t) for t in tokens):
+    if not await authorize_mcp(token, "write"):
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
 
 
@@ -60,7 +50,7 @@ async def find_lead(
     phone: str, branch_id: int | None = None,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    _auth(authorization)
+    await _auth(authorization)
     async with session_scope() as session:
         lead = await ops.find_lead(session, phone, branch_id)
         if lead is None:
@@ -82,7 +72,7 @@ async def _resolve(session, req: _PhoneReq):  # noqa: ANN001, ANN202
 
 @router.post("/move_lead")
 async def move_lead(req: _MoveReq, authorization: str | None = Header(default=None)) -> dict:
-    _auth(authorization)
+    await _auth(authorization)
     async with session_scope() as session:
         lead = await _resolve(session, req)
         return _op_response(await ops.move_lead(session, lead, req.stage, req.note))
@@ -90,7 +80,7 @@ async def move_lead(req: _MoveReq, authorization: str | None = Header(default=No
 
 @router.post("/close_deal")
 async def close_deal(req: _PhoneReq, authorization: str | None = Header(default=None)) -> dict:
-    _auth(authorization)
+    await _auth(authorization)
     async with session_scope() as session:
         lead = await _resolve(session, req)
         return _op_response(await ops.close_deal(session, lead, req.note))
@@ -98,7 +88,7 @@ async def close_deal(req: _PhoneReq, authorization: str | None = Header(default=
 
 @router.post("/call_failed")
 async def call_failed(req: _PhoneReq, authorization: str | None = Header(default=None)) -> dict:
-    _auth(authorization)
+    await _auth(authorization)
     async with session_scope() as session:
         lead = await _resolve(session, req)
         return _op_response(await ops.call_failed(session, lead, req.note, BrokerLLM()))

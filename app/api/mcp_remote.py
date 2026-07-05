@@ -16,8 +16,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
-from app.api._mcp_auth import split_tokens, token_guard
-from app.config import settings
+from app.api._mcp_auth import token_guard
 from app.modules.leads import ops
 
 # DNS-rebinding protection guards browser attacks on localhost dev servers by pinning
@@ -91,6 +90,7 @@ async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
 
 
 def connector_app():  # noqa: ANN201
-    """The token-guarded Streamable HTTP ASGI app to mount at /connector. MCP_SECRET may
-    hold several comma-separated tokens (owner, partner, integration) — each revocable."""
-    return token_guard(mcp.streamable_http_app(), lambda: split_tokens(settings().mcp_secret))
+    """The token-guarded Streamable HTTP ASGI app to mount at /connector. Accepts write
+    tokens from the env secret or the mcp_token table (UI-managed)."""
+    from app.modules.mcp.tokens import authorize_mcp  # noqa: PLC0415 (avoid import cycle)
+    return token_guard(mcp.streamable_http_app(), lambda t: authorize_mcp(t, "write"))

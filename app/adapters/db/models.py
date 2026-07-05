@@ -256,6 +256,23 @@ class ManagerAlert(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class McpToken(SQLModel, table=True):
+    """A bearer token issued to an MCP client. Only the SHA-256 hash is stored (shown once
+    at creation, never again); `prefix` is the first chars for identification in the UI.
+    `scope` = write (funnel ops) | read (read-only reader). Platform-level, not per-branch:
+    a token grants API access across branches (the reader tool filters by branch itself)."""
+    __tablename__ = "mcp_token"
+
+    id: int | None = Field(default=None, primary_key=True)
+    label: str = Field(description="who this token is for, e.g. 'director' / 'partner CRM'")
+    scope: str = Field(description="write | read")
+    token_hash: str = Field(index=True, unique=True, description="sha256 hex of the token")
+    prefix: str = Field(description="first chars of the token, for identification only")
+    created_at: datetime = Field(default_factory=_utcnow)
+    last_used_at: datetime | None = Field(default=None)
+    revoked_at: datetime | None = Field(default=None)
+
+
 class CrmLeadState(SQLModel, table=True):
     """Cached CRM state for a lead — the READ side of the CRM link. Populated by the pull
     sync and by the point-check right before a send. The send-gate reads `verdict` to

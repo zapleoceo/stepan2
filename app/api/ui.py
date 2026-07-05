@@ -41,6 +41,7 @@ from ._routes_channels import router as _channels_router
 from ._routes_chat import router as _chat_router
 from ._routes_coach import router as _coach_router
 from ._routes_knowledge import router as _knowledge_router
+from ._routes_mcpadmin import router as _mcpadmin_router
 from ._routes_members import router as _members_router
 from ._routes_products import router as _products_router
 from ._ui_html import app_shell, funnel_html, thread_list_html
@@ -56,6 +57,7 @@ router.include_router(_members_router)
 router.include_router(_products_router)
 router.include_router(_admin_router)
 router.include_router(_branches_router)
+router.include_router(_mcpadmin_router)
 
 _THREAD_TMPL = (
     "SELECT ct.id, l.display_name, l.stage,"

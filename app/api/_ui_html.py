@@ -605,6 +605,7 @@ _HELP_KEYS: dict[str, str] = {
     "outbox": "help.outbox",
     "branches": "help.branches",
     "reports": "help.reports",
+    "mcp": "help.mcp",
 }
 
 
@@ -1386,6 +1387,8 @@ def app_shell(
         + _hna("nav.settings", "/ui/settings/panel", "fa-solid fa-gear", "settings")
         + '<div class="nav-sep"></div>'
         + (_hna("nav.branches", "/ui/branches/panel", "fa-solid fa-building", "branches")
+           if is_super else "")
+        + (_hna("nav.mcp", "/ui/mcp/panel", "fa-solid fa-plug", "mcp")
            if is_super else "")
         + _hna("nav.log", "/ui/settings/log", "fa-solid fa-list", "log")
     )

@@ -359,6 +359,16 @@ _TR: dict[str, dict[str, str]] = {
     },
     "chat.suggest_ph":  {"ru": "Черновик ответа…", "en": "Draft reply…",     "id": "Draf balasan…"},
     "chat.discard":     {"ru": "✗ Отменить",        "en": "✗ Discard",        "id": "✗ Buang"},
+    "nav.mcp":          {"ru": "MCP",         "en": "MCP",         "id": "MCP"},
+    "help.mcp": {
+        "ru": ("Управление доступом по MCP: токены для внешних клиентов (двигать воронку "
+               "или только читать чаты) и исходящая связь Степана с CRM. Плюс скачивание "
+               "документации по подключению."),
+        "en": ("MCP access: tokens for external clients (move the funnel or read-only chat "
+               "access) and Stepan's outgoing CRM link. Plus the connection docs download."),
+        "id": ("Akses MCP: token untuk klien eksternal (gerakkan funnel atau baca chat saja) "
+               "dan koneksi keluar Stepan ke CRM. Plus unduh dokumentasi koneksi."),
+    },
     # leads panel
     "nav.leads":        {"ru": "Лиды",        "en": "Leads",       "id": "Lead"},
     "lead.name":        {"ru": "Имя",         "en": "Name",        "id": "Nama"},
