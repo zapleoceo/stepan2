@@ -108,3 +108,19 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     # each leaf links to BOTH its audience and intent, so the opened list == the leaf count
     assert "/ui/inbox?lead_type=hot&audience=student" in html
     assert "/ui/inbox?lead_type=warm&audience=adult" in html
+
+
+def test_segment_tree_renders_per_audience_funnel() -> None:
+    from app.api._i18n import _lang
+    from app.api._ui_panels import reports_panel_html
+    _lang.set("en")
+    html = reports_panel_html(
+        {"new": 3}, {}, {}, [], None,
+        segments=[("adult", "warm", 10, 2), ("student", "hot", 4, 2)],
+        audience_stages={"adult": {"qualifying": 7, "ready": 3},
+                         "student": {"dormant": 4}})
+    # per-audience funnel strip with clickable stage counts (audience + stage)
+    assert "aud-fn" in html
+    assert "/ui/inbox?audience=adult&stage=qualifying" in html
+    assert "/ui/inbox?audience=adult&stage=ready" in html
+    assert "/ui/inbox?audience=student&stage=dormant" in html

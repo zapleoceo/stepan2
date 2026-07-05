@@ -170,7 +170,15 @@ _CSS = (
     # reports panel
     ".kpi-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}"
     # lead-segment tree (svg)
-    ".seg-tree{margin:.1rem 0 .7rem;overflow-x:auto}"
+    ".seg-tree{margin:.1rem 0 .35rem;overflow-x:auto}"
+    # per-audience funnel strip (clickable stage counts inside a segment-tree block)
+    ".aud-fn{display:flex;flex-wrap:wrap;gap:.3rem;margin:.1rem 0 1rem;padding-left:.1rem}"
+    ".afn{display:flex;flex-direction:column;align-items:center;gap:.05rem;min-width:54px;"
+    "padding:.28rem .45rem;background:#141925;border:1px solid #2d3748;border-radius:7px;"
+    "text-decoration:none;transition:background .12s}"
+    ".afn:hover{background:#1c2230}"
+    ".afn-n{font-size:.86rem;font-weight:700;color:#e8eef4;font-variant-numeric:tabular-nums}"
+    ".afn-l{font-size:.6rem;color:#8b98a5;white-space:nowrap}"
     # one-line sales funnel
     ".fnl-line{display:flex;gap:.3rem;align-items:stretch}"
     ".fnl-step{flex:1;min-width:0;background:#141925;border:1px solid #2d3748;"
