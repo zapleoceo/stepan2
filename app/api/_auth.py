@@ -77,6 +77,9 @@ def read_session(request: Request) -> dict | None:
 
 
 def _is_public(path: str) -> bool:
+    # "/" is the public marketing landing (exact match only — a prefix would open everything).
+    if path == "/":
+        return True
     return any(path == p or path.startswith(p) for p in _PUBLIC_PREFIXES)
 
 

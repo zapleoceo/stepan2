@@ -914,6 +914,27 @@ def test_admin_root_redirects_to_ui() -> None:
     assert resp.headers["location"] == "/ui/inbox"
 
 
+def test_landing_is_public_and_generic() -> None:
+    """The product landing at / renders for anonymous visitors, carries the login link,
+    and never names the client (no IT Step / course specifics)."""
+    client = TestClient(app, follow_redirects=False)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.text
+    assert body.lstrip().lower().startswith("<!doctype")
+    assert "Stepan" in body
+    assert 'href="/login"' in body               # login present (top-right)
+    assert "ig.me" in body                        # "Talk to Stepan" demo CTA
+    low = body.lower()
+    assert "it step" not in low and "itstep" not in low  # client not revealed
+
+
+def test_landing_path_is_public_in_auth() -> None:
+    from app.api._auth import _is_public
+    assert _is_public("/") is True
+    assert _is_public("/ui/inbox") is False       # "/" prefix must not open everything
+
+
 # ─── lang switch: stay on the current view (path-only redirect) ────────────────
 
 def test_lang_switch_from_full_page_preserves_referer() -> None:

@@ -120,9 +120,11 @@ def create_app() -> FastAPI:
     app.add_middleware(AdminGuardMiddleware)  # gate /admin before it reaches SQLAdmin
     app.add_middleware(AuthMiddleware)  # added last → outermost → runs first
 
-    @app.get("/", include_in_schema=False)
-    async def root() -> RedirectResponse:
-        return RedirectResponse(url="/ui/inbox", status_code=302)
+    @app.get("/", include_in_schema=False, response_class=HTMLResponse)
+    async def root() -> HTMLResponse:
+        # Public product landing (login lives top-right on it → /login → the app).
+        from app.api._landing import landing_html  # noqa: PLC0415
+        return HTMLResponse(landing_html())
 
     @app.get("/admin", include_in_schema=False)
     async def admin_root() -> RedirectResponse:
