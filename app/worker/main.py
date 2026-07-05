@@ -216,7 +216,7 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
             branch_cfg = await get_settings(session, branch.id)
             if not branch_cfg.followup_enabled:
                 continue
-            kb = await effective_kb_branch(session, branch.id)
+            kb = branch.kb_source_branch_id or branch.id  # object in hand → no extra query
             knowledge = KnowledgeService(session, kb, llm)
             svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)
             sent += await svc.run()  # timers are armed by OutboxSender after bot sends
