@@ -110,17 +110,17 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     assert "/ui/inbox?lead_type=warm&audience=adult" in html
 
 
-def test_segment_tree_renders_per_audience_funnel() -> None:
+def test_segment_tree_renders_stage_breakdown_inside_each_segment() -> None:
     from app.api._i18n import _lang
     from app.api._ui_panels import reports_panel_html
     _lang.set("en")
     html = reports_panel_html(
         {"new": 3}, {}, {}, [], None,
         segments=[("adult", "warm", 10, 2), ("student", "hot", 4, 2)],
-        audience_stages={"adult": {"qualifying": 7, "ready": 3},
-                         "student": {"dormant": 4}})
-    # per-audience funnel strip with clickable stage counts (audience + stage)
-    assert "aud-fn" in html
-    assert "/ui/inbox?audience=adult&stage=qualifying" in html
-    assert "/ui/inbox?audience=adult&stage=ready" in html
-    assert "/ui/inbox?audience=student&stage=dormant" in html
+        segment_stages={"adult": {"warm": {"qualifying": 7, "presenting": 3}},
+                        "student": {"hot": {"ready": 4}}})
+    # stage chips INSIDE each segment link to audience + lead_type + stage (the exact leaf)
+    assert "ssf-chip" in html
+    assert "/ui/inbox?audience=adult&lead_type=warm&stage=qualifying" in html
+    assert "/ui/inbox?audience=adult&lead_type=warm&stage=presenting" in html
+    assert "/ui/inbox?audience=student&lead_type=hot&stage=ready" in html
