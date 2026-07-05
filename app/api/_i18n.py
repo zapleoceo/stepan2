@@ -365,12 +365,12 @@ _TR: dict[str, dict[str, str]] = {
         "id": "Mau tapi tak bisa / tak mau bayar — 'gapunya duit', kaget harga, tanpa penghasilan",
     },
     "segdesc.student": {
-        "ru": "Школьник / несовершеннолетний / структурный блокер (нет телефона, нечем "
-              "платить) — независимо от того, насколько заинтересован",
-        "en": "At school / a minor / a structural blocker (no phone, no way to pay) — "
-              "regardless of how interested they sound",
-        "id": "Masih sekolah / di bawah umur / penghalang struktural (tanpa HP, tak bisa bayar) "
-              "— seberapa pun tertariknya",
+        "ru": "Школьник / несовершеннолетний — целевой сегмент (не блокер): любая программа "
+              "со скидкой 10% для школьников, оплата родителями, можно во взрослую группу",
+        "en": "School-age / a minor — a target segment (not a blocker): any program at a 10% "
+              "student discount, a parent pays, can join the adult group",
+        "id": "Usia sekolah / di bawah umur — segmen target (bukan penghalang): program apa pun "
+              "diskon pelajar 10%, dibayar orang tua, bisa gabung kelas dewasa",
     },
     "segdesc.non_target": {
         "ru": "Не та аудитория (просит то, чему не учим), оффтоп, троллинг или явное «не хочу»",

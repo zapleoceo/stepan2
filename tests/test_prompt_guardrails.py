@@ -58,3 +58,9 @@ def test_decision_parses_phone() -> None:
     assert d.phone == "0812345"
     d2 = parse_decision('{"reply":"hi","stage":"presenting"}')
     assert d2.phone is None
+
+
+def test_students_are_a_target_segment() -> None:
+    assert "STUDENTS (school-age) ARE A TARGET" in _DECISION_CONTRACT
+    assert "10% student discount" in _DECISION_CONTRACT
+    assert "a parent pays" in _DECISION_CONTRACT
