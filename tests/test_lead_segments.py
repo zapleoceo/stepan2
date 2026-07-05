@@ -72,6 +72,24 @@ async def test_segment_dist_groups_by_audience_and_intent(db_session) -> None:
     assert rows[("adult", "unclear")] == (1, 0)   # NULLs → adult / unclear
 
 
+async def test_segment_dist_row_shape_total_at_index_2(db_session) -> None:
+    """Consumers (reports_panel total_leads) index the row as (audience, lead_type, total,
+    won) — total lives at [2]. Guards the regression where the 3→4-tuple shift made
+    sum(int(s[1])) try to int() a lead_type string."""
+    branch = Branch(name="T", lang="id")
+    db_session.add(branch)
+    await db_session.flush()
+    db_session.add(Lead(branch_id=branch.id, audience="adult", lead_type="warm",
+                        stage="new", created_at=_NOW))
+    db_session.add(Lead(branch_id=branch.id, audience="student", lead_type="hot",
+                        stage="new", created_at=_NOW))
+    await db_session.flush()
+    rows = await fetch_segment_dist(db_session, [branch.id])
+    assert all(len(r) == 4 for r in rows)
+    assert all(isinstance(r[0], str) and isinstance(r[1], str) for r in rows)  # aud, seg
+    assert sum(int(r[2]) for r in rows) == 2  # total_leads — the reports_panel expression
+
+
 def test_segment_widget_renders_audience_subtrees() -> None:
     from app.api._i18n import _lang
     from app.api._ui_panels import reports_panel_html
