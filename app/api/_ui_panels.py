@@ -1445,42 +1445,30 @@ def _segment_subtree_svg(rows: list, root_label: str, aud_key: str = "") -> str:
     )
 
 
-def _segment_stage_rows_html(aud_key: str, leaves: list, seg_stage_map: dict) -> str:
-    """Under an audience's Sankey, the funnel breakdown INSIDE each intent segment: one row
-    per lead_type (same win-rate order as the tree), a clickable chip per non-empty stage.
-    Each chip opens exactly that audience + segment + stage's chats. `seg_stage_map` =
-    {lead_type: {stage: count}}."""
-    meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
-    ordered = sorted(leaves, key=lambda r: (r[2] / r[1] if r[1] else 0, r[1]), reverse=True)
-    rows = []
-    for key, _n, _won in ordered:
-        stages = seg_stage_map.get(key, {})
-        chips = []
-        for st in _ALL_STAGES:
-            c = int(stages.get(st, 0) or 0)
-            if c <= 0:
-                continue
-            col = _STAGE_COLOR.get(st, "#868e96")
-            slbl = _h.escape(t(f"stage.{st}"))
-            chips.append(
-                f'<a class="ssf-chip" style="border-left:3px solid {col}"'
-                f' href="/ui/inbox?audience={aud_key}&lead_type={key}&stage={st}"'
-                f' title="{slbl}"><b>{c}</b>{slbl}</a>')
-        if not chips:
+def _audience_funnel_html(aud_key: str, stage_counts: dict) -> str:
+    """A compact clickable funnel strip inside an audience block: one chip per non-empty
+    funnel stage (pipeline order), each linking to that audience+stage's chats — so the
+    count opens exactly those leads."""
+    steps = []
+    for st in _ALL_STAGES:
+        n = int(stage_counts.get(st, 0) or 0)
+        if n <= 0:
             continue
-        color, lbl = meta.get(key, ("#8899aa", "seg.unclear"))
-        rows.append(
-            f'<div class="ssf-row"><span class="ssf-seg" style="color:{color}">'
-            f'{_h.escape(t(lbl))}</span><div class="ssf-chips">{"".join(chips)}</div></div>')
-    return f'<div class="ssf">{"".join(rows)}</div>' if rows else ""
+        color = _STAGE_COLOR.get(st, "#868e96")
+        lbl = _h.escape(t(f"stage.{st}"))
+        steps.append(
+            f'<a class="afn" style="border-top:2px solid {color}"'
+            f' href="/ui/inbox?audience={aud_key}&stage={st}" title="{lbl}">'
+            f'<span class="afn-n">{n}</span><span class="afn-l">{lbl}</span></a>')
+    return f'<div class="aud-fn">{"".join(steps)}</div>' if steps else ""
 
 
-def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> str:
-    """Three-level lead breakdown: one Sankey per audience (adults, then students), branching
-    into intent segments by win rate, and under it the funnel breakdown INSIDE each segment
-    (clickable stage chips). Rows: (audience, lead_type, total, won); a legacy 3-tuple is
-    audience 'adult'. `seg_stage_by_aud` = {aud: {lead_type: {stage: count}}}.
-    Server-rendered — instant on the htmx swap, no client JS. Empty until classified."""
+def _segment_tree_html(segments: list, stage_by_aud: dict | None = None) -> str:
+    """Two-axis lead breakdown: one segment sub-tree per audience (adults, then students),
+    each root showing that audience's total, branching into intent segments by win rate, plus
+    a clickable per-audience funnel strip (stage counts). Rows: (audience, lead_type, total,
+    won); a legacy 3-tuple is treated as audience 'adult'. `stage_by_aud` = {aud: {stage: n}}.
+    Server-rendered SVG — instant on the htmx swap, no client JS. Empty until classified."""
     by_aud: dict[str, list] = {}
     for s in segments:
         if len(s) >= 4:
@@ -1504,8 +1492,8 @@ def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> 
         cap = "" if single else (
             f'<div style="font-size:.72rem;color:#8899aa;margin:.6rem 0 .1rem;'
             f'font-weight:600">{_h.escape(t(f"aud.{aud}"))}</div>')
-        rows = _segment_stage_rows_html(aud, by_aud[aud], (seg_stage_by_aud or {}).get(aud, {}))
-        blocks += f'{cap}<div class="seg-tree">{svg}</div>{rows}'
+        funnel = _audience_funnel_html(aud, (stage_by_aud or {}).get(aud, {}))
+        blocks += f'{cap}<div class="seg-tree">{svg}</div>{funnel}'
     if not blocks:
         return ""
     return (
@@ -1529,7 +1517,7 @@ def reports_panel_html(
     ad_suggestions: dict[str, str] | None = None,
     products: list[tuple[str, str]] | None = None,
     segments: list | None = None,
-    segment_stages: dict | None = None,
+    audience_stages: dict | None = None,
     stage_flow: list | None = None,
     stage_reach: dict[str, int] | None = None,
     total_leads: int = 0,
@@ -1608,7 +1596,7 @@ def reports_panel_html(
         f'<div class="pnl-body">'
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
-        f'{_segment_tree_html(segments or [], segment_stages)}'
+        f'{_segment_tree_html(segments or [], audience_stages)}'
         f'{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}'  # noqa: E501
         f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501

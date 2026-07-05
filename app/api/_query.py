@@ -79,19 +79,16 @@ async def fetch_segment_dist(
     return list((await session.execute(q)).all())
 
 
-async def fetch_audience_segment_stage_dist(
+async def fetch_audience_stage_dist(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
 ) -> list:
-    """Leads by (audience, intent segment, funnel stage) — the stage breakdown shown INSIDE
-    each intent segment of the tree. Rows: (audience, lead_type, stage, count). NULL audience
-    → 'unknown', NULL lead_type → 'unclear' (matches fetch_segment_dist's bucketing)."""
+    """Leads by (audience, funnel stage) with a count each — the per-audience funnel shown
+    inside each segment-tree block. Rows: (audience, stage, count). NULL audience → 'unknown'."""
     aud = func.coalesce(Lead.audience, "unknown")
-    seg = func.coalesce(Lead.lead_type, "unclear")
     q = (
-        select(aud.label("aud"), seg.label("seg"),
-               Lead.stage.label("stage"), func.count().label("cnt"))
-        .group_by(aud, seg, Lead.stage)
+        select(aud.label("aud"), Lead.stage.label("stage"), func.count().label("cnt"))
+        .group_by(aud, Lead.stage)
     )
     if branch_ids:
         q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
