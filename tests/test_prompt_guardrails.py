@@ -64,3 +64,9 @@ def test_students_are_a_target_segment() -> None:
     assert "STUDENTS (school-age) ARE A TARGET" in _DECISION_CONTRACT
     assert "10% student discount" in _DECISION_CONTRACT
     assert "a parent pays" in _DECISION_CONTRACT
+
+
+def test_no_invented_proof_or_cross_product_trial() -> None:
+    assert "DON'T OFFER WHAT YOU CAN'T DELIVER" in _DECISION_CONTRACT
+    assert "no invented alumni success stories" in _DECISION_CONTRACT
+    assert "NO Vibe Coding Skill Booster" in _DECISION_CONTRACT
