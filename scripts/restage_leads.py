@@ -4,6 +4,11 @@ NOTHING else: no replies are sent, no manager hand-offs are raised, agent_enable
 follow-up timer are left untouched. It never assigns ready / handed_off / manager — a batch
 must not trigger a live hand-off — and it skips leads already in those stages or blocked.
 
+Ghost guard: a lead chased the full follow-up schedule (followups_sent >= _GHOST_FOLLOWUPS)
+with no reply is forced to `dormant` and the LLM is skipped — otherwise the classifier (which
+only calls dormant on an explicit stop) would reactivate a silent ghost and undo outbox.py's
+live schedule-exhaustion rule.
+
 Run in the container:  python -m scripts.restage_leads [--branch N] [--limit N] [--dry]
 
 Each lead is its own transaction, so a crash resumes cleanly (idempotent recompute)."""
@@ -26,6 +31,18 @@ log = logging.getLogger("restage_leads")
 # are live hand-offs (bot off, manager card, CAPI) — never fired from a relabel pass.
 _STAGES = ("new", "nurturing", "qualifying", "presenting", "objection", "dormant")
 _EXCLUDED = ("ready", "handed_off", "manager")
+
+# A lead chased this many follow-ups with NO reply is ghosted → dormant, no matter how "active"
+# the dialog reads. This mirrors outbox.py (the live path marks dormant when the follow-up
+# schedule is exhausted; the default schedule 4,24,72h = 3 steps). Without this override the LLM
+# stage classifier — which only calls dormant on an EXPLICIT stop — would reactivate a silent
+# ghost, undoing the live rule. A fresh inbound resets followups_sent, so >= means still silent.
+_GHOST_FOLLOWUPS = 3
+
+
+def _ghost_stage(followups_sent: int) -> str | None:
+    """Forced stage for a ghosted lead ('dormant'), or None to let the LLM classify."""
+    return "dormant" if followups_sent >= _GHOST_FOLLOWUPS else None
 
 _SYSTEM = (
     "Below is a sales chat between a LEAD and the AGENT (Stepan) for IT STEP, a coding school "
@@ -50,15 +67,17 @@ _SYSTEM = (
 
 async def _lead_rows(
     session, branch: int | None, limit: int | None, offset: int = 0,
-) -> list[tuple[int, int, str, int]]:
+) -> list[tuple[int, int, str, int, int]]:
     where = ["l.stage NOT IN ('ready','handed_off','manager')", "l.is_blocked = false"]
     params: dict = {}
     if branch:
         where.append("l.branch_id = :b")
         params["b"] = branch
     # WHERE is built only from the fixed clauses above; all values are bound params.
-    subq = "(SELECT ct.id FROM channel_thread ct WHERE ct.lead_id = l.id ORDER BY ct.id LIMIT 1)"
-    q = f"SELECT l.id, l.branch_id, l.stage, {subq} FROM lead l WHERE {' AND '.join(where)} ORDER BY l.id"  # noqa: S608, E501
+    thr = "(SELECT ct.id FROM channel_thread ct WHERE ct.lead_id = l.id ORDER BY ct.id LIMIT 1)"
+    fups = ("(SELECT ct.followups_sent FROM channel_thread ct WHERE ct.lead_id = l.id"
+            " ORDER BY ct.id LIMIT 1)")
+    q = f"SELECT l.id, l.branch_id, l.stage, {thr}, {fups} FROM lead l WHERE {' AND '.join(where)} ORDER BY l.id"  # noqa: S608, E501
     if limit:
         q += " LIMIT :lim"
         params["lim"] = limit
@@ -66,7 +85,7 @@ async def _lead_rows(
         q += " OFFSET :off"
         params["off"] = offset
     rows = (await session.execute(text(q), params)).all()
-    return [(r[0], r[1], str(r[2]), r[3]) for r in rows if r[3] is not None]
+    return [(r[0], r[1], str(r[2]), r[3], int(r[4] or 0)) for r in rows if r[3] is not None]
 
 
 async def _dialog(session, lead_id: int) -> str:
@@ -97,8 +116,33 @@ def _parse(raw: str) -> str | None:
     return val if val in _STAGES else None
 
 
-async def _process(row: tuple[int, int, str, int], llm: BrokerLLM, dry: bool) -> str:
-    lead_id, branch_id, cur_stage, thread_id = row
+async def _relabel(session, row: tuple[int, int, str, int, int], new_stage: str,
+                   reason: str, dry: bool) -> str:
+    lead_id, branch_id, cur_stage, thread_id, _ = row
+    if new_stage == cur_stage:
+        return "same"
+    if new_stage in _EXCLUDED:  # defensive — never hand off from a relabel pass
+        return "same"
+    if not dry:
+        await session.execute(
+            text("UPDATE lead SET stage = :s WHERE id = :id"), {"s": new_stage, "id": lead_id})
+        await session.execute(
+            text("INSERT INTO stage_event"
+                 " (branch_id, lead_id, thread_id, from_stage, to_stage, actor, reason,"
+                 "  created_at)"
+                 " VALUES (:b, :l, :t, :f, :s, 'batch:restage', :r, now())"),
+            {"b": branch_id, "l": lead_id, "t": thread_id, "f": cur_stage, "s": new_stage,
+             "r": reason})
+    return f"{cur_stage}->{new_stage}"
+
+
+async def _process(row: tuple[int, int, str, int, int], llm: BrokerLLM, dry: bool) -> str:
+    lead_id, branch_id, cur_stage, thread_id, followups_sent = row
+    forced = _ghost_stage(followups_sent)
+    if forced is not None:  # ghosted after the full follow-up schedule — dormant, skip the LLM
+        async with session_scope() as session:
+            return await _relabel(session, row, forced,
+                                  "ghosted: followups exhausted (>=3), no reply", dry)
     async with session_scope() as session:
         convo = await _dialog(session, lead_id)
         if not convo:
@@ -124,21 +168,7 @@ async def _process(row: tuple[int, int, str, int], llm: BrokerLLM, dry: bool) ->
         new_stage = _parse(raw)
         if new_stage is None:
             return "error"
-        if new_stage == cur_stage:
-            return "same"
-        if new_stage in _EXCLUDED:  # defensive — classifier can't emit these, never hand off
-            return "same"
-        if not dry:
-            await session.execute(
-                text("UPDATE lead SET stage = :s WHERE id = :id"),
-                {"s": new_stage, "id": lead_id})
-            await session.execute(
-                text("INSERT INTO stage_event"
-                     " (branch_id, lead_id, thread_id, from_stage, to_stage, actor, reason,"
-                     "  created_at)"
-                     " VALUES (:b, :l, :t, :f, :s, 'batch:restage', 'full stage re-check', now())"),
-                {"b": branch_id, "l": lead_id, "t": thread_id, "f": cur_stage, "s": new_stage})
-        return f"{cur_stage}->{new_stage}"
+        return await _relabel(session, row, new_stage, "full stage re-check", dry)
 
 
 async def main() -> None:
@@ -158,7 +188,7 @@ async def main() -> None:
     sem = asyncio.Semaphore(args.concurrency)
     counts: dict[str, int] = {}
 
-    async def run(row: tuple[int, int, str, int], idx: int) -> None:
+    async def run(row: tuple[int, int, str, int, int], idx: int) -> None:
         async with sem:
             r = await _process(row, llm, args.dry)
             bucket = "moved" if "->" in r else r
