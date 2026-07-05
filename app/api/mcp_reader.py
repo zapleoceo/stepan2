@@ -55,30 +55,23 @@ async def list_chats(limit: int = 30, branch_id: int | None = None,
     Returns each chat's thread_id, lead name, phone, stage, branch, last activity and
     message count — use thread_id or phone with get_chat/analyze_chat."""
     limit = max(1, min(limit, 100))
-    # Build the WHERE dynamically: an untyped NULL bind in "(:p IS NULL OR col = :p)"
-    # makes asyncpg fail with AmbiguousParameterError, so only bind filters that are set.
-    conds: list[str] = []
-    params: dict = {"limit": limit}
-    if branch_id is not None:
-        conds.append("l.branch_id = :branch")
-        params["branch"] = branch_id
-    if stage is not None:
-        conds.append("l.stage = :stage")
-        params["stage"] = stage
-    where_sql = (" WHERE " + " AND ".join(conds)) if conds else ""
+    # CAST the optional filters: an untyped NULL bind in "(:p IS NULL OR col = :p)" makes
+    # asyncpg fail with AmbiguousParameterError — the cast pins the type so NULL is fine.
     q = text(
         "SELECT ct.id, l.display_name, l.phone_e164, l.stage, l.branch_id,"
         "       MAX(m.occurred_at) AS last_at, COUNT(m.id) AS n"
         " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
         " LEFT JOIN message m ON m.thread_id = ct.id AND m.text <> ''"
-        f"{where_sql}"
+        " WHERE (CAST(:branch AS INTEGER) IS NULL OR l.branch_id = :branch)"
+        "   AND (CAST(:stage AS VARCHAR) IS NULL OR l.stage = :stage)"
         " GROUP BY ct.id, l.display_name, l.phone_e164, l.stage, l.branch_id"
         " HAVING COUNT(m.id) > 0"
         " ORDER BY last_at DESC"
         " LIMIT :limit"
     )
     async with session_scope() as session:
-        rows = (await session.execute(q, params)).all()
+        rows = (await session.execute(
+            q, {"branch": branch_id, "stage": stage, "limit": limit})).all()
     return {"chats": [
         {"thread_id": r[0], "name": r[1], "phone": r[2], "stage": r[3],
          "branch_id": r[4], "last_at": r[5].isoformat() if r[5] else None, "messages": r[6]}
