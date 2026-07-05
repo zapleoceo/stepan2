@@ -27,7 +27,7 @@ from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
 from .needs import merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
-from .routing import FAST, SMART, pick_capability
+from .routing import FAST, SMART, parse_smart_stages, pick_capability
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +125,13 @@ class ReplyService:
             lead.preferred_language = script_lang  # sticks even if the model forgets to say so
             self.session.add(lead)
         mode = self.settings.reply_routing if self.settings is not None else "hybrid"
+        smart_stages = parse_smart_stages(
+            self.settings.smart_stages if self.settings is not None else None)
         cap = pick_capability(
             workflow=route_wf, stage=lead.stage if lead is not None else None,
             lead_type=lead.lead_type if lead is not None else None,
-            last_inbound=last_in.text if last_in is not None else "", mode=mode)
+            last_inbound=last_in.text if last_in is not None else "", mode=mode,
+            smart_stages=smart_stages)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill)
         try:

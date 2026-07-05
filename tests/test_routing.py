@@ -3,7 +3,12 @@ cheap majority to chat:fast, and honour the off switch."""
 from __future__ import annotations
 
 from app.domain.enums import Stage
-from app.modules.conversation.routing import FAST, SMART, pick_capability
+from app.modules.conversation.routing import (
+    FAST,
+    SMART,
+    parse_smart_stages,
+    pick_capability,
+)
 
 
 def _pick(**over) -> str:
@@ -44,3 +49,22 @@ def test_buying_signal_forces_smart_even_early() -> None:
     assert _pick(stage=Stage.QUALIFYING, last_inbound="Gasss") == SMART
     assert _pick(stage=Stage.QUALIFYING, last_inbound="ini nomor wa 0812 3456 7890") == SMART
     assert _pick(stage=Stage.QUALIFYING, last_inbound="masih mikir dulu ya") == FAST
+
+
+def test_parse_smart_stages() -> None:
+    assert parse_smart_stages("presenting, objection ,ready") == frozenset(
+        {"presenting", "objection", "ready"})
+    assert parse_smart_stages("presenting,bogus") == frozenset({"presenting"})  # drop unknown
+    assert parse_smart_stages("") == frozenset({"presenting", "objection", "ready"})  # → default
+    assert parse_smart_stages("nonsense") == frozenset(
+        {"presenting", "objection", "ready"})  # all-invalid → default, never all-fast by typo
+
+
+def test_smart_stages_is_tunable() -> None:
+    # Operator narrows the strong-model stages to objection only → presenting now routes fast.
+    only_obj = frozenset({"objection"})
+    assert _pick(stage=Stage.PRESENTING, smart_stages=only_obj) == FAST
+    assert _pick(stage=Stage.OBJECTION, smart_stages=only_obj) == SMART
+    # Widen to include qualifying → qualifying now routes smart.
+    assert _pick(stage=Stage.QUALIFYING,
+                 smart_stages=frozenset({"qualifying", "presenting"})) == SMART

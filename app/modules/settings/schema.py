@@ -104,6 +104,17 @@ SCHEMA: list[SettingSection] = [
                ("hybrid", _l("Гибрид (экономно)", "Hybrid (thrifty)", "Hybrid (hemat)")),
                ("off", _l("Всегда сильная", "Always strong", "Selalu kuat")),
            ]),
+        _f("smart_stages", "text", "presenting,objection,ready",
+           _l("Стадии на сильной модели", "Strong-model stages", "Tahap model kuat"),
+           ph=_l("presenting,objection,ready", "presenting,objection,ready",
+                 "presenting,objection,ready"),
+           help=_l("Гибрид: на этих стадиях отвечает сильная модель (через запятую). "
+                   "Горячие лиды и сигналы оплаты — всегда на сильной.",
+                   "Hybrid: strong model answers on these stages (comma-list). Hot leads and "
+                   "payment signals always use strong.",
+                   "Hybrid: model kuat menjawab di tahap ini (koma). Lead panas & sinyal "
+                   "bayar selalu pakai model kuat."),
+           width="230px"),
         # hidden until the RAG / tech-context / web-search features are ported — the
         # keys are still parsed + seeded, but showing dead toggles misleads the operator.
         _f("tech_usecase_enabled", "bool", "true",
