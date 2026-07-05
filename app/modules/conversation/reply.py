@@ -168,7 +168,7 @@ class ReplyService:
         if mode == "full" and guard.is_risky(decision.reply):
             issues += await guard.verify_grounding(
                 self.llm, decision.reply, context, branch_id=self.branch_id,
-                thread_id=thread_id, bill=bill)
+                thread_id=thread_id, bill=bill, system=await self._guard_prompt())
         if not issues:
             return decision
         logger.warning("guard: branch=%d thread=%d fabrication → regen: %s",
@@ -189,6 +189,13 @@ class ReplyService:
                      self.branch_id, thread_id)
         from dataclasses import replace  # noqa: PLC0415
         return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True)
+
+    async def _guard_prompt(self) -> str | None:
+        """The reply-guard checker prompt, editable per branch via the `guard_verify` KB
+        doc; None → guard.py's built-in default."""
+        from app.modules.knowledge.repository import KnowledgeRepo  # noqa: PLC0415
+        doc = await KnowledgeRepo(self.session, self.branch_id).by_slug("guard_verify")
+        return doc.content if doc and (doc.content or "").strip() else None
 
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.

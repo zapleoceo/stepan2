@@ -22,8 +22,9 @@ from .repository import KnowledgeRepo, ProductRepo
 
 logger = logging.getLogger(__name__)
 
-# Persona is identity — always injected directly, never chunked/retrieved.
-PERSONA_SLUGS = frozenset({"persona", "persona_core"})
+# Docs injected/used directly, never chunked into the retrieval index: persona is
+# identity (always injected); guard_verify is the reply-guard's checker prompt.
+PERSONA_SLUGS = frozenset({"persona", "persona_core", "guard_verify"})
 _EMBED_BATCH = 24  # broker/voyage rejects large embed batches (502) — keep well under ~40
 _TOP_K = settings().rag_top_k
 

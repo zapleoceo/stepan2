@@ -63,11 +63,12 @@ def is_risky(reply: str) -> bool:
 
 async def verify_grounding(
     llm: LLMPort, reply: str, context: str, *, branch_id: int,
-    thread_id: int, bill: bool = True,
+    thread_id: int, bill: bool = True, system: str | None = None,
 ) -> list[str]:
-    """LLM grounding check on a risky reply; returns unsupported claims ([] = clean)."""
+    """LLM grounding check on a risky reply; returns unsupported claims ([] = clean).
+    `system` overrides the checker prompt (from the editable `guard_verify` KB doc)."""
     messages = [
-        {"role": "system", "content": _VERIFY_SYSTEM},
+        {"role": "system", "content": system or _VERIFY_SYSTEM},
         {"role": "user", "content": f"KNOWLEDGE BASE:\n{context[:12000]}\n\nDRAFT:\n{reply}"},
     ]
     try:
