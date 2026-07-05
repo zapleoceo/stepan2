@@ -138,6 +138,15 @@ def test_inbox_ad_filter_renders_chip_and_scoped_thread_load() -> None:
     assert "/ui/threads?ad_id=120255671613970771" in resp.text
 
 
+def test_inbox_segment_filter_renders_chip_and_scoped_thread_load() -> None:
+    # Clicking a segment-tree leaf opens /ui/inbox?lead_type=warm — chip + scoped thread load.
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox?lead_type=warm")
+    assert resp.status_code == 200
+    assert "ad-filter" in resp.text                       # reuses the dismissable chip styling
+    assert "/ui/threads?lead_type=warm" in resp.text      # thread list loads scoped to segment
+
+
 def test_ad_product_map_rejects_without_single_branch() -> None:
     # No branch cookie → branch_ids is None → the route refuses before any DB work.
     client = TestClient(app, raise_server_exceptions=False)

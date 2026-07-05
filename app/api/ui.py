@@ -85,12 +85,13 @@ _THREAD_TMPL = (
 
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(
-    request: Request, stage: str = "", ad_id: str = "", grp: str = "",
+    request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
                                   ad_id=ad_id.strip(), grp=grp.strip(),
+                                  lead_type=lead_type.strip(),
                                   is_super=is_super_admin(request)))
 
 
@@ -141,7 +142,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
-    request: Request, stage: str = "", ad_id: str = "", grp: str = "",
+    request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
@@ -155,6 +156,12 @@ async def threads_partial(
     elif s:
         conditions.append("l.stage = :stage")
         params["stage"] = s
+    lt = lead_type.strip()
+    if lt == "unclear":  # tree buckets an unset lead_type as 'unclear' — match both
+        conditions.append("(l.lead_type = 'unclear' OR l.lead_type IS NULL)")
+    elif lt:  # "open this segment's chats" from the reports segment tree
+        conditions.append("l.lead_type = :lead_type")
+        params["lead_type"] = lt
     ad = ad_id.strip()
     if ad:  # "open this ad's chats" from the reports ad-funnel table
         conditions.append("ct.ad_id = :ad_id")

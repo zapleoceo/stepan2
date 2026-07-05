@@ -58,3 +58,4 @@ def test_segment_widget_renders() -> None:
     assert "seg-tree" in html
     assert "Lead segments" in html
     assert "won 20%" in html  # warm: 2/10
+    assert "/ui/inbox?lead_type=warm" in html  # leaf links to that segment's chats

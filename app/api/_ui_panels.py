@@ -1225,11 +1225,12 @@ def _funnel_flow_html(
         ty = y + h / 2 + 12 if below else y - h / 2 - 5
         desc = _h.escape(t("flow.entry_desc") if s == "new" else t(f"sdesc.{s}"))
         nodes += (
+            f'<a href="/ui/inbox?stage={s}" style="cursor:pointer">'
             f'<g><title>{lbl}: {t_s} — {desc}</title>'
             f'<rect x="{x - bar_w / 2:.0f}" y="{y - h / 2:.0f}" width="{bar_w}" height="{h:.0f}"'
             f' rx="3" fill="{col}"/>'
             f'<text x="{x:.0f}" y="{ty:.0f}" text-anchor="middle" fill="#9aa7b5"'
-            f' font-size="9">{lbl} · {t_s}</text></g>'
+            f' font-size="9">{lbl} · {t_s}</text></g></a>'
         )
     # "no movement": leads that entered (first message) but have no transition logged yet, so
     # entry + this = the whole base. A standalone dashed node under the entry (no links flow to
@@ -1379,6 +1380,7 @@ def _segment_tree_html(segments: list) -> str:
         desc = _h.escape(t(f"segdesc.{key}"))
         tip = t("seg.tip", label=label, cnt=cnt, pct=pct, won_pct=won_pct, desc=desc)
         nodes += (
+            f'<a href="/ui/inbox?lead_type={key}" style="cursor:pointer">'
             f'<g><title>{tip}</title>'
             f'<rect x="{node_x}" y="{y}" width="{node_w}" height="{node_h}" rx="6"'
             f' fill="#141925" stroke="#2d3748"/>'
@@ -1388,7 +1390,7 @@ def _segment_tree_html(segments: list) -> str:
             f'<text x="{node_x + node_w - 10}" y="{cy - 1}" text-anchor="end" fill="#e8eef4"'
             f' font-size="14" font-weight="700">{cnt}</text>'
             f'<text x="{node_x + 14}" y="{cy + 11}" fill="#6b7685" font-size="9">'
-            f'{pct}% · won {won_pct}%</text></g>'
+            f'{pct}% · won {won_pct}%</text></g></a>'
         )
     root = (
         f'<rect x="6" y="{root_cy - 30}" width="122" height="60" rx="8" fill="#1a2230"'

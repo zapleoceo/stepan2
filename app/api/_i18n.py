@@ -53,6 +53,7 @@ _TR: dict[str, dict[str, str]] = {
                      "en": "🔍 Search name / @handle",
                      "id": "🔍 Cari nama / @handle"},
     "inbox.ad_filter": {"ru": "Чаты по рекламе", "en": "Chats from ad", "id": "Chat dari iklan"},
+    "inbox.seg_filter": {"ru": "Сегмент", "en": "Segment", "id": "Segmen"},
     "inbox.ad_clear": {"ru": "Показать все чаты", "en": "Show all chats",
                        "id": "Tampilkan semua chat"},
     "chat.bot_off_hint": {"ru": "Бот выключен для этого лида",

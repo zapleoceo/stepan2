@@ -104,7 +104,9 @@ JS едет инлайном во фрагменте (`_AD_FUNNEL_JS`), обра
   `fetch_segment_dist` (`coalesce(lead_type,'unclear')`, won = стадии `ready|handed_off`).
   У каждого листа hover-`<title>` (`seg.tip` + `segdesc.{type}`) с точным критерием, как
   определяется тип — дословно из блока LEAD TYPE в `prompt.py`, теми же правилами что живой
-  классификатор.
+  классификатор. Лист — SVG-ссылка на `/ui/inbox?lead_type=<type>` (для `unclear` фильтр ловит
+  и `NULL`); узел воронки — ссылка на `/ui/inbox?stage=<stage>`. `threads_partial`/`inbox`
+  принимают `lead_type`, шелл рисует дисмиссабл-чип (`inbox.seg_filter`) как для рекламы.
 - **Воронка (путь лидов)** — `_funnel_flow_html`: Sankey-поток реального пути
   `вход → … → выход`, восстановленный из аудита переходов `stage_event` (`fetch_stage_flow`,
   строки `from_stage,to_stage,count`, self-переходы отфильтрованы). Счёт —

@@ -62,6 +62,7 @@ def test_flow_widget_renders_and_falls_back() -> None:
     assert "<svg" in html
     assert html.count("<path") == 3           # one link per edge
     assert "Entry point:" in html             # node hover describes how the stage is determined
+    assert "/ui/inbox?stage=presenting" in html  # stage node links to those chats
     assert _funnel_flow_html([]) == ""        # empty → caller falls back to line funnel
 
 

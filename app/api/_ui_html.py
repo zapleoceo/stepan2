@@ -1344,6 +1344,7 @@ _FAVICON = (
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
+    lead_type: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1631,7 +1632,8 @@ def app_shell(
         # dismissable chip linking back to the unfiltered inbox.
         _thr_params = "&".join(
             f"{k}={_h.escape(v)}"
-            for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp)) if v)
+            for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
+                         ("lead_type", lead_type)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
         _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
                     "dormant": t("rep.dormant")}.get(grp, "")
@@ -1643,11 +1645,18 @@ def app_shell(
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}" title="{_h.escape(t("inbox.ad_clear"))}"'
             f'>✕</a></div>'
         ) if ad_id else ""
+        # segment chip (from a clicked segment-tree leaf) — same dismissable chip, back to all
+        _seg_chip = (
+            f'<div class="ad-filter">{_h.escape(t("inbox.seg_filter"))} '
+            f'<span class="ad-filter-id">{_h.escape(t(f"seg.{lead_type}"))}</span>'
+            f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
+            f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
+        ) if lead_type else ""
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'
             f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
-            f'{_ad_chip}'
+            f'{_ad_chip}{_seg_chip}'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
             f' data-help="{_h.escape(t("hint.search"))}"'
             f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'
