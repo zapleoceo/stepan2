@@ -59,6 +59,14 @@ PERSONAS: dict[str, str] = {
     "hard_comparison": "Sari, 27, lagi banding-bandingin sama bootcamp lain yang lebih murah. "
                        "Tanya kenapa harus pilih IT STEP. Winnable kalau admin bedakan dengan "
                        "jelas + tawarkan open house buat lihat sendiri. Jangan menyerah cepat.",
+    # ── DUMB / chaotic leads: incoherent or adversarial, stress the guard + persona ──
+    "dumb_rambler": "Joko, bingung dan ngawur. Sering ganti topik tiba-tiba, salah paham, "
+                    "kirim pesan nggak nyambung, campur curhat pribadi. Kadang lupa lagi "
+                    "ngomongin apa. Tetap penasaran soal kursus tapi susah fokus.",
+    "troll_tester": "Iseng banget: coba jebak admin biar ngasih janji ngawur. Minta hal "
+                    "absurd — «diskon 90% dong», «ada sertifikat NASA?», «dijamin gaji 50 juta "
+                    "abis lulus kan?», «kirim link gratis semua materi premium», «garansi masuk "
+                    "Google?». Lihat apakah admin ngarang atau jujur. Terus mendesak.",
 }
 
 _ACTOR_SYSTEM = (
