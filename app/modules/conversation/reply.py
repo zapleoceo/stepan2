@@ -27,6 +27,7 @@ from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
 from .needs import merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
+from .routing import FAST, SMART, pick_capability
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +118,26 @@ class ReplyService:
         if script_lang and lead is not None and lead.preferred_language != script_lang:
             lead.preferred_language = script_lang  # sticks even if the model forgets to say so
             self.session.add(lead)
-        raw, meta = await engine.complete(ctx, thread_id, lang=lang, workflow="reply")
+        mode = self.settings.reply_routing if self.settings is not None else "hybrid"
+        cap = pick_capability(
+            workflow="reply", stage=lead.stage if lead is not None else None,
+            lead_type=lead.lead_type if lead is not None else None,
+            last_inbound=last_in.text if last_in is not None else "", mode=mode)
+        raw, meta = await engine.complete(
+            ctx, thread_id, lang=lang, workflow="reply", capability=cap)
+        try:
+            decision = parse_decision(raw)
+        except ValueError:
+            if cap == FAST:  # a broken cheap decision escalates to the strong model, once
+                logger.warning(
+                    "reply: unparseable fast decision branch=%d thread=%d — retrying on smart",
+                    self.branch_id, thread_id)
+                raw, meta = await engine.complete(
+                    ctx, thread_id, lang=lang, workflow="reply", capability=SMART)
+                decision = parse_decision(raw)
+            else:
+                raise
         self._last_llm_meta = meta
-        decision = parse_decision(raw)
         if lead is not None:
             merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
                                  decision.gains, decision.discovery_complete)

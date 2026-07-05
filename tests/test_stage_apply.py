@@ -76,6 +76,24 @@ async def _world(s, *, phone: str | None = None, stage: Stage = Stage.NEW,
     return branch.id, thread.id, lead
 
 
+class CapRecordingLLM:
+    """Returns broken JSON on chat:fast, a valid decision on chat:smart; records the tiers
+    it was asked for — to prove a broken cheap decision escalates to the strong model."""
+    def __init__(self) -> None:
+        self.caps: list[str] = []
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        cap = kw.get("capability")
+        self.caps.append(cap)
+        if cap == "chat:fast":
+            return "{ this is not valid json", {"model": "fast", "cost_usd": 0.0}
+        return json.dumps({"reply": "ok", "stage": "qualifying"}), {"model": "smart",
+                                                                    "cost_usd": 0.02}
+
+    async def embed(self, texts):  # noqa: ANN001, ANN201
+        return [[0.0] for _ in texts]
+
+
 def _decision(**over: Any) -> Decision:
     base: dict[str, Any] = {
         "reply": "ok", "stage": Stage.QUALIFYING, "product_slug": None,
@@ -83,6 +101,14 @@ def _decision(**over: Any) -> Decision:
     }
     base.update(over)
     return Decision(**base)
+
+
+async def test_fast_broken_json_escalates_to_smart(db_session) -> None:
+    bid, tid, _ = await _world(db_session, stage=Stage.NEW)  # early + no signal → routes to fast
+    llm = CapRecordingLLM()
+    decision = await _svc(db_session, bid, llm=llm).decide(tid)
+    assert llm.caps == ["chat:fast", "chat:smart"]  # tried cheap, escalated on broken JSON
+    assert decision is not None and decision.reply == "ok"
 
 
 def _svc(s, bid: int, notifier=None, llm=None) -> ReplyService:  # noqa: ANN001

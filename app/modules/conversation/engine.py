@@ -119,8 +119,12 @@ class DecisionEngine:
         lang: str,
         workflow: str,
         extra_user_msg: str | None = None,
+        capability: str = "chat:smart",
     ) -> tuple[str, dict]:
-        """Build the prompt, call the model, record the spend; returns (raw, meta)."""
+        """Build the prompt, call the model, record the spend; returns (raw, meta).
+
+        capability picks the model tier (see routing.pick_capability) — default stays smart
+        so any caller that doesn't route keeps the strong model."""
         context = await self.knowledge.knowledge_context(
             ctx.thread.product_slug, query=_retrieval_query(ctx.dialog), thread_id=thread_id)
         notes = await self.coaching.active_manager_notes()
@@ -134,7 +138,7 @@ class DecisionEngine:
         elif messages[-1]["role"] == "assistant":
             messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
         raw, meta = await self.llm.chat(
-            messages, capability="chat:smart", require_json_schema=True,
+            messages, capability=capability, require_json_schema=True,
             workflow=workflow, thread_id=thread_id, branch_id=self.branch_id,
         )
         await ctx.budget.record(float(meta.get("cost_usd") or 0.0))

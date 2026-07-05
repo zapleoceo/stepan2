@@ -51,6 +51,9 @@ class BranchSettings:
     crm_read_enabled: bool = False
     crm_state_url: str = ""
     crm_read_secret: str = ""
+    # 'hybrid' → route cheap turns to chat:fast, keep chat:smart for money moments;
+    # 'off' → always chat:smart (pre-optimisation behaviour). See conversation.routing.
+    reply_routing: str = "hybrid"
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -144,4 +147,5 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_read_secret=raw.get("crm_read_secret", ""),
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
+        reply_routing=raw.get("reply_routing", "hybrid"),
     )

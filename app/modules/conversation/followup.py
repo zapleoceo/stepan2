@@ -127,19 +127,37 @@ class FollowupService:
             return False
         lang = await self._lang()
         total = len(self.settings.followup_schedule_h)
+        from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
+        from .routing import FAST, SMART, pick_capability  # noqa: PLC0415
+        mode = self.settings.reply_routing if self.settings is not None else "hybrid"
+        # A nudge to a quiet lead is the lowest-stakes traffic → cheap model; escalate once if
+        # the cheap model returns a broken decision so the follow-up still goes out.
+        cap = pick_capability(workflow="followup", stage=None, lead_type=None,
+                              last_inbound="", mode=mode)
+        nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow="followup",
-            extra_user_msg=_FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total),
+            extra_user_msg=nudge, capability=cap,
         )
-        from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
         try:
             decision = parse_decision(raw)
         except ValueError:
-            logger.warning(
-                "followup: unparseable decision branch=%d thread=%d — attempt not burned",
-                self.branch_id, thread_id,
-            )
-            return False
+            if cap == FAST:
+                raw, meta = await engine.complete(
+                    ctx, thread_id, lang=lang, workflow="followup",
+                    extra_user_msg=nudge, capability=SMART)
+                try:
+                    decision = parse_decision(raw)
+                except ValueError:
+                    logger.warning(
+                        "followup: unparseable decision branch=%d thread=%d — attempt not burned",
+                        self.branch_id, thread_id)
+                    return False
+            else:
+                logger.warning(
+                    "followup: unparseable decision branch=%d thread=%d — attempt not burned",
+                    self.branch_id, thread_id)
+                return False
         if not decision.reply:
             return False
         if await self._lead_replied_meanwhile(thread_id):

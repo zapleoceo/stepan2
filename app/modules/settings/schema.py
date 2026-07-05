@@ -94,6 +94,16 @@ SCHEMA: list[SettingSection] = [
                ("direct", _l("Прямой (весь текст)", "Direct (full text)", "Langsung")),
                ("rag", _l("RAG (векторный поиск)", "RAG (vector search)", "RAG (vektor)")),
            ]),
+        _f("reply_routing", "text", "hybrid",
+           _l("Маршрутизация модели", "Model routing", "Routing model"),
+           help=_l("Гибрид: дешёвая модель на простых ходах, сильная — на закрытии сделки",
+                   "Hybrid: cheap model on easy turns, strong model for closing",
+                   "Hybrid: model murah untuk giliran mudah, model kuat untuk closing"),
+           width="170px",
+           choices=[
+               ("hybrid", _l("Гибрид (экономно)", "Hybrid (thrifty)", "Hybrid (hemat)")),
+               ("off", _l("Всегда сильная", "Always strong", "Selalu kuat")),
+           ]),
         # hidden until the RAG / tech-context / web-search features are ported — the
         # keys are still parsed + seeded, but showing dead toggles misleads the operator.
         _f("tech_usecase_enabled", "bool", "true",
