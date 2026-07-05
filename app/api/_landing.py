@@ -139,6 +139,41 @@ footer{border-top:1px solid var(--line);padding:2.2rem 0;color:var(--mut);font-s
 .stp-foot textarea:focus{outline:none;border-color:var(--acc)}
 .stp-send{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border:none;border-radius:10px;width:40px;height:38px;font-size:1rem;cursor:pointer}
 @media (max-width:460px){.stp-w{right:8px;bottom:8px;width:calc(100vw - 16px);height:calc(100vh - 16px)}.stp-fab{right:12px;bottom:12px}}
+/* product mockups (illustrative — not real data) */
+.shots{display:grid;grid-template-columns:1fr 1fr;gap:1.4rem;margin-top:2.6rem;align-items:start}
+.frame{background:#0d0f15;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 22px 55px rgba(0,0,0,.5)}
+.fbar{display:flex;align-items:center;gap:.4rem;padding:.55rem .8rem;border-bottom:1px solid var(--line);background:#12151d}
+.fbar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+.fd1{background:#ff5f57}.fd2{background:#febc2e}.fd3{background:#28c840}
+.furl{margin-left:.5rem;font-size:.68rem;color:var(--mut);background:#0d0f15;border:1px solid var(--line);border-radius:6px;padding:.16rem .6rem;flex:1;text-align:center}
+.ph-top{display:flex;align-items:center;gap:.55rem;padding:.7rem .9rem;border-bottom:1px solid var(--line);background:#12151d}
+.ph-ava{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#ff8fb1,#c86fff);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:.85rem}
+.ph-top b{font-size:.9rem}.ph-top small{display:block;font-size:.64rem;color:#51cf66}
+.ph-body{padding:.9rem;display:flex;flex-direction:column;gap:.45rem;background:#0d0f15}
+.mb{max-width:82%;padding:.5rem .75rem;border-radius:14px;font-size:.83rem;line-height:1.42}
+.mb.in{align-self:flex-start;background:#1c2431;border:1px solid var(--line);border-bottom-left-radius:5px}
+.mb.out{align-self:flex-end;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;border-bottom-right-radius:5px}
+.mb .who{display:block;font-size:.58rem;opacity:.65;margin-bottom:.15rem}
+.dash{padding:1rem;display:flex;flex-direction:column;gap:.9rem;background:#0d0f15}
+.mcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.9rem}
+.mlbl{font-size:.6rem;color:var(--mut);text-transform:uppercase;letter-spacing:.09em;margin-bottom:.55rem}
+.leadrow{display:flex;align-items:center;gap:.5rem;margin-bottom:.65rem}
+.av{width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#5ac8fa,#4d7cff);display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#fff}
+.leadrow b{font-size:.85rem}
+.spill{margin-left:auto;font-size:.6rem;background:rgba(155,122,255,.16);color:#b79bff;border-radius:20px;padding:.12rem .6rem}
+.chips{display:flex;flex-wrap:wrap;gap:.35rem}
+.ch2{font-size:.68rem;border-radius:8px;padding:.2rem .5rem;border:1px solid}
+.c-goal{background:#12233b;color:#7db8ff;border-color:#1e3a5f}
+.c-pain{background:#301a1a;color:#ffb0a3;border-color:#4a2a2a}
+.c-gain{background:#132a1e;color:#8fe3ac;border-color:#1e3a2a}
+.fn{display:flex;flex-direction:column;gap:.45rem}
+.fnrow{display:flex;align-items:center;gap:.6rem}
+.fnrow .nm{width:74px;color:var(--mut);font-size:.72rem}
+.fnbar{height:15px;border-radius:5px;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+.fnrow .v{font-weight:700;font-size:.72rem;margin-left:auto}
+.alert{display:flex;align-items:center;gap:.5rem;font-size:.78rem;color:#8fe3ac;background:rgba(81,207,102,.1);border:1px solid rgba(81,207,102,.28);border-radius:10px;padding:.6rem .75rem}
+.mnote{text-align:center;font-size:.72rem;color:var(--mut);margin-top:1rem;opacity:.8}
+@media (max-width:760px){.shots{grid-template-columns:1fr}}
 """
 
 
@@ -220,6 +255,61 @@ def landing_html() -> str:
         "<p class=\"lead\">Stepan runs the whole first conversation the way your best closer "
         "would, then hands you the ready-to-buy leads.</p>"
         f"<div class=\"steps\">{steps}</div>"
+        "</div></section>"
+        # ── a peek inside (illustrative mockups) ──
+        "<section><div class=\"wrap\">"
+        "<div class=\"kick\">A peek inside</div>"
+        "<h2>See what it actually does</h2>"
+        "<p class=\"lead\">A real conversation on one side, your live dashboard on the other — "
+        "Stepan works the lead end to end and hands you the ready-to-buy ones.</p>"
+        "<div class=\"shots\">"
+        # chat mockup
+        "<div class=\"frame\">"
+        "<div class=\"ph-top\"><span class=\"ph-ava\">M</span>"
+        "<div><b>Maya</b><small>● Instagram · online</small></div></div>"
+        "<div class=\"ph-body\">"
+        "<div class=\"mb in\">hi! saw your ad — is this ok if I've literally never trained "
+        "before? 😅</div>"
+        "<div class=\"mb out\"><span class=\"who\">Stepan</span>Totally — that's exactly where "
+        "most people start, Maya 🙌 Quick one: what would you most love to change first — "
+        "energy, strength, or how you feel in your clothes?</div>"
+        "<div class=\"mb in\">honestly how I feel in my clothes… but I have zero time for a "
+        "gym</div>"
+        "<div class=\"mb out\"><span class=\"who\">Stepan</span>Hear you — \"no time\" is the "
+        "#1 reason people stall. It's built around 20-min sessions you can do at home, "
+        "shaped to your week. Want me to show how your first two weeks would look?</div>"
+        "<div class=\"mb in\">yes please 🙏</div>"
+        "</div></div>"
+        # dashboard mockup
+        "<div class=\"frame\">"
+        "<div class=\"fbar\"><i class=\"fd1\"></i><i class=\"fd2\"></i><i class=\"fd3\"></i>"
+        "<span class=\"furl\">Stepan · your dashboard</span></div>"
+        "<div class=\"dash\">"
+        "<div class=\"mcard\"><div class=\"mlbl\">Lead — captured automatically</div>"
+        "<div class=\"leadrow\"><span class=\"av\">M</span><b>Maya R.</b>"
+        "<span class=\"spill\">Qualifying</span></div>"
+        "<div class=\"chips\">"
+        "<span class=\"ch2 c-goal\">🎯 Feel great in her clothes</span>"
+        "<span class=\"ch2 c-pain\">😣 No time for the gym</span>"
+        "<span class=\"ch2 c-gain\">✨ 20-min home workouts</span>"
+        "</div></div>"
+        "<div class=\"mcard\"><div class=\"mlbl\">Live funnel · this week</div>"
+        "<div class=\"fn\">"
+        "<div class=\"fnrow\"><span class=\"nm\">New</span>"
+        "<span class=\"fnbar\" style=\"width:100%\"></span><span class=\"v\">128</span></div>"
+        "<div class=\"fnrow\"><span class=\"nm\">Nurturing</span>"
+        "<span class=\"fnbar\" style=\"width:58%\"></span><span class=\"v\">74</span></div>"
+        "<div class=\"fnrow\"><span class=\"nm\">Qualifying</span>"
+        "<span class=\"fnbar\" style=\"width:32%\"></span><span class=\"v\">41</span></div>"
+        "<div class=\"fnrow\"><span class=\"nm\">Presenting</span>"
+        "<span class=\"fnbar\" style=\"width:18%\"></span><span class=\"v\">22</span></div>"
+        "<div class=\"fnrow\"><span class=\"nm\">Ready</span>"
+        "<span class=\"fnbar\" style=\"width:8%\"></span><span class=\"v\">9</span></div>"
+        "</div></div>"
+        "<div class=\"alert\">🔔 Maya's ready to book — handed to your team just now.</div>"
+        "</div></div>"
+        "</div>"
+        "<p class=\"mnote\">Illustrative — sample data, not a real customer.</p>"
         "</div></section>"
         # capabilities
         "<section><div class=\"wrap\">"

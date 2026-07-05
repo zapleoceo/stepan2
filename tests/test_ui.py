@@ -925,6 +925,8 @@ def test_landing_is_public_and_generic() -> None:
     assert "Stepan" in body
     assert 'href="/login"' in body               # login present (top-right)
     assert "ig.me" in body                        # "Talk to Stepan" demo CTA
+    assert "A peek inside" in body                 # illustrative UI mockups
+    assert "Illustrative" in body                  # labelled sample data, not real
     low = body.lower()
     assert "it step" not in low and "itstep" not in low  # client not revealed
 
