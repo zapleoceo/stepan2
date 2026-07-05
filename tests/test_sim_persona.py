@@ -54,5 +54,6 @@ async def test_unknown_persona_is_rejected(db_session) -> None:
     assert out["ok"] is False
 
 
-def test_ten_personas_defined() -> None:
-    assert len(PERSONAS) == 10  # the full segmentation/funnel matrix
+def test_personas_defined() -> None:
+    assert len(PERSONAS) >= 10  # segmentation/funnel matrix + hard-lead set
+    assert "hard_skeptic" in PERSONAS  # difficult, winnable leads for the close test

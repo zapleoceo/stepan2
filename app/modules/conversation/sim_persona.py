@@ -16,7 +16,7 @@ from app.ports.llm import LLMPort
 from .sim import SimService
 
 _END = "[END]"
-_MAX_TOTAL_TURNS = 12  # absolute stop across resumes, so a chatty persona can't loop forever
+_MAX_TOTAL_TURNS = 18  # absolute stop across resumes — long enough to work a hard lead
 
 # 10 archetypes spanning the segmentation / funnel test matrix.
 PERSONAS: dict[str, str] = {
@@ -41,15 +41,35 @@ PERSONAS: dict[str, str] = {
                     "kebanyakan nanya atau balasannya kepanjangan.",
     "wrong_fit": "Fajar, 22, nyari sesuatu yang IT STEP kemungkinan nggak punya — misal kelas "
                  "'AI robotics / IoT hardware'. Kalau ternyata nggak ada, lihat apa admin jujur.",
+    # ── HARD leads: not ready, resistant, but WINNABLE — persist, don't quit early ──
+    "hard_skeptic": "Rudi, 29, sangat skeptis. Bandingin terus dengan YouTube gratis & bootcamp "
+                    "lain, minta bukti berulang. TAPI kamu sebenarnya butuh skill ini dan bisa "
+                    "diyakinkan. JANGAN cepat menyerah — tekan admin dengan keberatan nyata "
+                    "beberapa kali. Kalau admin jawab meyakinkan + tawarkan open house gratis, "
+                    "kamu MAU datang. Berhenti hanya kalau admin jelas payah/muter-muter, atau "
+                    "kamu sudah setuju ikut open house / daftar.",
+    "hard_budget": "Nadia, 23, pengen banget ikut tapi takut harga & komitmen; ragu terus soal "
+                   "cicilan dan worth-it nggak. Winnable: kalau admin yakinkan ROI + cicilan + "
+                   "tawarkan open house, kamu mau reservasi DP atau minimal datang open house "
+                   "dulu. Jangan menyerah cepat, dorong admin jawab kekhawatiranmu.",
+    "hard_procrastinator": "Eko, 34, sibuk, selalu «nanti aja / pikir-pikir dulu», menunda. "
+                           "Winnable: butuh langkah kecil tanpa tekanan. Kalau admin tawarkan "
+                           "open house gratis Kamis tanpa maksa, kamu mau ikut. Jangan langsung "
+                           "pergi — kasih admin kesempatan beberapa kali.",
+    "hard_comparison": "Sari, 27, lagi banding-bandingin sama bootcamp lain yang lebih murah. "
+                       "Tanya kenapa harus pilih IT STEP. Winnable kalau admin bedakan dengan "
+                       "jelas + tawarkan open house buat lihat sendiri. Jangan menyerah cepat.",
 }
 
 _ACTOR_SYSTEM = (
     "You role-play an Instagram lead DMing a course-sales admin (Stepan) at IT STEP Jakarta. "
     "Write ONLY casual Bahasa Indonesia, SHORT (1-2 sentences), like a real DM. Stay fully in "
     "character; never say you are an AI, never narrate. React naturally to the admin's last "
-    "message — ask, object, or decide as your persona would. Output exactly {end} alone when "
-    "you have either (a) given your name + WA number and agreed to enrol / take the next step, "
-    "or (b) decided you're not interested and want to stop.\n\nYOUR PERSONA: {persona}"
+    "message — ask, object, or decide as your persona would. Output exactly {end} alone ONLY "
+    "when you have either (a) committed to a next step — agreed to enrol / reserve a seat, OR "
+    "agreed to attend the free open house / a consultation and given your name + WA number — "
+    "or (b) firmly decided you're not interested and want to stop. Otherwise keep the "
+    "conversation going.\n\nYOUR PERSONA: {persona}"
 )
 
 
