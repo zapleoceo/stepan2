@@ -23,7 +23,7 @@ def test_one_product_facts_no_mixing() -> None:
 
 def test_soft_qualify_gate_present() -> None:
     assert "SOFT-QUALIFY EARLY" in _DECISION_CONTRACT
-    assert "risk signal" in _DECISION_CONTRACT.lower()
+    assert "genuine dead end" in _DECISION_CONTRACT.lower()  # soft-close reserved for these
 
 
 def test_catch_all_answer_is_narrowed_not_reasked() -> None:
@@ -70,3 +70,8 @@ def test_no_invented_proof_or_cross_product_trial() -> None:
     assert "DON'T OFFER WHAT YOU CAN'T DELIVER" in _DECISION_CONTRACT
     assert "no invented alumni success stories" in _DECISION_CONTRACT
     assert "NO Vibe Coding Skill Booster" in _DECISION_CONTRACT
+
+
+def test_early_adult_vs_student_split() -> None:
+    assert "split ADULT vs SCHOOL-AGE early" in _DECISION_CONTRACT
+    assert "NEVER soft-close someone just for being a student" in _DECISION_CONTRACT
