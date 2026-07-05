@@ -18,6 +18,20 @@ from app.modules.settings.service import invalidate  # noqa: E402
 _FAKE_LINK = "https://lab.itstep.id/cybersecurity-practice?access=HANDAYANI2024"
 
 
+def test_parse_unsupported_line_based() -> None:
+    assert guard._parse_unsupported("CLEAN") == []
+    assert guard._parse_unsupported("") == []
+    assert guard._parse_unsupported("- free lab access\n2. 50% discount") == [
+        "free lab access", "50% discount"]
+
+
+def test_parse_unsupported_tolerates_legacy_json() -> None:
+    # a stale guard_verify prompt in the DB still emits JSON — must keep parsing
+    assert guard._parse_unsupported('{"unsupported": ["invented link", "fake cert"]}') == [
+        "invented link", "fake cert"]
+    assert guard._parse_unsupported('```json\n{"unsupported": []}\n```') == []
+
+
 # ─── deterministic URL grounding ────────────────────────────────────────────────
 
 def test_ungrounded_url_flagged_grounded_allowed() -> None:

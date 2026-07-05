@@ -42,8 +42,38 @@ _VERIFY_SYSTEM = (
     "bot may use, then the DRAFT. List every CONCRETE factual claim in the draft that is "
     "NOT supported by the knowledge base: invented links, free/discount/trial offers, lab "
     "or resource access, prices, dates, certifications, guarantees, statistics. Ignore "
-    "generic rapport, questions, and paraphrases of KB facts. Reply JSON only: "
-    '{"unsupported": ["<short quote or description>", ...]}. Empty list if all grounded.')
+    "generic rapport, questions, and paraphrases of KB facts. Output ONE unsupported claim "
+    "per line (a short quote or description), nothing else — no numbering, no JSON, no prose. "
+    "If everything is grounded, reply with the single word CLEAN.")
+
+_CLEAN_TOKENS = frozenset({"clean", "none", "ok", "grounded", "[]", "-", "n/a", "kosong"})
+# a leading list marker only: "- ", "* ", "• ", "1. ", "2) " — not digits inside the claim
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-•*]|\d+[.)])\s+")
+
+
+def _parse_unsupported(raw: str) -> list[str]:
+    """Unsupported-claims list from the verifier's reply. Tolerates the new line-based format
+    AND a legacy JSON body ({"unsupported": [...]}), so a stale guard_verify prompt in the DB
+    keeps working through the transition."""
+    s = (raw or "").strip()
+    if not s:
+        return []
+    if s.startswith("{") or s.startswith("```"):  # legacy JSON shape
+        body = s.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        try:
+            items = json.loads(body).get("unsupported") or []
+            return [str(x).strip() for x in items if str(x).strip()][:8]
+        except (json.JSONDecodeError, AttributeError):
+            pass  # not real JSON — fall through to line parsing
+    out: list[str] = []
+    for line in s.splitlines():
+        claim = _LIST_MARKER_RE.sub("", line.strip()).strip()  # drop only a leading bullet/number
+        if not claim:
+            continue
+        if claim.lower() in _CLEAN_TOKENS:  # explicit "all grounded" sentinel
+            return []
+        out.append(claim)
+    return out[:8]
 
 
 def _grounded_url(url: str, context: str) -> bool:
@@ -72,15 +102,15 @@ async def verify_grounding(
         {"role": "user", "content": f"KNOWLEDGE BASE:\n{context[:12000]}\n\nDRAFT:\n{reply}"},
     ]
     try:
+        # No require_json_schema: the verifier answers in plain lines, so the broker isn't
+        # limited to JSON-mode providers (wider/cheaper pool, fewer timeouts). The parser
+        # still accepts a legacy JSON body from a stale guard_verify prompt.
         raw, meta = await llm.chat(
-            messages, capability="chat:fast", require_json_schema=True,
+            messages, capability="chat:fast",
             workflow="guard", thread_id=thread_id, branch_id=branch_id)
         if not bill:
             meta.pop("cost_usd", None)  # sandbox verify shouldn't distort cost meta
-        data = json.loads(
-            raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip())
-        items = data.get("unsupported") or []
-        return [str(x) for x in items][:8]
+        return _parse_unsupported(raw)
     except Exception as exc:  # noqa: BLE001 — a failed verify must not block the reply
         logger.warning("guard verify failed branch=%d thread=%d: %s", branch_id, thread_id, exc)
         return []
