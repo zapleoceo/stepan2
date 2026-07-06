@@ -38,6 +38,12 @@ _CSS = (
     "html,body{height:100%;overflow-x:hidden}"
     "body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
     "background:#0f1117;color:#d0d7de;font-size:14px}"
+    # Structural link style — theme accent, no browser-default blue/underline. Anything more
+    # specific (.na, .ti, .sn, message-bubble links, etc.) overrides this via normal cascade
+    # order/specificity; this is only the inherited fallback so a bare <a> never falls back to
+    # UA-agent blue.
+    "a{color:#4da6ff;text-decoration:none}"
+    "a:hover{text-decoration:underline}"
     # coach 'thinking' indicator — shown only while the htmx request is in flight
     ".coach-think{display:none;align-items:center;gap:.5rem;padding:.35rem .85rem;"
     "font-size:.78rem;color:#8899aa;flex-shrink:0}"
