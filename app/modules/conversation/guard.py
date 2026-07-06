@@ -1,11 +1,16 @@
 """Reply guard — the verification layer that stops the bot from stating things the KB
-doesn't support (fabricated links, free-lab access, invented rates/certs/dates).
+doesn't support (fabricated links, free-lab access, invented rates/certs/dates, invented
+alumni/success stories).
 
 Two tiers, cheapest first:
   1. deterministic: any URL not present verbatim in the KB context is a fabrication
-     (this alone would have blocked the fake `lab.itstep.id/...?access=...` in chat 1736).
+     (this alone would have blocked the fake `lab.itstep.id/...?access=...` in chat 1736);
+     a claim of an already-sent file/screenshot/WA delivery is always false too.
   2. selective LLM verify: only when the reply looks risky (a link, an offer, a resource
-     hand-out), a cheap model lists claims unsupported by the KB context.
+     hand-out, a price figure, or a specific alumni/success story), a cheap model lists
+     claims unsupported by the KB context — including a story that isn't one of the
+     product's curated Success Cases (chat 1827: "salah satu alumni kami..." with nothing
+     to back it up if the lead asks to see it).
 
 On an unfixable violation the caller regenerates once, then falls back to a safe
 "let me confirm with the team" hand-off — never sends the fabrication.
@@ -41,13 +46,25 @@ _PRICE_RE = re.compile(
 # via WhatsApp — deterministically false regardless of KB content: Stepan is text-only (no
 # image/file attach capability) and Instagram-only (no WhatsApp channel). A 50-thread live
 # audit (2026-07-05) found leads left believing a screenshot/dataset had arrived when
-# nothing was ever sent (threads 1408, 1721). Illustrative alumni STORIES are fine as a
-# sales narrative — only a false ALREADY-DELIVERED claim is blocked here.
+# nothing was ever sent (threads 1408, 1721).
 _DELIVERY_NOUN = r"(?:screenshot|foto|gambar|file|dokumen|dataset|dm|wa|whatsapp)"
 _FALSE_DELIVERY_RE = re.compile(
     rf"\b{_DELIVERY_NOUN}\w*\b[^.!?\n]{{0,15}}\b(?:udah|sudah)\b[^.!?\n]{{0,20}}\bkirim(?:kan)?\b"
     rf"|\b(?:udah|sudah)\b[^.!?\n]{{0,40}}\bkirim(?:kan)?\b[^.!?\n]{{0,40}}\b{_DELIVERY_NOUN}\b",
     re.IGNORECASE)
+
+# Alumni/success-story narrative — a specific-sounding "one of our alumni did X" claim.
+# Policy (2026-07-06): illustrative stories are fine, but ONLY when they're the exact cases
+# already curated in a product's "Success cases" section (real named public figures + links,
+# or the Director's own real projects) — never improvised on the fly with no case behind it.
+# Chat 1827 is the live example: "salah satu alumni kami yang berhasil..." with zero name,
+# link, or specific detail — if the lead asks to see it, there is nothing to show. This
+# doesn't block generalized TRUE archetype language ("banyak peserta kami mulai dari nol,
+# ada yang jadi developer...") — the LLM verify step judges that distinction using the
+# actual Success Cases / Stories content in context.
+_STORY_RE = re.compile(
+    r"\b(alumni kami|lulusan kami|peserta kami|salah satu (peserta|siswa|alumni|mentor|"
+    r"murid))\b", re.IGNORECASE)
 
 
 def false_delivery_claims(reply: str) -> list[str]:
@@ -64,10 +81,15 @@ _VERIFY_SYSTEM = (
     "You check a sales bot's draft reply for fabrication. You get the KNOWLEDGE BASE the "
     "bot may use, then the DRAFT. List every CONCRETE factual claim in the draft that is "
     "NOT supported by the knowledge base: invented links, free/discount/trial offers, lab "
-    "or resource access, prices, dates, certifications, guarantees, statistics. Ignore "
-    "generic rapport, questions, and paraphrases of KB facts. Output ONE unsupported claim "
-    "per line (a short quote or description), nothing else — no numbering, no JSON, no prose. "
-    "If everything is grounded, reply with the single word CLEAN.")
+    "or resource access, prices, dates, certifications, guarantees, statistics. "
+    "ALUMNI/SUCCESS-STORY CLAIMS: a specific-sounding story ('salah satu alumni kami yang...', "
+    "a named or implied individual with a concrete outcome) is a fabrication UNLESS that exact "
+    "case (name, outcome, or link) appears in the knowledge base's Success Cases / Stories "
+    "content. A GENERALIZED true statement ('banyak peserta kami mulai dari nol, ada yang jadi "
+    "developer, ada yang freelance') is fine even without a specific case — only flag a "
+    "SPECIFIC unsourced story. Ignore generic rapport, questions, and paraphrases of KB facts. "
+    "Output ONE unsupported claim per line (a short quote or description), nothing else — no "
+    "numbering, no JSON, no prose. If everything is grounded, reply with the single word CLEAN.")
 
 _CLEAN_TOKENS = frozenset({"clean", "none", "ok", "grounded", "[]", "-", "n/a", "kosong"})
 # a leading list marker only: "- ", "* ", "• ", "1. ", "2) " — not digits inside the claim
@@ -111,9 +133,12 @@ def ungrounded_urls(reply: str, context: str) -> list[str]:
 
 def is_risky(reply: str) -> bool:
     """Cheap gate: does the reply look like it might hand out an offer/resource/link,
-    or state a concrete price (the shape of the chat-452 fabrication)?"""
+    state a concrete price (chat-452 shape), or tell a specific alumni/success story
+    (chat-1827 shape) that needs checking against the curated Success Cases content?"""
     text = reply or ""
-    return bool(_URL_RE.search(text) or _RISKY_RE.search(text) or _PRICE_RE.search(text))
+    return bool(
+        _URL_RE.search(text) or _RISKY_RE.search(text) or _PRICE_RE.search(text)
+        or _STORY_RE.search(text))
 
 
 async def verify_grounding(
@@ -146,5 +171,7 @@ CORRECTION = (
     "Rewrite the reply WITHOUT any of them. Never invent links, lab/resource access, free "
     "trials, discounts, rates, certifications, dates, or statistics. Never claim you have "
     "ALREADY sent a file/screenshot/dataset or delivered anything via WhatsApp — you cannot "
-    "attach files and have no WhatsApp channel. If you don't have a fact, say you'll confirm "
-    "it with the team. Return the JSON as usual.]")
+    "attach files and have no WhatsApp channel. Never tell a specific alumni/success story "
+    "that isn't one of the exact cases in the product's Success Cases section — use one of "
+    "those verbatim, a generalized true statement, or skip the story. If you don't have a "
+    "fact, say you'll confirm it with the team. Return the JSON as usual.]")

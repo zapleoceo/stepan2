@@ -61,6 +61,16 @@ def test_false_delivery_claims_catches_already_sent_but_not_offers_to_send() -> 
     assert not guard.false_delivery_claims("Mau aku kirim silabus lengkapnya lewat chat ini?")
 
 
+def test_is_risky_detects_unsourced_alumni_stories() -> None:
+    # chat 1827: an improvised story with nothing to back it up if the lead asks to see it
+    assert guard.is_risky(
+        "aku ingin cerita tentang salah satu alumni kami yang berhasil mengembangkan bisnisnya")
+    assert guard.is_risky("ada lulusan kami yang sekarang kerja di startup fintech")
+    # a plain course description with no alumni/success-story language at all stays cheap
+    assert not guard.is_risky(
+        "Vibe Coding itu program 4 bulan buat bikin aplikasi sendiri pakai AI.")
+
+
 # ─── integration through the real reply path (SimService) ───────────────────────
 
 class _ScriptLLM:
