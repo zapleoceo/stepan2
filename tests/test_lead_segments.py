@@ -113,3 +113,26 @@ def test_segment_widget_renders_audience_subtrees() -> None:
     assert "/ui/inbox?lead_type=warm&audience=adult&stage=presenting" in html
     assert "/ui/inbox?lead_type=hot&audience=student&stage=ready" in html
     assert "/ui/inbox?lead_type=warm&audience=adult" in html
+
+
+def test_segment_order_is_fixed_regardless_of_win_rate_or_input_order() -> None:
+    """Segments must render in the SAME temperature order (hot, warm, cold, no_budget,
+    non_target, unclear) in every audience block, never reshuffled by win-rate or by the
+    order rows arrived in — that inconsistency was the actual complaint."""
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _segment_tree_html
+    _lang.set("en")
+    # scrambled input order, wildly different win-rates per block
+    block_a = [("adult", "unclear", 2, 0), ("adult", "cold", 22, 0),
+              ("adult", "warm", 291, 8), ("adult", "hot", 20, 3),
+              ("adult", "no_budget", 26, 2)]
+    block_b = [("student", "no_budget", 6, 3), ("student", "hot", 25, 3),
+              ("student", "warm", 519, 30), ("student", "unclear", 255, 2),
+              ("student", "cold", 627, 0)]
+    html_a = _segment_tree_html(block_a)
+    html_b = _segment_tree_html(block_b)
+    for html in (html_a, html_b):
+        positions = {label: html.index(f">{label}<")
+                     for label in ("hot", "warm", "cold", "no budget", "unclear")}
+        ordered = sorted(positions, key=positions.get)
+        assert ordered == ["hot", "warm", "cold", "no budget", "unclear"]

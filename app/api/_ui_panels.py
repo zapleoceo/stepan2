@@ -1377,7 +1377,7 @@ def _date_range_form_html(date_from: str, date_to: str, active_range: str = "") 
 # values — hot==manager, warm==ready, cold==new, no_budget==qualifying — which is why the
 # reports panel read as one undifferentiated wall of color). 'student' is an audience, not a
 # segment here — see _AUD_ORDER.
-_SEG_META = (  # (key, colour, i18n label)
+_SEG_META = (  # (key, colour, i18n label) — this tuple order IS the display order everywhere
     ("hot", "#f06595", "seg.hot"),
     ("warm", "#ffd43b", "seg.warm"),
     ("cold", "#748ffc", "seg.cold"),
@@ -1385,6 +1385,11 @@ _SEG_META = (  # (key, colour, i18n label)
     ("non_target", "#5c636a", "seg.non_target"),
     ("unclear", "#4a5568", "seg.unclear"),
 )
+# Fixed rank by temperature (hottest first, unclassified last) — the SAME order in every
+# audience block, regardless of win-rate or volume, so "hot/warm/cold/..." always reads
+# top-to-bottom the same way instead of reshuffling per block (that's what made the reports
+# panel look inconsistent — win-rate sort put segments in a different order per audience).
+_SEG_RANK = {k: i for i, (k, _c, _l) in enumerate(_SEG_META)}
 _AUD_ORDER = ("adult", "unknown", "student")  # sub-tree order; 'unknown' = not yet classified
 
 
@@ -1392,10 +1397,11 @@ def _segment_subtree_svg(
     rows: list, root_label: str, aud_key: str = "", seg_stage_map: dict | None = None,
 ) -> str:
     """One audience's segment tree: a root node (its total) branching into each intent
-    segment, link thickness ∝ volume, ordered by win probability. `rows` = [(key, n, won)].
-    To the RIGHT of each segment node, a row of small stage boxes (the funnel inside that
-    segment): one box per non-empty stage with its count, clickable to that
-    audience+segment+stage's chats. `seg_stage_map` = {lead_type: {stage: count}}."""
+    segment, link thickness ∝ volume, in the fixed temperature order (_SEG_RANK) — the same
+    order in every audience block. To the RIGHT of each segment node, a row of small stage
+    boxes (the funnel inside that segment): one box per non-empty stage with its count,
+    clickable to that audience+segment+stage's chats. `seg_stage_map` = {lead_type:
+    {stage: count}}."""
     meta = {k: (c, lbl) for k, c, lbl in _SEG_META}
     leaves = []
     for key, n, won in rows:
@@ -1405,8 +1411,7 @@ def _segment_subtree_svg(
         leaves.append((color, _h.escape(t(lbl)), n, won, key))
     if not leaves:
         return ""
-    # Order by win probability (won/count) desc; ties (incl. 0%) fall back to volume.
-    leaves.sort(key=lambda r: (r[3] / r[2] if r[2] else 0, r[2]), reverse=True)
+    leaves.sort(key=lambda r: _SEG_RANK.get(r[4], len(_SEG_META)))
     total = sum(r[2] for r in leaves)
     n_seg = len(leaves)
     ssm = seg_stage_map or {}
