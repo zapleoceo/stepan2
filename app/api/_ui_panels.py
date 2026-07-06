@@ -6,7 +6,7 @@ import json as _json
 from datetime import UTC, datetime, timedelta
 
 from ._i18n import current_lang, t
-from ._ui_html import _ago, _as_dt, ig_post_url
+from ._ui_html import _STAGE_COLOR, _STAGE_ICON, _ago, _as_dt, ig_post_url
 
 _ST_ECSS: dict[str, str] = {
     "proposed": "es-p", "applied": "es-a",
@@ -17,16 +17,16 @@ _ST_ECSS: dict[str, str] = {
 # ─── coach chat ───────────────────────────────────────────────────────────────
 
 # ─── stage badge helper ───────────────────────────────────────────────────────
+# _STAGE_COLOR / _STAGE_ICON are the ONE canonical funnel palette (defined in _ui_html.py,
+# also driving the .sn/.sq/... badge CSS there) — imported, never redefined, so the pipeline
+# stage colors are identical everywhere they appear (inbox badges, funnel chart, segment
+# tree's per-stage boxes). See _SEG_META below for the separate, deliberately non-colliding
+# classifier/intent palette.
 
 _STC: dict[str, str] = {
     "new": "sn", "nurturing": "snu", "qualifying": "sq", "presenting": "sp",
     "objection": "so", "ready": "sr", "handed_off": "sh", "dormant": "sd",
     "manager": "sm",
-}
-_STAGE_COLOR: dict[str, str] = {
-    "new": "#4da6ff", "nurturing": "#d6a96f", "qualifying": "#9b7aff",
-    "presenting": "#4adb7a", "objection": "#ffa94d", "ready": "#51cf66",
-    "handed_off": "#22b8cf", "dormant": "#868e96", "manager": "#ff6b6b",
 }
 _ALL_STAGES = (
     "new", "nurturing", "qualifying", "presenting", "objection",
@@ -1371,12 +1371,18 @@ def _date_range_form_html(date_from: str, date_to: str, active_range: str = "") 
     )
 
 
-_SEG_META = (  # (key, colour, i18n label) — intent segments only; 'student' is an audience now
-    ("hot", "#ff6b6b", "seg.hot"),
-    ("warm", "#51cf66", "seg.warm"),
-    ("cold", "#4da6ff", "seg.cold"),
-    ("no_budget", "#9b7aff", "seg.no_budget"),
-    ("non_target", "#868e96", "seg.non_target"),
+# Classifier/intent palette — a temperature scale, deliberately using DIFFERENT hexes than
+# _STAGE_COLOR's funnel/pipeline palette above, so the same color never means two different
+# things when a segment card and a stage box sit side by side (they used to share exact hex
+# values — hot==manager, warm==ready, cold==new, no_budget==qualifying — which is why the
+# reports panel read as one undifferentiated wall of color). 'student' is an audience, not a
+# segment here — see _AUD_ORDER.
+_SEG_META = (  # (key, colour, i18n label)
+    ("hot", "#f06595", "seg.hot"),
+    ("warm", "#ffd43b", "seg.warm"),
+    ("cold", "#748ffc", "seg.cold"),
+    ("no_budget", "#be4bdb", "seg.no_budget"),
+    ("non_target", "#5c636a", "seg.non_target"),
     ("unclear", "#4a5568", "seg.unclear"),
 )
 _AUD_ORDER = ("adult", "unknown", "student")  # sub-tree order; 'unknown' = not yet classified
@@ -1406,7 +1412,7 @@ def _segment_subtree_svg(
     ssm = seg_stage_map or {}
     row_h, top, node_x, node_w, node_h = 46, 14, 372, 236, 34
     link_x0, mid_x = 128, 250
-    bx0, bw, bh, bgap = node_x + node_w + 12, 44, 32, 6  # stage boxes right of each node
+    bx0, bw, bh, bgap = node_x + node_w + 12, 46, 34, 6  # stage boxes right of each node
     max_boxes = max(
         (sum(1 for st in _ALL_STAGES if int(ssm.get(k, {}).get(st, 0) or 0) > 0)
          for _c, _l, _n, _w, k in leaves), default=0)
@@ -1450,15 +1456,22 @@ def _segment_subtree_svg(
             bx = bx0 + j * (bw + bgap)
             j += 1
             scol = _STAGE_COLOR.get(st, "#868e96")
-            stip = f"{_h.escape(t(f'stage.{st}'))}: {c}"
+            sicon = _STAGE_ICON.get(st, "•")
+            slabel = _h.escape(t(f"stage.{st}"))
+            stip = f"{slabel}: {c}"
             nodes += (
                 f'<a href="/ui/inbox?lead_type={key}{aud_q}&stage={st}" style="cursor:pointer">'
                 f'<g><title>{stip}</title>'
                 f'<rect x="{bx}" y="{by}" width="{bw}" height="{bh}" rx="5"'
                 f' fill="#141925" stroke="#2d3748"/>'
                 f'<rect x="{bx}" y="{by}" width="{bw}" height="3" rx="1.5" fill="{scol}"/>'
-                f'<text x="{bx + bw / 2:.0f}" y="{cy + 5}" text-anchor="middle" fill="#e8eef4"'
-                f' font-size="13" font-weight="700">{c}</text></g></a>'
+                # icon caption above the count so each box reads on its own, not just on hover —
+                # same glyph the main inbox funnel uses for this stage, tying the two views
+                # together visually.
+                f'<text x="{bx + bw / 2:.0f}" y="{by + 15}" text-anchor="middle"'
+                f' font-size="10">{sicon}</text>'
+                f'<text x="{bx + bw / 2:.0f}" y="{by + 28}" text-anchor="middle" fill="#e8eef4"'
+                f' font-size="12" font-weight="700">{c}</text></g></a>'
             )
     root = (
         f'<rect x="6" y="{root_cy - 30}" width="122" height="60" rx="8" fill="#1a2230"'
