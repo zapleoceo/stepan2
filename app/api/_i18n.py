@@ -545,7 +545,18 @@ _TR: dict[str, dict[str, str]] = {
     "ch.connect":  {"ru": "Подключить",        "en": "Connect",           "id": "Hubungkan"},
     "ch.delete":   {"ru": "Удалить",           "en": "Delete",            "id": "Hapus"},
     "ch.save":     {"ru": "Сохранить",         "en": "Save",              "id": "Simpan"},
-    "ch.active":   {"ru": "активен",           "en": "active",            "id": "aktif"},
+    "ch.active":   {"ru": "Канал включён",     "en": "Channel enabled",   "id": "Channel aktif"},
+    "ch.active_hint": {
+        "ru": "Выключи, если Instagram блокирует отправку (ошибка 403 / action block) — "
+              "приём и отправка через этот канал остановятся, ничего не потеряется. "
+              "Включи обратно, когда блок снимется (обычно несколько часов).",
+        "en": "Turn off if Instagram is blocking sends (403 / action block) — this pauses "
+              "both receiving and sending on this channel, nothing is lost. Turn back on "
+              "once the block clears (usually a few hours).",
+        "id": "Matikan jika Instagram memblokir pengiriman (403 / action block) — channel "
+              "ini berhenti menerima & mengirim, tidak ada yang hilang. Nyalakan lagi "
+              "setelah blokir hilang (biasanya beberapa jam).",
+    },
     "ch.verify":   {"ru": "Подтвердить",       "en": "Verify",            "id": "Verifikasi"},
     "ch.ig_login": {"ru": "Войти в Instagram", "en": "Login Instagram",   "id": "Login Instagram"},
     "ch.username": {"ru": "Имя пользователя",  "en": "Username",          "id": "Username"},

@@ -818,6 +818,8 @@ def channel_edit_form_html(
         f'<input type="checkbox" name="is_active" id="ch-a{ch_id}" {checked}>'
         f'<label class="frm-lbl" for="ch-a{ch_id}" style="margin:0">'
         f'{_h.escape(t("ch.active"))}</label></div>'
+        f'<div style="font-size:.72rem;color:#8a94a6;margin:-.3rem 0 .6rem">'
+        f'{_h.escape(t("ch.active_hint"))}</div>'
         f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
         f'</form>'
     )
