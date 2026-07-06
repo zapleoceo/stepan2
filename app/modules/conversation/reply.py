@@ -46,7 +46,24 @@ _DISCOVERY_CAP_NUDGE = (
     "[System: you have already asked discovery questions for {n} turns without the lead "
     "voicing a clear need — do NOT ask another discovery question this turn. If they asked "
     "something directly, answer it now with the fact from the product card. Otherwise "
-    "present the best-fit product with its value and price. Return the JSON as usual.]"
+    "present the best-fit product: ONE concrete value line tied to what they've told you, "
+    "then a light next step. Lead with the full price/DP breakdown ONLY if they explicitly "
+    "asked about price/payment or signaled they want to enroll — a lead asking how to solve "
+    "their problem (not how much it costs) gets a value answer, not a price dump; save the "
+    "full price for when they ask or the conversation clearly calls for it. Return the JSON "
+    "as usual.]"
+)
+# A lead the model itself has already classified non_target (wrong audience, off-topic,
+# trolling, selling us something) but that keeps getting re-engaged turn after turn — the
+# live example was thread 2027, a domain seller the bot kept trying to pitch Vibe Coding to
+# across many turns. Once that classification has already stuck from an EARLIER turn, wrap
+# up instead of continuing the sales motion.
+_NON_TARGET_NUDGE = (
+    "[System: this lead was already classified non_target (wrong audience / off-topic / "
+    "not interested in our programs) in an earlier turn and is still off-topic. Do NOT "
+    "keep pitching or asking discovery questions — write ONE short, polite closing line "
+    "and stop there; only re-engage if THEY bring up a real interest in one of our "
+    "programs. Return the JSON as usual.]"
 )
 
 
@@ -198,11 +215,17 @@ class ReplyService:
             last_inbound=last_in.text if last_in is not None else "", mode=mode,
             smart_stages=smart_stages)
         extra_user_msg = None
-        needs_captured = ctx.stored_needs.discovery_complete or ctx.stored_needs.has_needs()
-        if not needs_captured:
-            inbound_count = await self.messages.inbound_count(thread_id)
-            if inbound_count > _DISCOVERY_TURN_CAP:
-                extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
+        if lead is not None and lead.lead_type == "non_target":
+            # lead.lead_type reflects the PRIOR turn's classification (persisted in
+            # _apply_decision below) — reaching here means the model already called this
+            # non_target once and the lead is back for another round; don't re-engage.
+            extra_user_msg = _NON_TARGET_NUDGE
+        else:
+            needs_captured = ctx.stored_needs.discovery_complete or ctx.stored_needs.has_needs()
+            if not needs_captured:
+                inbound_count = await self.messages.inbound_count(thread_id)
+                if inbound_count > _DISCOVERY_TURN_CAP:
+                    extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
             extra_user_msg=extra_user_msg)

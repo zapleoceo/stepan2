@@ -6,6 +6,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from sqlmodel import select
+
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
@@ -61,3 +63,29 @@ async def test_nudge_injected_past_cap_without_captured_needs(db_session) -> Non
     last = llm.last_messages[-1]
     assert last["role"] == "user"
     assert "do NOT ask another discovery question this turn" in last["content"]
+
+
+async def test_non_target_nudge_wraps_up_instead_of_re_pitching(db_session) -> None:
+    """Chat 2027: a domain seller kept getting pitched Vibe Coding turn after turn even
+    though the model had already classified them non_target — once that classification
+    is already on the lead from a prior turn, stop re-engaging."""
+    bid, tid = await _thread_with_turns(db_session, 3)
+    lead = (await db_session.execute(
+        select(Lead).where(Lead.branch_id == bid))).scalars().first()
+    lead.lead_type = "non_target"
+    db_session.add(lead)
+    await db_session.flush()
+    llm = _SpyLLM()
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    last = llm.last_messages[-1]
+    assert last["role"] == "user"
+    assert "already classified non_target" in last["content"]
+    assert "Do NOT keep pitching" in last["content"]
+
+
+async def test_no_non_target_nudge_for_a_normal_lead(db_session) -> None:
+    bid, tid = await _thread_with_turns(db_session, 3)
+    llm = _SpyLLM()
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    last = llm.last_messages[-1]
+    assert last["role"] != "user" or "non_target" not in last["content"]
