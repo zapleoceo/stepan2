@@ -42,14 +42,20 @@ def pick_capability(
     *, workflow: str, stage: Stage | str | None, lead_type: str | None,
     last_inbound: str, mode: str,
     smart_stages: frozenset[str] = _DEFAULT_SMART_STAGES,
+    followup_attempt: int = 0,
 ) -> str:
     """`SMART` or `FAST` for this turn. mode != 'hybrid' → always SMART (feature off).
 
-    smart_stages = the operator-tunable set of stages that keep the strong model."""
+    smart_stages = the operator-tunable set of stages that keep the strong model.
+    followup_attempt = how many nudges already sent in this thread (0 = first nudge)."""
     if mode != "hybrid":
         return SMART
     if workflow == "followup":
-        return FAST  # nudging a quiet lead — lowest-stakes traffic, always cheap
+        # The first nudge is genuinely low-stakes (cheap model is fine). From the 2nd nudge
+        # on, the cheap model was observed repeating an earlier opener near-verbatim (chat
+        # 1830: re-greeted the lead and re-asked the same discovery question 2 nudges in) —
+        # varying the angle across attempts needs the stronger model's instruction-following.
+        return SMART if followup_attempt >= 1 else FAST
     stage_val = stage.value if isinstance(stage, Stage) else str(stage or "").lower()
     if stage_val in smart_stages or lead_type == "hot":
         return SMART

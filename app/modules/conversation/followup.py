@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -27,6 +28,31 @@ if TYPE_CHECKING:
     from app.ports.llm import LLMPort
 
 logger = logging.getLogger(__name__)
+
+# A nudge that's near-identical to something already sent in this thread (chat 1830: the
+# 2nd follow-up re-greeted the lead and re-asked the same discovery question almost
+# verbatim) — the model's own "change the angle" instruction wasn't reliable enough on its
+# own, so this is a deterministic backstop, same idea as the reply-guard's checks.
+_DUPLICATE_RATIO = 0.6
+_REPEAT_CORRECTION = (
+    "[System: your draft repeats something you already said in this thread almost "
+    "word-for-word: {prior!r}. Do NOT send it again — pick a genuinely different angle "
+    "(their stated need, a cheaper entry point, a concrete yes/no question). Return the "
+    "JSON as usual.]"
+)
+
+
+def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
+    """The prior bot message most similar to new_text, and that similarity ratio."""
+    best_text, best_ratio = "", 0.0
+    new_norm = (new_text or "").strip().lower()
+    for m in dialog:
+        if m.direction != "out" or not (m.text or "").strip():
+            continue
+        ratio = SequenceMatcher(None, new_norm, m.text.strip().lower()).ratio()
+        if ratio > best_ratio:
+            best_text, best_ratio = m.text.strip(), ratio
+    return best_text, best_ratio
 
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
@@ -133,7 +159,7 @@ class FollowupService:
         # A nudge to a quiet lead is the lowest-stakes traffic → cheap model; escalate once if
         # the cheap model returns a broken decision so the follow-up still goes out.
         cap = pick_capability(workflow="followup", stage=None, lead_type=None,
-                              last_inbound="", mode=mode)
+                              last_inbound="", mode=mode, followup_attempt=sent_so_far)
         nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow="followup",
@@ -160,6 +186,23 @@ class FollowupService:
                 return False
         if not decision.reply:
             return False
+        prior, ratio = _most_similar_prior(decision.reply, ctx.dialog)
+        if ratio >= _DUPLICATE_RATIO:
+            logger.warning(
+                "followup: branch=%d thread=%d near-duplicate nudge (ratio=%.2f) → regen",
+                self.branch_id, thread_id, ratio)
+            raw, meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow="followup", capability=SMART,
+                extra_user_msg=_REPEAT_CORRECTION.format(prior=prior))
+            try:
+                decision = parse_decision(raw)
+            except ValueError:
+                logger.warning(
+                    "followup: unparseable regen branch=%d thread=%d — attempt not burned",
+                    self.branch_id, thread_id)
+                return False
+            if not decision.reply:
+                return False
         decision, meta = await guard_decision(
             self.session, self.branch_id, self.settings, self.llm,
             engine, ctx, thread_id, lang, "followup", True, decision, meta)

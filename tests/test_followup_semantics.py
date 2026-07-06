@@ -185,6 +185,39 @@ async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_se
     assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
+async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
+    """Chat 1830: the 2nd follow-up re-greeted the lead and re-asked the exact same
+    discovery question already sent — must regenerate on the strong model instead of
+    shipping a near-verbatim repeat."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True, followups_sent=1)
+    prior_line = ("Halo Kak! Seneng banget Kakak tertarik dengan SMM. Boleh cerita dulu, "
+                 "Kakak pengen belajar SMM untuk apa ya?")
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW - timedelta(hours=5)))
+    await db_session.flush()
+
+    class _ScriptLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            self.calls += 1
+            reply = prior_line if self.calls == 1 else \
+                "Btw, kalau budget masih jadi kendala, ada Skill Booster lebih ringan lho 😊"
+            return json.dumps({"reply": reply, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    llm = _ScriptLLM()
+    assert await _svc(db_session, bid, llm=llm).run() == 1
+    assert llm.calls == 2  # first draft (near-duplicate) + one regen
+    row = await _pending(db_session, tid)
+    assert row is not None and "Skill Booster" in row.text
+
+
 async def test_followup_nudge_goes_through_the_reply_guard(db_session) -> None:
     """Followup nudges used to bypass the reply guard entirely (only ReplyService.decide
     called it) — a fabricated link in a nudge would ship unblocked. Must be caught the same
