@@ -1584,6 +1584,11 @@ def reports_panel_html(
     # message totals for the period (drives the "N messages" headline over the chart)
     total_in = sum(hour_in.values())
     total_out = sum(hour_out.values())
+    kpis += _kpi(
+        "rep.msgs_tile",
+        f"{total_out}↑ / {total_in}↓",
+        "#63c5ff",
+    )
 
     # compact hourly-activity mini-chart placed high in the panel — grouped in/out bars per
     # hour-of-day, scaled to the busiest in/out count so the two directions compare directly;
