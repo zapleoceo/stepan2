@@ -22,7 +22,11 @@ from app.admin._branch import (
 from app.config import settings
 from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.needs_translate import translated_needs
-from app.modules.conversation.translate import translate_message, translate_text
+from app.modules.conversation.translate import (
+    target_for_lang,
+    translate_message,
+    translate_text,
+)
 from app.modules.knowledge.repository import ProductRepo
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import get_settings
@@ -590,7 +594,7 @@ async def chat_tr_draft(
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-    target = {"ru": "Russian", "en": "English", "id": "Indonesian"}.get(lang_code, "Russian")
+    target = target_for_lang(lang_code)
     try:
         tr = await translate_text(BrokerLLM(), text_body, target=target)
     except Exception as exc:
@@ -666,13 +670,19 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
 
 @router.get("/chat/{thread_id}/msg/{mid}/tr", response_class=HTMLResponse)
 async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HTMLResponse:
-    """Translate a message bubble to Russian (cached in message.tr_text — no re-billing)."""
+    """Translate a message bubble to the viewer's UI language (cached in message.tr_text —
+    no re-billing). NOTE: the cache is a single column, not keyed by language — if operators
+    view in different UI languages, the second viewer's request can hit a cache written for
+    a different target than their own. Not solved here (would need a schema change);
+    today's actual usage is Russian-only in practice, so it isn't yet a live problem."""
+    lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
         try:
-            tr = await translate_message(session, mid, BrokerLLM())
+            tr = await translate_message(
+                session, mid, BrokerLLM(), target=target_for_lang(lang_code))
         except Exception as exc:
             _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
             return HTMLResponse("")  # empty → JS leaves the bubble as-is, lets the user retry
@@ -737,7 +747,9 @@ async def pending_delete(thread_id: int, oid: int, request: Request) -> HTMLResp
 
 @router.post("/chat/{thread_id}/pending/{oid}/tr", response_class=HTMLResponse)
 async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLResponse:
-    """Translate a queued reply to Russian; cache it on outbox.tr_text so the poll keeps it."""
+    """Translate a queued reply to the viewer's UI language; cache it on outbox.tr_text so
+    the poll keeps it."""
+    lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
@@ -751,7 +763,7 @@ async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLR
         if row[1]:  # already translated (cache) — no LLM call
             return HTMLResponse(f"🌐 {_h.escape(row[1])}")
         try:
-            tr = await translate_text(BrokerLLM(), row[0])
+            tr = await translate_text(BrokerLLM(), row[0], target=target_for_lang(lang_code))
         except Exception as exc:
             _log.warning("pending translate error tid=%s oid=%s: %s", thread_id, oid, exc)
             return HTMLResponse("")

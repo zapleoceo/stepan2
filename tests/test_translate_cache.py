@@ -77,3 +77,25 @@ async def test_translate_uses_generous_max_tokens() -> None:
     llm = CountingLLM("перевод")
     await translate_text(llm, "halo apa kabar kak")
     assert llm.last_kw.get("max_tokens", 0) >= 1000
+
+
+def test_target_for_lang_maps_ui_codes() -> None:
+    """UI language code -> the target name the translate prompt uses. Two of the three
+    call sites used to hardcode 'Russian' regardless of the viewer's UI language — this
+    is the single shared mapping all of them must use now."""
+    from app.modules.conversation.translate import target_for_lang
+    assert target_for_lang("ru") == "Russian"
+    assert target_for_lang("en") == "English"
+    assert target_for_lang("id") == "Indonesian"
+    assert target_for_lang("xx") == "Russian"  # unknown code -> safe default
+
+
+def test_system_prompt_never_assumes_source_is_target() -> None:
+    """Real failure: 'sok' (Indonesian slang) got 'translated' as the lookalike Russian
+    word 'сок' (juice), and 'kasih tau' got an outright refusal ('this isn't Russian').
+    The prompt must explicitly rule out both failure modes."""
+    from app.modules.conversation.translate import _system_prompt
+    prompt = _system_prompt("Russian")
+    assert "never" in prompt.lower() and "refuse" in prompt.lower()
+    assert "lookalike" in prompt.lower() or "NEVER already written" in prompt
+    assert "{target}" not in prompt  # regression: an unformatted literal braces bug
