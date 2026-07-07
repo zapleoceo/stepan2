@@ -161,11 +161,20 @@ async def guard_decision(
         fixed = decision
     # Only the deterministic checks are re-verified (an LLM re-verify would double cost);
     # a still-broken draft means we can't trust it → hand off.
-    if fixed.reply and not _deterministic_issues(fixed.reply, context):
+    from dataclasses import replace  # noqa: PLC0415
+    remaining = _deterministic_issues(fixed.reply, context) if fixed.reply else ["empty reply"]
+    if not remaining:
         return fixed, regen_meta
+    # A still-doubled-up question after the regen is a style slip, not a fabrication risk —
+    # trim to the first question deterministically instead of wasting a manager's attention
+    # on a lead who asked something the KB already answers (threads 2159/2160: "ceritakan
+    # lebih detail" got a full hand-off purely because the regen ALSO asked two questions).
+    if all("question mark" in issue for issue in remaining):
+        trimmed = guard.truncate_to_one_question(fixed.reply)
+        if not _deterministic_issues(trimmed, context):
+            return replace(fixed, reply=trimmed), regen_meta
     logger.error("guard: branch=%d thread=%d unfixable violation → hand-off",
                  branch_id, thread_id)
-    from dataclasses import replace  # noqa: PLC0415
     return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True), regen_meta
 
 

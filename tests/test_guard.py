@@ -82,6 +82,27 @@ def test_multiple_questions_flags_two_but_not_one() -> None:
     assert not guard.multiple_questions("Coba jawab kayak gini: «tertarik gak kak?» ya Kak")
 
 
+def test_truncate_to_one_question_keeps_first_drops_rest() -> None:
+    # live case (threads 2159/2160): the model doubles up on discovery questions even after
+    # a regen — trim to the first instead of a full hand-off for a perfectly answerable ask.
+    doubled = ("Tentu! Sebelum aku jelaskan lebih detail, apa yang membuatmu tertarik jadi "
+               "Data Analyst? Ada tujuan spesifik yang ingin dicapai?")
+    trimmed = guard.truncate_to_one_question(doubled)
+    assert trimmed == ("Tentu! Sebelum aku jelaskan lebih detail, apa yang membuatmu tertarik "
+                        "jadi Data Analyst?")
+    assert not guard.multiple_questions(trimmed)
+
+
+def test_truncate_to_one_question_ignores_quoted_example_marks() -> None:
+    reply = "Coba jawab kayak gini: «tertarik gak kak?» — kira-kira Kakak gimana?"
+    trimmed = guard.truncate_to_one_question(reply)
+    assert trimmed == reply  # only one REAL question mark outside the quote — nothing to cut
+
+
+def test_truncate_to_one_question_no_question_mark_returns_unchanged() -> None:
+    assert guard.truncate_to_one_question("Oke Kak, siap!") == "Oke Kak, siap!"
+
+
 def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert guard.impossible_capability_offers("aku bisa jelasin lewat voice note kalau mau")
     assert guard.impossible_capability_offers("mending aku telpon langsung kamu aja ya")
@@ -140,3 +161,19 @@ async def test_guard_hands_off_when_fabrication_persists(db_session) -> None:
     out = await SimService(db_session, llm).say(bid, "g2", "kirim link lab dong")
     assert out["ok"] and _FAKE_LINK not in out["reply"]
     assert out["reply"] == guard.SAFE_FALLBACK and out["needs_manager"] is True  # handed off
+
+
+async def test_guard_trims_a_still_doubled_question_instead_of_handing_off(db_session) -> None:
+    """Live case (threads 2159/2160): the regen ALSO asked two questions — a style slip,
+    not a fabrication, so it must be trimmed to one rather than handed off to a manager."""
+    bid = await _branch(db_session)
+    doubled_twice = (
+        "Tentu! Apa yang membuatmu tertarik jadi Data Analyst? Ada tujuan tertentu?",
+        "Boleh! Sebelum itu, kamu sudah kerja atau masih kuliah? Mau fokus ke bidang apa?",
+    )
+    llm = _ScriptLLM(*doubled_twice)
+    out = await SimService(db_session, llm).say(bid, "g3", "ceritakan lebih detail dong")
+    assert out["ok"]
+    assert out["reply"] != guard.SAFE_FALLBACK and out["needs_manager"] is False
+    assert not guard.multiple_questions(out["reply"])
+    assert out["reply"] == "Boleh! Sebelum itu, kamu sudah kerja atau masih kuliah?"

@@ -97,6 +97,22 @@ def multiple_questions(reply: str) -> list[str]:
     return []
 
 
+def truncate_to_one_question(reply: str) -> str:
+    """Deterministic last resort for a draft still asking 2+ questions after a regen: keep
+    everything through the FIRST real question mark, drop the rest. A double question is a
+    style slip, not a fabrication risk — trimming it is safe and always available, unlike
+    the SAFE_FALLBACK hand-off, which wastes a manager's attention on a lead who asked a
+    perfectly answerable question (live case: threads 2159/2160, "ceritakan lebih detail
+    tentang kursusnya" got a full hand-off because the regen also happened to double up)."""
+    # Same length as the original so the found index lines up with the un-stripped string —
+    # a quoted KB "?" must not count, but blanking it (not deleting it) keeps positions valid.
+    masked = _QUOTE_STRIP_RE.sub(lambda m: "�" * len(m.group(0)), reply or "")
+    idx = masked.find("?")
+    if idx == -1:
+        return reply
+    return reply[: idx + 1].rstrip()
+
+
 # Stepan is a TEXT-ONLY Instagram DM bot — no voice notes, no calls, no video. Offering one
 # is a capability that doesn't exist, whether phrased as a future offer (thread 1330: "aku
 # bisa jelasin lewat voice note") or (already covered by false_delivery_claims) as done.
