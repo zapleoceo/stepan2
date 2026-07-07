@@ -237,6 +237,11 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Stepan's master switch: OFF — the bot replies to no one (sync keeps running).",
         "id": "Saklar utama Stepan: OFF — bot tidak membalas siapa pun (sync tetap jalan).",
     },
+    "hint.sending_global": {
+        "ru": "Отправка: OFF — очередь копится, но ничего не уходит (для бана/чекпоинта).",
+        "en": "Sending: OFF — the queue keeps building, nothing goes out (for a ban/checkpoint).",
+        "id": "Pengiriman: OFF — antrean menumpuk, tidak ada yang terkirim (saat banned).",
+    },
     "hint.lang": {
         "ru": "Язык интерфейса админки. На язык ответов бота не влияет.",
         "en": "Admin UI language. Does not affect the bot's reply language.",
@@ -645,6 +650,8 @@ _TR: dict[str, dict[str, str]] = {
                       "id": "Stepan — semua"},
     "bot.branch":    {"ru": "Степан — этот филиал", "en": "Stepan — this branch",
                       "id": "Stepan — cabang ini"},
+    "bot.sending":   {"ru": "Отправка (исходящие)", "en": "Sending (outbound)",
+                      "id": "Pengiriman (keluar)"},
     "bot.pick_branch": {"ru": "Выберите один филиал в фильтре, чтобы управлять его ботом",
                         "en": "Pick a single branch in the filter to control its bot",
                         "id": "Pilih satu cabang di filter untuk mengatur botnya"},

@@ -488,13 +488,46 @@ async def agent_toggle(
     return HTMLResponse(_agent_toggles_html(selected, platform_on, branch_on, is_super))
 
 
-def _switch(scope: str, branch_id: int, label: str, on: bool) -> str:
+_SENDING_KEY = "sending_enabled"  # per-branch send_outbox master switch (see settings.schema)
+
+
+@router.get("/sending-status", response_class=HTMLResponse)
+async def sending_status(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_id = await _single_selected_branch(request)
+    async with session_scope() as session:
+        sending_on = await _read_flag(session, branch_id, _SENDING_KEY) if branch_id else None
+    return HTMLResponse(_sending_toggle_html(branch_id, sending_on))
+
+
+@router.post("/sending-toggle", response_class=HTMLResponse)
+async def sending_toggle(request: Request, branch_id: int = Form(default=1)) -> HTMLResponse:
+    apply_lang(request)
+    allowed = branch_ids_from_request(request)
+    if allowed and branch_id not in allowed:
+        branch_id = allowed[0]
+    selected = await _single_selected_branch(request)
+    async with session_scope() as session:
+        if selected is not None and not is_branch_write_forbidden(
+            selected, writable_branch_ids(request)
+        ):
+            new = not await _read_flag(session, selected, _SENDING_KEY)
+            await _write_flag(session, selected, _SENDING_KEY, new)
+            invalidate(selected)
+        sending_on = await _read_flag(session, selected, _SENDING_KEY) if selected else None
+    return HTMLResponse(_sending_toggle_html(selected, sending_on))
+
+
+def _switch(
+    scope: str, branch_id: int, label: str, on: bool, *,
+    post_url: str = "/ui/agent-toggle", target: str = "#bot-tog-wrap",
+) -> str:
     knob = "translateX(1.05rem)" if on else "translateX(0)"
     track = "#51cf66" if on else "#4a5568"
     status = _h.escape(t("bot.on" if on else "bot.off"))
     st_color = "#7ee2a8" if on else "#ff9b9b"
     return (
-        f'<form hx-post="/ui/agent-toggle" hx-target="#bot-tog-wrap" hx-swap="innerHTML"'
+        f'<form hx-post="{post_url}" hx-target="{target}" hx-swap="innerHTML"'
         f' class="tgl-row"><input type="hidden" name="scope" value="{scope}">'
         f'<input type="hidden" name="branch_id" value="{branch_id}">'
         f'<button type="submit" class="tgl-btn" title="{_h.escape(label)}">'
@@ -517,6 +550,17 @@ def _agent_toggles_html(
         (platform_switch if is_super else "")
         + _switch("branch", branch_id, t("bot.branch"), branch_on)
     )
+
+
+def _sending_toggle_html(branch_id: int | None, sending_on: bool | None) -> str:
+    """Sidebar quick-switch for send_outbox — a shortcut to the same sending_enabled
+    setting as the Settings page, for flipping it without leaving the current view
+    (e.g. right after a ban/checkpoint, without hunting through Settings)."""
+    if branch_id is None or sending_on is None:
+        return f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
+    return _switch(
+        "sending", branch_id, t("bot.sending"), sending_on,
+        post_url="/ui/sending-toggle", target="#sending-tog-wrap")
 
 
 @router.get("/branches/widget", response_class=HTMLResponse)

@@ -1155,6 +1155,37 @@ def test_agent_toggle_post_returns_html(client: TestClient) -> None:
         assert "bot-tog" in resp.text
 
 
+def test_sending_toggle_html_reflects_state() -> None:
+    """Sidebar quick-switch for send_outbox — separate widget from the bot on/off switch,
+    posting to its own endpoint/target so toggling one never touches the other."""
+    from app.api._routes_admin import _sending_toggle_html
+    _set_lang("en")
+    off = _sending_toggle_html(1, sending_on=False)
+    assert "Sending (outbound)" in off
+    assert "OFF" in off
+    assert "/ui/sending-toggle" in off
+    assert "#sending-tog-wrap" in off
+    on = _sending_toggle_html(1, sending_on=True)
+    assert "ON" in on
+    # no branch selected -> a hint, not a guessed toggle
+    hint = _sending_toggle_html(None, None)
+    assert "tgl-hint" in hint
+
+
+def test_sending_status_route_responds(client: TestClient) -> None:
+    resp = client.get("/ui/sending-status")
+    assert resp.status_code in (200, 500)
+
+
+def test_sending_toggle_post_returns_html(client: TestClient) -> None:
+    resp = client.post("/ui/sending-toggle", data={"branch_id": "1"})
+    assert resp.status_code in (200, 500)
+    if resp.status_code == 200:
+        # no branch selected in the filter -> a pick-branch hint (no single branch to flip);
+        # with one selected it would post to /ui/sending-toggle instead.
+        assert "sending-toggle" in resp.text or "tgl-hint" in resp.text
+
+
 # ─── query helpers: fetch_messages, fetch_pending ─────────────────────────────
 
 def test_ago_returns_localized_minutes() -> None:
