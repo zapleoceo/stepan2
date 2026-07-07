@@ -196,6 +196,40 @@ async def test_media_not_content_deduped(db_session) -> None:
     assert len(created) == 2  # media excluded from content dedup
 
 
+async def test_manager_media_flags_pending_and_stubs_asset(db_session) -> None:
+    """A manager sending a photo/video from the IG app must get the SAME stub-and-backfill
+    treatment as lead-sent media (see test_media_message_flags_pending_stubs_asset_and_
+    records_seen) — it used to render as a bare '🖼 media' placeholder forever because only
+    the lead-side ingest branch created the MediaAsset stub."""
+    bid, cid, _, _ = await _world(db_session)
+    msg = InboundMessage(
+        external_thread_id="ig-1", sender_id="own1", text="🖼 media",
+        occurred_at=_NOW, external_id="m1", direction="out",
+        media_url="https://cdn/manager.jpg", media_kind="image")
+    created = await IngestService(db_session, bid).ingest(cid, [msg])
+    assert created[0].sent_by == "manager"
+    assert created[0].media_pending is True
+    asset = (await db_session.exec(select(MediaAsset))).first()
+    assert asset is not None and asset.url == "https://cdn/manager.jpg"
+    assert asset.kind == "image" and asset.data is None
+    assert asset.message_id == created[0].id
+
+
+async def test_manager_media_not_content_deduped(db_session) -> None:
+    """Two distinct manager-sent photos share the placeholder text — the wide out-echo
+    dedup window must not collapse them into one (mirrors test_media_not_content_deduped
+    for the lead-side path)."""
+    bid, cid, _, _ = await _world(db_session)
+    m1 = InboundMessage(external_thread_id="ig-1", sender_id="own1", text="🖼 media",
+                        occurred_at=_NOW, external_id="m1", direction="out",
+                        media_url="http://cdn/a.jpg", media_kind="image")
+    m2 = InboundMessage(external_thread_id="ig-1", sender_id="own1", text="🖼 media",
+                        occurred_at=_NOW, external_id="m2", direction="out",
+                        media_url="http://cdn/b.jpg", media_kind="image")
+    created = await IngestService(db_session, bid).ingest(cid, [m1, m2])
+    assert len(created) == 2  # media excluded from the out-echo content dedup too
+
+
 async def test_dedup_by_real_id_vs_outbox_recorded_row(db_session) -> None:
     bid, cid, _, thread = await _world(db_session)
     db_session.add(Message(branch_id=bid, thread_id=thread.id, channel_id=cid,

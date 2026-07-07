@@ -113,8 +113,11 @@ class IngestService:
         # same message under a DIFFERENT item id, so external-id dedup misses it and we'd
         # store our own send twice (one bubble showed up 2x in the chat + the LLM context).
         # A genuine manual reply typed in the IG app carries novel text, so a wide content
-        # window here drops only the poll-back echo, never a real human message.
-        if await self.messages.duplicate_by_content(
+        # window here drops only the poll-back echo, never a real human message. Media items
+        # carry the same placeholder text ('🖼 media') regardless of which photo/video it is,
+        # so skip this content dedup for them — same guard as _store's lead-side path,
+        # otherwise a manager sending two different photos back-to-back would drop the second.
+        if inbound.media_url is None and await self.messages.duplicate_by_content(
             thread.id, "out", inbound.text, inbound.occurred_at, window=_OUT_ECHO_WINDOW
         ):
             return None
@@ -130,6 +133,17 @@ class IngestService:
                 occurred_at=inbound.occurred_at,
             )
         )
+        if inbound.media_url:
+            # Manager-sent media (photo/video from the IG app) — same stub-and-backfill path
+            # as lead-sent media (see _store below); ingest can't download inline, the
+            # backfill worker fills the bytes later. Previously only the lead-side branch
+            # did this, so a manager's own media rendered as a bare '🖼 media' placeholder
+            # forever instead of the actual image/video.
+            msg.media_pending = True
+            self.session.add(MediaAsset(
+                branch_id=self.branch_id, message_id=msg.id,
+                kind=inbound.media_kind or "image", url=inbound.media_url,
+            ))
         if thread.last_out_at is None or inbound.occurred_at > thread.last_out_at:
             thread.last_out_at = inbound.occurred_at
         return msg
