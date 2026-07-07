@@ -1139,6 +1139,7 @@ def chat_header_html(
     following_count: int | None = None,
     last_active_at: datetime | None = None,
     needs: NeedsProfile | None = None,
+    needs_pending: bool = False,
     products: list | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
@@ -1234,15 +1235,22 @@ def chat_header_html(
         f'{meta_row}'
         f'</div>'
         f'{src_bar}'
-        f'{_needs_block(needs)}'
+        f'{needs_block_html(needs, tid, needs_pending)}'
         f'</div>'
     )
 
 
-def _needs_block(needs: NeedsProfile | None) -> str:
+def needs_block_html(
+    needs: NeedsProfile | None, tid: int, pending: bool = False,
+) -> str:
     """Render the captured Value-Proposition-Canvas profile (jobs/pains/gains) so the
-    manager sees what Stepan discovered — pre-translated by the caller into the current
-    UI language (see needs_translate.translated_needs). Empty when nothing captured yet."""
+    manager sees what Stepan discovered. `needs` is pre-translated by the caller from
+    cache only (see needs_translate.cached_needs) — no broker call in this render path.
+
+    When `pending` is True, some phrase isn't cached for the viewer's language yet: the
+    box still shows (with untranslated fallback text) but also carries an hx-get that
+    lazily fetches the real translation from /chat/{tid}/needs and swaps itself out once
+    the broker responds, so the initial page load never blocks on LLM latency."""
     if needs is None:
         return ""
     p = needs
@@ -1258,9 +1266,13 @@ def _needs_block(needs: NeedsProfile | None) -> str:
                         f'{_h.escape(label)}</span>{chips}</div>')
     if not rows:
         return ""
+    lazy_attrs = (
+        f' hx-get="/ui/chat/{tid}/needs" hx-trigger="load" hx-swap="outerHTML"'
+        if pending else ""
+    )
     return (
-        f'<div class="nd-box" data-help="{_h.escape(t("hint.needs"))}">'
-        f'{"".join(rows)}</div>'
+        f'<div class="nd-box" id="nd-{tid}" data-help="{_h.escape(t("hint.needs"))}"'
+        f'{lazy_attrs}>{"".join(rows)}</div>'
     )
 
 
@@ -1289,6 +1301,7 @@ def chat_panel_html(
     last_active_at: datetime | None = None,
     lead_seen_at: datetime | None = None,
     needs: NeedsProfile | None = None,
+    needs_pending: bool = False,
     events: list | None = None,
     products: list | None = None,
 ) -> str:
@@ -1305,7 +1318,8 @@ def chat_panel_html(
         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
         agent_enabled=agent_enabled, is_blocked=is_blocked,
         follower_count=follower_count, following_count=following_count,
-        last_active_at=last_active_at, needs=needs, products=products,
+        last_active_at=last_active_at, needs=needs, needs_pending=needs_pending,
+        products=products,
     )
     return (
         f'{header}'

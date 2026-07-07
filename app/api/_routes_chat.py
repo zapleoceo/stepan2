@@ -21,7 +21,7 @@ from app.admin._branch import (
 )
 from app.config import settings
 from app.modules.conversation.needs import parse_needs
-from app.modules.conversation.needs_translate import translated_needs
+from app.modules.conversation.needs_translate import cached_needs, translated_needs
 from app.modules.conversation.translate import (
     target_for_lang,
     translate_message,
@@ -45,6 +45,7 @@ from ._ui_html import (
     chat_header_html,
     chat_panel_html,
     messages_html,
+    needs_block_html,
     set_render_tz,
     since_bubbles_html,
     suggest_box_html,
@@ -85,7 +86,11 @@ def _actor_name(request: Request) -> str:
 
 async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | None, lang: str):
     """Auto-translate the lead's captured needs into the current UI language, caching the
-    result on lead.needs_tr so re-rendering the header never re-bills the same phrase."""
+    result on lead.needs_tr so re-rendering the header never re-bills the same phrase.
+
+    This calls the broker and therefore blocks on network latency — only the lazy
+    /needs endpoint uses it. The main panel render uses cached_needs() instead, which is
+    pure cache lookup with no I/O, so opening a chat never waits on the LLM."""
     profile, new_tr = await translated_needs(parse_needs(needs), needs_tr, lang, BrokerLLM())
     if new_tr is not None:
         await session.execute(
@@ -152,7 +157,7 @@ async def _build_chat_panel(
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
      follower_count, following_count, last_active_at, lead_seen_at, _tz, needs,
      lead_id, needs_tr) = info
-    needs_profile = await _needs_for(session, lead_id, needs, needs_tr, current_lang())
+    needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return chat_panel_html(
         thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
         product_slug=product_slug, ig_id=ig_id,
@@ -163,7 +168,7 @@ async def _build_chat_panel(
         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs_profile,
-        events=events, products=products,
+        needs_pending=needs_pending, events=events, products=products,
     )
 
 
@@ -205,6 +210,31 @@ async def chat_page(
         ad_id=ad_id.strip(), grp=grp.strip()))
     resp.set_cookie("stepan2_open_thread", str(thread_id), max_age=86400, samesite="lax")
     return resp
+
+
+@router.get("/chat/{thread_id}/needs", response_class=HTMLResponse)
+async def chat_needs_lazy(thread_id: int, request: Request) -> HTMLResponse:
+    """Lazily translate the lead's needs box. The panel renders instantly from cache
+    (see cached_needs in _build_chat_panel) and only loads this route — which calls the
+    broker — when cached_needs found an untranslated phrase; hx-swap replaces the box in
+    place once the broker responds, so opening a chat never blocks on LLM latency."""
+    lang = apply_lang(request)
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        row = (
+            await session.execute(
+                text(
+                    "SELECT l.branch_id, l.needs, l.needs_tr, l.id FROM channel_thread ct"
+                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+        if not row or is_branch_forbidden(row[0], allowed):
+            return HTMLResponse("")
+        _, needs, needs_tr, lead_id = row
+        profile = await _needs_for(session, lead_id, needs, needs_tr, lang)
+    return HTMLResponse(needs_block_html(profile, thread_id))
 
 
 _MIME_FOR_KIND = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/mp4"}
@@ -457,7 +487,7 @@ async def chat_stage(
                     )
                 except Exception:
                     _log.warning("manual stage alert failed tid=%s", thread_id, exc_info=True)
-        needs_profile = await _needs_for(session, lead_id, needs, needs_tr, current_lang())
+        needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return HTMLResponse(
         chat_header_html(thread_id, str(name or "Lead"), stage,
                          product_slug=product_slug, ig_id=ig_id,
@@ -467,7 +497,8 @@ async def chat_stage(
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs_profile, products=products)
+                         last_active_at=last_active_at, needs=needs_profile,
+                         needs_pending=needs_pending, products=products)
     )
 
 
@@ -526,7 +557,7 @@ async def chat_product(
                 actor=_actor_name(request),
             ))
             await session.flush()
-        needs_profile = await _needs_for(session, lead_id, needs, needs_tr, current_lang())
+        needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return HTMLResponse(
         chat_header_html(thread_id, str(name or "Lead"), str(stage or "new"),
                          product_slug=new_slug, ig_id=ig_id,
@@ -536,7 +567,8 @@ async def chat_product(
                          ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs_profile, products=products)
+                         last_active_at=last_active_at, needs=needs_profile,
+                         needs_pending=needs_pending, products=products)
     )
 
 

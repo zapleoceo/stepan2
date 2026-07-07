@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 
 from app.modules.conversation.needs import NeedsProfile
-from app.modules.conversation.needs_translate import translated_needs
+from app.modules.conversation.needs_translate import cached_needs, translated_needs
 
 
 class _EchoLLM:
@@ -103,6 +103,32 @@ async def test_empty_profile_short_circuits_without_a_broker_call() -> None:
     assert translated == NeedsProfile()
     assert new_tr is None
     assert llm.calls == 0
+
+
+def test_cached_needs_is_pure_and_flags_pending_on_cache_miss() -> None:
+    """cached_needs must do zero I/O (no broker, no DB) — it only reads whatever cache is
+    already in needs_tr and reports pending=True when a phrase isn't cached yet, so the
+    caller (chat panel render) knows to lazily fetch the real translation."""
+    profile = NeedsProfile(jobs=["belajar coding"])
+    translated, pending = cached_needs(profile, None, "ru")
+    assert pending is True
+    assert translated.jobs == ["belajar coding"]  # untranslated fallback, not blank
+
+
+async def test_cached_needs_matches_translated_needs_cache_and_reports_no_pending() -> None:
+    """Once translated_needs has cached a phrase, cached_needs must read the same cache and
+    report pending=False — the lazy /needs endpoint should not fire again after that."""
+    profile = NeedsProfile(jobs=["belajar coding"])
+    _, new_tr = await translated_needs(profile, None, "ru", _EchoLLM())
+    translated, pending = cached_needs(profile, new_tr, "ru")
+    assert pending is False
+    assert translated.jobs == ["RU:belajar coding"]
+
+
+def test_cached_needs_empty_profile_is_never_pending() -> None:
+    translated, pending = cached_needs(NeedsProfile(), None, "ru")
+    assert pending is False
+    assert translated == NeedsProfile()
 
 
 async def test_batch_translate_uses_a_generous_max_tokens_for_a_full_profile() -> None:

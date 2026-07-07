@@ -37,6 +37,27 @@ def _save_cache(needs_tr: str | None, lang: str, cache: dict[str, str]) -> str:
     return json.dumps(d, ensure_ascii=False)
 
 
+def cached_needs(
+    profile: NeedsProfile, needs_tr: str | None, lang: str,
+) -> tuple[NeedsProfile, bool]:
+    """Pure, no-I/O lookup: apply whatever is already cached in `needs_tr`, and report
+    whether any phrase is still missing a translation (`pending`). Used to render the chat
+    header instantly on page load without waiting on the broker — the caller lazily
+    triggers `translated_needs` (which does call the broker) only when `pending` is True."""
+    if not (profile.jobs or profile.pains or profile.gains):
+        return profile, False
+    cache = _load_cache(needs_tr, lang)
+    all_items = list(dict.fromkeys([*profile.jobs, *profile.pains, *profile.gains]))
+    pending = any(s not in cache for s in all_items)
+    translated = NeedsProfile(
+        jobs=[cache.get(s, s) for s in profile.jobs],
+        pains=[cache.get(s, s) for s in profile.pains],
+        gains=[cache.get(s, s) for s in profile.gains],
+        discovery_complete=profile.discovery_complete,
+    )
+    return translated, pending
+
+
 async def translated_needs(
     profile: NeedsProfile, needs_tr: str | None, lang: str, llm: LLMPort,
 ) -> tuple[NeedsProfile, str | None]:

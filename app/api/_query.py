@@ -248,11 +248,19 @@ def _branch_where(
 
 _MSG_COLS = (
     "m.id, m.direction, m.sent_by, m.text, m.occurred_at, m.llm_info,"
-    " m.link_url, m.preview_url,"
-    " (SELECT ma.id FROM media_asset ma WHERE ma.message_id = m.id"
-    "  AND ma.data IS NOT NULL ORDER BY ma.id LIMIT 1) AS media_id,"
-    " (SELECT ma.kind FROM media_asset ma WHERE ma.message_id = m.id"
-    "  AND ma.data IS NOT NULL ORDER BY ma.id LIMIT 1) AS media_kind"
+    " m.link_url, m.preview_url, mm.media_id, mm.media_kind"
+)
+
+# One media_asset row per message (the first with data), joined once for the whole thread
+# instead of two correlated subqueries re-run per message row — same result, O(1) query
+# instead of O(2N) for an N-message thread. ROW_NUMBER() works on both Postgres and the
+# SQLite used in tests (3.25+), so no dialect branching needed.
+_MEDIA_JOIN = (
+    " LEFT JOIN ("
+    " SELECT message_id, id AS media_id, kind AS media_kind,"
+    " ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY id) AS rn"
+    " FROM media_asset WHERE data IS NOT NULL"
+    " ) mm ON mm.message_id = m.id AND mm.rn = 1"
 )
 
 
@@ -271,6 +279,7 @@ async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
             text(
                 f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
+                f"{_MEDIA_JOIN}"
                 " WHERE m.thread_id = :tid ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id},
@@ -284,6 +293,7 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
             text(
                 f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
+                f"{_MEDIA_JOIN}"
                 " WHERE m.thread_id = :tid AND m.id > :after"
                 " ORDER BY m.occurred_at, m.id"
             ),

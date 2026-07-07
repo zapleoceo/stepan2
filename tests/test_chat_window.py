@@ -446,11 +446,10 @@ class _CountingTranslateLLM:
 
 
 @pytest.mark.asyncio
-async def test_needs_auto_translate_on_panel_load_is_cached(db_session, monkeypatch) -> None:
-    """Loading the chat panel must translate jobs/pains/gains into the UI language with NO
-    extra click, and cache the result on lead.needs_tr so a second load never re-bills."""
-    from sqlalchemy import text as _text
-
+async def test_needs_panel_load_never_calls_broker(db_session) -> None:
+    """Loading the chat panel must render instantly from cache (untranslated fallback text
+    is fine) — it must NEVER block on a broker call. The panel instead ships an hx-get so
+    the browser lazily fetches the real translation after the page is already visible."""
     import app.api._routes_chat as rc
     from app.adapters.db.models import Branch, ChannelThread, Lead
 
@@ -468,12 +467,45 @@ async def test_needs_auto_translate_on_panel_load_is_cached(db_session, monkeypa
     rc.BrokerLLM = lambda: llm
     _set_lang("ru")
     try:
-        html1 = await rc._build_chat_panel(db_session, 1, None)
-        assert "RU:belajar coding" in html1
+        html = await rc._build_chat_panel(db_session, 1, None)
+        assert llm.calls == 0  # panel render must never touch the broker
+        assert "belajar coding" in html  # untranslated fallback shown immediately
+        assert 'hx-get="/ui/chat/1/needs"' in html  # lazy-load hook for the real translation
+        assert 'hx-trigger="load"' in html
+    finally:
+        rc.session_scope, rc.BrokerLLM = orig_scope, orig_llm
+
+
+async def test_needs_lazy_endpoint_translates_and_caches(db_session) -> None:
+    """The lazy /needs route is where the actual broker call happens — first hit translates
+    and caches on lead.needs_tr, a second hit is a pure cache read (no re-bill)."""
+    from sqlalchemy import text as _text
+
+    import app.api._routes_chat as rc
+    from app.adapters.db.models import Branch, ChannelThread, Lead
+
+    b = Branch(id=1, name="B", lang="id", tz_offset_h=7, is_active=True)
+    lead = Lead(id=1, branch_id=1, display_name="Alice", agent_enabled=True,
+                needs='{"jobs":["belajar coding"],"pains":[],"gains":[],'
+                     '"discovery_complete":false}')
+    db_session.add_all([b, lead, ChannelThread(id=1, lead_id=1, channel_id=1,
+                                                external_thread_id="x1")])
+    await db_session.commit()
+
+    orig_scope, orig_llm = rc.session_scope, rc.BrokerLLM
+    llm = _CountingTranslateLLM()
+    rc.session_scope = lambda: _Scope(db_session)
+    rc.BrokerLLM = lambda: llm
+    req = _Req()
+    req.cookies = {"stepan2_lang": "ru"}  # chat_needs_lazy reads lang from the request, not
+    # the ContextVar set by _set_lang, since it (unlike _build_chat_panel) calls apply_lang
+    try:
+        html1 = await rc.chat_needs_lazy(1, req)
+        assert "RU:belajar coding" in html1.body.decode()
         assert llm.calls == 1
 
-        html2 = await rc._build_chat_panel(db_session, 1, None)
-        assert "RU:belajar coding" in html2
+        html2 = await rc.chat_needs_lazy(1, req)
+        assert "RU:belajar coding" in html2.body.decode()
         assert llm.calls == 1  # cache hit — no second broker call
     finally:
         rc.session_scope, rc.BrokerLLM = orig_scope, orig_llm
