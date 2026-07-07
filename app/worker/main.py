@@ -234,6 +234,9 @@ async def send_outbox(ctx: dict[str, Any]) -> int:
     for branch in branches:
         assert branch.id is not None
         async with session_scope() as session:
+            cfg = await get_settings(session, branch.id)
+            if not cfg.sending_enabled:  # queue keeps accumulating, nothing goes out
+                continue
             channels = {c.id: c for c in await wiring.active_channels(session, branch.id)}
             thread_ids = await wiring.threads_with_pending_outbox(session, branch.id)
         for thread_id in thread_ids:

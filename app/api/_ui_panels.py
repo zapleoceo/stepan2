@@ -95,16 +95,20 @@ def outbox_panel_html(
     rows: list, tz_by_branch: dict[int, int] | None = None,
     quiet_by_branch: dict[int, tuple[int, int]] | None = None,
     cap_status: dict[int, tuple[bool, bool]] | None = None,
+    sending_paused: dict[int, bool] | None = None,
 ) -> str:
     """Read-only outbox queue monitor (last 100 entries). `cap_status` = {branch_id:
     (hourly_reached, daily_reached)} — computed live from real counts by the caller each
     request, never hardcoded here, so a pending/due row that's actually being held back by
-    the anti-ban send cap shows why instead of just looking silently stuck."""
+    the anti-ban send cap shows why instead of just looking silently stuck. `sending_paused`
+    = {branch_id: bool} — the branch's own send_outbox master switch (independent of the
+    bot on/off toggle); when paused, EVERY due row is held, including manager sends."""
     title = _h.escape(t("nav.outbox"))
     hint = _h.escape(t("help.outbox"))
     tz = tz_by_branch or {}
     quiet = quiet_by_branch or {}
     caps = cap_status or {}
+    paused = sending_paused or {}
 
     def _spill(s: str) -> str:
         css = {"pending": "s-pend", "sent": "s-sent", "failed": "s-fail"}.get(s, "s-pend")
@@ -143,13 +147,18 @@ def outbox_panel_html(
         dt = _as_dt(scheduled)
         if dt is None:
             return "—"
+        secs = (dt - now).total_seconds()
+        # sending is fully paused for this branch (independent of the bot on/off toggle) —
+        # applies to EVERY due row, manager sends included, since send_outbox skips the whole
+        # branch when this is off.
+        if secs <= 5 and paused.get(branch_id):
+            return f'<span style="color:#ff8787">⏸ {_h.escape(t("outbox.sending_paused"))}</span>'
         # follow-ups are HELD during quiet hours — they won't go out until quiet lifts, even
         # if their scheduled_at is already due.
         qe = _in_quiet(branch_id)
         if str(source) == "followup" and qe is not None:
             return (f'<span style="color:#ffa94d">🔇 '
                     f'{_h.escape(t("outbox.quiet_until", h=f"{qe:02d}"))}</span>')
-        secs = (dt - now).total_seconds()
         # due but held back by the hourly/daily anti-ban send cap (manager sends bypass it,
         # so exempt those) — without this the row would just say "now" and never move,
         # looking like a silent bug instead of the deliberate anti-ban throttle it is.

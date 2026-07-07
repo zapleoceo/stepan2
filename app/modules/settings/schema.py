@@ -81,6 +81,17 @@ SCHEMA: list[SettingSection] = [
         _f("daily_cap", "int", "800",
            _l("Сообщений в день", "Messages / day", "Pesan / hari"),
            ph=_l("800", "800", "800"), help=_UNLIMITED, width="76px"),
+        # Independent from the main bot switch: that one gates scanning incoming + queueing a
+        # reply; this one gates the SEND worker draining the queue. Off = keep capturing
+        # incoming and queueing replies, but nothing actually goes out — the lever for "the
+        # account got soft-blocked, pause sending without losing what comes in".
+        _f("sending_enabled", "bool", "true",
+           _l("Отправка (исходящие)", "Sending (outbound)", "Pengiriman (keluar)"),
+           help=_l(
+               "Выкл — очередь копится, но ничего не отправляется (для бана/чекпоинта)",
+               "Off — the queue keeps building but nothing sends (for a ban/checkpoint)",
+               "Nonaktif — antrean menumpuk tapi tidak terkirim (saat kena banned/checkpoint)"),
+           width="90px"),
     ]),
     SettingSection("fa-solid fa-clock-rotate-left",
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [

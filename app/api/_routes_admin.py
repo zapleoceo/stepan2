@@ -118,9 +118,11 @@ async def outbox_panel(request: Request) -> HTMLResponse:
         # real sent counts each request), so a due row that's actually held back by the
         # hourly/daily send cap shows why instead of looking silently stuck.
         cap_status: dict[int, tuple[bool, bool]] = {}
+        sending_paused: dict[int, bool] = {}
         now = utc_now()
         for bid in seen_ids:
             cfg = await get_settings(session, bid)
+            sending_paused[bid] = not cfg.sending_enabled
             hourly_hit = daily_hit = False
             if cfg.hourly_cap > 0:
                 n = (await session.execute(
@@ -138,7 +140,8 @@ async def outbox_panel(request: Request) -> HTMLResponse:
                 )).scalar_one()
                 daily_hit = n >= cfg.daily_cap
             cap_status[bid] = (hourly_hit, daily_hit)
-    return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch, quiet_by_branch, cap_status))
+    return HTMLResponse(outbox_panel_html(
+        list(rows), tz_by_branch, quiet_by_branch, cap_status, sending_paused))
 
 
 def _valid_date(value: str) -> str:

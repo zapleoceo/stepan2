@@ -781,6 +781,25 @@ def test_outbox_panel_html_shows_rate_cap_held_marker() -> None:
     assert "cap reached" not in mgr.lower()
 
 
+def test_outbox_panel_html_shows_sending_paused_marker() -> None:
+    """The branch-level sending_enabled switch (independent of the bot on/off toggle) holds
+    EVERY due row, including manager sends — send_outbox skips the whole branch when off."""
+    from datetime import datetime
+
+    from app.api._ui_panels import outbox_panel_html
+    _set_lang("en")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    agent_due = [(1, 10, "pending", "agent", "hi", now, None, 1)]
+    mgr_due = [(2, 11, "pending", "manager", "hi", now, None, 1)]
+    paused = outbox_panel_html(agent_due + mgr_due, sending_paused={1: True})
+    assert paused.lower().count("sending paused") == 2  # both rows held, manager included
+    resumed = outbox_panel_html(agent_due, sending_paused={1: False})
+    assert "sending paused" not in resumed.lower()
+    # pause takes priority over the cap marker when both apply — one clear reason, not two
+    both = outbox_panel_html(agent_due, cap_status={1: (True, False)}, sending_paused={1: True})
+    assert "sending paused" in both.lower() and "cap reached" not in both.lower()
+
+
 def test_outbox_panel_html_shifts_times_to_branch_local() -> None:
     """scheduled_at/sent_at must render in the row's own branch-local time, not raw UTC —
     was a plain str(v)[11:19] slice with zero tz correction."""

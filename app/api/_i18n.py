@@ -489,6 +489,8 @@ _TR: dict[str, dict[str, str]] = {
                         "id": "batas {limit} tercapai"},
     "outbox.cap_hour": {"ru": "в час", "en": "hourly", "id": "per jam"},
     "outbox.cap_day":  {"ru": "в день", "en": "daily", "id": "per hari"},
+    "outbox.sending_paused": {"ru": "отправка на паузе", "en": "sending paused",
+                              "id": "pengiriman dijeda"},
     # broker log page
     "nav.log":          {"ru": "Лог брокера",  "en": "Broker log",  "id": "Log broker"},
     "log.title":        {"ru": "Лог вызовов брокера", "en": "Broker call log",
