@@ -103,6 +103,13 @@ def test_truncate_to_one_question_no_question_mark_returns_unchanged() -> None:
     assert guard.truncate_to_one_question("Oke Kak, siap!") == "Oke Kak, siap!"
 
 
+def test_truncate_to_one_question_keeps_only_first_of_three() -> None:
+    triple = "Kakak kerja? Atau kuliah? Atau masih sekolah?"
+    trimmed = guard.truncate_to_one_question(triple)
+    assert trimmed == "Kakak kerja?"
+    assert not guard.multiple_questions(trimmed)
+
+
 def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert guard.impossible_capability_offers("aku bisa jelasin lewat voice note kalau mau")
     assert guard.impossible_capability_offers("mending aku telpon langsung kamu aja ya")

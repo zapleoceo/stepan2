@@ -1,8 +1,10 @@
-# Reply-guard — anti-fabrication framework
+# Reply-guard — draft-quality verification layer
 
 The verification layer between generation and send. RAG + prompt only *ask* the model to
-stay grounded; the guard *checks* the draft against the exact KB context the model saw and
-refuses to send fabrications (invented links, free-lab access, made-up rates/certs/dates).
+stay grounded and to write well; the guard *checks* the draft and refuses to send it when it
+violates a rule. It started (chat 1736) as an anti-fabrication check against the exact KB
+context the model saw, and has since grown a second tier of **conversation-quality** checks
+that need no KB context at all (see below).
 
 Motivated by chat 1736, where the bot invented a personalised lab URL
 (`lab.itstep.id/...?access=HANDAYANI2024`), "free 3-day lab access", a Cisco cert track,
@@ -33,6 +35,30 @@ bare price claim slipped past the LLM-verify tier. Both gaps are closed.
 
 Defense-in-depth: `persona_core` also carries a hard "NEVER FABRICATE" rule (no invented
 links/labs/free access/promos/rates/dates/certs/stats; unknown → confirm with the team).
+
+## Conversation-quality tier (deterministic, no KB context needed)
+
+Live business review (Daniel/Dima, 2026-07-07) surfaced recurring style failures that don't
+need the KB to detect. These run in `_deterministic_issues` alongside the URL/delivery checks
+and go through the same regenerate-once flow:
+
+- **`multiple_questions`** — 2+ `?` in one turn (across all `|||` bubbles) leaves one question
+  unanswered (threads 1729/1793). Quoted `«…»` example scripts are stripped before counting.
+- **`impossible_capability_offers`** — offering a voice note / call / video (thread 1330);
+  Stepan is text-only Instagram DM. (A "the team will call you" hand-off is NOT this — only
+  Stepan offering to do it himself.)
+- **`wrong_channel_claims`** — telling an Instagram-DM lead to "go DM on Instagram" (thread
+  2092); this conversation already IS Instagram.
+- **`false_delivery_claims`** — claiming a file/screenshot was ALREADY sent, or delivered via
+  WhatsApp (threads 1408/1721); Stepan can't attach files and has no WhatsApp channel.
+
+**Graceful degrade for doubled questions:** unlike a fabrication, a still-doubled question
+after the regen is a style slip, not a risk. When the ONLY remaining issue is
+`multiple_questions`, `truncate_to_one_question` keeps the reply through the first real `?`
+and drops the rest, instead of a full SAFE_FALLBACK hand-off (threads 2159/2160: a plain
+"tell me more about the course" was needlessly handed to a manager because the regen also
+doubled up). Every other violation type still hands off — there's no safe way to trim a
+fabricated fact.
 
 ## Config
 

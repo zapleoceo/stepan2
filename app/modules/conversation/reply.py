@@ -411,8 +411,10 @@ class ReplyService:
         if ready and ready_subtype == "openhouse":
             # An event RSVP is a notify-only side channel (see _handoff_openhouse) — it's
             # a sale (of a seat, not a course) but NOT a hand-off: the bot keeps talking,
-            # so never let it force READY/MANAGER and silence the account.
-            return decision.stage
+            # so never let it force READY/MANAGER and silence the account. A model that wrote
+            # stage='ready' directly would otherwise slip READY through here (→ _handoff mutes
+            # the bot), so remap it down to PRESENTING — the same defensive depth as _is_ready.
+            return Stage.PRESENTING if decision.stage == Stage.READY else decision.stage
         if ready and lead.phone_e164:
             return Stage.READY
         if decision.needs_manager:

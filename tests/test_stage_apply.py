@@ -256,6 +256,20 @@ async def test_openhouse_rsvp_ignores_conflicting_needs_manager_flag(db_session)
     assert alerts[0].kind == "ready_openhouse"
 
 
+async def test_openhouse_with_model_written_ready_stage_stays_present(db_session) -> None:
+    """Defensive depth: even if the model illegally writes stage='ready' on an openhouse
+    RSVP turn, the notify-only channel must NOT mute the bot — remap READY→PRESENTING."""
+    notifier = FakeNotifier()
+    bid, tid, lead = await _world(db_session, phone="+6281234567890", stage=Stage.PRESENTING)
+    await _svc(db_session, bid, notifier=notifier).enqueue_reply(
+        tid, _decision(ready=True, ready_subtype="openhouse", stage=Stage.READY),
+    )
+    assert lead.stage == Stage.PRESENTING  # not READY — bot keeps talking
+    assert lead.agent_enabled is True
+    alert = (await db_session.exec(select(ManagerAlert))).first()
+    assert alert is not None and alert.kind == "ready_openhouse"
+
+
 async def test_event_product_forces_openhouse_rsvp(db_session) -> None:
     """When the bound product is kind='event', a 'ready' is an RSVP regardless of the model's
     subtype guess: notify-only, bot stays on — never a course-deal hand-off."""
