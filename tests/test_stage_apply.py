@@ -116,6 +116,23 @@ def _svc(s, bid: int, notifier=None, llm=None) -> ReplyService:  # noqa: ANN001
                         branch_settings=_parse({}), notifier=notifier)
 
 
+async def test_enqueue_reply_drops_duplicate_when_already_answered_meanwhile(db_session) -> None:
+    """Idempotency backstop (2026-07-07): if a sibling run already sent a reply to this exact
+    inbound while THIS run was slow (a broker call near its own timeout ceiling, or a killed+
+    retried worker job), last_out_at already caught up to last_in_at by the time we reach
+    enqueue_reply — drop the duplicate instead of sending a second reply."""
+    bid, tid, _lead = await _world(db_session)
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    thread.last_in_at = _NOW
+    thread.last_out_at = _NOW  # a sibling already answered this inbound
+    db_session.add(thread)
+    await db_session.flush()
+    out = await _svc(db_session, bid).enqueue_reply(tid, _decision())
+    assert out is None
+    assert (await db_session.exec(select(StageEvent))).first() is None  # no stage churn either
+
+
 async def test_stage_applied_with_journal(db_session) -> None:
     bid, tid, lead = await _world(db_session)
     await _svc(db_session, bid).enqueue_reply(tid, _decision())

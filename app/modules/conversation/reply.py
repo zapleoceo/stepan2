@@ -112,6 +112,37 @@ async def guard_prompt(session: AsyncSession, branch_id: int) -> str | None:
     return doc.content if doc and (doc.content or "").strip() else None
 
 
+async def raise_manager_alert(
+    session: AsyncSession, branch_id: int, notifier: NotifierPort | None, llm: LLMPort,
+    thread_id: int, lead_id: int, decision: Decision, lead_phone: str | None = None,
+) -> None:
+    """Notify a human that this thread needs one — the KB genuinely has no answer, so a
+    manager works it and (per policy) feeds the missing fact back into the KB afterward.
+    Shared by the live-reply path AND follow-up nudges: a needs_manager decision means the
+    same thing regardless of which path produced it, so both must actually alert (a nudge
+    that silently sets needs_manager with no alert was the pre-2026-07-07 followup gap)."""
+    q = decision.manager_question or ""
+    gap = decision.kb_gap or ""
+    summary_en = q or "Lead requests human handoff"
+    summary_ru = f"Вопрос: {q}" if q else "Лид запросил менеджера"
+    if gap:
+        summary_ru += f"\nПробел в KB: {gap}"
+    alerts = AlertService(session, branch_id, notifier, llm=llm)
+    try:
+        await alerts.raise_alert(
+            lead_id=lead_id,
+            kind="needs_manager",
+            summary_en=summary_en,
+            summary_ru=summary_ru,
+            thread_id=thread_id,
+            lead_phone=lead_phone,
+        )
+    except Exception:
+        logger.warning(
+            "manager alert failed thread=%s lead=%s", thread_id, lead_id, exc_info=True
+        )
+
+
 def _deterministic_issues(reply: str, context: str) -> list[str]:
     """Every KB-context-free check — no LLM call needed, always on regardless of
     reply_guard mode. Re-run on a regenerated draft too, so a still-broken reply is caught
@@ -287,6 +318,18 @@ class ReplyService:
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
+        # Idempotency backstop: if a sibling run already answered this exact inbound while
+        # THIS run was slow (a guard regen against a broker near its own timeout ceiling), the
+        # watermark has already caught up — don't queue a second reply. This is the last line
+        # of defense behind the advisory lock: a job ARQ killed for exceeding worker_job_timeout_s
+        # can keep running as a zombie coroutine past that point (asyncio cancellation doesn't
+        # always land mid-await), so the lock alone doesn't fully close the gap (2026-07-07).
+        if thread.last_out_at is not None and thread.last_in_at is not None \
+                and thread.last_out_at >= thread.last_in_at:
+            logger.warning(
+                "enqueue_reply: branch=%d thread=%d already answered by a sibling run — "
+                "dropping the duplicate", self.branch_id, thread_id)
+            return None
         base = self._scheduled_at()
         outbox: Outbox | None = None
         meta_line = _fmt_llm_meta(self._last_llm_meta)
@@ -311,10 +354,10 @@ class ReplyService:
             )
         return outbox
 
-    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> None:
-        """Move the funnel: stage priority ready+contact → READY, needs_manager →
-        MANAGER, ready w/o contact → PRESENTING, else the model's stage. An openhouse RSVP
-        is a side-channel notification, not a stage transition — see _stage_for."""
+    def _sync_lead_fields(self, lead: Lead, thread, decision: Decision) -> None:
+        """Copy this turn's observations onto the lead/thread — product, language, segment,
+        and a freshly-typed phone. Pure field sync, no funnel-stage logic (see _apply_decision
+        for that) — split out so each responsibility can be read and tested on its own."""
         # The model may re-qualify the product it inherited from the ad (product_source
         # 'ad') or from an earlier turn ('model'), but never overrides a manager's manual
         # pick ('manager').
@@ -343,6 +386,12 @@ class ReplyService:
             if normalized:
                 lead.phone_e164 = normalized
                 self.session.add(lead)
+
+    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> None:
+        """Move the funnel: stage priority ready+contact → READY, needs_manager →
+        MANAGER, ready w/o contact → PRESENTING, else the model's stage. An openhouse RSVP
+        is a side-channel notification, not a stage transition — see _stage_for."""
+        self._sync_lead_fields(lead, thread, decision)
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return
@@ -502,26 +551,9 @@ class ReplyService:
         self, thread_id: int, lead_id: int, decision: Decision,
         lead_phone: str | None = None,
     ) -> None:
-        q = decision.manager_question or ""
-        gap = decision.kb_gap or ""
-        summary_en = q or "Lead requests human handoff"
-        summary_ru = f"Вопрос: {q}" if q else "Лид запросил менеджера"
-        if gap:
-            summary_ru += f"\nПробел в KB: {gap}"
-        alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)
-        try:
-            await alerts.raise_alert(
-                lead_id=lead_id,
-                kind="needs_manager",
-                summary_en=summary_en,
-                summary_ru=summary_ru,
-                thread_id=thread_id,
-                lead_phone=lead_phone,
-            )
-        except Exception:
-            logger.warning(
-                "manager alert failed thread=%s lead=%s", thread_id, lead_id, exc_info=True
-            )
+        await raise_manager_alert(
+            self.session, self.branch_id, self._notifier, self.llm,
+            thread_id, lead_id, decision, lead_phone)
 
     def _scheduled_at(self) -> datetime:
         """Return send time: now + random delay from settings (or immediate if none)."""

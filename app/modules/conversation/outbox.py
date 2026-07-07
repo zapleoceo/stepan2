@@ -34,6 +34,10 @@ _SOFT_BLOCK = (
     "rate", "429", "spam", "blocked", "try again", "throttl", "temporarily",
 )
 _RETRY_AFTER = timedelta(minutes=settings().soft_block_retry_min)
+# A soft block used to retry forever — a PERMANENT block (never lifts) would requeue every
+# _RETRY_AFTER indefinitely, hammering the channel and never surfacing to a human. Cap it;
+# past this the row gives up as 'failed' like any other unrecoverable send error.
+_MAX_SOFT_BLOCK_ATTEMPTS = settings().outbox_max_soft_block_attempts
 # Humanlike pause after opening a chat before replying (anti-ban) — S1 parity.
 _SEEN_DELAY_S = (settings().seen_delay_min_s, settings().seen_delay_max_s)
 
@@ -95,15 +99,22 @@ class OutboxSender:
             logger.info(
                 "sent branch=%d thread=%d source=%s", self.branch_id, thread_id, row.source
             )
-        elif _is_soft_block(result.error):
+        elif _is_soft_block(result.error) and row.attempts < _MAX_SOFT_BLOCK_ATTEMPTS:
             row.status = "pending"  # transient (challenge/rate) — back off, don't drop
             row.scheduled_at = now + _RETRY_AFTER
             row.error = result.error
+            row.attempts += 1
             logger.warning(
-                "soft-block branch=%d thread=%d: %s — retry at %s",
-                self.branch_id, thread_id, result.error, row.scheduled_at,
+                "soft-block branch=%d thread=%d attempt=%d/%d: %s — retry at %s",
+                self.branch_id, thread_id, row.attempts, _MAX_SOFT_BLOCK_ATTEMPTS,
+                result.error, row.scheduled_at,
             )
         else:
+            if _is_soft_block(result.error):
+                logger.error(
+                    "soft-block branch=%d thread=%d: %d attempts exhausted, giving up: %s",
+                    self.branch_id, thread_id, row.attempts, result.error,
+                )
             row.status = "failed"
             row.error = result.error
             logger.warning(

@@ -185,6 +185,43 @@ async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_se
     assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
+async def test_followup_needs_manager_raises_an_alert(db_session) -> None:
+    """A nudge can trip needs_manager too (an unfixable guard violation, or the model
+    surfacing a genuine KB gap) — it must alert a human same as a live reply, or nobody
+    ever finds out the lead needs one (the gap this closes)."""
+    from app.adapters.db.models import ManagerAlert
+
+    bid, tid, lead, _thread = await _world(db_session, timer_due=True)
+    lead.phone_e164 = "+6281234567890"
+    db_session.add(lead)
+    await db_session.flush()
+
+    class _Notifier:
+        def __init__(self) -> None:
+            self.sends: list[str] = []
+
+        async def create_topic(self, *, name: str, icon_emoji=None) -> int:  # noqa: ANN001, ARG002
+            return 1
+
+        async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
+            self.sends.append(text)
+            return "ok"
+
+    payload = json.dumps({
+        "reply": "Untuk yang ini aku cek dulu ke tim ya Kak",
+        "stage": "qualifying", "needs_manager": True, "manager_question": "Promo bulan ini?",
+        "kb_gap": "no monthly promo info in KB",
+    })
+    notifier = _Notifier()
+    svc = FollowupService(db_session, bid, FakeLLM(payload), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=notifier)
+    assert await svc.run() == 1
+    alert = (await db_session.exec(select(ManagerAlert))).first()
+    assert alert is not None and alert.kind == "needs_manager"
+    assert alert.lead_phone == "+6281234567890"
+    assert len(notifier.sends) == 1
+
+
 async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
     """Chat 1830: the 2nd follow-up re-greeted the lead and re-asked the exact same
     discovery question already sent — must regenerate on the strong model instead of

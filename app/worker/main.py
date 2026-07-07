@@ -166,12 +166,22 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
         branches = await wiring.active_branches(session)
     for branch in branches:
         assert branch.id is not None
-        async with session_scope() as session:
-            cfg = await get_settings(session, branch.id)
-            if not cfg.agent_enabled:
-                logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
-                continue
-            thread_ids = await wiring.threads_awaiting_reply(session, branch.id)
+        try:
+            async with session_scope() as session:
+                cfg = await get_settings(session, branch.id)
+                if not cfg.agent_enabled:
+                    logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
+                    continue
+                thread_ids = await wiring.threads_awaiting_reply(session, branch.id)
+        except Exception:
+            # An error here (not inside _reply_thread's own try) used to propagate out of
+            # reply_pending entirely, aborting every remaining branch for the tick and making
+            # ARQ retry the WHOLE job from scratch — the retry's fresh thread_ids query is
+            # itself safe (a thread already replied-to drops out of it), but every branch
+            # AFTER the one that errored had to wait a full extra tick for no reason. Isolate
+            # per branch, same as _reply_thread isolates per thread.
+            logger.exception("reply_pending: branch=%s bookkeeping failed, skipping", branch.id)
+            continue
         for thread_id in thread_ids:
             if await _reply_thread(branch.id, thread_id, llm):
                 enqueued += 1
@@ -218,7 +228,8 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
                 continue
             kb = branch.kb_source_branch_id or branch.id  # object in hand → no extra query
             knowledge = KnowledgeService(session, kb, llm)
-            svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg)
+            svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg,
+                                  notifier=_build_notifier(branch_cfg))
             sent += await svc.run()  # timers are armed by OutboxSender after bot sends
     return sent
 

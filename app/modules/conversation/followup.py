@@ -20,12 +20,13 @@ from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
 from .engine import DecisionEngine, _fmt_llm_meta
-from .reply import _BUBBLE_GAP_S, _split_bubbles, guard_decision
+from .reply import _BUBBLE_GAP_S, _split_bubbles, guard_decision, raise_manager_alert
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
     from app.ports.llm import LLMPort
+    from app.ports.notify import NotifierPort
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +95,14 @@ class FollowupService:
         llm: LLMPort,
         knowledge: KnowledgeService,
         settings: BranchSettings,
+        notifier: NotifierPort | None = None,
     ) -> None:
         self.session = session
         self.branch_id = branch_id
         self.llm = llm
         self.knowledge = knowledge
         self.settings = settings
+        self.notifier = notifier
         self.threads = ThreadRepo(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
         self.outbox = OutboxRepo(session, branch_id)
@@ -210,6 +213,13 @@ class FollowupService:
             return False
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: lead answered while we were generating (S1 guard)
+        # A nudge can trip needs_manager too (an unfixable guard violation, or the model
+        # itself surfacing a KB gap) — it must alert same as a live reply, or a human never
+        # finds out (the pre-2026-07-07 gap: this used to queue the nudge silently).
+        if decision.needs_manager and ctx.lead is not None:
+            await raise_manager_alert(
+                self.session, self.branch_id, self.notifier, self.llm,
+                thread_id, ctx.lead.id, decision, ctx.lead.phone_e164)
         meta_line = _fmt_llm_meta(meta)
         for i, bubble in enumerate(_split_bubbles(decision.reply)):
             await self.outbox.add(Outbox(

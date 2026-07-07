@@ -106,6 +106,23 @@ async def test_ingest_binds_product_from_ad_map(db_session) -> None:
     assert thread.ad_id == "AD1"
 
 
+async def test_ingest_defaults_lead_source_from_ad_id(db_session) -> None:
+    """Live case (thread 2158): IG sent an ad_id but no lead_source tag, so source_hint's
+    'lead clicked an ad' prompt never fired and Stepan opened generically instead of
+    acknowledging the ad. An ad_id is unambiguous evidence of a click-to-message ad."""
+    bid, ch = await _branch_channel(db_session)
+    await IngestService(db_session, bid).ingest(ch, [_inbound(ad_id="AD1")])
+    thread = (await db_session.exec(select(ChannelThread))).first()
+    assert thread.lead_source == "ad_clicktomsg"
+
+
+async def test_ingest_leaves_lead_source_none_without_ad_id(db_session) -> None:
+    bid, ch = await _branch_channel(db_session)
+    await IngestService(db_session, bid).ingest(ch, [_inbound(ad_id=None)])
+    thread = (await db_session.exec(select(ChannelThread))).first()
+    assert thread.lead_source is None
+
+
 async def test_ingest_leaves_product_none_when_ad_unmapped(db_session) -> None:
     bid, ch = await _branch_channel(db_session)
     await IngestService(db_session, bid).ingest(ch, [_inbound(ad_id="AD_UNKNOWN")])

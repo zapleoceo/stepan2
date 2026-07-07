@@ -6,6 +6,7 @@ a fake ChannelPort — flipping status and recording an outgoing Message, or mar
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message, Outbox
@@ -206,6 +207,37 @@ async def test_send_next_failure_marks_failed_and_records_nothing(db_session):
         s, branch_id, FakeLLM(_DECISION), KnowledgeService(s, branch_id)
     ).messages.dialog(thread_id)
     assert all(m.direction == "in" for m in dialog)  # no outgoing message recorded
+
+
+async def test_send_next_soft_block_retries_then_gives_up(db_session):
+    """A soft block (challenge/rate) used to retry forever. Cap it — once attempts are
+    exhausted the row gives up as 'failed' instead of requeuing every _RETRY_AFTER forever."""
+    from app.modules.conversation.outbox import _MAX_SOFT_BLOCK_ATTEMPTS
+
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id)
+    row = Outbox(branch_id=branch_id, thread_id=thread_id, text="stuck",
+                attempts=_MAX_SOFT_BLOCK_ATTEMPTS - 1)
+    s.add(row)
+    await s.flush()
+
+    class _ChallengeChannel(FakeChannel):
+        async def send_text(self, external_thread_id, text):  # noqa: ANN001, ANN201
+            return SendResult(ok=False, error="challenge_required")
+
+    sent = await OutboxSender(s, branch_id, _ChallengeChannel()).send_next(thread_id)
+    assert sent is not None
+    assert sent.attempts == _MAX_SOFT_BLOCK_ATTEMPTS  # last allowed retry
+    assert sent.status == "pending"
+    sent.scheduled_at = datetime.now(UTC).replace(tzinfo=None)  # force it due again
+    s.add(sent)
+    await s.flush()
+
+    sent2 = await OutboxSender(s, branch_id, _ChallengeChannel()).send_next(thread_id)
+    assert sent2 is not None
+    assert sent2.status == "failed"  # attempts exhausted — gives up instead of retrying again
+    assert sent2.error == "challenge_required"
 
 
 async def test_send_next_none_when_nothing_pending(db_session):

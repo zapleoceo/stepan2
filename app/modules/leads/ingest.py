@@ -192,8 +192,15 @@ class IngestService:
         if inbound.product_hint and thread.product_slug is None:
             thread.product_slug = inbound.product_hint
             thread.product_source = "ad"
-        if inbound.lead_source and thread.lead_source is None:
-            thread.lead_source = inbound.lead_source
+        if thread.lead_source is None:
+            # IG doesn't always tag the referral type even when it DOES send an ad_id (live
+            # case, thread 2158) — an ad_id is unambiguous evidence of a click-to-message ad,
+            # so fall back to it rather than silently missing the entry-point prompt hint
+            # (source_hint) that acknowledges the ad instead of a generic "how can I help".
+            if inbound.lead_source:
+                thread.lead_source = inbound.lead_source
+            elif inbound.ad_id:
+                thread.lead_source = "ad_clicktomsg"
         if inbound.ad_id and thread.ad_id is None:
             thread.ad_id = inbound.ad_id
         if inbound.ad_media_id and thread.ad_media_id is None:

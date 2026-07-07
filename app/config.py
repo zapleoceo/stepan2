@@ -62,14 +62,23 @@ class Settings(BaseSettings):
         default=10, description="max concurrent ARQ jobs (higher = more parallel IG sessions "
                                 "and DB load)")
     worker_job_timeout_s: int = Field(
-        default=120, description="per-job kill deadline; every batch cap below is sized to "
-                                 "finish inside this")
+        default=240, description="per-job kill deadline; every batch cap below is sized to "
+                                 "finish inside this. Must comfortably clear a single thread's "
+                                 "WORST case: one llm_read_timeout_slow_s (90s) initial call "
+                                 "plus a guard regen also at 90s ceiling — 120s used to be "
+                                 "tight enough that a broker running near its own timeout "
+                                 "ceiling got this job killed mid-flight and retried, and the "
+                                 "retry re-picked a thread whose advisory lock had already "
+                                 "released → duplicate reply/send (2026-07-07)")
     ingest_jitter_s: float = Field(
         default=12.0, description="random 0..N s delay before each IG inbox poll so calls don't "
                                   "hit on a machine-regular tick (anti-ban)")
     reply_batch_cap: int = Field(
-        default=10, description="threads decided per reply_pending tick; too high overruns the "
-                                "job timeout → retry duplicates")
+        default=5, description="threads decided per reply_pending tick; too high overruns the "
+                               "job timeout → retry duplicates. Halved alongside the raised "
+                               "worker_job_timeout_s so a run of several guard-triggered "
+                               "(near-worst-case) threads in one tick still finishes with room "
+                               "to spare, not just the average case")
     send_batch_cap: int = Field(
         default=15, description="outbox rows sent per send_outbox tick; too high overruns the "
                                 "timeout → duplicate real IG sends")
@@ -98,6 +107,10 @@ class Settings(BaseSettings):
     soft_block_retry_min: int = Field(
         default=15, description="minutes to back off a channel after a soft block (rate limit / "
                                 "challenge) before retrying sends")
+    outbox_max_soft_block_attempts: int = Field(
+        default=8, description="give up and mark 'failed' after this many soft-block retries "
+                               "(~8 × soft_block_retry_min ≈ 2h) — a permanent block used to "
+                               "retry forever and never surface to a human")
 
     # ── LLM cost / quality knobs ────────────────────────────────────────────────
     llm_read_timeout_s: float = Field(

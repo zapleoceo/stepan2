@@ -242,6 +242,8 @@ class Outbox(SQLModel, table=True):
     error: str | None = Field(default=None)
     llm_info: str | None = Field(default=None)
     tr_text: str | None = Field(default=None, description="кэш перевода очередной реплики")
+    attempts: int = Field(default=0, description="soft-block retries so far — capped, not "
+                                                  "infinite (see outbox._MAX_SOFT_BLOCK_ATTEMPTS)")
 
 
 class ManagerAlert(SQLModel, table=True):

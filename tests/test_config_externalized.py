@@ -31,9 +31,14 @@ def test_every_new_setting_has_a_description() -> None:
 
 def test_operational_knobs_are_present_with_sane_defaults() -> None:
     s = settings()
-    # the caps that must stay under the worker job timeout
-    assert s.worker_job_timeout_s == 120
-    assert s.reply_batch_cap == 10 and s.send_batch_cap == 15 and s.deletion_thread_cap == 3
+    # the caps that must stay under the worker job timeout. Raised 120→240 (2026-07-07): a
+    # single thread's worst case is one llm_read_timeout_slow_s (90s) call plus a guard regen
+    # ALSO at the 90s ceiling — 120s was tight enough that a broker running near its own
+    # timeout got this job killed mid-flight and retried, duplicating the reply/send.
+    assert s.worker_job_timeout_s == 240
+    # reply_batch_cap halved alongside the raised timeout so several worst-case threads in one
+    # tick still finish with room to spare, not just the average case.
+    assert s.reply_batch_cap == 5 and s.send_batch_cap == 15 and s.deletion_thread_cap == 3
     assert s.awaiting_reply_max_age_days == 3
     assert s.broker_log_retention_days == 30
     # anti-ban pacing
