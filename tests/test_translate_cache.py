@@ -124,3 +124,12 @@ async def test_translate_text_wraps_input_in_delimiters() -> None:
     user_content = llm.last_messages[1]["content"]
     assert user_content == f"'''{body}'''"
 
+
+async def test_translate_text_strips_leaked_delimiters() -> None:
+    """Real failure: despite being told not to, the live model echoed the ''' delimiters
+    back around its translation ("''Я буду отключен...''"). translate_text must strip
+    them rather than leaking prompt scaffolding into the stored/displayed translation."""
+    from app.modules.conversation.translate import translate_text
+    llm = CountingLLM("''перевод текста''")
+    assert await translate_text(llm, "halo") == "перевод текста"
+

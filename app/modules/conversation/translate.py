@@ -68,7 +68,11 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
     out, _ = await llm.chat(messages, capability="chat:fast",
                             max_tokens=settings().translate_max_tokens,
                             workflow="translate")
-    return out.strip() or None
+    clean = out.strip()
+    # Some models echo back the ''' delimiters from the prompt despite being told not to —
+    # strip any that wrap the whole response.
+    clean = clean.strip("'").strip()
+    return clean or None
 
 
 async def translate_message(
