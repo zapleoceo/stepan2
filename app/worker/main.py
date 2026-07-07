@@ -215,23 +215,60 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
     Runs every 10 minutes (between ingest and reply). Quiet hours do NOT block queueing —
     only the send (OutboxSender.send_next) holds a follow-up until quiet hours end, so a
     nudge queued at 23:50 is ready to go out the instant quiet hours lift instead of
-    losing a whole cron cycle. Only fires when followup_enabled=true in branch settings."""
-    sent = 0
+    losing a whole cron cycle. Only fires when followup_enabled=true in branch settings.
+
+    Each due THREAD runs in its OWN transaction (mirrors reply_pending/_reply_thread) —
+    a branch can have hundreds of due threads, and a slow/degraded broker can make the
+    whole cron job hit its ARQ timeout mid-list. Before this split, the entire branch's
+    due-thread loop shared one open transaction that only committed at the very end, so a
+    timeout kill silently discarded every follow-up already generated earlier in that same
+    cycle — broker calls could log ok=True and still never reach the outbox (2026-07-07)."""
+    queued = 0
     llm = BrokerLLM()
     async with session_scope() as session:
         if not await _platform_agent_on(session):
             return 0
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            branch_cfg = await get_settings(session, branch.id)
-            if not branch_cfg.followup_enabled:
-                continue
-            kb = branch.kb_source_branch_id or branch.id  # object in hand → no extra query
+        branches = await wiring.active_branches(session)
+    for branch in branches:
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
+                branch_cfg = await get_settings(session, branch.id)
+                if not branch_cfg.followup_enabled:
+                    continue
+                kb = await effective_kb_branch(session, branch.id)
+                knowledge = KnowledgeService(session, kb, llm)
+                svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg,
+                                      notifier=_build_notifier(branch_cfg))
+                due = await svc.due_threads(datetime.now(UTC).replace(tzinfo=None))
+        except Exception:
+            logger.exception(
+                "schedule_followups: branch=%s bookkeeping failed, skipping", branch.id)
+            continue
+        for thread_id, product_slug, sent_so_far in due:
+            if await _queue_one_followup(branch.id, thread_id, product_slug, sent_so_far, llm):
+                queued += 1  # timers are armed by OutboxSender after bot sends
+    return queued
+
+
+async def _queue_one_followup(
+    branch_id: int, thread_id: int, product_slug: str | None, sent_so_far: int,
+    llm: BrokerLLM,
+) -> bool:
+    """One thread's follow-up generate+queue in its own transaction; isolates failures per
+    thread so a poison thread (bad LLM JSON, broker error) or a later job-timeout can't
+    roll back follow-ups already committed for earlier threads this cycle."""
+    try:
+        async with session_scope() as session:
+            branch_cfg = await get_settings(session, branch_id)
+            kb = await effective_kb_branch(session, branch_id)
             knowledge = KnowledgeService(session, kb, llm)
-            svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg,
+            svc = FollowupService(session, branch_id, llm, knowledge, branch_cfg,
                                   notifier=_build_notifier(branch_cfg))
-            sent += await svc.run()  # timers are armed by OutboxSender after bot sends
-    return sent
+            return await svc.queue_one(thread_id, product_slug, sent_so_far)
+    except Exception:
+        logger.exception("followup failed branch=%d thread=%d", branch_id, thread_id)
+        return False
 
 
 async def send_outbox(ctx: dict[str, Any]) -> int:

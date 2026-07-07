@@ -57,7 +57,8 @@ async def test_schedule_followups_queues_during_quiet_hours(db_session, monkeypa
     db_session.add(b)
     await db_session.flush()
 
-    ran: list[int] = []
+    constructed: list[int] = []
+    queued_calls: list[tuple[int, str | None, int]] = []
 
     async def _fake_platform_on(_session) -> bool:
         return True
@@ -68,18 +69,94 @@ async def test_schedule_followups_queues_during_quiet_hours(db_session, monkeypa
     async def _fake_get_settings(_session, _branch_id):
         return _ALWAYS_QUIET
 
+    async def _fake_effective_kb_branch(_session, branch_id):
+        return branch_id
+
     class _FakeFollowupService:
         def __init__(self, *_a, **_kw) -> None:
-            ran.append(1)
+            constructed.append(1)
 
-        async def run(self) -> int:
-            return 3
+        async def due_threads(self, _now):
+            return [(101, "course-a", 0), (102, None, 1), (103, "course-b", 0)]
+
+        async def queue_one(self, thread_id, product_slug, sent_so_far):
+            queued_calls.append((thread_id, product_slug, sent_so_far))
+            return True
 
     monkeypatch.setattr(worker_main, "_platform_agent_on", _fake_platform_on)
     monkeypatch.setattr(wiring, "active_branches", _fake_active_branches)
     monkeypatch.setattr(worker_main, "get_settings", _fake_get_settings)
+    monkeypatch.setattr(worker_main, "effective_kb_branch", _fake_effective_kb_branch)
     monkeypatch.setattr(worker_main, "FollowupService", _FakeFollowupService)
 
-    sent = await worker_main.schedule_followups({})
-    assert sent == 3
-    assert ran == [1]  # FollowupService WAS constructed and run despite quiet hours
+    queued = await worker_main.schedule_followups({})
+    assert queued == 3
+    # one FollowupService per branch-bookkeeping call PLUS one per queued thread (each
+    # thread now opens its own transaction/service instance — see _queue_one_followup)
+    assert len(constructed) == 1 + 3
+    assert queued_calls == [(101, "course-a", 0), (102, None, 1), (103, "course-b", 0)]
+
+
+async def test_one_thread_failing_does_not_discard_others_this_cycle(
+    db_session, monkeypatch,
+) -> None:
+    """Real incident (2026-07-07): the whole branch's due-thread loop used to share ONE
+    open transaction, so a job-timeout (or any later thread raising) rolled back every
+    follow-up already generated earlier in the same cycle — a broker call could log
+    ok=True and still never reach the outbox. Each thread must now commit independently:
+    an earlier thread's success must survive a later thread's failure."""
+    b = Branch(name="Q", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+
+    session_opens = 0
+
+    async def _fake_platform_on(_session) -> bool:
+        return True
+
+    async def _fake_active_branches(_session):
+        return [b]
+
+    async def _fake_get_settings(_session, _branch_id):
+        return _ALWAYS_QUIET
+
+    async def _fake_effective_kb_branch(_session, branch_id):
+        return branch_id
+
+    class _FakeFollowupService:
+        def __init__(self, *_a, **_kw) -> None:
+            pass
+
+        async def due_threads(self, _now):
+            return [(1, None, 0), (2, None, 0), (3, None, 0)]
+
+        async def queue_one(self, thread_id, _product_slug, _sent_so_far):
+            if thread_id == 2:
+                raise RuntimeError("simulated broker/db failure on thread 2")
+            return True
+
+    class _CountingScope:
+        """Each `async with session_scope()` opened is a separate transaction — the
+        fix under test. Counting opens proves thread 1/3 each got their own, independent
+        of thread 2 blowing up."""
+        async def __aenter__(self):
+            nonlocal session_opens
+            session_opens += 1
+            return db_session
+
+        async def __aexit__(self, *_exc) -> bool:
+            return False  # never swallow — same contract as the real session_scope
+
+    monkeypatch.setattr(worker_main, "_platform_agent_on", _fake_platform_on)
+    monkeypatch.setattr(wiring, "active_branches", _fake_active_branches)
+    monkeypatch.setattr(worker_main, "get_settings", _fake_get_settings)
+    monkeypatch.setattr(worker_main, "effective_kb_branch", _fake_effective_kb_branch)
+    monkeypatch.setattr(worker_main, "FollowupService", _FakeFollowupService)
+    monkeypatch.setattr(worker_main, "session_scope", lambda: _CountingScope())
+
+    queued = await worker_main.schedule_followups({})
+    assert queued == 2  # threads 1 and 3 succeeded despite thread 2 raising
+    # 1 open for platform-flag+branch-listing + 1 for branch bookkeeping + 1 per thread (3)
+    # — thread 2's failure didn't prevent thread 3's own independent transaction from
+    # opening and succeeding
+    assert session_opens == 1 + 1 + 3

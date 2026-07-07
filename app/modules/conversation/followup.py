@@ -108,17 +108,17 @@ class FollowupService:
         self.outbox = OutboxRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
 
-    async def run(self) -> int:
-        """Queue nudges for every due thread; one failure never blocks the rest."""
+    async def due_threads(self, now: datetime) -> list[tuple[int, str | None, int]]:
+        """Threads eligible for a follow-up right now — a pure query, no broker/DB writes.
+
+        Quiet hours do NOT filter this list — only the SEND (OutboxSender.send_next) holds
+        a follow-up-sourced row until quiet hours end. Queueing now means it's ready to go
+        out the instant quiet hours lift, instead of losing that whole cron cycle."""
         cfg = self.settings
         if not cfg.followup_enabled or not cfg.followup_schedule_h:
-            return 0
+            return []
         if not cfg.agent_enabled:
-            return 0  # global OFF: no generation at all
-        # Quiet hours do NOT block generation here — only the SEND (OutboxSender.send_next)
-        # holds a follow-up-sourced row until quiet hours end. Queueing now means it's ready
-        # to go out the moment quiet hours lift, instead of losing that whole cron cycle.
-        now = datetime.now(UTC).replace(tzinfo=None)
+            return []  # global OFF: no generation at all
         rows = (
             await self.session.execute(
                 text(_FOLLOWUP_Q),
@@ -128,6 +128,33 @@ class FollowupService:
                 },
             )
         ).all()
+        return list(rows)
+
+    async def queue_one(
+        self, thread_id: int, product_slug: str | None, sent_so_far: int,
+    ) -> bool:
+        """Generate+queue a single due thread's nudge; isolates one thread's failure so the
+        caller can commit per-thread (see worker/main.py's schedule_followups, which opens
+        a fresh session/transaction per call — a job-timeout kill mid-cycle used to roll
+        back every already-generated follow-up from that cycle because they all shared one
+        open transaction across the whole branch's due list, 2026-07-07)."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        try:
+            return await self._queue_followup(thread_id, product_slug, sent_so_far, now)
+        except Exception:
+            logger.exception(
+                "followup failed branch=%d thread=%d", self.branch_id, thread_id
+            )
+            return False
+
+    async def run(self) -> int:
+        """Queue nudges for every due thread in the CALLER's session/transaction.
+
+        Convenience for tests and other single-session callers. The worker does NOT use
+        this — schedule_followups calls due_threads() then queue_one() per thread, each in
+        its own transaction, so one slow/killed thread can't discard others' progress."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        rows = await self.due_threads(now)
         queued = 0
         for thread_id, product_slug, sent_so_far in rows:
             try:
