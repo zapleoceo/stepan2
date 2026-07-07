@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
-from datetime import UTC, datetime  # noqa: E402
+from datetime import UTC, datetime, timedelta  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -242,6 +242,48 @@ def test_event_bubble_shows_product_change_detail() -> None:
     html = _event_bubble(row)
     assert "Product changed" in html
     assert "vibe → py" in html  # the old→new detail is shown
+
+
+# ─── stage-event display anchoring (decision written before the reply is sent) ──
+
+def test_stage_event_anchors_to_the_reply_it_caused() -> None:
+    """A needs_manager/stage-change row is written the instant the decision is made —
+    before the humanize-delayed reply that triggered it actually sends. The system line
+    must display AFTER that reply, not before it, or the transcript reads backwards."""
+    from app.api._ui_html import _anchor_event_ts
+
+    decided_at = datetime(2026, 7, 7, 11, 25, 44)
+    sent_at = datetime(2026, 7, 7, 11, 26, 33)  # ~49s later, after the humanize delay
+    assert _anchor_event_ts(decided_at, [sent_at]) == sent_at
+
+
+def test_stage_event_keeps_own_timestamp_beyond_the_anchor_window() -> None:
+    from app.api._ui_html import _anchor_event_ts
+
+    decided_at = datetime(2026, 7, 7, 11, 25, 44)
+    far_reply = decided_at + timedelta(minutes=10)  # e.g. a soft-block retry, way later
+    assert _anchor_event_ts(decided_at, [far_reply]) == decided_at
+
+
+def test_stage_event_keeps_own_timestamp_with_no_following_reply() -> None:
+    """A manual stage change (no bot reply attached) shows at its own time."""
+    from app.api._ui_html import _anchor_event_ts
+
+    decided_at = datetime(2026, 7, 7, 11, 25, 44)
+    earlier_reply = decided_at - timedelta(minutes=1)
+    assert _anchor_event_ts(decided_at, [earlier_reply]) == decided_at
+
+
+def test_merge_feed_orders_stage_line_after_its_reply() -> None:
+    from app.api._ui_html import _merge_feed
+
+    decided_at = datetime(2026, 7, 7, 11, 25, 44)
+    sent_at = datetime(2026, 7, 7, 11, 26, 33)
+    msg = (24376, "out", "agent", "Oke Kak, jadwalnya...", sent_at, None,
+           None, None, None, None, False)
+    event = (5575, "stage", "manager", "presenting", "bot", decided_at)
+    html = _merge_feed([msg], [event], tid=1, lead_seen_at=None)
+    assert html.index("Oke Kak") < html.index("sys-log")  # reply bubble renders first
 
 
 # ─── manager alert deep-link ──────────────────────────────────────────────────

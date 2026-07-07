@@ -937,10 +937,33 @@ def _event_bubble(row: object) -> str:
     )
 
 
+# A stage/alert event is written the instant the decision is made — BEFORE the reply that
+# triggered it is actually sent (the "humanize" anti-ban delay adds up to ~30-60s, longer on
+# a soft-block retry). Anchoring a 'stage' event to its own created_at would show the system
+# line ABOVE the bot reply a human reader would expect it to follow. Look for the next
+# outgoing bubble within this window and display the event right after it instead.
+_EVENT_ANCHOR_WINDOW = timedelta(minutes=5)
+
+
+def _anchor_event_ts(event_ts: datetime, out_ts: list[datetime]) -> datetime:
+    """The display timestamp for a 'stage' event: the next outgoing message at/after it
+    within the anchor window (so it reads in the order a human saw it happen), else its own
+    timestamp unchanged (e.g. a manual stage change with no reply attached)."""
+    for ts in out_ts:  # out_ts is sorted ascending
+        if ts >= event_ts:
+            return ts if ts - event_ts <= _EVENT_ANCHOR_WINDOW else event_ts
+    return event_ts
+
+
 def _merge_feed(msgs: list, events: list, tid: int, lead_seen_at: datetime | None) -> str:
-    """Message bubbles + system-log lines, interleaved in timestamp order."""
+    """Message bubbles + system-log lines, interleaved in DISPLAY order (not raw write
+    order — see _anchor_event_ts)."""
+    out_ts = sorted(ts for m in msgs if m[1] == "out" and (ts := _as_dt(m[4])) is not None)
     items = [(_as_dt(m[4]) or datetime.min, 0, _bubble(m, tid, lead_seen_at)) for m in msgs]
-    items += [(_as_dt(e[5]) or datetime.min, 1, _event_bubble(e)) for e in events]
+    items += [
+        (_anchor_event_ts(_as_dt(e[5]) or datetime.min, out_ts), 1, _event_bubble(e))
+        for e in events
+    ]
     items.sort(key=lambda x: (x[0], x[1]))
     return "".join(html for *_r, html in items)
 
