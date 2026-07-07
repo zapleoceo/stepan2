@@ -18,6 +18,7 @@ class CountingLLM:
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
         self.calls += 1
         self.last_kw = kw
+        self.last_messages = messages
         return self.out, {"model": "fake", "cost_usd": 0.001}
 
     async def embed(self, texts):  # noqa: ANN001, ANN201
@@ -99,3 +100,27 @@ def test_system_prompt_never_assumes_source_is_target() -> None:
     assert "never" in prompt.lower() and "refuse" in prompt.lower()
     assert "lookalike" in prompt.lower() or "NEVER already written" in prompt
     assert "{target}" not in prompt  # regression: an unformatted literal braces bug
+
+
+def test_system_prompt_forbids_chat_assistant_collapse() -> None:
+    """Real failure: 'Kyaknya aku ikut offline kak soalnya kerjaa' made the model drop the
+    translate task entirely and answer as a generic chat assistant ('How can I help? I
+    don't understand...'). The prompt must explicitly forbid treating the input as a live
+    message addressed to the model."""
+    from app.modules.conversation.translate import _system_prompt
+    prompt = _system_prompt("Russian")
+    assert "not a chat assistant" in prompt.lower()
+    assert "data" in prompt.lower()
+    assert "never respond" in prompt.lower()
+
+
+async def test_translate_text_wraps_input_in_delimiters() -> None:
+    """Delimiting the user-turn content reinforces that it's a DATA block to transform,
+    not a live chat turn — part of the fix for the chat-assistant-collapse failure above."""
+    from app.modules.conversation.translate import translate_text
+    llm = CountingLLM("перевод")
+    body = "Kyaknya aku ikut offline kak soalnya kerjaa"
+    await translate_text(llm, body)
+    user_content = llm.last_messages[1]["content"]
+    assert user_content == f"'''{body}'''"
+
