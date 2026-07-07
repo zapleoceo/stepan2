@@ -71,6 +71,29 @@ def test_is_risky_detects_unsourced_alumni_stories() -> None:
         "Vibe Coding itu program 4 bulan buat bikin aplikasi sendiri pakai AI.")
 
 
+# ─── multiple questions / impossible capabilities / wrong channel ──────────────
+
+def test_multiple_questions_flags_two_but_not_one() -> None:
+    assert guard.multiple_questions(
+        "Kak pernah ngerasa gak dapet engagement? Atau bingung bikin konten yang menarik?")
+    assert guard.multiple_questions("Kalau boleh tau, Kakak kerja di bidang apa? Domisili mana?")
+    assert not guard.multiple_questions("Kalau boleh tau, Kakak tertarik di bidang apa?")
+    # a quoted example script's own "?" doesn't count against the real question to the lead
+    assert not guard.multiple_questions("Coba jawab kayak gini: «tertarik gak kak?» ya Kak")
+
+
+def test_impossible_capability_offers_catches_voice_and_call() -> None:
+    assert guard.impossible_capability_offers("aku bisa jelasin lewat voice note kalau mau")
+    assert guard.impossible_capability_offers("mending aku telpon langsung kamu aja ya")
+    assert not guard.impossible_capability_offers("aku jelasin di sini aja ya Kak lewat chat")
+
+
+def test_wrong_channel_claims_catches_dm_on_instagram() -> None:
+    assert guard.wrong_channel_claims("langsung aja DM aku di Instagram ya Kak")
+    assert guard.wrong_channel_claims("chat aku di Instagram aja buat lanjutin")
+    assert not guard.wrong_channel_claims("langsung aja tanya di sini ya Kak")
+
+
 # ─── integration through the real reply path (SimService) ───────────────────────
 
 class _ScriptLLM:

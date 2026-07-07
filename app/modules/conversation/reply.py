@@ -112,15 +112,30 @@ async def guard_prompt(session: AsyncSession, branch_id: int) -> str | None:
     return doc.content if doc and (doc.content or "").strip() else None
 
 
+def _deterministic_issues(reply: str, context: str) -> list[str]:
+    """Every KB-context-free check — no LLM call needed, always on regardless of
+    reply_guard mode. Re-run on a regenerated draft too, so a still-broken reply is caught
+    before it ships rather than trusted on faith."""
+    return [
+        *guard.ungrounded_urls(reply, context),
+        *guard.false_delivery_claims(reply),
+        *guard.multiple_questions(reply),
+        *guard.impossible_capability_offers(reply),
+        *guard.wrong_channel_claims(reply),
+    ]
+
+
 async def guard_decision(
     session: AsyncSession, branch_id: int, branch_settings: BranchSettings | None,
     llm: LLMPort, engine: DecisionEngine, ctx, thread_id: int, lang: str, workflow: str,
     bill: bool, decision: Decision, meta: dict,
 ) -> tuple[Decision, dict]:
-    """Block fabricated facts: ungrounded links (deterministic) + an LLM grounding
-    check on risky replies. One correcting regeneration, then a safe hand-off — never
-    send the fabrication. Off when reply_guard='off'. Shared by live replies AND
-    follow-up nudges — a fabrication doesn't care which path generated it.
+    """Block fabricated facts and a handful of conversation-quality failures: ungrounded
+    links, false delivery claims, more than one question in a turn, impossible capability
+    offers, and telling an Instagram lead to go DM on Instagram — all deterministic — plus
+    an LLM grounding check on risky replies. One correcting regeneration, then a safe
+    hand-off — never send the violation. Off when reply_guard='off'. Shared by live replies
+    AND follow-up nudges.
 
     Returns (decision, meta) — meta is the regen's broker-log line when a regen
     happened, else the meta passed in unchanged."""
@@ -128,8 +143,7 @@ async def guard_decision(
     if mode == "off" or not decision.reply:
         return decision, meta
     context = engine.last_context
-    issues = guard.ungrounded_urls(decision.reply, context)
-    issues += guard.false_delivery_claims(decision.reply)
+    issues = _deterministic_issues(decision.reply, context)
     if mode == "full" and guard.is_risky(decision.reply):
         issues += await guard.verify_grounding(
             llm, decision.reply, context, branch_id=branch_id,
@@ -146,11 +160,10 @@ async def guard_decision(
     except ValueError:
         fixed = decision
     # Only the deterministic checks are re-verified (an LLM re-verify would double cost);
-    # a still-fabricated link/delivery claim means we can't trust the draft → hand off.
-    if fixed.reply and not guard.ungrounded_urls(fixed.reply, context) \
-            and not guard.false_delivery_claims(fixed.reply):
+    # a still-broken draft means we can't trust it → hand off.
+    if fixed.reply and not _deterministic_issues(fixed.reply, context):
         return fixed, regen_meta
-    logger.error("guard: branch=%d thread=%d unfixable fabrication → hand-off",
+    logger.error("guard: branch=%d thread=%d unfixable violation → hand-off",
                  branch_id, thread_id)
     from dataclasses import replace  # noqa: PLC0415
     return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True), regen_meta
