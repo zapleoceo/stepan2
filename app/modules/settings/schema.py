@@ -66,12 +66,21 @@ SCHEMA: list[SettingSection] = [
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [
-        _f("hourly_cap", "int", "350",
+        # Defaults sized as a runaway-bug backstop, not a precise anti-ban dial: IG/WhatsApp
+        # follow-ups ride the unofficial private APIs (instagrapi/Evolution), where community
+        # guidance flags 200+/day as a high-risk bulk-send profile — but this cap also gates
+        # safe official-Graph replies to real inbound leads, which run much higher on a busy
+        # branch. Too low silently stops replying to real leads for the rest of the window
+        # (see the 2026-06-21 "Stepan molchit" incident) — a worse outcome than a modest ban
+        # risk. 150/800 gives real headroom over a typical busy branch's organic peak
+        # (~50/hour, ~300-500/day) while still being a real ceiling, not the old 350/2100
+        # (which never actually triggered).
+        _f("hourly_cap", "int", "150",
            _l("Сообщений в час", "Messages / hour", "Pesan / jam"),
-           ph=_l("350", "350", "350"), help=_UNLIMITED, width="76px"),
-        _f("daily_cap", "int", "2100",
+           ph=_l("150", "150", "150"), help=_UNLIMITED, width="76px"),
+        _f("daily_cap", "int", "800",
            _l("Сообщений в день", "Messages / day", "Pesan / hari"),
-           ph=_l("2100", "2100", "2100"), help=_UNLIMITED, width="76px"),
+           ph=_l("800", "800", "800"), help=_UNLIMITED, width="76px"),
     ]),
     SettingSection("fa-solid fa-clock-rotate-left",
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [
