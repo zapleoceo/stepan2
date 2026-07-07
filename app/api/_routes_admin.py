@@ -269,6 +269,26 @@ async def reports_panel(
     lead_where = ("WHERE" + date_and[4:]) if date_and else ""
     # date_and / lead_where are built ONLY from fixed fragments; all values are bound params.
     _sc = f"SELECT l.stage, COUNT(*) FROM lead l {lead_where} GROUP BY l.stage"  # noqa: S608
+    # The hour histogram counts MESSAGES sent/received in the window, so it must filter by
+    # m.occurred_at — NOT date_and's l.created_at (conversation-start). Reusing date_and here
+    # made "range=1h" read as "leads whose conversation started in the last hour", so an active
+    # send-out to OLDER leads (a queue drain, a re-engagement batch) showed as ~0 even while
+    # dozens of messages were actually going out. Own filter, own params, same bidirectional
+    # scoping rules as date_and.
+    msg_and = ""
+    msg_params: dict = {}
+    if branch_ids:
+        msg_and += " AND l.branch_id = ANY(:mbids)"
+        msg_params["mbids"] = branch_ids
+    if active_range:
+        msg_and += " AND m.occurred_at >= :msince"
+        msg_params["msince"] = utc_now() - _QUICK_RANGES[active_range]
+    elif df:
+        msg_and += " AND m.occurred_at >= CAST(:mdf AS date)"
+        msg_params["mdf"] = date.fromisoformat(df)
+    if dt_:
+        msg_and += " AND m.occurred_at < (CAST(:mdt AS date) + INTERVAL '1 day')"
+        msg_params["mdt"] = date.fromisoformat(dt_)
     _hour = (
         # Branch-local hour bucket — see _query._HOUR_Q for why the shift is needed.
         "SELECT EXTRACT(HOUR FROM m.occurred_at + make_interval(hours => b.tz_offset_h))::int,"
@@ -277,13 +297,13 @@ async def reports_panel(
         " JOIN lead l ON l.id=ct.lead_id JOIN branch b ON b.id=l.branch_id"
         " WHERE m.direction=:dir{da} GROUP BY 1"
     )
-    _hi = _hour.format(da=date_and)  # noqa: S608
+    _hi = _hour.format(da=msg_and)  # noqa: S608
     _ho = _hi
     fb_bid = fb_acct = ""
     async with session_scope() as session:
         sc = (await session.execute(text(_sc), params)).all()
-        hi = (await session.execute(text(_hi), {**params, "dir": "in"})).all()
-        ho = (await session.execute(text(_ho), {**params, "dir": "out"})).all()
+        hi = (await session.execute(text(_hi), {**msg_params, "dir": "in"})).all()
+        ho = (await session.execute(text(_ho), {**msg_params, "dir": "out"})).all()
         ad_funnel = await fetch_ad_funnel(session, branch_ids, since=since_dt, until=until_dt)
         discovery = await fetch_discovery_metrics(
             session, branch_ids, since=since_dt, until=until_dt)
