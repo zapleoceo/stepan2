@@ -3,13 +3,30 @@
 The first translate stores the result on the row; later requests return it for free."""
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import settings
+from app.modules.conversation.routing import SMART
 from app.ports.llm import LLMPort
 
 _TARGET_BY_LANG = {"ru": "Russian", "en": "English", "id": "Indonesian"}
+
+# The cheap chat:fast provider pool has been observed silently failing to translate
+# Indonesian → Russian specifically: it returns the source text unchanged, a source/English
+# mashup, or even the wrong script entirely (live case, thread 2161 — 0 of 5 sampled calls to
+# cohere/command-r7b-12-2024 produced actual Cyrillic). English and Indonesian both use the
+# Latin script, so this check can only catch the Russian case, but that's also the only
+# target in real use today (see msg_translate_single's cache-key note).
+_CYRILLIC_RE = re.compile(r"[а-яА-ЯёЁ]")
+
+
+def _looks_translated(body: str, target: str) -> bool:
+    if target == "Russian":
+        return bool(_CYRILLIC_RE.search(body))
+    return True
 
 
 def target_for_lang(lang_code: str) -> str:
@@ -65,13 +82,18 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
     # Cyrillic/Indonesian output is token-heavy (mistral encodes Cyrillic at ~2-3x the
     # char count); 400 truncated real translations mid-sentence. Cap input at 800 chars,
     # so ~1500 output tokens comfortably covers a full translation.
-    out, _ = await llm.chat(messages, capability="chat:fast",
-                            max_tokens=settings().translate_max_tokens,
-                            workflow="translate")
-    clean = out.strip()
-    # Some models echo back the ''' delimiters from the prompt despite being told not to —
-    # strip any that wrap the whole response.
-    clean = clean.strip("'").strip()
+    for capability in ("chat:fast", SMART):
+        out, _ = await llm.chat(messages, capability=capability,
+                                max_tokens=settings().translate_max_tokens,
+                                workflow="translate")
+        clean = out.strip()
+        # Some models echo back the ''' delimiters from the prompt despite being told not
+        # to — strip any that wrap the whole response.
+        clean = clean.strip("'").strip()
+        if clean and _looks_translated(clean, target):
+            return clean
+        # The cheap pool's chat:fast provider has been caught silently not-translating (see
+        # _looks_translated) — one retry on the strong model before giving up.
     return clean or None
 
 

@@ -133,3 +133,48 @@ async def test_translate_text_strips_leaked_delimiters() -> None:
     llm = CountingLLM("''перевод текста''")
     assert await translate_text(llm, "halo") == "перевод текста"
 
+
+# ─── retry when chat:fast silently doesn't translate (thread 2161) ──────────────
+
+class _SequenceLLM:
+    """Returns one output per call, in order; records the capability asked for each time."""
+
+    def __init__(self, *outs: str) -> None:
+        self._q = list(outs)
+        self.caps: list[str] = []
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        self.caps.append(kw.get("capability"))
+        return self._q.pop(0), {"model": "fake", "cost_usd": 0.001}
+
+    async def embed(self, texts):  # noqa: ANN001, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_looks_translated_flags_untranslated_russian_output() -> None:
+    """Live case: cohere/command-r7b-12-2024 returned the Indonesian source basically
+    unchanged (once even switched to Chinese) when asked to translate to Russian — 0 of 5
+    sampled attempts produced real Cyrillic."""
+    from app.modules.conversation.translate import _looks_translated
+    assert not _looks_translated("Halo! Senang hearing itu Kakak tertarik sama SMM", "Russian")
+    assert _looks_translated("Привет! Рад, что тебе интересно", "Russian")
+    # only checked for a Russian target — English/Indonesian share the Latin script
+    assert _looks_translated("Hello there", "English")
+
+
+async def test_translate_text_retries_on_smart_when_fast_fails_to_translate() -> None:
+    from app.modules.conversation.translate import translate_text
+    # chat:fast echoes the Indonesian source back untranslated; chat:smart gets it right
+    llm = _SequenceLLM("Halo! masih Indonesia aja", "Привет! уже по-русски")
+    out = await translate_text(llm, "halo apa kabar", target="Russian")
+    assert out == "Привет! уже по-русски"
+    assert llm.caps == ["chat:fast", "chat:smart"]
+
+
+async def test_translate_text_no_retry_when_fast_already_translated() -> None:
+    from app.modules.conversation.translate import translate_text
+    llm = _SequenceLLM("Привет, как дела")
+    out = await translate_text(llm, "halo apa kabar", target="Russian")
+    assert out == "Привет, как дела"
+    assert llm.caps == ["chat:fast"]  # no wasted smart-model call
+
