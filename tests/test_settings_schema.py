@@ -155,6 +155,23 @@ def test_current_value_overrides_default() -> None:
     assert 'value="7"' in html
 
 
+def test_cap_usage_badge_shown_when_provided() -> None:
+    """Live usage under hourly_cap/daily_cap — never hardcoded, only rendered when the
+    route computed it and passed it in."""
+    html = settings_form_html(
+        {"hourly_cap": "150", "daily_cap": "800"}, "en",
+        cap_usage={"hourly_cap": (150, 150), "daily_cap": (310, 800)})
+    assert "150/150 (100%)" in html
+    assert "cap reached" in html.lower()
+    assert "310/800 (39%)" in html
+    assert "cap reached" not in html.split("310/800")[1][:40].lower()
+
+
+def test_cap_usage_badge_absent_without_data() -> None:
+    html = settings_form_html({"hourly_cap": "150"}, "en")
+    assert "/150 (" not in html
+
+
 # ─── save-by-key route (smoke) ──────────────────────────────────────────────────
 
 def test_settings_save_by_key_route(client: TestClient) -> None:

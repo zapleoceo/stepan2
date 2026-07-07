@@ -135,6 +135,8 @@ _TR: dict[str, dict[str, str]] = {
     "set.saved":    {"ru": "✓",         "en": "✓",             "id": "✓"},
     "set.autosave": {"ru": "сохраняется автоматически", "en": "saves automatically",
                      "id": "tersimpan otomatis"},
+    "set.cap_reached": {"ru": "лимит исчерпан, отправка на паузе",
+                        "en": "cap reached, sends paused", "id": "batas tercapai, jeda kirim"},
     # help overlay
     "help.title":   {"ru": "Справка",   "en": "Help",          "id": "Bantuan"},
     "help.inbox":   {
@@ -483,6 +485,10 @@ _TR: dict[str, dict[str, str]] = {
     "outbox.in_h":      {"ru": "через {n} ч",  "en": "in {n}h",     "id": "{n} jam lagi"},
     "outbox.quiet_until": {"ru": "тихо до {h}:00", "en": "quiet till {h}:00",
                            "id": "senyap s/d {h}:00"},
+    "outbox.cap_held": {"ru": "лимит {limit} исчерпан", "en": "{limit} cap reached",
+                        "id": "batas {limit} tercapai"},
+    "outbox.cap_hour": {"ru": "в час", "en": "hourly", "id": "per jam"},
+    "outbox.cap_day":  {"ru": "в день", "en": "daily", "id": "per hari"},
     # broker log page
     "nav.log":          {"ru": "Лог брокера",  "en": "Broker log",  "id": "Log broker"},
     "log.title":        {"ru": "Лог вызовов брокера", "en": "Broker call log",

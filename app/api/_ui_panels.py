@@ -94,12 +94,17 @@ def outbox_count_html(n: int) -> str:
 def outbox_panel_html(
     rows: list, tz_by_branch: dict[int, int] | None = None,
     quiet_by_branch: dict[int, tuple[int, int]] | None = None,
+    cap_status: dict[int, tuple[bool, bool]] | None = None,
 ) -> str:
-    """Read-only outbox queue monitor (last 100 entries)."""
+    """Read-only outbox queue monitor (last 100 entries). `cap_status` = {branch_id:
+    (hourly_reached, daily_reached)} — computed live from real counts by the caller each
+    request, never hardcoded here, so a pending/due row that's actually being held back by
+    the anti-ban send cap shows why instead of just looking silently stuck."""
     title = _h.escape(t("nav.outbox"))
     hint = _h.escape(t("help.outbox"))
     tz = tz_by_branch or {}
     quiet = quiet_by_branch or {}
+    caps = cap_status or {}
 
     def _spill(s: str) -> str:
         css = {"pending": "s-pend", "sent": "s-sent", "failed": "s-fail"}.get(s, "s-pend")
@@ -145,6 +150,15 @@ def outbox_panel_html(
             return (f'<span style="color:#ffa94d">🔇 '
                     f'{_h.escape(t("outbox.quiet_until", h=f"{qe:02d}"))}</span>')
         secs = (dt - now).total_seconds()
+        # due but held back by the hourly/daily anti-ban send cap (manager sends bypass it,
+        # so exempt those) — without this the row would just say "now" and never move,
+        # looking like a silent bug instead of the deliberate anti-ban throttle it is.
+        if secs <= 5 and str(source) != "manager":
+            hourly_hit, daily_hit = caps.get(branch_id, (False, False))
+            if hourly_hit or daily_hit:
+                which = t("outbox.cap_hour") if hourly_hit else t("outbox.cap_day")
+                held = _h.escape(t("outbox.cap_held", limit=which))
+                return f'<span style="color:#ff8787">⏳ {held}</span>'
         if secs <= 5:
             return f'<span style="color:#51cf66">{_h.escape(t("outbox.now"))}</span>'
         if secs < 60:

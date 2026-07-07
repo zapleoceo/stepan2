@@ -16,11 +16,11 @@ from app.admin._branch import (
     is_super_admin,
     writable_branch_ids,
 )
-from app.domain.clock import utc_now
+from app.domain.clock import branch_day_start_utc, utc_now
 from app.modules.ads import AdMappingService
 from app.modules.knowledge.repository import ProductRepo
 from app.modules.settings import schema as settings_schema
-from app.modules.settings.service import invalidate
+from app.modules.settings.service import get_settings, invalidate
 
 from ._i18n import apply_lang, t
 from ._ig_preview import fetch_creative_bytes
@@ -114,7 +114,31 @@ async def outbox_panel(request: Request) -> HTMLResponse:
                     continue
             quiet_by_branch = {
                 bid: (d.get("quiet_start", 0), d.get("quiet_end", 0)) for bid, d in tmp.items()}
-    return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch, quiet_by_branch))
+        # Live anti-ban cap status per branch (never cached/hardcoded — computed fresh from
+        # real sent counts each request), so a due row that's actually held back by the
+        # hourly/daily send cap shows why instead of looking silently stuck.
+        cap_status: dict[int, tuple[bool, bool]] = {}
+        now = utc_now()
+        for bid in seen_ids:
+            cfg = await get_settings(session, bid)
+            hourly_hit = daily_hit = False
+            if cfg.hourly_cap > 0:
+                n = (await session.execute(
+                    text("SELECT count(*) FROM outbox WHERE branch_id=:b AND status='sent'"
+                         " AND sent_at >= :since"),
+                    {"b": bid, "since": now - timedelta(hours=1)},
+                )).scalar_one()
+                hourly_hit = n >= cfg.hourly_cap
+            if cfg.daily_cap > 0:
+                day_start = branch_day_start_utc(now, cfg.tz_offset_h)
+                n = (await session.execute(
+                    text("SELECT count(*) FROM outbox WHERE branch_id=:b AND status='sent'"
+                         " AND sent_at >= :since"),
+                    {"b": bid, "since": day_start},
+                )).scalar_one()
+                daily_hit = n >= cfg.daily_cap
+            cap_status[bid] = (hourly_hit, daily_hit)
+    return HTMLResponse(outbox_panel_html(list(rows), tz_by_branch, quiet_by_branch, cap_status))
 
 
 def _valid_date(value: str) -> str:
@@ -298,7 +322,30 @@ async def settings_panel(request: Request) -> HTMLResponse:
     async with session_scope() as session:
         q = f"SELECT key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
         rows = (await session.execute(text(q), params)).all()
-    return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
+        # Live usage badge under hourly_cap/daily_cap — single-branch only (ambiguous which
+        # branch's counts to show across a cross-branch view), computed fresh each request
+        # from real sent counts, never hardcoded.
+        cap_usage: dict[str, tuple[int, int]] = {}
+        if branch_ids and len(branch_ids) == 1:
+            bid = branch_ids[0]
+            cfg = await get_settings(session, bid)
+            now = utc_now()
+            if cfg.hourly_cap > 0:
+                n = (await session.execute(
+                    text("SELECT count(*) FROM outbox WHERE branch_id=:b AND status='sent'"
+                         " AND sent_at >= :since"),
+                    {"b": bid, "since": now - timedelta(hours=1)},
+                )).scalar_one()
+                cap_usage["hourly_cap"] = (n, cfg.hourly_cap)
+            if cfg.daily_cap > 0:
+                day_start = branch_day_start_utc(now, cfg.tz_offset_h)
+                n = (await session.execute(
+                    text("SELECT count(*) FROM outbox WHERE branch_id=:b AND status='sent'"
+                         " AND sent_at >= :since"),
+                    {"b": bid, "since": day_start},
+                )).scalar_one()
+                cap_usage["daily_cap"] = (n, cfg.daily_cap)
+    return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang, cap_usage))
 
 
 

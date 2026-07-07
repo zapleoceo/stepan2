@@ -761,6 +761,26 @@ def test_outbox_panel_html_statuses() -> None:
     assert ">#77<" in html
 
 
+def test_outbox_panel_html_shows_rate_cap_held_marker() -> None:
+    """A due, pending, non-manager row must show WHY it's stuck when the branch's send cap
+    is currently reached — otherwise it just looks like a silently broken send."""
+    from datetime import datetime
+
+    from app.api._ui_panels import outbox_panel_html
+    _set_lang("en")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    due = [(1, 10, "pending", "agent", "hi", now, None, 1)]
+    held = outbox_panel_html(due, cap_status={1: (True, False)})
+    assert "cap reached" in held.lower()
+    # not capped -> falls through to the normal "now" indicator
+    clear = outbox_panel_html(due, cap_status={1: (False, False)})
+    assert "cap reached" not in clear.lower()
+    # a manager send bypasses the cap entirely (see outbox.py _cap_reached) — never marked
+    mgr_due = [(2, 11, "pending", "manager", "hi", now, None, 1)]
+    mgr = outbox_panel_html(mgr_due, cap_status={1: (True, True)})
+    assert "cap reached" not in mgr.lower()
+
+
 def test_outbox_panel_html_shifts_times_to_branch_local() -> None:
     """scheduled_at/sent_at must render in the row's own branch-local time, not raw UTC —
     was a plain str(v)[11:19] slice with zero tz correction."""

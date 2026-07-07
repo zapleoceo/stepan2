@@ -101,11 +101,36 @@ def _control(f: S.SettingField, value: str, lang: str, width: str | None = None)
     )
 
 
-def field_html(f: S.SettingField, value: str, lang: str, *, saved: bool = False) -> str:
-    """One compact auto-saving row — reused for the panel and the save response."""
+def _usage_badge(used: int, cap: int, lang: str) -> str:
+    """Live 'used/cap this window' indicator for a rate-limit field — colour banded by how
+    close to the ceiling it is (not a hardcoded numeric threshold for the FIELD itself, just
+    a generic proximity-to-100% band). `used`/`cap` are computed fresh by the caller from
+    real sent counts each request — never baked in here."""
+    from app.api._i18n import t  # noqa: PLC0415
+    if cap <= 0:  # 0 = unlimited, no ceiling to show usage against
+        return ""
+    pct = used / cap * 100
+    color = "#ff6b6b" if pct >= 100 else "#ffa94d" if pct >= 80 else "#51cf66"
+    warn = (f' · {_h.escape(t("set.cap_reached"))}' if pct >= 100 else "")
+    return (
+        f'<div style="font-size:.68rem;color:{color};margin-top:.15rem">'
+        f'{used}/{cap} ({pct:.0f}%){warn}</div>'
+    )
+
+
+def field_html(
+    f: S.SettingField, value: str, lang: str, *, saved: bool = False,
+    cap_usage: dict[str, tuple[int, int]] | None = None,
+) -> str:
+    """One compact auto-saving row — reused for the panel and the save response. `cap_usage`
+    (e.g. {"hourly_cap": (used, cap)}) adds a live usage badge under a rate-limit field,
+    computed fresh by the route each request — this function never hardcodes a threshold."""
     check = ' <span style="color:#51cf66">✓</span>' if saved else ""
     help_txt = S.tr(f.help, lang) if f.help else ""
     help_html = f'<div style="{_HELP}">{_h.escape(help_txt)}</div>' if help_txt else ""
+    usage = cap_usage.get(f.key) if cap_usage else None
+    if usage is not None:
+        help_html += _usage_badge(usage[0], usage[1], lang)
     label = f'<div style="{_LBL}">{_h.escape(S.tr(f.label, lang))}{check}</div>'
     if f.kind == "multi" or _is_wide(f):
         # A wide control (checkbox group, token, URL) can't share the row — the label collapses
@@ -125,9 +150,12 @@ def field_html(f: S.SettingField, value: str, lang: str, *, saved: bool = False)
     )
 
 
-def _section_html(sec: S.SettingSection, values: dict[str, str], lang: str) -> str:
+def _section_html(
+    sec: S.SettingSection, values: dict[str, str], lang: str,
+    cap_usage: dict[str, tuple[int, int]] | None = None,
+) -> str:
     rows = "".join(
-        field_html(f, values.get(f.key, f.default), lang)
+        field_html(f, values.get(f.key, f.default), lang, cap_usage=cap_usage)
         for f in sec.fields if not f.hidden
     )
     if not rows:  # a section with only hidden fields — don't render an empty card
@@ -140,8 +168,13 @@ def _section_html(sec: S.SettingSection, values: dict[str, str], lang: str) -> s
     )
 
 
-def settings_form_html(values: dict[str, str], lang: str) -> str:
-    """Full settings panel: every schema section rendered with current values.
+def settings_form_html(
+    values: dict[str, str], lang: str,
+    cap_usage: dict[str, tuple[int, int]] | None = None,
+) -> str:
+    """Full settings panel: every schema section rendered with current values. `cap_usage`
+    (e.g. {"hourly_cap": (used, cap)}) shows a live badge under the anti-ban limit fields —
+    computed fresh by the route from real sent counts each request, never hardcoded here.
 
     No Save button by design — every field auto-saves on change (see _HX). The autosave
     label next to the title says so up front, since a manager used to a Save button won't
@@ -149,7 +182,7 @@ def settings_form_html(values: dict[str, str], lang: str) -> str:
     from app.api._i18n import t  # noqa: PLC0415
     title = _h.escape(t("nav.settings"))
     autosave = _h.escape(t("set.autosave"))
-    body = "".join(_section_html(sec, values, lang) for sec in S.SCHEMA)
+    body = "".join(_section_html(sec, values, lang, cap_usage) for sec in S.SCHEMA)
     # checkbox group → recompute the comma-list into the hidden input, then fire its autosave
     script = (
         '<script>function multiSave(cb){var g=cb.closest(".multi-grp");'
