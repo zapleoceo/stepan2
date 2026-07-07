@@ -112,7 +112,7 @@ _CSS = (
     "border-bottom:1px solid rgba(255,255,255,.04);"
     "text-decoration:none;color:inherit;cursor:pointer;transition:background .1s;"
     "border-left:2px solid transparent}"
-    ".ti:hover{background:rgba(255,255,255,.05)}"
+    ".ti:hover{background:rgba(255,255,255,.05);text-decoration:none}"
     ".ti.on{background:rgba(32,107,196,.14);border-left-color:#206bc4}"
     ".ti-av{width:32px;height:32px;border-radius:50%;flex-shrink:0;"
     "background-size:cover;background-position:center;"
