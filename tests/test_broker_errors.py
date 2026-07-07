@@ -252,7 +252,7 @@ async def test_embed_5xx_raises_and_logs_failure(monkeypatch) -> None:
 
 @pytest.mark.parametrize(
     ("capability", "read_timeout"),
-    [("chat:smart", 90.0), ("chat:fast", 60.0)],
+    [("chat:smart", 90.0), ("chat:fast", 70.0)],
 )
 async def test_per_capability_timeout_passed_to_client(
     monkeypatch, capability: str, read_timeout: float,
