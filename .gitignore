@@ -16,3 +16,4 @@ infra/.env
 .DS_Store
 *.log
 node_modules/
+scratch_persona.*
