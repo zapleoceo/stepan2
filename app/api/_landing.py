@@ -112,6 +112,19 @@ h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;
 .feat .ic{color:var(--acc);margin-bottom:1rem;display:block}
 .feat h3{font-family:var(--disp);font-size:.96rem;font-weight:600;margin-bottom:.4rem;letter-spacing:-.01em}
 .feat p{font-size:.83rem;color:var(--mut);line-height:1.55}
+/* pricing */
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2.6rem}
+.pcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.8rem}
+.pcard.hi{border-color:var(--acc);background:linear-gradient(180deg,var(--acc-soft),var(--panel) 60%)}
+.ptag{color:var(--acc);font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.9rem}
+.pnum{font-family:var(--disp);font-size:2.4rem;font-weight:600;letter-spacing:-.02em}
+.pnum small{font-size:1rem;color:var(--mut);font-weight:500}
+.pwhat{font-size:.9rem;color:var(--ink);margin-top:.3rem;font-weight:600}
+.pnote{font-size:.83rem;color:var(--mut);line-height:1.55;margin-top:.7rem}
+.pinc{margin-top:1.8rem;display:grid;grid-template-columns:repeat(3,1fr);gap:.7rem;list-style:none}
+.pinc li{display:flex;align-items:flex-start;gap:.55rem;font-size:.85rem;color:var(--mut);line-height:1.5}
+.pinc li .ic{color:var(--ok);flex-shrink:0;margin-top:.15rem}
+@media (max-width:760px){.pgrid,.pinc{grid-template-columns:1fr}}
 /* compare */
 .cmp{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2.8rem}
 .col{border-radius:16px;padding:1.7rem;border:1px solid var(--line);background:var(--panel)}
@@ -274,6 +287,7 @@ _IC = {
     "wa": '<path d="M21 11.5a8.5 8.5 0 0 1-12.6 7.4L3 21l2.2-5.3A8.5 8.5 0 1 1 21 11.5Z"/><path d="M8.5 9c0 4 2.5 6.5 6.5 6.5"/>',
     "msgr": '<path d="M12 3C6.5 3 2 7.1 2 12c0 2.7 1.3 5.1 3.4 6.7V22l3.1-1.7c1.1.3 2.3.5 3.5.5 5.5 0 10-4.1 10-9s-4.5-9-10-9Z"/><path d="m7 13 3-3 2.5 2L16 11l-3 3-2.5-2Z"/>',
     "tiktok": '<path d="M16 3c.3 2 1.7 3.6 4 4v3c-1.6 0-3-.4-4-1v6.5A5.5 5.5 0 1 1 10.5 10v3a2.5 2.5 0 1 0 2.5 2.5V3z"/>',
+    "check": '<path d="M20 6 9 17l-5-5"/>',
 }
 
 
@@ -291,6 +305,44 @@ def _adrow(mark: str, name: str, stats: str, booked: str, roas: str) -> str:
     return (f'<div class="adrow"><span class="adth">{mark}</span>'
             f'<div><div class="an">{name}</div><div class="as">{stats}</div></div>'
             f'<div class="adkpi"><b class="num">{booked}</b><span>{roas}</span></div></div>')
+
+
+def _pricing_section() -> str:
+    """Simple usage-based pricing: first 100 leads free, then a flat per-lead fee — no
+    per-message or per-conversation-length metering, so a long qualification chat never
+    costs more than a one-liner."""
+    included = [
+        "Unlimited messages per lead — a 40-turn qualification costs the same as one reply",
+        "Instagram + WhatsApp + Messenger, every language",
+        "CRM sync via MCP, ad attribution, analytics dashboard",
+    ]
+    inc_items = "".join(f'<li>{_svg(_IC["check"], 16)}{i}</li>' for i in included)
+    return (
+        "<section class=\"divide\" id=\"pricing\"><div class=\"wrap\">"
+        "<div class=\"shead\">"
+        "<div class=\"kick\">Pricing</div>"
+        "<h2>Pay for leads, not for chatting</h2>"
+        "<p class=\"lead\">No seats, no message caps, no surprise usage tiers — "
+        "one price per lead, no matter how long Stepan talks to them.</p></div>"
+        "<div class=\"pgrid\">"
+        "<div class=\"pcard\">"
+        "<div class=\"ptag\">Get started</div>"
+        "<div class=\"pnum\">Free</div>"
+        "<div class=\"pwhat\">First 100 leads</div>"
+        "<p class=\"pnote\">Run Stepan on real traffic before you pay anything.</p>"
+        "</div>"
+        "<div class=\"pcard hi\">"
+        "<div class=\"ptag\">Pay as you grow</div>"
+        "<div class=\"pnum\">$0.10<small>/lead</small></div>"
+        "<div class=\"pwhat\">After the first 100</div>"
+        "<p class=\"pnote\">Billed per lead, once — not per message, not per hour of "
+        "back-and-forth.</p>"
+        "</div></div>"
+        f"<ul class=\"pinc\">{inc_items}</ul>"
+        "<div class=\"cta\" style=\"margin-top:1.6rem\">"
+        "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button></div>"
+        "</div></section>"
+    )
 
 
 def _ad_accounts_section() -> str:
@@ -543,13 +595,14 @@ def landing_html() -> str:
         f"<span class=\"pill soon\">{_svg(_IC['tiktok'], 18)}TikTok"
         "<span class=\"tag\">soon</span></span>"
         "</div></div></section>"
+        # pricing
+        + _pricing_section() +
         # final CTA
         "<section class=\"divide\"><div class=\"wrap\"><div class=\"final\">"
         "<div class=\"kick\" style=\"position:relative\">See it for yourself</div>"
         "<h2>Let Stepan sell <em>you</em>.</h2>"
         "<p class=\"lead\">Message it like one of your leads and watch it qualify and pitch — "
-        "in real time. Pricing is tailored to your volume; that's a conversation, not a "
-        "checkout.</p>"
+        "in real time.</p>"
         "<div class=\"cta\">"
         "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button></div>"
         "</div></div></section>"

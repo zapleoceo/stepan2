@@ -987,6 +987,19 @@ def test_landing_has_in_page_chat_widget() -> None:
     body = client.get("/").text
     assert "openStepan()" in body                  # CTAs open the widget
     assert "/demo/chat" in body                    # widget calls the demo endpoint
+
+
+def test_landing_pricing_section_states_the_flat_per_lead_fee() -> None:
+    """First 100 leads free, then a flat $0.10/lead regardless of conversation length —
+    no per-message/per-minute metering, so a long qualification never costs more."""
+    client = TestClient(app, follow_redirects=False)
+    body = client.get("/").text
+    assert 'id="pricing"' in body
+    assert "First 100 leads" in body
+    assert "Free" in body
+    assert "$0.10" in body and "/lead" in body
+    assert "no matter how long Stepan talks to them" in body
+    assert "Unlimited messages per lead" in body
     assert 'id="stp-w"' in body                    # the chat panel is present
 
 
