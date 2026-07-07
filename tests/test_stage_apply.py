@@ -16,6 +16,7 @@ from app.adapters.db.models import (
     Lead,
     ManagerAlert,
     Message,
+    Outbox,
     Product,
     StageEvent,
 )
@@ -226,6 +227,35 @@ async def test_needs_manager_moves_to_manager_and_mutes(db_session) -> None:
     alert = (await db_session.exec(select(ManagerAlert))).first()
     assert alert is not None and alert.kind == "needs_manager"
     assert alert.lead_phone == "+6281234567890"
+
+
+async def test_needs_manager_appends_a_closing_line_for_the_lead(db_session) -> None:
+    """Live case (thread 1023): needs_manager mutes the bot, but nothing told the LEAD a
+    human was taking over — a follow-up they sent days later got pure silence. The bot's own
+    turn must include a closing bubble saying a human will follow up."""
+    from app.modules.conversation.reply import _MANAGER_HANDOFF_CLOSING
+
+    bid, tid, _lead = await _world(db_session, phone="+6281234567890")
+    out = await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(needs_manager=True, manager_question="Jadwal Demo Event?"),
+    )
+    assert out is not None and out.text == _MANAGER_HANDOFF_CLOSING
+    rows = (await db_session.exec(
+        select(Outbox).where(Outbox.thread_id == tid).order_by(Outbox.scheduled_at))).all()
+    assert [r.text for r in rows] == ["ok", _MANAGER_HANDOFF_CLOSING]  # model's reply, then it
+
+
+async def test_no_closing_line_when_already_in_manager_stage(db_session) -> None:
+    """Don't re-append the closing line on every subsequent needs_manager turn once the
+    lead is already muted — only the turn that FLIPS the stage gets it."""
+    from app.modules.conversation.reply import _MANAGER_HANDOFF_CLOSING
+
+    bid, tid, _lead = await _world(db_session, phone="+6281234567890", stage=Stage.MANAGER)
+    await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(needs_manager=True, manager_question="Another question?"),
+    )
+    rows = (await db_session.exec(select(Outbox).where(Outbox.thread_id == tid))).all()
+    assert all(r.text != _MANAGER_HANDOFF_CLOSING for r in rows)
 
 
 async def test_openhouse_rsvp_notifies_without_muting_bot(db_session) -> None:

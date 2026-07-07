@@ -35,6 +35,16 @@ logger = logging.getLogger(__name__)
 _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
+# A needs_manager turn always mutes the bot (agent_enabled=False) — but the model's own
+# reply that same turn is about answering the lead's question, not about announcing a
+# hand-off; nothing told the LEAD a human is now taking over. A lead who then sends a
+# follow-up (e.g. a phone number, thread 1023) gets pure silence — no bot, no confirmation,
+# because the account is already muted. Append this deterministic closing line whenever the
+# stage newly flips to MANAGER, so the lead is never left hanging without an explanation.
+_MANAGER_HANDOFF_CLOSING = (
+    "Terima kasih ya Kak! Untuk ini tim kami yang akan bantu langsung - nanti dihubungi via "
+    "telepon atau WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) ya 🙏"
+)
 # After this many lead turns the discovery gate stops forcing more questions — a lead who
 # hasn't yielded a real need by now won't from a third question; present on what we have.
 _DISCOVERY_TURN_CAP = 2
@@ -333,7 +343,8 @@ class ReplyService:
         base = self._scheduled_at()
         outbox: Outbox | None = None
         meta_line = _fmt_llm_meta(self._last_llm_meta)
-        for i, bubble in enumerate(_split_bubbles(decision.reply)):
+        bubbles = _split_bubbles(decision.reply)
+        for i, bubble in enumerate(bubbles):
             outbox = await self.outbox.add(
                 Outbox(
                     branch_id=self.branch_id,
@@ -344,8 +355,22 @@ class ReplyService:
                 )
             )
         lead = await self.session.get(Lead, thread.lead_id)
+        just_muted = False
         if lead is not None:
-            await self._apply_decision(lead, thread, decision)
+            just_muted = await self._apply_decision(lead, thread, decision)
+        if just_muted:
+            # The lead just got handed to a human — say so, instead of going silent with no
+            # explanation (thread 1023: a lead who sent a follow-up phone number 2 days after
+            # a needs_manager mute got zero acknowledgment of any kind).
+            outbox = await self.outbox.add(
+                Outbox(
+                    branch_id=self.branch_id,
+                    thread_id=thread_id,
+                    text=_MANAGER_HANDOFF_CLOSING,
+                    scheduled_at=base + timedelta(seconds=len(bubbles) * _BUBBLE_GAP_S),
+                    llm_info=meta_line,
+                )
+            )
         is_openhouse_rsvp = decision.ready and decision.ready_subtype == "openhouse"
         if decision.needs_manager and not is_openhouse_rsvp:
             await self._raise_manager_alert(
@@ -387,14 +412,17 @@ class ReplyService:
                 lead.phone_e164 = normalized
                 self.session.add(lead)
 
-    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> None:
+    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> bool:
         """Move the funnel: stage priority ready+contact → READY, needs_manager →
         MANAGER, ready w/o contact → PRESENTING, else the model's stage. An openhouse RSVP
-        is a side-channel notification, not a stage transition — see _stage_for."""
+        is a side-channel notification, not a stage transition — see _stage_for.
+
+        Returns True when the stage just flipped to MANAGER this turn (a fresh mute, not an
+        already-muted lead) — the caller appends the hand-off closing line for that case."""
         self._sync_lead_fields(lead, thread, decision)
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
-            return
+            return False
         # The bound product's kind decides deal-vs-RSVP: an event product is ALWAYS an
         # openhouse-style RSVP (notify team, bot stays on), regardless of what the model
         # guessed — the model only picks the subtype for non-event products.
@@ -408,7 +436,7 @@ class ReplyService:
         inbound = await self.messages.inbound_count(thread.id)
         new_stage = self._stage_for(decision, lead, inbound, eff_subtype)
         if new_stage == lead.stage:
-            return
+            return False
         self.session.add(StageEvent(
             branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
             from_stage=str(lead.stage), to_stage=str(new_stage), actor="bot",
@@ -422,6 +450,7 @@ class ReplyService:
             await self._handoff(lead, thread, eff_subtype)
         self.session.add(lead)
         logger.info("branch=%d lead=%d stage → %s", self.branch_id, lead.id, new_stage)
+        return new_stage == Stage.MANAGER
 
     async def _product_kind(self, slug: str) -> str:
         row = (await self.session.execute(
