@@ -1386,6 +1386,23 @@ def test_branch_edit_html_active_has_checked() -> None:
     assert 'checked' in html
 
 
+def test_branch_edit_html_kb_copy_targets_main_with_progress_indicator() -> None:
+    """Real bug: the copy-KB button's hx-target was '#panel' — no such element exists
+    anywhere in the app, so clicking it ran the copy server-side but never showed the
+    result (silent no-op from the user's perspective). Must target #main (same as every
+    other nav panel), disable the button while in flight, and show a spinner."""
+    from app.api._ui_panels import branch_edit_html
+    _set_lang("en")
+    html = branch_edit_html(5, "Malaysia", "en", 8, is_active=True,
+                            other_branches=[(1, "Indonesia")])
+    assert 'hx-target="#panel"' not in html
+    assert 'hx-post="/ui/branches/5/copy-kb" hx-target="#main"' in html
+    assert 'hx-disabled-elt="find button"' in html
+    assert 'hx-indicator="#kbcp-ind"' in html
+    assert 'id="kbcp-ind" class="htmx-indicator"' in html
+    assert "Копируется" in html
+
+
 # ─── branches routes smoke tests ──────────────────────────────────────────────
 
 def test_branches_panel_route(client: TestClient) -> None:

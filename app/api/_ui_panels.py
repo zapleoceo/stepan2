@@ -683,15 +683,30 @@ def _kb_copy_section(bid: int, kb_source: int | None, others: list[tuple[int, st
     if not others:
         return linked
     opts = "".join(f'<option value="{i}">{_h.escape(nm)}</option>' for i, nm in others)
+    # hx-target used to be "#panel" — no such element exists anywhere in this app (the
+    # branch edit form itself renders inside "#main", same as every other nav panel), so
+    # the copy request had nowhere to swap its response into: clicking "Скопировать" did
+    # run the copy server-side but the button visibly did nothing. Fixed to "#main", plus
+    # an hx-indicator spinner and hx-disabled-elt so a copy in progress is visible and
+    # can't be double-submitted.
     return (
         '<div style="margin-top:.7rem;border-top:1px solid #2d3748;padding-top:.6rem">'
         + linked +
-        f'<form hx-post="/ui/branches/{bid}/copy-kb" hx-target="#panel" hx-swap="innerHTML"'
+        f'<form id="kbcp-{bid}" hx-post="/ui/branches/{bid}/copy-kb"'
+        ' hx-target="#main" hx-swap="innerHTML"'
+        ' hx-indicator="#kbcp-ind" hx-disabled-elt="find button"'
         ' hx-confirm="Скопировать базу знаний из выбранного филиала? Текущая база этого'
         ' филиала будет заменена." style="display:flex;gap:.4rem;align-items:center">'
         '<span class="hint" style="min-width:96px">Скопировать из:</span>'
         f'<select class="act-sel" name="src_branch_id" style="flex:1">{opts}</select>'
-        '<button class="btn-sm" type="submit">Скопировать</button></form>'
+        '<button class="btn-sm" type="submit">Скопировать</button>'
+        # no inline display: here — .htmx-indicator{display:none} must win until htmx adds
+        # .htmx-request during the request (an inline display would always override it).
+        '<span id="kbcp-ind" class="htmx-indicator"'
+        ' style="font-size:.78rem;color:#8899aa">'
+        '<span class="spin" style="margin-right:.35rem;vertical-align:middle"></span>'
+        'Копируется…</span>'
+        '</form>'
         + '</div>')
 
 
