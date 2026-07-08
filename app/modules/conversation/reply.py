@@ -229,6 +229,24 @@ async def guard_decision(
     if mode == "off" or not decision.reply:
         return decision, meta
     context = engine.last_context
+    if decision.needs_manager:
+        last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
+        if guard.premature_manager_handoff(last_in, context):
+            logger.warning(
+                "guard: branch=%d thread=%d premature needs_manager on a price question "
+                "already answered in KB → regen", branch_id, thread_id)
+            raw, regen_meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+                extra_user_msg=guard.MANAGER_HANDOFF_CORRECTION)
+            try:
+                fixed = parse_decision(raw)
+            except ValueError:
+                fixed = None
+            # Only adopt the regen if it actually stopped escalating — a model that still
+            # insists on needs_manager after being told the fact is in context probably has
+            # a real reason; better a genuine gap reaches a human than looping on a refusal.
+            if fixed is not None and fixed.reply and not fixed.needs_manager:
+                decision, meta = fixed, regen_meta
     issues = _deterministic_issues(decision.reply, context)
     if mode == "full" and guard.is_risky(decision.reply):
         issues += await guard.verify_grounding(

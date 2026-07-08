@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
 
@@ -122,6 +123,15 @@ def test_wrong_channel_claims_catches_dm_on_instagram() -> None:
     assert not guard.wrong_channel_claims("langsung aja tanya di sini ya Kak")
 
 
+def test_premature_manager_handoff_catches_price_question_answered_in_kb() -> None:
+    # thread 2285: "ini gratis ga kak?" escalated to a human even though the Skill
+    # Booster price (Rp 700.000/600.000) was right there in the retrieved KB context
+    context = "> Quick facts — Cybersecurity Skill Booster: Harga Rp 700.000 offline..."
+    assert guard.premature_manager_handoff("ini gratis ga kak?", context)
+    assert not guard.premature_manager_handoff("gimana cara daftarnya?", context)  # not a price q
+    assert not guard.premature_manager_handoff("berapa harganya?", "no price figure here")
+
+
 # ─── integration through the real reply path (SimService) ───────────────────────
 
 class _ScriptLLM:
@@ -168,6 +178,81 @@ async def test_guard_hands_off_when_fabrication_persists(db_session) -> None:
     out = await SimService(db_session, llm).say(bid, "g2", "kirim link lab dong")
     assert out["ok"] and _FAKE_LINK not in out["reply"]
     assert out["reply"] == guard.SAFE_FALLBACK and out["needs_manager"] is True  # handed off
+
+
+def _settings_urls_only():  # noqa: ANN201
+    from app.modules.settings.service import _parse
+    return _parse({"reply_guard": "urls"})
+
+
+class _FakeCtx:
+    def __init__(self, last_inbound: str) -> None:
+        self.dialog = [SimpleNamespace(direction="in", text=last_inbound)]
+
+
+class _FakeEngine:
+    """Stands in for DecisionEngine in guard_decision — only last_context/complete are
+    used, so a real KB/RAG setup isn't needed to test the needs_manager correction alone."""
+
+    def __init__(self, context: str, *regen_replies: str) -> None:
+        self.last_context = context
+        self._q = list(regen_replies)
+
+    async def complete(self, ctx, thread_id, lang, workflow, **kw):  # noqa: ANN001, ANN003
+        raw = self._q.pop(0)
+        return raw, {"model": "fake", "cost_usd": 0.0}
+
+
+async def test_guard_regenerates_a_premature_needs_manager_on_price_question(
+    db_session,
+) -> None:
+    """Thread 2285: the model set needs_manager=true for "ini gratis ga kak?" even though
+    the Cybersecurity Skill Booster price was right there in the retrieved KB context —
+    guard_decision must catch this and force a regen instead of handing off."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    context = "> Quick facts — Cybersecurity Skill Booster: Harga Rp 700.000 offline..."
+    engine = _FakeEngine(
+        context,
+        json.dumps({"reply": "Ini Rp 700.000 offline / Rp 600.000 online ya Kak 😊",
+                   "stage": "qualifying", "needs_manager": False}),
+    )
+    ctx = _FakeCtx("ini gratis ga kak?")
+    decision = parse_decision(json.dumps({
+        "reply": "Untuk ini aku cek dulu ke tim ya Kak", "stage": "qualifying",
+        "needs_manager": True, "manager_question": "ini gratis ga kak?",
+    }))
+    fixed, _meta = await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={})
+    assert fixed.needs_manager is False
+    assert "700.000" in fixed.reply
+
+
+async def test_guard_keeps_needs_manager_if_regen_still_insists(db_session) -> None:
+    """If the model still sets needs_manager=true after being told the fact is in
+    context, trust it — a real gap reaching a human beats looping on a refusal."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    context = "> Quick facts — Cybersecurity Skill Booster: Harga Rp 700.000 offline..."
+    engine = _FakeEngine(
+        context,
+        json.dumps({"reply": "Masih perlu dicek ke tim ya Kak", "stage": "qualifying",
+                   "needs_manager": True}),
+    )
+    ctx = _FakeCtx("ini gratis ga kak?")
+    decision = parse_decision(json.dumps({
+        "reply": "Untuk ini aku cek dulu ke tim ya Kak", "stage": "qualifying",
+        "needs_manager": True,
+    }))
+    fixed, _meta = await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={})
+    assert fixed.needs_manager is True
 
 
 async def test_guard_trims_a_still_doubled_question_instead_of_handing_off(db_session) -> None:

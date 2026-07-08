@@ -144,6 +144,37 @@ def wrong_channel_claims(reply: str) -> list[str]:
     return [m.group(0) for m in _WRONG_CHANNEL_RE.finditer(reply or "")]
 
 
+# A price/availability question ("ini gratis ga kak?", "berapa?") escalated to
+# needs_manager when the retrieved KB context ALREADY has a price figure for the product
+# being discussed is not a real KB gap — the contract's own rule says either answer it or
+# defer with a discovery question, never hand off (thread 2285: lead asked "ini gratis ga
+# kak?" right after the bot itself named "Skill Booster"; the Cybersecurity Skill Booster
+# price - Rp 700.000/600.000 - was right there in context, and the bot silently muted
+# itself instead of using it).
+_PRICE_QUESTION_RE = re.compile(
+    r"\b(gratis|free|berapa|harga|biaya|tarif|cicilan|angsuran|murah|mahal)\b",
+    re.IGNORECASE)
+
+
+def premature_manager_handoff(last_inbound: str, context: str) -> bool:
+    """True when the lead's last message is a price/availability question AND the KB
+    context already contains a price figure — a needs_manager decision on THIS turn would
+    be escalating something the model already had the answer for."""
+    if not _PRICE_QUESTION_RE.search(last_inbound or ""):
+        return False
+    return bool(_PRICE_RE.search(context or ""))
+
+
+MANAGER_HANDOFF_CORRECTION = (
+    "[System: you set needs_manager=true for a price/availability question, but a price "
+    "figure for this product is already in the knowledge base context above - this is NOT a "
+    "real KB gap, do not hand it off to a human. Either answer the price directly, or if "
+    "discovery genuinely isn't done yet, acknowledge and defer with ONE discovery question "
+    "per your own early-price rule - never silently escalate a fact you already have. Set "
+    "needs_manager=false. Return the JSON as usual.]"
+)
+
+
 # Bahasa hand-off when a clean reply can't be produced — never invents, defers to a human.
 SAFE_FALLBACK = (
     "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
