@@ -85,7 +85,9 @@ async def _ingest_channel(branch_id: int, channel_id: int) -> int:
                 # only; other channels/branches keep polling.
                 logger.warning("skip ingest channel %s: fetch failed: %s", channel_id, exc)
                 return 0
-            return len(await IngestService(session, branch_id).ingest(channel_id, inbound))
+            cfg = await get_settings(session, branch_id)
+            svc = IngestService(session, branch_id, notifier=_build_notifier(cfg))
+            return len(await svc.ingest(channel_id, inbound))
     except IntegrityError:
         logger.info("ingest channel %s: rows already stored by a concurrent run", channel_id)
         return 0

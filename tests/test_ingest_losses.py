@@ -70,6 +70,50 @@ async def test_burst_of_lead_messages_all_ingested(db_session) -> None:
     assert [m.text for m in created] == ["раз", "два", "три"]
 
 
+class _FakeNotifier:
+    def __init__(self) -> None:
+        self.sends: list[str] = []
+
+    async def create_topic(self, *, name: str, icon_emoji=None) -> int:  # noqa: ANN001, ARG002
+        return 1
+
+    async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
+        self.sends.append(text)
+        return "ok"
+
+
+async def test_bot_off_new_message_pings_telegram(db_session) -> None:
+    """Live case (thread 2274): a lead in a human-led stage (or with the bot manually
+    toggled off) wrote something new and nothing told anyone — the bot stays silent by
+    design, but a manager should still be pinged that a message is waiting."""
+    bid, cid, lead, _thread = await _world(db_session)
+    lead.stage = Stage.MANAGER
+    lead.agent_enabled = False
+    await db_session.flush()
+    notifier = _FakeNotifier()
+    rows = [_in("halo, masih ada slot ga kak?", ext="i9")]
+    await IngestService(db_session, bid, notifier=notifier).ingest(cid, rows)
+
+    from sqlalchemy import text as _text
+    alert = (await db_session.execute(
+        _text("SELECT kind, summary_ru FROM manager_alert WHERE lead_id = :i"), {"i": lead.id},
+    )).first()
+    assert alert is not None and alert[0] == "bot_off_message"
+    assert "masih ada slot" in alert[1]
+    assert len(notifier.sends) == 1
+    assert lead.agent_enabled is False  # MANAGER stage — _revive_bot leaves it off
+
+
+async def test_bot_off_message_skipped_silently_without_a_notifier(db_session) -> None:
+    """No notifier configured (branch has no Telegram token) — must not raise, just skip."""
+    bid, cid, lead, _thread = await _world(db_session)
+    lead.agent_enabled = False
+    await db_session.flush()
+    rows = [_in("halo", ext="i10")]
+    created = await IngestService(db_session, bid).ingest(cid, rows)  # no notifier passed
+    assert len(created) == 1
+
+
 async def test_own_reply_recorded_as_manager_and_moves_last_out(db_session) -> None:
     bid, cid, lead, thread = await _world(db_session)
     lead.agent_enabled = False

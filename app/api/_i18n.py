@@ -306,6 +306,16 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Save",
         "id": "Simpan",
     },
+    "chat.skip": {
+        "ru": "Пропустить",
+        "en": "Skip",
+        "id": "Lewati",
+    },
+    "chat.stage_reason_title": {
+        "ru": "Причина смены стадии (необязательно) — Степан увидит это",
+        "en": "Reason for the stage change (optional) — Stepan will see this",
+        "id": "Alasan perubahan tahap (opsional) — Stepan akan melihatnya",
+    },
     "hint.needs": {
         "ru": "Что Степан выяснил о лиде: цели (jobs), боли (pains), желаемое (gains).",
         "en": "What Stepan discovered: goals (jobs), fears (pains), desired outcomes (gains).",

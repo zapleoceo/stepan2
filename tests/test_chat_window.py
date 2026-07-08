@@ -429,10 +429,11 @@ async def test_bot_toggle_flips_lead_agent_enabled(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_manager_note_saves_and_appears_in_header(db_session) -> None:
-    """Per-lead override note (2026-07-08): a manager writes it once via this route, and
-    it must both persist on the lead row AND render back in the header HTML — the reply
-    pipeline reads it straight off lead.manager_note (see prompt.manager_note_block)."""
+async def test_manager_note_saves_and_closes_popup(db_session) -> None:
+    """Per-lead override note (2026-07-08): only reachable via the stage-reason popup shown
+    after a manual stage change — no standing note box in the header anymore. Saving persists
+    on the lead row (read straight off by prompt.manager_note_block) and returns empty HTML
+    for the popup's swap target, closing it same as Skip."""
     from sqlalchemy import text as _text
 
     import app.api._routes_chat as rc
@@ -450,7 +451,7 @@ async def test_manager_note_saves_and_appears_in_header(db_session) -> None:
         _text("SELECT manager_note FROM lead WHERE id = 1")
     )).scalar()
     assert stored == "not ready yet — needs budget"
-    assert "not ready yet" in html.body.decode()
+    assert html.body.decode() == ""  # popup closes, no lingering content
 
 
 @pytest.mark.asyncio
@@ -510,6 +511,31 @@ async def test_manager_note_updates_log_chronology_not_just_overwrite(db_session
         _text("SELECT manager_note FROM lead WHERE id = 1")
     )).scalar()
     assert current is None
+
+
+@pytest.mark.asyncio
+async def test_manual_stage_change_shows_reason_popup(db_session) -> None:
+    """The popup only appears for a REAL manual stage move (this route is manager-UI-only,
+    Stepan's own transitions never render HTML) — never for a no-op reselect of the same
+    stage. It targets #note-popup-{tid} via OOB swap, not the header."""
+    import app.api._routes_chat as rc
+    from app.api._routes_chat import chat_stage
+
+    await _seed_thread(db_session)
+    orig = rc.session_scope
+    rc.session_scope = lambda: _Scope(db_session)
+    try:
+        changed = await chat_stage(1, _Req(), stage="qualifying")  # type: ignore[arg-type]
+        same = await chat_stage(1, _Req(), stage="qualifying")  # type: ignore[arg-type]
+    finally:
+        rc.session_scope = orig
+
+    changed_html = changed.body.decode()
+    assert 'id="note-popup-1"' in changed_html
+    assert 'hx-swap-oob="true"' in changed_html
+    assert "note-pop" in changed_html
+    same_html = same.body.decode()
+    assert "note-pop-h" not in same_html  # same stage reselected → no popup
 
 
 # ─── captured-needs auto-translate on chat panel load (cached) ────────────────

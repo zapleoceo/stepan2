@@ -261,7 +261,7 @@ class ManagerAlert(SQLModel, table=True):
     branch_id: int = Field(foreign_key="branch.id", index=True)
     lead_id: int = Field(foreign_key="lead.id", index=True)
     thread_id: int | None = Field(default=None, foreign_key="channel_thread.id")
-    kind: str = Field(description="ready_deal|ready_openhouse|needs_manager")
+    kind: str = Field(description="ready_deal|ready_openhouse|needs_manager|bot_off_message")
     actor: str = Field(default="auto")
     lead_phone: str | None = Field(default=None)
     summary_en: str = Field(default="")

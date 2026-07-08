@@ -48,6 +48,7 @@ from ._ui_html import (
     needs_block_html,
     set_render_tz,
     since_bubbles_html,
+    stage_reason_popup_html,
     suggest_box_html,
 )
 
@@ -464,7 +465,8 @@ async def chat_stage(
          manager_note) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
-        if stage != str(old_stage):
+        changed = stage != str(old_stage)
+        if changed:
             await session.execute(
                 text("UPDATE lead SET stage = :s WHERE id = :id"),
                 {"s": stage, "id": lead_id},
@@ -490,19 +492,24 @@ async def chat_stage(
                 except Exception:
                     _log.warning("manual stage alert failed tid=%s", thread_id, exc_info=True)
         needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
-    return HTMLResponse(
-        chat_header_html(thread_id, str(name or "Lead"), stage,
-                         product_slug=product_slug, ig_id=ig_id,
-                         phone=phone, created_at=created_at, last_in_at=last_in_at,
-                         ig_username=ig_username, avatar_url=avatar_url,
-                         lead_source=lead_source, ad_id=ad_id,
-                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
-                         follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs_profile,
-                         needs_pending=needs_pending, products=products,
-                         manager_note=manager_note)
+    header = chat_header_html(
+        thread_id, str(name or "Lead"), stage,
+        product_slug=product_slug, ig_id=ig_id,
+        phone=phone, created_at=created_at, last_in_at=last_in_at,
+        ig_username=ig_username, avatar_url=avatar_url,
+        lead_source=lead_source, ad_id=ad_id,
+        ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+        agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
+        follower_count=follower_count, following_count=following_count,
+        last_active_at=last_active_at, needs=needs_profile,
+        needs_pending=needs_pending, products=products,
+        manager_note=manager_note,
     )
+    # A manual stage move (this route is manager-UI-only; Stepan's own transitions never
+    # render HTML) prompts for a reason, saved as the per-lead manager_note Stepan reads
+    # every turn — never shown for a no-op reselect of the same stage.
+    popup = stage_reason_popup_html(thread_id, oob=True) if changed else ""
+    return HTMLResponse(header + popup)
 
 
 @router.post("/chat/{thread_id}/product", response_class=HTMLResponse)
@@ -583,7 +590,11 @@ async def chat_manager_note(
     """Save (or clear, on empty) a per-LEAD manager override note — injected into Stepan's
     prompt every turn until cleared (see prompt.manager_note_block). Distinct from the
     branch-wide CoachingNote: closes the gap where a manager manually demotes a wrongly-
-    ready lead but has no way to tell the bot WHY, so it just marks ready=true again."""
+    ready lead but has no way to tell the bot WHY, so it just marks ready=true again.
+
+    Only reachable via the stage-reason popup (stage_reason_popup_html) shown right after a
+    manual stage move — there's no standing note box in the header anymore. Returns empty
+    HTML for its target (#note-popup-{tid}), closing the popup on save same as Skip."""
     apply_lang(request)
     cleaned = note.strip() or None
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
@@ -609,43 +620,7 @@ async def chat_manager_note(
             detail=cleaned, actor=_actor_name(request),
         ))
         await session.flush()
-        info = (
-            await session.execute(
-                text(
-                    "SELECT l.display_name, l.stage, ct.product_slug, ct.external_thread_id,"
-                    " l.phone_e164, l.created_at, ct.last_in_at,"
-                    " l.ig_username, l.avatar_url,"
-                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at,"
-                    " l.needs, l.needs_tr"
-                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-                    " WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
-        if not info:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        (name, stage, product_slug, ig_id, phone, created_at, last_in_at,
-         ig_username, avatar_url, lead_source, ad_id, ad_media_id, ad_preview_url,
-         agent_enabled, is_blocked, follower_count, following_count, last_active_at,
-         needs, needs_tr) = info
-        products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
-        needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
-    return HTMLResponse(
-        chat_header_html(thread_id, str(name or "Lead"), str(stage or "new"),
-                         product_slug=product_slug, ig_id=ig_id,
-                         phone=phone, created_at=created_at, last_in_at=last_in_at,
-                         ig_username=ig_username, avatar_url=avatar_url,
-                         lead_source=lead_source, ad_id=ad_id,
-                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
-                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
-                         follower_count=follower_count, following_count=following_count,
-                         last_active_at=last_active_at, needs=needs_profile,
-                         needs_pending=needs_pending, products=products,
-                         manager_note=cleaned)
-    )
+    return HTMLResponse("")
 
 
 @router.post("/chat/{thread_id}/suggest", response_class=HTMLResponse)

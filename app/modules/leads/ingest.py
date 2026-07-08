@@ -14,7 +14,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.ads import AdMappingService
+from app.modules.notifications.alerts import AlertService
 from app.ports.channel import InboundMessage
+from app.ports.notify import NotifierPort
 
 from .identity import IdentityService
 from .phone import extract_phone
@@ -32,11 +34,14 @@ _OUT_ECHO_WINDOW = timedelta(minutes=5)
 class IngestService:
     """Inbound ingestion for one branch — idempotent on (channel_id, external_id)."""
 
-    def __init__(self, session: AsyncSession, branch_id: int) -> None:
+    def __init__(
+        self, session: AsyncSession, branch_id: int, notifier: NotifierPort | None = None,
+    ) -> None:
         self.session = session
         self.branch_id = branch_id
         self.identity = IdentityService(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
+        self._notifier = notifier
 
     async def ingest(
         self, channel_id: int, messages: list[InboundMessage]
@@ -185,10 +190,13 @@ class IngestService:
         ):
             thread.lead_seen_at = inbound.lead_seen_at
         if thread.last_in_at is None or inbound.occurred_at > thread.last_in_at:
+            was_off = not lead.agent_enabled  # capture BEFORE _revive_bot may flip it back on
             thread.last_in_at = inbound.occurred_at
             thread.window_until = inbound.occurred_at + WINDOW
             await self._reset_followup_cycle(thread)
             self._revive_bot(lead, thread)
+            if was_off:
+                await self._notify_bot_off(lead, thread, inbound.text)
         if inbound.product_hint and thread.product_slug is None:
             thread.product_slug = inbound.product_hint
             thread.product_source = "ad"
@@ -245,6 +253,25 @@ class IngestService:
         if not lead.agent_enabled:
             lead.agent_enabled = True
         self.session.add(lead)
+
+    async def _notify_bot_off(self, lead, thread, text: str) -> None:
+        """The bot was silent (manually toggled off, or a human-led stage) when this
+        inbound arrived, so nothing else will tell a manager the lead just wrote something —
+        ping Telegram directly. Best-effort: never blocks/fails ingestion (thread 2274)."""
+        if self._notifier is None:
+            return
+        snippet = (text or "").strip()[:200]
+        try:
+            await AlertService(self.session, self.branch_id, self._notifier).raise_alert(
+                lead_id=lead.id, kind="bot_off_message", thread_id=thread.id,
+                lead_phone=lead.phone_e164,
+                summary_en=f"Bot is OFF — lead wrote: {snippet}" if snippet
+                else "Bot is OFF — lead wrote (no text/media)",
+                summary_ru=f"Бот выключен — лид написал: {snippet}" if snippet
+                else "Бот выключен — лид написал (без текста/медиа)",
+            )
+        except Exception:
+            logger.warning("bot-off alert failed lead=%s", lead.id, exc_info=True)
 
 
 def _external_id(inbound: InboundMessage) -> str:

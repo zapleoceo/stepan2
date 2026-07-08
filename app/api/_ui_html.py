@@ -287,6 +287,11 @@ _CSS = (
     ".delx-pop button{border:none;border-radius:3px;cursor:pointer;font-size:.7rem;"
     "padding:.02rem .3rem;line-height:1.3}"
     ".delx-y{background:#862e2e;color:#fff}.delx-n{background:#2d3748;color:#c3cede}"
+    ".note-pop-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}"
+    ".note-pop{position:fixed;top:30%;left:50%;transform:translateX(-50%);z-index:41;"
+    "background:#181c26;border:1px solid #2d3748;border-radius:10px;padding:.75rem;"
+    "width:min(320px,90vw);box-shadow:0 8px 24px rgba(0,0,0,.4)}"
+    ".note-pop-h{font-size:.78rem;color:#c3cede;margin-bottom:.4rem}"
     ".emo-bar{display:flex;flex-wrap:wrap;gap:.15rem;padding:.25rem .1rem 0}"
     ".emo-bar button{background:none;border:none;cursor:pointer;font-size:1.05rem;"
     "line-height:1;padding:.1rem .18rem;border-radius:4px}"
@@ -1239,29 +1244,39 @@ def chat_header_html(
         f'</div>'
         f'{src_bar}'
         f'{needs_block_html(needs, tid, needs_pending)}'
-        f'{manager_note_html(tid, manager_note)}'
         f'</div>'
     )
 
 
-def manager_note_html(tid: int, note: str | None) -> str:
-    """Per-lead manager override note — injected into Stepan's prompt every turn until
-    cleared (see prompt.manager_note_block). Distinct from the branch-wide CoachingNote:
-    this is scoped to ONE lead, e.g. after manually demoting a wrongly-ready lead so the
-    bot doesn't just mark it ready again on the next turn."""
-    val = _h.escape(note or "")
+def note_popup_slot_html(tid: int) -> str:
+    """Empty placeholder the stage-change route OOB-fills with stage_reason_popup_html —
+    must exist in the initial panel render so the swap target is there on first load."""
+    return f'<div id="note-popup-{tid}"></div>'
+
+
+def stage_reason_popup_html(tid: int, oob: bool = False) -> str:
+    """Mini popup asking WHY the stage just changed, shown only right after a MANUAL move
+    (chat_stage is a manager-only UI route — Stepan's own stage transitions never render
+    HTML, so this never fires for a bot-driven change). The answer becomes the per-lead
+    manager_note Stepan reads every turn (see prompt.manager_note_block) and is logged to
+    ThreadLog for chronology (manager_note_html's old always-on box is gone — this popup is
+    now the only way to set/see it change)."""
+    oob_attr = ' hx-swap-oob="true"' if oob else ""
     return (
-        f'<form class="mgr-note" style="margin:.3rem 0 0"'
-        f' hx-post="/ui/chat/{tid}/manager-note" hx-target="#chat-hdr-{tid}"'
-        f' hx-swap="outerHTML" data-help="{_h.escape(t("hint.manager_note"))}">'
-        f'<textarea name="note" rows="2"'
+        f'<div id="note-popup-{tid}"{oob_attr}>'
+        f'<div class="note-pop-bg" onclick="closeNotePopup({tid})"></div>'
+        f'<form class="note-pop" hx-post="/ui/chat/{tid}/manager-note"'
+        f' hx-target="#note-popup-{tid}" hx-swap="innerHTML">'
+        f'<div class="note-pop-h">{_h.escape(t("chat.stage_reason_title"))}</div>'
+        f'<textarea name="note" rows="2" autofocus'
         f' placeholder="{_h.escape(t("chat.manager_note_ph"))}"'
-        f' style="width:100%;font-size:.72rem;background:#1a1f2b;color:#c9d1d9;'
-        f'border:1px solid #2d3748;border-radius:6px;padding:.3rem;resize:vertical">'
-        f'{val}</textarea>'
-        f'<button type="submit" class="act-sel" style="margin-top:2px">'
-        f'{_h.escape(t("chat.save"))}</button>'
-        f'</form>'
+        f' style="width:100%;font-size:.78rem;background:#1a1f2b;color:#c9d1d9;'
+        f'border:1px solid #2d3748;border-radius:6px;padding:.4rem;resize:vertical"></textarea>'
+        f'<div style="margin-top:.4rem;text-align:right">'
+        f'<button type="button" class="act-btn" style="margin-right:.3rem"'
+        f' onclick="closeNotePopup({tid})">{_h.escape(t("chat.skip"))}</button>'
+        f'<button type="submit" class="act-sel">{_h.escape(t("chat.save"))}</button>'
+        f'</div></form></div>'
     )
 
 
@@ -1349,6 +1364,7 @@ def chat_panel_html(
     )
     return (
         f'{header}'
+        f'{note_popup_slot_html(tid)}'
         f'<div class="msgs" id="msgs-{tid}">'
         f'{messages_html(msgs, pending, tid, lead_seen_at, events)}</div>'
         f'<div id="sug-{tid}"></div>'
@@ -1633,6 +1649,9 @@ def app_shell(
         "el.dataset.tr=html;el.innerHTML=html;"
         "el.dataset.state='tr';el.classList.add('trview');}})"
         ".catch(function(){el.style.opacity='';});}"
+        # close the stage-reason popup without saving (Skip, or click the backdrop)
+        "function closeNotePopup(tid){var el=document.getElementById('note-popup-'+tid);"
+        "if(el)el.innerHTML='';}"
         # delete: inline micro-confirm popup right at the × (no browser dialog)
         "function delAsk(btn,tid,mid){"
         "if(btn.dataset.armed)return;btn.dataset.armed=1;btn.style.display='none';"
