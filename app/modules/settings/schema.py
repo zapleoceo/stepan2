@@ -175,6 +175,17 @@ SCHEMA: list[SettingSection] = [
            ph=_l("EAAB…", "EAAB…", "EAAB…"),
            help=_l("Пусто = не менять", "Blank = keep current", "Kosong = tetap"),
            width="340px"),
+        _f("meta_ads_token", "secret", "",
+           _l("Marketing API токен (ads_read)", "Marketing API token (ads_read)",
+              "Token Marketing API (ads_read)"),
+           ph=_l("EAAG…", "EAAG…", "EAAG…"),
+           help=_l("System User токен с ads_read — статистика по рекламе (не для сообщений). "
+                   "Пусто = не менять",
+                   "System User token with ads_read scope — ad performance data only, no "
+                   "messaging access. Blank = keep current",
+                   "Token System User dengan ads_read — hanya data performa iklan. "
+                   "Kosong = tetap"),
+           width="340px"),
     ]),
     SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [
         _f("crm_enabled", "bool", "false",
