@@ -1634,6 +1634,14 @@ def app_shell(
         "document.body.addEventListener('htmx:configRequest',function(e){"
         "var el=e.detail.elt;"
         "if(el&&el.id==='tl'){e.detail.path='/ui/threads'+window.location.search;}});"
+        # The 30s background poll above replaces #tl's innerHTML, which resets its
+        # scrollTop to 0 — the manager loses their place in a long thread list every poll.
+        # Save/restore scroll position around the swap.
+        "var _tlScroll=0;"
+        "document.body.addEventListener('htmx:beforeSwap',function(e){"
+        "if(e.detail.target&&e.detail.target.id==='tl'){_tlScroll=e.detail.target.scrollTop;}});"
+        "document.body.addEventListener('htmx:afterSwap',function(e){"
+        "if(e.detail.target&&e.detail.target.id==='tl'){e.detail.target.scrollTop=_tlScroll;}});"
         "function sendSuggest(tid){"
         "var ta=document.getElementById('sug-ta-'+tid);"
         "if(!ta||!ta.value.trim())return;"

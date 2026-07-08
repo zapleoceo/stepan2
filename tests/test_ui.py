@@ -170,6 +170,18 @@ def test_thread_list_poll_always_follows_the_current_url() -> None:
     assert "tl.setAttribute('hx-get'" not in html
 
 
+def test_thread_list_poll_preserves_scroll_position() -> None:
+    """Real bug: fixing the filter-follows-URL poll left a new regression — replacing
+    #tl's innerHTML on every 30s poll reset its scrollTop to 0, so a manager scrolled
+    partway down a long thread list got yanked back to the top every 30 seconds."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>main</div>", active_nav="inbox")
+    assert "htmx:beforeSwap" in html and "htmx:afterSwap" in html
+    assert "_tlScroll" in html
+    assert "e.detail.target.scrollTop" in html
+
+
 def test_app_shell_hides_members_and_branches_for_non_super_admin() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")
