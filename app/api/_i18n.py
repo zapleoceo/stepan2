@@ -459,6 +459,10 @@ _TR: dict[str, dict[str, str]] = {
                          "id": "— tanpa produk —"},
     "chat.product":     {"ru": "Продукт изменён", "en": "Product changed",
                          "id": "Produk diubah"},
+    "chat.manager_note_set": {"ru": "Заметка менеджера обновлена", "en": "Manager note updated",
+                              "id": "Catatan manajer diperbarui"},
+    "chat.manager_note_cleared": {"ru": "Заметка менеджера очищена", "en": "Manager note cleared",
+                                  "id": "Catatan manajer dihapus"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

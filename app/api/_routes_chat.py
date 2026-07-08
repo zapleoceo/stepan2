@@ -600,6 +600,14 @@ async def chat_manager_note(
             {"n": cleaned, "who": _actor_name(request),
              "now": datetime.now(UTC).replace(tzinfo=None), "tid": thread_id},
         )
+        # The lead row only holds the CURRENT note (overwritten on every save) — log every
+        # change to ThreadLog too, so the chronology survives updates and shows in the chat
+        # timeline (same mechanism as context-clear/product-change log lines).
+        session.add(ThreadLog(
+            branch_id=branch_id, thread_id=thread_id,
+            kind="manager_note_set" if cleaned else "manager_note_cleared",
+            detail=cleaned, actor=_actor_name(request),
+        ))
         await session.flush()
         info = (
             await session.execute(

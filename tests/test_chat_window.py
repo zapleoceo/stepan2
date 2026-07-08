@@ -477,6 +477,41 @@ async def test_manager_note_blank_clears_it(db_session) -> None:
     assert stored is None
 
 
+@pytest.mark.asyncio
+async def test_manager_note_updates_log_chronology_not_just_overwrite(db_session) -> None:
+    """The lead row only holds the CURRENT note (each save overwrites it) — chronology
+    across updates must survive in ThreadLog, same mechanism as context-clear/product-change
+    log lines, so a manager can see the history of notes left on this lead over time."""
+    from sqlalchemy import text as _text
+
+    import app.api._routes_chat as rc
+    from app.api._routes_chat import chat_manager_note
+
+    await _seed_thread(db_session)
+    orig = rc.session_scope
+    rc.session_scope = lambda: _Scope(db_session)
+    try:
+        await chat_manager_note(1, _Req(), note="first note")  # type: ignore[arg-type]
+        await chat_manager_note(1, _Req(), note="updated note")  # type: ignore[arg-type]
+        await chat_manager_note(1, _Req(), note="")  # type: ignore[arg-type]
+    finally:
+        rc.session_scope = orig
+
+    rows = (await db_session.execute(
+        _text("SELECT kind, detail FROM thread_log WHERE thread_id = 1 ORDER BY id")
+    )).all()
+    assert [r[0] for r in rows] == [
+        "manager_note_set", "manager_note_set", "manager_note_cleared"]
+    assert rows[0][1] == "first note"
+    assert rows[1][1] == "updated note"
+    assert rows[2][1] is None
+    # the lead row itself only reflects the LATEST state (cleared) — history lives in the log
+    current = (await db_session.execute(
+        _text("SELECT manager_note FROM lead WHERE id = 1")
+    )).scalar()
+    assert current is None
+
+
 # ─── captured-needs auto-translate on chat panel load (cached) ────────────────
 
 class _CountingTranslateLLM:
