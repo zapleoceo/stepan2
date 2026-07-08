@@ -1592,14 +1592,17 @@ def app_shell(
         "function setFnl(el){"
         "document.querySelectorAll('.fseg.on,.fchip.on,.fnl-all.on')"
         ".forEach(e=>e.classList.remove('on'));"
-        "el.classList.add('on');"
-        # Filtering by a funnel step is an htmx partial swap of #tl's content — but #tl keeps
-        # its own hx-get for the 30s poll. Without syncing it, the next poll re-fetches the
-        # OLD (usually unfiltered) list and yanks you out of the filter. Point the poll at the
-        # step's own threads URL so the background refresh stays on the same filter.
-        "var tl=document.getElementById('tl');"
-        "var g=el.getAttribute('hx-get');"
-        "if(tl&&g){tl.setAttribute('hx-get',g);}}"
+        "el.classList.add('on');}"
+        # #tl (the thread list) polls itself every 30s (hx-trigger="load, every 30s") using
+        # whatever hx-get it was born with — a stage-pill click only swaps its INNERHTML, so
+        # a stale/mismatched hx-get would silently re-fetch the WRONG filter on the next poll
+        # (previously only synced on a pill click, and only for `stage` — any OTHER active
+        # filter, ad_id/lead_type/audience/grp, still got dropped). Force every one of #tl's
+        # own requests to mirror the address bar instead — correct no matter how the current
+        # filter got there (pill click, direct URL, back/forward).
+        "document.body.addEventListener('htmx:configRequest',function(e){"
+        "var el=e.detail.elt;"
+        "if(el&&el.id==='tl'){e.detail.path='/ui/threads'+window.location.search;}});"
         "function sendSuggest(tid){"
         "var ta=document.getElementById('sug-ta-'+tid);"
         "if(!ta||!ta.value.trim())return;"

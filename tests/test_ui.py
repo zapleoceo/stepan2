@@ -153,6 +153,23 @@ def test_app_shell_contains_sidebar_and_nav() -> None:
     assert "<div>main</div>" in html
 
 
+def test_thread_list_poll_always_follows_the_current_url() -> None:
+    """Real bug: #tl (the thread list) polls itself every 30s, but a stage-pill click only
+    swapped its innerHTML — #tl's own hx-get stayed whatever it was born with, so the next
+    poll silently re-fetched the WRONG filter (and dropped any non-stage filter, since the
+    old fix only synced `stage`). #tl's own requests must always mirror window.location.
+    search instead, so the background poll can never diverge from the visible URL."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>main</div>", active_nav="inbox", stage="ready")
+    assert "htmx:configRequest" in html
+    assert "el.id==='tl'" in html
+    assert "window.location.search" in html
+    # the old per-pill-click sync (only fixed `stage`, dropped other filters) is gone —
+    # superseded by the URL-driven listener above
+    assert "tl.setAttribute('hx-get'" not in html
+
+
 def test_app_shell_hides_members_and_branches_for_non_super_admin() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")
