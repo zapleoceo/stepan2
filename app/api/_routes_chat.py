@@ -136,7 +136,7 @@ async def _build_chat_panel(
                 " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                 " l.agent_enabled, l.is_blocked,"
                 " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                " b.tz_offset_h, l.needs, l.id, l.needs_tr"
+                " b.tz_offset_h, l.needs, l.id, l.needs_tr, l.manager_note"
                 " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                 " JOIN branch b ON b.id = l.branch_id"
                 " WHERE ct.id = :tid"
@@ -156,7 +156,7 @@ async def _build_chat_panel(
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
      follower_count, following_count, last_active_at, lead_seen_at, _tz, needs,
-     lead_id, needs_tr) = info
+     lead_id, needs_tr, manager_note) = info
     needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return chat_panel_html(
         thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -169,6 +169,7 @@ async def _build_chat_panel(
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs_profile,
         needs_pending=needs_pending, events=events, products=products,
+        manager_note=manager_note,
     )
 
 
@@ -445,7 +446,7 @@ async def chat_stage(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.needs, l.needs_tr"
+                    " l.needs, l.needs_tr, l.manager_note"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"
                     " WHERE ct.id = :tid"
@@ -459,7 +460,8 @@ async def chat_stage(
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at, _tz, needs, needs_tr) = info
+         follower_count, following_count, last_active_at, _tz, needs, needs_tr,
+         manager_note) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if stage != str(old_stage):
@@ -498,7 +500,8 @@ async def chat_stage(
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
                          last_active_at=last_active_at, needs=needs_profile,
-                         needs_pending=needs_pending, products=products)
+                         needs_pending=needs_pending, products=products,
+                         manager_note=manager_note)
     )
 
 
@@ -526,7 +529,7 @@ async def chat_product(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.needs, l.id, l.needs_tr"
+                    " l.needs, l.id, l.needs_tr, l.manager_note"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id WHERE ct.id = :tid"
                 ),
@@ -540,7 +543,7 @@ async def chat_product(
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _tz, needs,
-         lead_id, needs_tr) = info
+         lead_id, needs_tr, manager_note) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if new_slug is not None and new_slug not in {sl for sl, _ in products}:
@@ -568,7 +571,72 @@ async def chat_product(
                          agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
                          follower_count=follower_count, following_count=following_count,
                          last_active_at=last_active_at, needs=needs_profile,
-                         needs_pending=needs_pending, products=products)
+                         needs_pending=needs_pending, products=products,
+                         manager_note=manager_note)
+    )
+
+
+@router.post("/chat/{thread_id}/manager-note", response_class=HTMLResponse)
+async def chat_manager_note(
+    thread_id: int, request: Request, note: str = Form(default=""),
+) -> HTMLResponse:
+    """Save (or clear, on empty) a per-LEAD manager override note — injected into Stepan's
+    prompt every turn until cleared (see prompt.manager_note_block). Distinct from the
+    branch-wide CoachingNote: closes the gap where a manager manually demotes a wrongly-
+    ready lead but has no way to tell the bot WHY, so it just marks ready=true again."""
+    apply_lang(request)
+    cleaned = note.strip() or None
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
+    async with session_scope() as session:
+        branch_id = await _guarded_branch(session, thread_id, allowed)
+        if branch_id is None:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        await session.execute(
+            text(
+                "UPDATE lead SET manager_note = :n, manager_note_by = :who,"
+                " manager_note_at = :now"
+                " WHERE id = (SELECT lead_id FROM channel_thread WHERE id = :tid)"
+            ),
+            {"n": cleaned, "who": _actor_name(request),
+             "now": datetime.now(UTC).replace(tzinfo=None), "tid": thread_id},
+        )
+        await session.flush()
+        info = (
+            await session.execute(
+                text(
+                    "SELECT l.display_name, l.stage, ct.product_slug, ct.external_thread_id,"
+                    " l.phone_e164, l.created_at, ct.last_in_at,"
+                    " l.ig_username, l.avatar_url,"
+                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
+                    " l.agent_enabled, l.is_blocked,"
+                    " l.follower_count, l.following_count, l.last_active_at,"
+                    " l.needs, l.needs_tr"
+                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+                    " WHERE ct.id = :tid"
+                ),
+                {"tid": thread_id},
+            )
+        ).first()
+        if not info:
+            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        (name, stage, product_slug, ig_id, phone, created_at, last_in_at,
+         ig_username, avatar_url, lead_source, ad_id, ad_media_id, ad_preview_url,
+         agent_enabled, is_blocked, follower_count, following_count, last_active_at,
+         needs, needs_tr) = info
+        products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
+        needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
+    return HTMLResponse(
+        chat_header_html(thread_id, str(name or "Lead"), str(stage or "new"),
+                         product_slug=product_slug, ig_id=ig_id,
+                         phone=phone, created_at=created_at, last_in_at=last_in_at,
+                         ig_username=ig_username, avatar_url=avatar_url,
+                         lead_source=lead_source, ad_id=ad_id,
+                         ad_media_id=ad_media_id, ad_preview_url=ad_preview_url,
+                         agent_enabled=bool(agent_enabled), is_blocked=bool(is_blocked),
+                         follower_count=follower_count, following_count=following_count,
+                         last_active_at=last_active_at, needs=needs_profile,
+                         needs_pending=needs_pending, products=products,
+                         manager_note=cleaned)
     )
 
 

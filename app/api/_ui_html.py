@@ -1141,6 +1141,7 @@ def chat_header_html(
     needs: NeedsProfile | None = None,
     needs_pending: bool = False,
     products: list | None = None,
+    manager_note: str | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -1236,7 +1237,29 @@ def chat_header_html(
         f'</div>'
         f'{src_bar}'
         f'{needs_block_html(needs, tid, needs_pending)}'
+        f'{manager_note_html(tid, manager_note)}'
         f'</div>'
+    )
+
+
+def manager_note_html(tid: int, note: str | None) -> str:
+    """Per-lead manager override note — injected into Stepan's prompt every turn until
+    cleared (see prompt.manager_note_block). Distinct from the branch-wide CoachingNote:
+    this is scoped to ONE lead, e.g. after manually demoting a wrongly-ready lead so the
+    bot doesn't just mark it ready again on the next turn."""
+    val = _h.escape(note or "")
+    return (
+        f'<form class="mgr-note" style="margin:.3rem 0 0"'
+        f' hx-post="/ui/chat/{tid}/manager-note" hx-target="#chat-hdr-{tid}"'
+        f' hx-swap="outerHTML" data-help="{_h.escape(t("hint.manager_note"))}">'
+        f'<textarea name="note" rows="2"'
+        f' placeholder="{_h.escape(t("chat.manager_note_ph"))}"'
+        f' style="width:100%;font-size:.72rem;background:#1a1f2b;color:#c9d1d9;'
+        f'border:1px solid #2d3748;border-radius:6px;padding:.3rem;resize:vertical">'
+        f'{val}</textarea>'
+        f'<button type="submit" class="act-sel" style="margin-top:2px">'
+        f'{_h.escape(t("chat.save"))}</button>'
+        f'</form>'
     )
 
 
@@ -1304,6 +1327,7 @@ def chat_panel_html(
     needs_pending: bool = False,
     events: list | None = None,
     products: list | None = None,
+    manager_note: str | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -1319,7 +1343,7 @@ def chat_panel_html(
         agent_enabled=agent_enabled, is_blocked=is_blocked,
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, needs=needs, needs_pending=needs_pending,
-        products=products,
+        products=products, manager_note=manager_note,
     )
     return (
         f'{header}'

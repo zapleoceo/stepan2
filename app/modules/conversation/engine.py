@@ -135,7 +135,8 @@ class DecisionEngine:
             context, ctx.dialog, lang, coaching_notes=notes,
             needs_block=needs_summary(ctx.stored_needs),
             source_block=source_hint(ctx.thread.lead_source),
-            name_block=lead_name_hint(ctx.lead.display_name if ctx.lead else None))
+            name_block=lead_name_hint(ctx.lead.display_name if ctx.lead else None),
+            manager_note=ctx.lead.manager_note if ctx.lead else None)
         if extra_user_msg is not None:
             messages.append({"role": "user", "content": extra_user_msg})
         elif messages[-1]["role"] == "assistant":

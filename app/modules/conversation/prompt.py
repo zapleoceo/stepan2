@@ -332,6 +332,20 @@ def _role_of(message: Message) -> str:
     return "user" if message.direction == "in" else "assistant"
 
 
+_MANAGER_NOTE_HEADER = "MANAGER NOTE ON THIS LEAD (follow strictly, overrides your own read):"
+
+
+def manager_note_block(note: str | None) -> str | None:
+    """A manager's PER-LEAD override, unlike CoachingNote (branch-wide rules for every
+    lead). The live gap this closes: a manager manually moves a lead back out of READY
+    because it isn't actually ready, but nothing stops the model from marking ready=true
+    again on the very next turn — there was no way to tell Stepan WHY this specific lead
+    was demoted. A manager writes free text here (e.g. 'checked, not ready yet — needs
+    budget confirmed before ready again') and it's injected every turn until cleared."""
+    text = (note or "").strip()
+    return f"{_MANAGER_NOTE_HEADER}\n{text}" if text else None
+
+
 def build_messages(
     persona_and_kb: str,
     dialog: list[Message],
@@ -340,14 +354,18 @@ def build_messages(
     needs_block: str | None = None,
     source_block: str | None = None,
     name_block: str | None = None,
+    manager_note: str | None = None,
 ) -> list[dict[str, Any]]:
-    """System (persona+KB+coaching+known-needs+entry+name+contract) then dialog."""
+    """System (persona+KB+coaching+per-lead note+known-needs+entry+name+contract) then dialog."""
     parts: list[str] = []
     if persona_and_kb.strip():
         parts.append(persona_and_kb.rstrip())
     if coaching_notes:
         notes_block = "\n".join(f"- {n}" for n in coaching_notes)
         parts.append(f"{_COACHING_HEADER}\n{notes_block}")
+    note_block = manager_note_block(manager_note)
+    if note_block:
+        parts.append(note_block)
     if source_block and source_block.strip():
         parts.append(source_block.strip())
     if name_block and name_block.strip():

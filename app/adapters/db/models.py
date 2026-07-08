@@ -88,6 +88,13 @@ class Lead(SQLModel, table=True):
     profile_synced_at: datetime | None = Field(default=None, description="последний refresh")
     notify_topic_id: int | None = Field(
         default=None, description="Telegram forum topic (message_thread_id) для алертов лида")
+    manager_note: str | None = Field(
+        default=None, description="личная заметка менеджера ЭТОМУ лиду — инжектится в промпт "
+                                  "каждый ход (напр. 'проверил, не готов, не считай ready снова "
+                                  "без нового сигнала'); в отличие от CoachingNote (на весь "
+                                  "филиал), это per-lead override")
+    manager_note_by: str | None = Field(default=None, description="кто оставил manager_note")
+    manager_note_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

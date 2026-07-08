@@ -105,6 +105,31 @@ def test_build_messages_injects_entry_hint() -> None:
     assert "ENTRY:" not in plain[0]["content"]  # no block → nothing injected
 
 
+def test_manager_note_block_wraps_with_header_or_none() -> None:
+    from app.modules.conversation.prompt import manager_note_block
+    block = manager_note_block("checked, not ready yet — needs budget confirmed")
+    assert block is not None
+    assert "MANAGER NOTE" in block
+    assert "checked, not ready yet" in block
+    assert manager_note_block(None) is None
+    assert manager_note_block("   ") is None  # blank note → nothing injected
+
+
+def test_build_messages_injects_manager_note() -> None:
+    """Per-lead override (2026-07-08): a manager who demotes a wrongly-ready lead can leave
+    Stepan a reason so it doesn't just mark ready=true again next turn — distinct from
+    CoachingNote, which is branch-wide, not per-lead."""
+    from types import SimpleNamespace
+
+    from app.modules.conversation.prompt import build_messages
+    dialog = [SimpleNamespace(direction="in", text="halo")]
+    msgs = build_messages("persona", dialog, "en", manager_note="not actually ready yet")
+    assert "MANAGER NOTE" in msgs[0]["content"]
+    assert "not actually ready yet" in msgs[0]["content"]
+    plain = build_messages("persona", dialog, "en")
+    assert "MANAGER NOTE" not in plain[0]["content"]  # no note → nothing injected
+
+
 def test_fmt_llm_meta_free_time_and_id() -> None:
     from app.modules.conversation.reply import _fmt_llm_meta
     free = _fmt_llm_meta({"model": "x/mistral-large-latest", "tokens_in": 537,

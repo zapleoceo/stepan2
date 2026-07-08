@@ -428,6 +428,55 @@ async def test_bot_toggle_flips_lead_agent_enabled(db_session) -> None:
     assert bool(val) is False
 
 
+@pytest.mark.asyncio
+async def test_manager_note_saves_and_appears_in_header(db_session) -> None:
+    """Per-lead override note (2026-07-08): a manager writes it once via this route, and
+    it must both persist on the lead row AND render back in the header HTML — the reply
+    pipeline reads it straight off lead.manager_note (see prompt.manager_note_block)."""
+    from sqlalchemy import text as _text
+
+    import app.api._routes_chat as rc
+    from app.api._routes_chat import chat_manager_note
+
+    await _seed_thread(db_session)
+    orig = rc.session_scope
+    rc.session_scope = lambda: _Scope(db_session)
+    try:
+        html = await chat_manager_note(1, _Req(), note="not ready yet — needs budget")  # type: ignore[arg-type]
+    finally:
+        rc.session_scope = orig
+
+    stored = (await db_session.execute(
+        _text("SELECT manager_note FROM lead WHERE id = 1")
+    )).scalar()
+    assert stored == "not ready yet — needs budget"
+    assert "not ready yet" in html.body.decode()
+
+
+@pytest.mark.asyncio
+async def test_manager_note_blank_clears_it(db_session) -> None:
+    from sqlalchemy import text as _text
+
+    import app.api._routes_chat as rc
+    from app.api._routes_chat import chat_manager_note
+
+    await _seed_thread(db_session)
+    await db_session.execute(
+        _text("UPDATE lead SET manager_note = 'old note' WHERE id = 1"))
+    await db_session.commit()
+    orig = rc.session_scope
+    rc.session_scope = lambda: _Scope(db_session)
+    try:
+        await chat_manager_note(1, _Req(), note="   ")  # type: ignore[arg-type]
+    finally:
+        rc.session_scope = orig
+
+    stored = (await db_session.execute(
+        _text("SELECT manager_note FROM lead WHERE id = 1")
+    )).scalar()
+    assert stored is None
+
+
 # ─── captured-needs auto-translate on chat panel load (cached) ────────────────
 
 class _CountingTranslateLLM:

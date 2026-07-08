@@ -287,6 +287,25 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Load context back: cleared messages re-enter the prompt.",
         "id": "Muat ulang konteks: pesan yang dibersihkan masuk prompt lagi.",
     },
+    "hint.manager_note": {
+        "ru": "Личная заметка ЭТОМУ лиду (не всему филиалу) — Степан видит её на каждом "
+              "ходу, пока не очистишь. Напр.: «проверил, не готов — не считай ready снова "
+              "без нового сигнала».",
+        "en": "A note for THIS lead only (not the whole branch) — Stepan sees it every turn "
+              "until cleared. E.g.: 'checked, not ready yet — needs a fresh signal before ready.'",
+        "id": "Catatan khusus lead INI (bukan seluruh cabang) — Stepan melihatnya tiap giliran "
+              "sampai dihapus.",
+    },
+    "chat.manager_note_ph": {
+        "ru": "Заметка для Степана по этому лиду (необязательно)…",
+        "en": "Note for Stepan on this lead (optional)…",
+        "id": "Catatan untuk Stepan tentang lead ini (opsional)…",
+    },
+    "chat.save": {
+        "ru": "Сохранить",
+        "en": "Save",
+        "id": "Simpan",
+    },
     "hint.needs": {
         "ru": "Что Степан выяснил о лиде: цели (jobs), боли (pains), желаемое (gains).",
         "en": "What Stepan discovered: goals (jobs), fears (pains), desired outcomes (gains).",
