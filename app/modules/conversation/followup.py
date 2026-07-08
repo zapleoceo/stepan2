@@ -238,6 +238,21 @@ class FollowupService:
             engine, ctx, thread_id, lang, "followup", True, decision, meta)
         if not decision.reply:
             return False
+        # guard_decision can regenerate the draft too (for an UNRELATED violation elsewhere
+        # in the text) — that regeneration is never re-checked against dialog history, so it
+        # can silently reintroduce the exact near-duplicate the check above already rejected
+        # once. Live case (thread 2087, 2026-07-08): the dedup check passed on a fresh draft
+        # about a fabricated "Rp 750rb bootcamp"; guard caught the fabrication and
+        # regenerated, and that correction converged word-for-word onto an answer already
+        # sent as a live reply an hour earlier. Re-check the FINAL text — a repeat nudge is
+        # low-value; skip sending rather than risk another regen loop, next attempt retries.
+        _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
+        if post_guard_ratio >= _DUPLICATE_RATIO:
+            logger.warning(
+                "followup: branch=%d thread=%d still near-duplicate after guard regen "
+                "(ratio=%.2f) — dropping this attempt", self.branch_id, thread_id,
+                post_guard_ratio)
+            return False
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: lead answered while we were generating (S1 guard)
         # A nudge can trip needs_manager too (an unfixable guard violation, or the model

@@ -222,6 +222,45 @@ async def test_followup_needs_manager_raises_an_alert(db_session) -> None:
     assert len(notifier.sends) == 1
 
 
+async def test_followup_drops_nudge_still_duplicate_after_guard_regen(db_session) -> None:
+    """Live case (thread 2087, 2026-07-08): the dedup check runs BEFORE guard_decision, so
+    it only sees the FIRST draft. If that draft is fresh (passes dedup) but guard flags an
+    unrelated fabrication and regenerates, that correction can converge onto text already
+    sent — never re-checked, since guard's regen happens after the dedup gate. Re-check the
+    FINAL text post-guard and drop the send rather than repeat something already said."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    prior_line = "Program SMM Intensive ini formatnya hybrid, 3 sesi per minggu online."
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW - timedelta(hours=1)))
+    await db_session.flush()
+
+    class _ScriptLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            self.calls += 1
+            if self.calls == 1:
+                # fresh draft (passes the pre-guard dedup check) but with a fabricated URL
+                reply = "Cek promo spesial di https://itstep.id/promo-rahasia ya Kak!"
+            else:
+                # guard's OWN regen (for the fabrication) converges back onto the prior line
+                reply = prior_line
+            return json.dumps({"reply": reply, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    llm = _ScriptLLM()
+    assert await _svc(db_session, bid, llm=llm).run() == 0  # dropped, not sent
+    assert await _pending(db_session, tid) is None
+    refreshed = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    assert refreshed.next_followup_at is not None  # timer NOT consumed — retries next cycle
+
+
 async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
     """Chat 1830: the 2nd follow-up re-greeted the lead and re-asked the exact same
     discovery question already sent — must regenerate on the strong model instead of
