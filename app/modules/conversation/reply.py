@@ -16,7 +16,7 @@ from app.adapters.channels.ig_parse import VOICE_PENDING_PH
 from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent
 from app.adapters.meta_capi import MetaCapi
 from app.config import settings
-from app.domain.enums import Stage
+from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import BranchSettings
@@ -485,6 +485,14 @@ class ReplyService:
 
     def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0,
                    ready_subtype: str | None = None) -> Stage:
+        # Once a lead is in a HUMAN-LED stage (manager took it over, or it's already ready/
+        # handed off), only a manual UI action may move it out — the bot never auto-moves the
+        # funnel stage again, even if it keeps talking (agent_enabled can stay on; see
+        # HUMAN_LED_STAGES). Live bug (thread 2274): a manager moved a lead to MANAGER, the
+        # bot's very next decision moved it straight back to qualifying on its own read of
+        # the conversation — the manager's call was silently overridden.
+        if lead.stage in HUMAN_LED_STAGES:
+            return lead.stage
         ready = self._is_ready(decision)
         if ready and ready_subtype == "openhouse":
             # An event RSVP is a notify-only side channel (see _handoff_openhouse) — it's

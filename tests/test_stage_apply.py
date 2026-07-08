@@ -216,6 +216,28 @@ async def test_phone_captured_from_decision_enables_handoff(db_session) -> None:
     assert lead.agent_enabled is False
 
 
+async def test_bot_never_moves_a_lead_out_of_manager_stage(db_session) -> None:
+    """Live bug (thread 2274): a manager manually moved a lead to MANAGER; the bot's very
+    next decision moved it straight back to qualifying on its own read of the chat, silently
+    overriding the manager's call. Only a manual UI action may move a lead OUT of a human-led
+    stage — the bot can keep talking (agent_enabled untouched here) but never touches stage."""
+    bid, tid, lead = await _world(db_session, stage=Stage.MANAGER)
+    lead.agent_enabled = True  # manager kept the bot ON while still holding the lead
+    db_session.add(lead)
+    await db_session.flush()
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(stage=Stage.QUALIFYING))
+    assert lead.stage == Stage.MANAGER  # unchanged despite the model's own stage read
+    assert lead.agent_enabled is True  # bot may still reply — this rule is stage-only
+    assert (await db_session.exec(select(StageEvent))).first() is None  # no phantom transition
+
+
+async def test_bot_never_moves_a_lead_out_of_ready_stage(db_session) -> None:
+    bid, tid, lead = await _world(db_session, stage=Stage.READY, phone="+6281234567890")
+    await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(stage=Stage.PRESENTING, needs_manager=True))
+    assert lead.stage == Stage.READY
+
+
 async def test_needs_manager_moves_to_manager_and_mutes(db_session) -> None:
     notifier = FakeNotifier()
     bid, tid, lead = await _world(db_session, phone="+6281234567890")
