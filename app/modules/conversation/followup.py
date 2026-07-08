@@ -76,12 +76,21 @@ _FOLLOWUP_Q = (  # noqa: S608
 _FOLLOWUP_NUDGE = (
     "[System: the lead has not replied since your last message. This is follow-up"
     " attempt {n} of {total}. Write a short friendly follow-up in {lang} to"
-    " re-engage them. CHANGE THE ANGLE from your previous messages — do NOT re-send"
-    " the same open-house / alumni / 'ada sesi' line again. Pick a DIFFERENT lever"
-    " each attempt: a concrete case tied to their stated need, a cheaper entry point"
-    " (Skill Booster / bootcamp) if price was the sticking point, or a low-friction"
-    " yes/no question instead of an open one. Never mention the wait or the attempt"
-    " number. Return the JSON as usual.]"
+    " re-engage them.\n"
+    "SIGNAL THIS IS A CHECK-IN, don't just continue like the lead just spoke — a real "
+    "person re-opening a quiet chat gives some small, casual sign time passed ('eh iya '"
+    " / 'btw ' / 'oh iya jadi keinget' / a fresh greeting), not a bare reaction word like"
+    " 'Baik' or 'Wah sip!' that implies they just said something. Never state the wait"
+    " length or attempt number, never sound like an automated nag — one natural, human"
+    " beat is enough, then move straight to value.\n"
+    "DO NOT REPEAT A QUESTION YOU ALREADY ASKED, in ANY wording — read your own prior"
+    " messages first. If your last message asked something and got no answer, do NOT ask"
+    " it again reworded ('apa tujuan Kakak' vs 'Kakak pengen fokus ke mana' are the SAME"
+    " question) - either give them a concrete value/answer instead, or ask about a"
+    " completely different angle. CHANGE THE ANGLE each attempt for real: a concrete case"
+    " tied to their stated need, a cheaper entry point (Skill Booster / bootcamp) if price"
+    " was the sticking point, or a low-friction yes/no question instead of an open one."
+    " Return the JSON as usual.]"
 )
 
 
