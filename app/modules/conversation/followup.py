@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -20,7 +19,15 @@ from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
 from .engine import DecisionEngine, _fmt_llm_meta
-from .reply import _BUBBLE_GAP_S, _split_bubbles, guard_decision, raise_manager_alert
+from .reply import (
+    _BUBBLE_GAP_S,
+    _DUPLICATE_RATIO,
+    _REPEAT_CORRECTION,
+    _most_similar_prior,
+    _split_bubbles,
+    guard_decision,
+    raise_manager_alert,
+)
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -29,31 +36,6 @@ if TYPE_CHECKING:
     from app.ports.notify import NotifierPort
 
 logger = logging.getLogger(__name__)
-
-# A nudge that's near-identical to something already sent in this thread (chat 1830: the
-# 2nd follow-up re-greeted the lead and re-asked the same discovery question almost
-# verbatim) — the model's own "change the angle" instruction wasn't reliable enough on its
-# own, so this is a deterministic backstop, same idea as the reply-guard's checks.
-_DUPLICATE_RATIO = 0.6
-_REPEAT_CORRECTION = (
-    "[System: your draft repeats something you already said in this thread almost "
-    "word-for-word: {prior!r}. Do NOT send it again — pick a genuinely different angle "
-    "(their stated need, a cheaper entry point, a concrete yes/no question). Return the "
-    "JSON as usual.]"
-)
-
-
-def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
-    """The prior bot message most similar to new_text, and that similarity ratio."""
-    best_text, best_ratio = "", 0.0
-    new_norm = (new_text or "").strip().lower()
-    for m in dialog:
-        if m.direction != "out" or not (m.text or "").strip():
-            continue
-        ratio = SequenceMatcher(None, new_norm, m.text.strip().lower()).ratio()
-        if ratio > best_ratio:
-            best_text, best_ratio = m.text.strip(), ratio
-    return best_text, best_ratio
 
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —

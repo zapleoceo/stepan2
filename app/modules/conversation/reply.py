@@ -8,6 +8,7 @@ import logging
 import random
 import re
 from datetime import UTC, datetime, timedelta
+from difflib import SequenceMatcher
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -75,6 +76,50 @@ _NON_TARGET_NUDGE = (
     "and stop there; only re-engage if THEY bring up a real interest in one of our "
     "programs. Return the JSON as usual.]"
 )
+
+# A live reply that repeats a question already asked in this thread — same failure mode
+# followup.py guards against (chat 1830), but on the live-reply path, which had NO dedup
+# check at all (thread 2260, 2026-07-08: the SECOND occurrence of a re-asked discovery
+# question was a live reply, not a followup, and slipped straight through).
+_DUPLICATE_RATIO = 0.6
+_REPEAT_CORRECTION = (
+    "[System: your draft repeats something you already said in this thread almost "
+    "word-for-word: {prior!r}. Do NOT send it again — pick a genuinely different angle "
+    "(their stated need, a cheaper entry point, a concrete yes/no question). Return the "
+    "JSON as usual.]"
+)
+# A '?'-ending clause, so a specific discovery question can be compared on its own —
+# whole-message similarity dilutes when the SAME question is wrapped in different framing
+# (a new intro sentence, a story, different padding) each time it's re-asked.
+_QUESTION_RE = re.compile(r"[^.!?\n]*\?")
+
+
+def _last_question(text: str) -> str | None:
+    matches = _QUESTION_RE.findall(text or "")
+    return matches[-1].strip() if matches else None
+
+
+def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
+    """The prior bot message most similar to new_text, and that similarity ratio.
+
+    Checks both the WHOLE message (catches a broadly repeated pitch) and just the closing
+    QUESTION (catches one specific discovery question re-asked inside an otherwise different
+    reply) — see followup.py's identical helper for the live cases that motivated this."""
+    best_text, best_ratio = "", 0.0
+    new_norm = (new_text or "").strip().lower()
+    new_q = _last_question(new_text)
+    for m in dialog:
+        if m.direction != "out" or not (m.text or "").strip():
+            continue
+        prior = m.text.strip()
+        ratio = SequenceMatcher(None, new_norm, prior.lower()).ratio()
+        if new_q:
+            prior_q = _last_question(prior)
+            if prior_q:
+                ratio = max(ratio, SequenceMatcher(None, new_q.lower(), prior_q.lower()).ratio())
+        if ratio > best_ratio:
+            best_text, best_ratio = prior, ratio
+    return best_text, best_ratio
 
 
 def _normalize_phone(raw: str) -> str | None:
@@ -304,9 +349,35 @@ class ReplyService:
                 decision = parse_decision(raw)
             else:
                 raise
+        if decision.reply:
+            prior, ratio = _most_similar_prior(decision.reply, ctx.dialog)
+            if ratio >= _DUPLICATE_RATIO:
+                logger.warning(
+                    "%s: branch=%d thread=%d near-duplicate reply (ratio=%.2f) → regen",
+                    workflow, self.branch_id, thread_id, ratio)
+                raw, meta = await engine.complete(
+                    ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+                    extra_user_msg=_REPEAT_CORRECTION.format(prior=prior))
+                try:
+                    decision = parse_decision(raw)
+                except ValueError:
+                    pass  # keep the original draft — a duplicate is better than dropping it here
         decision, meta = await guard_decision(
             self.session, self.branch_id, self.settings, self.llm,
             engine, ctx, thread_id, lang, workflow, bill, decision, meta)
+        # guard_decision's own regen (for an UNRELATED violation) is never re-checked against
+        # dialog history, so it can silently reintroduce the exact duplicate rejected above —
+        # same precedent as followup.py. A live reply can't just drop the send like a nudge
+        # can, so fall back to the SAFE_FALLBACK + hand-off instead of resending a duplicate.
+        if decision.reply:
+            _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
+            if post_guard_ratio >= _DUPLICATE_RATIO:
+                logger.warning(
+                    "%s: branch=%d thread=%d still near-duplicate after guard regen "
+                    "(ratio=%.2f) → hand-off", workflow, self.branch_id, thread_id,
+                    post_guard_ratio)
+                from dataclasses import replace  # noqa: PLC0415
+                decision = replace(decision, reply=guard.SAFE_FALLBACK, needs_manager=True)
         self._last_llm_meta = meta
         if lead is not None:
             merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,

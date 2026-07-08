@@ -89,3 +89,77 @@ async def test_no_non_target_nudge_for_a_normal_lead(db_session) -> None:
     await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
     last = llm.last_messages[-1]
     assert last["role"] != "user" or "non_target" not in last["content"]
+
+
+async def test_live_reply_regenerates_a_near_duplicate_question(db_session) -> None:
+    """Thread 2260, 2026-07-08: a discovery question re-asked wrapped in new framing slid
+    under the followup-only dedup gate because that SECOND occurrence was a live reply, not
+    a followup — ReplyService.decide() had no dedup check at all. Must regenerate instead of
+    shipping a near-verbatim repeat."""
+    bid, tid = await _thread_with_turns(db_session, 1)
+    ch_id = (await db_session.exec(select(ChannelThread).where(
+        ChannelThread.id == tid))).one().channel_id
+    prior_line = "Sebelumnya boleh cerita dikit. Data-nya buat apa Kak?"
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=ch_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW))
+    await db_session.flush()
+
+    class _ScriptLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            self.calls += 1
+            reply = ("Oh iya btw, sekalian mau tanya. Data-nya buat apa Kak?"
+                     if self.calls == 1 else
+                     "Kalau boleh tau, budget-nya kira-kira berapa ya Kak?")
+            return json.dumps({"reply": reply, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    llm = _ScriptLLM()
+    decision = await ReplyService(
+        db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    assert llm.calls == 2
+    assert decision.reply == "Kalau boleh tau, budget-nya kira-kira berapa ya Kak?"
+
+
+async def test_live_reply_hands_off_if_still_duplicate_after_guard_regen(db_session) -> None:
+    """Same precedent as followup.py's post-guard re-check, but a live reply can't just drop
+    the send like a nudge can — fall back to a safe hand-off instead of resending a
+    duplicate."""
+    from app.modules.conversation import guard
+
+    bid, tid = await _thread_with_turns(db_session, 1)
+    ch_id = (await db_session.exec(select(ChannelThread).where(
+        ChannelThread.id == tid))).one().channel_id
+    prior_line = "Program SMM Intensive ini formatnya hybrid, 3 sesi per minggu online."
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=ch_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW))
+    await db_session.flush()
+
+    class _ScriptLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            self.calls += 1
+            if self.calls == 1:
+                reply = "Cek promo spesial di https://itstep.id/promo-rahasia ya Kak!"
+            else:
+                reply = prior_line  # guard's own regen converges back onto the prior line
+            return json.dumps({"reply": reply, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    llm = _ScriptLLM()
+    decision = await ReplyService(
+        db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    assert decision.reply == guard.SAFE_FALLBACK
+    assert decision.needs_manager is True
