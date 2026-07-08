@@ -75,3 +75,10 @@ def test_no_invented_proof_or_cross_product_trial() -> None:
 def test_early_adult_vs_student_split() -> None:
     assert "split ADULT vs SCHOOL-AGE early" in _DECISION_CONTRACT
     assert "NEVER soft-close someone just for being a student" in _DECISION_CONTRACT
+
+
+def test_compound_question_gets_every_part_answered() -> None:
+    # thread 2159, 2026-07-08: "price list and the syllabus" got only the price answered,
+    # lead had to chase the rest ("btw syllabus nya td gmn ya")
+    assert "TWO OR MORE ASKS" in _DECISION_CONTRACT
+    assert "EVERY part answered" in _DECISION_CONTRACT
