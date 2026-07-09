@@ -177,6 +177,48 @@ async def test_no_thread_log_row_when_stage_does_not_change(db_session) -> None:
     assert (await db_session.exec(select(ThreadLog))).first() is None
 
 
+async def test_forced_manager_override_logs_kb_gap_not_the_models_own_stage_reason(
+    db_session,
+) -> None:
+    """Threads 1520/1995: needs_manager forces the stage to MANAGER regardless of what the
+    model itself requested, but the model's stage_reason describes ITS OWN requested stage
+    (e.g. 'presenting') - logging it as-is next to a presenting→manager row reads as a
+    mismatch. kb_gap actually explains the escalation and must win."""
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(
+        needs_manager=True, kb_gap="лид спросил про рассрочку 24 месяца — нет в базе",
+        stage_reason="лид уточнил детали — переход в presenting"))
+    assert lead.stage == Stage.MANAGER
+    log = (await db_session.exec(select(ThreadLog))).first()
+    assert log is not None and log.detail == "лид спросил про рассрочку 24 месяца — нет в базе"
+
+
+async def test_forced_manager_override_falls_back_when_kb_gap_is_missing(db_session) -> None:
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(
+        needs_manager=True, manager_question="ada trial class gratis?"))
+    assert lead.stage == Stage.MANAGER
+    log = (await db_session.exec(select(ThreadLog))).first()
+    assert log is not None and log.detail == "ada trial class gratis?"
+
+
+async def test_forced_manager_override_never_leaves_the_chronology_blank(db_session) -> None:
+    """Threads 2390/2392/2403: needs_manager fired with the model leaving stage_reason,
+    kb_gap AND manager_question all null - the chronology must still show something rather
+    than a silent gap."""
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(needs_manager=True))
+    assert lead.stage == Stage.MANAGER
+    log = (await db_session.exec(select(ThreadLog))).first()
+    assert log is not None and log.detail
+
+
 async def test_same_stage_writes_no_event(db_session) -> None:
     bid, tid, _ = await _world(db_session, stage=Stage.QUALIFYING)
     await _svc(db_session, bid).enqueue_reply(tid, _decision())

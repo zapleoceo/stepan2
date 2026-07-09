@@ -546,13 +546,27 @@ class ReplyService:
             reason="needs_manager" if decision.needs_manager else
                    ("ready" if ready else "model decision"),
         ))
-        if decision.stage_reason:
-            # Mirrors the manual stage-move reason popup, but for the bot's OWN decision —
-            # visible in the same chat chronology so a manager can see WHY Stepan moved the
-            # funnel, not just that it did.
+        # Mirrors the manual stage-move reason popup, but for the bot's OWN decision — visible
+        # in the same chat chronology so a manager can see WHY Stepan moved the funnel, not
+        # just that it did. A forced MANAGER override needs its OWN reason, not the model's
+        # stage_reason verbatim: that field describes the stage the model ITSELF asked for
+        # (e.g. 'presenting'), which needs_manager then overrides to MANAGER regardless —
+        # logging it as-is reads as a mismatch ("лид... — переход в presenting" next to a
+        # presenting→manager row). kb_gap/manager_question are what actually explain the
+        # escalation; stage_reason is only the right source for a non-escalation move. Model
+        # non-compliance (the field left null despite being "required") also gets a fallback
+        # here rather than a silent gap in the chronology.
+        if new_stage == Stage.MANAGER and decision.needs_manager:
+            reason_text = (
+                decision.kb_gap or decision.manager_question or decision.stage_reason
+                or "эскалация на менеджера без указанной моделью причины"
+            )
+        else:
+            reason_text = decision.stage_reason
+        if reason_text:
             self.session.add(ThreadLog(
                 branch_id=self.branch_id, thread_id=thread.id,
-                kind="stage_reason", detail=decision.stage_reason, actor="bot",
+                kind="stage_reason", detail=reason_text, actor="bot",
             ))
         lead.stage = new_stage
         if new_stage == Stage.MANAGER:
