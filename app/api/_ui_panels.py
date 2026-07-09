@@ -962,7 +962,7 @@ def _ch_ig_form(
                 f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
                 f'<button type="submit" class="btn-sm btn-p">'
                 f'{_h.escape(t("ch.retry_manual"))}</button>'
-                f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
+                f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
                 f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
                 f'{_h.escape(t("ch.start_over"))}</button>{spin}'
                 f'</form>'
@@ -975,11 +975,12 @@ def _ch_ig_form(
         # making them type a code that isn't even needed just to reach the eventual
         # manual-retry step is pointless — this button skips straight to a plain retry.
         app_confirm_btn = (
-            f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
+            f'<div style="margin-top:.4rem">'
+            f'<button type="button" class="btn-sm btn-g"'
             f' hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
             f' hx-swap="innerHTML" hx-include="closest form" hx-vals=\'{{"skip_code":"1"}}\''
             f' hx-disabled-elt="find button" hx-indicator="find .htmx-indicator">'
-            f'{_h.escape(t("ch.already_confirmed"))}</button>'
+            f'{_h.escape(t("ch.already_confirmed"))}</button></div>'
             if not is_challenge else ""
         )
         return (
@@ -995,7 +996,7 @@ def _ch_ig_form(
             f'<button type="submit" class="btn-sm btn-p">'
             f'{_h.escape(t("ch.verify"))}</button>'
             f'{app_confirm_btn}'
-            f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
+            f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
             f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
             f'{_h.escape(t("ch.start_over"))}</button>{spin}'
             f'</form>'
