@@ -423,6 +423,22 @@ async def test_pending_outbox_blocks_followup(db_session) -> None:
     assert await _svc(db_session, bid).run() == 0
 
 
+async def test_followup_skipped_when_lead_signaled_annoyance(db_session) -> None:
+    """Threads 2045/1996: the lead showed clear irritation ('Sok asik banget', 'Gak usah
+    ganggu aku lagi') in a live reply, but the next SCHEDULED follow-up fired anyway and
+    re-pitched the same price, ignoring the signal entirely. A follow-up is proactive (the
+    lead didn't ask for it) and must never fire on top of an unaddressed annoyance signal."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="in2", direction="in", sent_by="lead",
+                           text="Gak usah ganggu aku lagi",
+                           occurred_at=_NOW - timedelta(minutes=5)))
+    await db_session.flush()
+    llm = FakeLLM()
+    assert await _svc(db_session, bid, llm=llm).run() == 0
+    assert await _pending(db_session, tid) is None
+
+
 async def test_new_stage_excluded_from_followups(db_session) -> None:
     bid, _, _, _ = await _world(db_session, stage=Stage.NEW, timer_due=True)
     assert await _svc(db_session, bid).run() == 0

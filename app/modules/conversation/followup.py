@@ -18,6 +18,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Branch, Outbox
 from app.modules.settings.service import BranchSettings
 
+from . import guard
 from .engine import DecisionEngine, _fmt_llm_meta
 from .reply import (
     _BUBBLE_GAP_S,
@@ -171,6 +172,12 @@ class FollowupService:
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
         ctx = await engine.prepare(thread_id, workflow="followup")
         if ctx is None:
+            return False
+        last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
+        if guard.lead_signaled_annoyance(last_in):
+            logger.warning(
+                "followup: branch=%d thread=%d lead signaled annoyance at being contacted "
+                "— skipping nudge", self.branch_id, thread_id)
             return False
         lang = await self._lang()
         total = len(self.settings.followup_schedule_h)

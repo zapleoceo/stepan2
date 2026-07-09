@@ -68,7 +68,8 @@ _FALSE_DELIVERY_RE = re.compile(
 # actual Success Cases / Stories content in context.
 _STORY_RE = re.compile(
     r"\b(alumni kami|lulusan kami|peserta kami|salah satu (peserta|siswa|alumni|mentor|"
-    r"murid))\b", re.IGNORECASE)
+    r"murid)|kita (?:ada|punya) case\b|case alumni|ada (?:peserta|siswa|alumni|murid) yang "
+    r"(?:berhasil|sukses))\b", re.IGNORECASE)
 
 
 def false_delivery_claims(reply: str) -> list[str]:
@@ -144,6 +145,27 @@ def whatsapp_delivery_offers(reply: str) -> list[str]:
     """A promise to send anything over WhatsApp — always false, Stepan has no WhatsApp
     channel and can only reply inside this Instagram DM thread."""
     return [m.group(0) for m in _WHATSAPP_DELIVERY_RE.finditer(reply or "")]
+
+
+# Threads 2045/1996: the lead showed clear irritation at being re-contacted ("Sok asik
+# banget" / "Sukanya chat gw mulu") in a LIVE reply, but the next scheduled follow-up fired
+# ~67 minutes later and re-pitched the same price anyway, ignoring the signal entirely —
+# the lead then escalated to "Shuttt" / "Diemm" / "Gak usah ganggu aku lagi" before the bot
+# finally stopped. A follow-up is proactive (the lead didn't ask for it), so it must never
+# fire on top of an unaddressed annoyance signal — this is a deterministic backstop checked
+# against the lead's OWN last message before a nudge is even generated.
+_LEAD_ANNOYANCE_RE = re.compile(
+    r"\b(jangan ganggu|gak usah ganggu|nggak usah ganggu|tolong jangan ganggu|"
+    r"berhenti (?:chat|kirim|hubungi|nge-?chat)|stop (?:chat|hubungi|mengirim|nge-?chat)|"
+    r"udah jangan (?:chat|hubungi)|capek diganggu|sok asik|sukanya chat.*mulu|"
+    r"diem+(?:in)?\b|shu+t+\b)",
+    re.IGNORECASE)
+
+
+def lead_signaled_annoyance(last_inbound: str) -> bool:
+    """The lead's own last message reads as irritation at being contacted — a follow-up
+    should never fire on top of this unaddressed."""
+    return bool(_LEAD_ANNOYANCE_RE.search((last_inbound or "").strip()))
 
 
 # Chat 2092: the bot told an Instagram lead to "langsung aja DM aku di Instagram" — but this

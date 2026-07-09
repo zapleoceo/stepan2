@@ -72,6 +72,18 @@ def test_is_risky_detects_unsourced_alumni_stories() -> None:
         "Vibe Coding itu program 4 bulan buat bikin aplikasi sendiri pakai AI.")
 
 
+def test_is_risky_detects_unnamed_case_story_not_phrased_as_alumni() -> None:
+    # thread 2324: "kita punya case alumni yang berhasil bikin dashboard tracking sales jadi
+    # aplikasi mobile" — a fabricated case (Vibe Coding's only real Success Case is Pieter
+    # Levels) that evaded the old regex because it isn't phrased as "alumni kami"/"salah
+    # satu alumni"; only caught when the lead asked for detail, by which point the false
+    # claim had already been sent
+    assert guard.is_risky(
+        "kita punya case alumni yang berhasil bikin dashboard tracking sales jadi aplikasi "
+        "mobile pakai AI")
+    assert guard.is_risky("ada peserta yang berhasil switch karir jadi developer dalam sebulan")
+
+
 # ─── multiple questions / impossible capabilities / wrong channel ──────────────
 
 def test_multiple_questions_flags_two_but_not_one() -> None:
