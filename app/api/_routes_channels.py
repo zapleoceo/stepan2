@@ -364,6 +364,7 @@ async def ig_login_verify(
     request: Request,
     flow_id: str = Form(default=""),
     code: str = Form(default=""),
+    skip_code: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
@@ -373,10 +374,13 @@ async def ig_login_verify(
     if not flow or flow["channel_id"] != ch_id:
         return HTMLResponse(_ch_ig_form(ch_id, error="Flow expired — please login again"))
     cl = flow["client"]
-    if flow.get("kind") == "manual":
-        # No code to apply — the checkpoint is only cleared by approving in the real
-        # Instagram app. Just retry the login on the SAME client (same flow_id, so a
-        # repeated "not yet approved" re-render keeps the same button, no new state).
+    if flow.get("kind") == "manual" or (skip_code and flow.get("password")):
+        # No code to apply — either this checkpoint is only cleared by approving in the
+        # real Instagram app (kind='manual'), or the operator says they already approved a
+        # parallel push notification there (skip_code — Instagram can prompt for a 2FA code
+        # AND send an in-app "was this you?" push for the SAME login attempt at once; typing
+        # a code the operator never needed just to reach the manual retry was pointless).
+        # Retry on the SAME client (same flow_id) either way.
         return await _attempt_ig_login(cl, ch_id, flow["username"], flow["password"], flow_id)
     try:
         await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())

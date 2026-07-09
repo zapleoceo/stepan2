@@ -446,6 +446,62 @@ def test_ig_form_step2_challenge_shows_challenge_specific_copy() -> None:
     assert "2FA Code" not in html
 
 
+def test_ig_form_2fa_step_offers_skip_code_shortcut() -> None:
+    """Instagram can fire the 2FA code prompt AND an in-app push for the same login
+    attempt at once — if the operator already approved the push, they shouldn't have to
+    type a code first just to reach the eventual manual retry."""
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+
+    _lang.set("en")
+    html = _ch_ig_form(5, step="2fa", flow_id="abc", kind="2fa", username="itstep.ph")
+    assert "Already confirmed in the app" in html
+    assert '"skip_code":"1"' in html
+
+
+def test_ig_form_challenge_step_has_no_skip_code_shortcut() -> None:
+    """The shortcut retries via plain re-login (needs the stored password) — a code-based
+    email/SMS challenge flow never stores one, so it must not offer this button at all."""
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+
+    _lang.set("en")
+    html = _ch_ig_form(5, step="2fa", flow_id="xyz", kind="challenge", username="itstep.ph")
+    assert "Already confirmed in the app" not in html
+
+
+async def test_ig_login_verify_skip_code_retries_without_resolving_code(
+    monkeypatch,
+) -> None:
+    """skip_code=1 must bypass _resolve_ig_code entirely and go straight to a plain
+    re-login attempt on the same client — the code field's value is irrelevant."""
+    from app.api import _routes_channels as routes_mod
+    from app.api._routes_channels import _ig_flows, ig_login_verify
+
+    cl = _RaisingIGClient(None)  # succeeds immediately
+    _ig_flows["fid-skip"] = {"client": cl, "channel_id": 7, "kind": "2fa",
+                             "username": "u", "password": "p"}
+
+    async def _fake_channel_branch(_session, _ch_id, _allowed):
+        return 1
+
+    async def _fake_ig_save(ch_id, dump):
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(f"saved:{ch_id}:{dump}")
+
+    monkeypatch.setattr(routes_mod, "_channel_branch", _fake_channel_branch)
+    monkeypatch.setattr(routes_mod, "_ig_save", _fake_ig_save)
+
+    class _Req:
+        cookies: dict = {}
+        headers: dict = {}
+
+    resp = await ig_login_verify(7, _Req(), flow_id="fid-skip", code="", skip_code="1")
+    assert cl.login_calls == [("u", "p", "")]  # plain retry, no verification_code applied
+    assert "saved:7" in resp.body.decode()
+    _ig_flows.pop("fid-skip", None)
+
+
 # --- Registry --------------------------------------------------------------
 
 # --- InstagrapiTransport own-id resolution ----------------------------------

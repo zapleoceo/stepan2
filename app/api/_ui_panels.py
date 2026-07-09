@@ -970,6 +970,18 @@ def _ch_ig_form(
         is_challenge = kind == "challenge"
         code_lbl = t("ch.code_challenge") if is_challenge else t("ch.code_2fa")
         hint = t("ch.hint_challenge") if is_challenge else t("ch.hint_2fa")
+        # Instagram can fire the 2FA code prompt AND an in-app "was this you?" push for
+        # the SAME login attempt at once. If the operator already approved the push,
+        # making them type a code that isn't even needed just to reach the eventual
+        # manual-retry step is pointless — this button skips straight to a plain retry.
+        app_confirm_btn = (
+            f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
+            f' hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
+            f' hx-swap="innerHTML" hx-include="closest form" hx-vals=\'{{"skip_code":"1"}}\''
+            f' hx-disabled-elt="find button" hx-indicator="find .htmx-indicator">'
+            f'{_h.escape(t("ch.already_confirmed"))}</button>'
+            if not is_challenge else ""
+        )
         return (
             f'{_ch_step(t("ch.step2"))}{who}{err}'
             f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
@@ -982,6 +994,7 @@ def _ch_ig_form(
             f'{_ch_hint(hint)}'
             f'<button type="submit" class="btn-sm btn-p">'
             f'{_h.escape(t("ch.verify"))}</button>'
+            f'{app_confirm_btn}'
             f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
             f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
             f'{_h.escape(t("ch.start_over"))}</button>{spin}'

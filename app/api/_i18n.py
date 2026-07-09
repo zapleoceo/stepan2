@@ -686,6 +686,11 @@ _TR: dict[str, dict[str, str]] = {
     },
     "ch.retry_manual": {"ru": "Я подтвердил — повторить", "en": "I've confirmed — retry",
                         "id": "Sudah dikonfirmasi — coba lagi"},
+    "ch.already_confirmed": {
+        "ru": "Уже подтвердил в приложении — повторить",
+        "en": "Already confirmed in the app — retry",
+        "id": "Sudah dikonfirmasi di aplikasi — coba lagi",
+    },
     "ch.advanced_json": {
         "ru": "Продвинутый вариант: вставить готовую сессию (Session JSON)",
         "en": "Advanced: paste an existing session (Session JSON)",
