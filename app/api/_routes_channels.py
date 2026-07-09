@@ -263,37 +263,66 @@ async def ig_login_start(
     if not username.strip() or not password.strip():
         return HTMLResponse(_ch_ig_form(ch_id, error="Username and password required"))
 
+    # Same proxy+geo as the worker (build_channel_port) — a login geo that differs from
+    # the polling geo triggers an instant checkpoint. See ig_client.build_ig_client.
+    cl = build_ig_client(proxy=settings().ig_proxy, lang=lang, tz_offset_h=tz)
+    fid = secrets.token_hex(8)
+    return await _attempt_ig_login(cl, ch_id, username.strip(), password.strip(), fid)
+
+
+def _is_manual_challenge(exc: Exception) -> bool:
+    """True when instagrapi itself says a text code can't resolve this checkpoint at all —
+    a Bloks redirect / auth-platform / native in-app approval. instagrapi's own
+    ChallengeRequired._message_for_payload prefixes exactly these three cases with "Manual
+    verification required" (checked in its source, 2.18.3) — the remaining cases (legacy
+    email/SMS challenge, a named challenge step) are still worth trying
+    challenge_code_handler on, so only THIS exact marker routes to the no-code retry flow."""
+    return "Manual verification required" in str(exc)
+
+
+async def _attempt_ig_login(
+    cl: Any, ch_id: int, user: str, pw: str, fid: str, *, verification_code: str = "",
+) -> HTMLResponse:
+    """Shared login attempt for both the first credentials submit and a retry after the
+    operator resolves a challenge out-of-band (2FA code, challenge code, or a manual in-app
+    approval). Always reuses the SAME client instance across retries: instagrapi's device
+    fingerprint (uuid/phone_id/device_id/proxy) lives on `cl`, and Instagram ties a manual
+    approval to that exact fingerprint — a fresh client for the retry would just get
+    challenged again."""
     try:
         from instagrapi.exceptions import (  # noqa: PLC0415
             ChallengeRequired,
             TwoFactorRequired,
         )
     except ImportError:
+        _ig_flows.pop(fid, None)
         return HTMLResponse(_ch_ig_form(ch_id, error="instagrapi not installed on server"))
-
-    # Same proxy+geo as the worker (build_channel_port) — a login geo that differs from
-    # the polling geo triggers an instant checkpoint. See ig_client.build_ig_client.
-    cl = build_ig_client(proxy=settings().ig_proxy, lang=lang, tz_offset_h=tz)
-    user, pw = username.strip(), password.strip()
     try:
-        await asyncio.to_thread(cl.login, user, pw)
+        if verification_code:
+            await asyncio.to_thread(cl.login, user, pw, verification_code=verification_code)
+        else:
+            await asyncio.to_thread(cl.login, user, pw)
     except TwoFactorRequired:
-        fid = secrets.token_hex(8)
         _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "2fa",
                           "username": user, "password": pw}
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="2fa",
                                         username=user))
-    except ChallengeRequired:
-        fid = secrets.token_hex(8)
+    except ChallengeRequired as exc:
+        if _is_manual_challenge(exc):
+            _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "manual",
+                              "username": user, "password": pw}
+            return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="manual",
+                                            username=user))
         # username kept only for display here — the challenge is resolved via
         # challenge_code_handler on the live client, not a re-login call, so it never
-        # needs the password like the 2fa branch does (see _resolve_ig_code).
+        # needs the password like the 2fa/manual branches do (see _resolve_ig_code).
         _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "challenge",
                           "username": user}
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="challenge",
                                         username=user))
     except Exception as exc:
-        return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:160]))
+        _ig_flows.pop(fid, None)
+        return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:200]))
     return await _ig_save(ch_id, cl.get_settings())
 
 
@@ -333,6 +362,11 @@ async def ig_login_verify(
     if not flow or flow["channel_id"] != ch_id:
         return HTMLResponse(_ch_ig_form(ch_id, error="Flow expired — please login again"))
     cl = flow["client"]
+    if flow.get("kind") == "manual":
+        # No code to apply — the checkpoint is only cleared by approving in the real
+        # Instagram app. Just retry the login on the SAME client (same flow_id, so a
+        # repeated "not yet approved" re-render keeps the same button, no new state).
+        return await _attempt_ig_login(cl, ch_id, flow["username"], flow["password"], flow_id)
     try:
         await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())
     except Exception as exc:  # keep the flow so the user can retry the code

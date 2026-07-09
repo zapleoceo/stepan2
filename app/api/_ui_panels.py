@@ -929,28 +929,47 @@ def _ch_ig_form(
     ch_id: int, step: str = "login", flow_id: str = "", error: str = "",
     kind: str = "", username: str = "",
 ) -> str:
-    """Two-step Instagram connect flow: (1) credentials, (2) a verification code, if
-    Instagram asks for one. Step 2's label/hint switch on `kind`: instagrapi hits two
-    UNRELATED Instagram mechanisms that both land here — real 2FA (`kind='2fa'`, code
-    from an authenticator app/SMS, resolved by re-login) vs. a security CHALLENGE
-    (`kind='challenge'`, a "is this really you" check on a new device/IP, code emailed or
-    texted, resolved via challenge_resolve) — see _resolve_ig_code. Showing both as a bare
-    "2FA code" field used to make a challenge code look like a missing-2FA problem, so
-    turning 2FA off didn't stop the prompt (real report, 2026-07-08)."""
+    """Two-step Instagram connect flow: (1) credentials, (2) resolving whatever Instagram
+    asked for. Step 2's content switches on `kind` — instagrapi hits THREE unrelated
+    Instagram mechanisms that all land here:
+    - `kind='2fa'` — real 2FA, code from an authenticator app/SMS, resolved by re-login.
+    - `kind='challenge'` — a security "is this really you" check, code emailed/texted,
+      resolved via challenge_resolve.
+    - `kind='manual'` — a checkpoint instagrapi flags as NOT resolvable by any text code at
+      all (Bloks redirect / native in-app approval) — no code field; only a "confirm in the
+      real Instagram app, then retry" button, reusing the same client/device fingerprint.
+    Showing all three as a bare "2FA code" field used to make a challenge/manual checkpoint
+    look like a missing-2FA problem, so turning 2FA off didn't stop the prompt (real
+    report, 2026-07-08)."""
     err = _ch_err(error)
     spin = (
         f'<span class="htmx-indicator" style="margin-left:.5rem;color:#8b98a5;'
         f'font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
     )
     if step == "2fa":
-        is_challenge = kind == "challenge"
-        code_lbl = t("ch.code_challenge") if is_challenge else t("ch.code_2fa")
-        hint = t("ch.hint_challenge") if is_challenge else t("ch.hint_2fa")
         who = (
             f'<div style="font-size:.76rem;color:#9aa5b1;margin-bottom:.6rem">'
             f'{_h.escape(t("ch.for_account"))} <b>@{_h.escape(username)}</b></div>'
             if username else ""
         )
+        if kind == "manual":
+            return (
+                f'{_ch_step(t("ch.step2"))}{who}{err}'
+                f'{_ch_hint(t("ch.hint_manual"))}'
+                f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
+                f' hx-swap="innerHTML" hx-disabled-elt="find button"'
+                f' hx-indicator="find .htmx-indicator" style="max-width:340px">'
+                f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
+                f'<button type="submit" class="btn-sm btn-p">'
+                f'{_h.escape(t("ch.retry_manual"))}</button>'
+                f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
+                f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
+                f'{_h.escape(t("ch.start_over"))}</button>{spin}'
+                f'</form>'
+            )
+        is_challenge = kind == "challenge"
+        code_lbl = t("ch.code_challenge") if is_challenge else t("ch.code_2fa")
+        hint = t("ch.hint_challenge") if is_challenge else t("ch.hint_2fa")
         return (
             f'{_ch_step(t("ch.step2"))}{who}{err}'
             f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'

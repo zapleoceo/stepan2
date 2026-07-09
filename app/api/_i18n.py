@@ -673,6 +673,19 @@ _TR: dict[str, dict[str, str]] = {
               "telepon yang terhubung ke akun — cek email/SMS Anda.",
     },
     "ch.start_over": {"ru": "Начать заново", "en": "Start over", "id": "Mulai lagi"},
+    "ch.hint_manual": {
+        "ru": "Код здесь не поможет — Instagram требует подтверждения прямо в приложении. "
+              "Откройте официальный Instagram (приложение или сайт) на доверенном "
+              "устройстве, подтвердите вход там, затем нажмите «Повторить» ниже.",
+        "en": "No code will help here — Instagram requires confirming this login inside the "
+              "app itself. Open the official Instagram app or website on a trusted device, "
+              "approve the login there, then click Retry below.",
+        "id": "Kode tidak akan membantu di sini — Instagram meminta konfirmasi langsung di "
+              "aplikasi. Buka aplikasi atau situs Instagram resmi di perangkat tepercaya, "
+              "setujui login di sana, lalu klik Coba Lagi di bawah.",
+    },
+    "ch.retry_manual": {"ru": "Я подтвердил — повторить", "en": "I've confirmed — retry",
+                        "id": "Sudah dikonfirmasi — coba lagi"},
     "ch.advanced_json": {
         "ru": "Продвинутый вариант: вставить готовую сессию (Session JSON)",
         "en": "Advanced: paste an existing session (Session JSON)",

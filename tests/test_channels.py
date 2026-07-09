@@ -292,6 +292,90 @@ def test_ig_challenge_code_drives_challenge_resolve() -> None:
     assert cl.login_calls == []
 
 
+class _RaisingIGClient:
+    """Fake instagrapi client whose login() raises a given exception once, then succeeds
+    (simulating a retry after the operator resolves whatever instagrapi asked for)."""
+
+    def __init__(self, exc: Exception | None) -> None:
+        self._exc = exc
+        self.login_calls: list[tuple] = []
+
+    def login(self, username=None, password=None, verification_code=""):
+        self.login_calls.append((username, password, verification_code))
+        if self._exc is not None:
+            exc, self._exc = self._exc, None  # only raise on the FIRST call
+            raise exc
+        return True
+
+    def get_settings(self) -> dict:
+        return {"fake": "session"}
+
+
+def test_is_manual_challenge_matches_instagrapi_own_marker() -> None:
+    """instagrapi's ChallengeRequired._message_for_payload prefixes exactly the
+    unresolvable-by-code cases (Bloks redirect / auth-platform / native flow) with
+    'Manual verification required' — that's the only reliable signal to key off."""
+    from app.api._routes_channels import _is_manual_challenge
+
+    assert _is_manual_challenge(Exception(
+        "Manual verification required via Instagram native challenge flow. ..."))
+    assert _is_manual_challenge(Exception(
+        "Manual verification required via Instagram Bloks redirect checkpoint. ..."))
+    assert not _is_manual_challenge(Exception(
+        "Instagram returned a legacy challenge flow. Configure challenge_code_handler..."))
+    assert not _is_manual_challenge(Exception("some unrelated error"))
+
+
+async def test_attempt_ig_login_manual_challenge_shows_retry_not_code_field() -> None:
+    """A native/Bloks challenge (no code possible) must route to kind='manual' and store
+    the SAME client for a later no-code retry — not the code-input 'challenge' kind."""
+    # instagrapi's ChallengeRequired is imported lazily inside the function under test;
+    # raising the REAL class here (instagrapi is a hard dependency, see pyproject.toml)
+    # exercises the exact except clause instead of a stand-in.
+    from instagrapi.exceptions import ChallengeRequired
+
+    from app.api._routes_channels import _attempt_ig_login, _ig_flows
+
+    cl = _RaisingIGClient(ChallengeRequired(
+        "Manual verification required via Instagram native challenge flow."))
+    resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-manual")
+    body = resp.body.decode()
+    assert "I&#x27;ve confirmed" in body or "confirmed" in body.lower()
+    assert 'name="code"' not in body  # no code field — a code can't resolve this
+    assert _ig_flows["fid-manual"]["kind"] == "manual"
+    assert _ig_flows["fid-manual"]["client"] is cl
+    _ig_flows.pop("fid-manual", None)
+
+
+async def test_attempt_ig_login_code_based_challenge_shows_code_field() -> None:
+    """A regular email/SMS challenge (no 'Manual verification required' marker) must
+    still show the code-input form — only the unresolvable case skips it."""
+    from instagrapi.exceptions import ChallengeRequired
+
+    from app.api._routes_channels import _attempt_ig_login, _ig_flows
+
+    cl = _RaisingIGClient(ChallengeRequired("Instagram returned a legacy challenge flow."))
+    resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-challenge")
+    body = resp.body.decode()
+    assert 'name="code"' in body
+    assert _ig_flows["fid-challenge"]["kind"] == "challenge"
+    _ig_flows.pop("fid-challenge", None)
+
+
+async def test_attempt_ig_login_two_factor_stores_password_for_relogin() -> None:
+    from instagrapi.exceptions import TwoFactorRequired
+
+    from app.api._routes_channels import _attempt_ig_login, _ig_flows
+
+    cl = _RaisingIGClient(TwoFactorRequired("2FA required"))
+    resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-2fa")
+    body = resp.body.decode()
+    assert 'name="code"' in body
+    assert _ig_flows["fid-2fa"] == {"client": cl, "channel_id": 42, "kind": "2fa",
+                                    "username": "u", "password": "p"}
+    _ig_flows.pop("fid-2fa", None)
+
+
 def test_credential_panel_shows_session_after_connect() -> None:
     """Active session → connected view (not a blank login form again); otherwise form."""
     from app.api._i18n import _lang
