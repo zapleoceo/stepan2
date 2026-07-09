@@ -473,6 +473,9 @@ _TR: dict[str, dict[str, str]] = {
                               "id": "Catatan manajer diperbarui"},
     "chat.manager_note_cleared": {"ru": "Заметка менеджера очищена", "en": "Manager note cleared",
                                   "id": "Catatan manajer dihapus"},
+    "chat.stage_reason": {"ru": "Причина смены стадии (бот)",
+                          "en": "Stage change reason (bot)",
+                          "id": "Alasan perubahan tahap (bot)"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

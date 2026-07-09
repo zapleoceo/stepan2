@@ -143,6 +143,40 @@ async def test_stage_applied_with_journal(db_session) -> None:
     assert ev.actor == "bot"
 
 
+async def test_bot_stage_change_logs_its_own_reason_to_thread_log(db_session) -> None:
+    """The model's own explanation for a funnel move is logged the same way a manual
+    stage-move's reason popup is — visible in the chat chronology, not just internal."""
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session)
+    await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(stage_reason="лид назвал конкретную боль — переход в presenting"))
+    assert lead.stage == Stage.QUALIFYING
+    log = (await db_session.exec(select(ThreadLog))).first()
+    assert log is not None and log.kind == "stage_reason"
+    assert log.detail == "лид назвал конкретную боль — переход в presenting"
+    assert log.actor == "bot"
+
+
+async def test_no_thread_log_row_when_stage_reason_is_absent(db_session) -> None:
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision())  # no stage_reason
+    assert lead.stage == Stage.QUALIFYING
+    assert (await db_session.exec(select(ThreadLog))).first() is None
+
+
+async def test_no_thread_log_row_when_stage_does_not_change(db_session) -> None:
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session, stage=Stage.QUALIFYING)
+    await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(stage_reason="should not be logged — no move"))
+    assert lead.stage == Stage.QUALIFYING
+    assert (await db_session.exec(select(ThreadLog))).first() is None
+
+
 async def test_same_stage_writes_no_event(db_session) -> None:
     bid, tid, _ = await _world(db_session, stage=Stage.QUALIFYING)
     await _svc(db_session, bid).enqueue_reply(tid, _decision())

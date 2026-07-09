@@ -60,6 +60,20 @@ def test_decision_parses_phone() -> None:
     assert d2.phone is None
 
 
+def test_stage_reason_rule_and_field_present() -> None:
+    assert "stage_reason" in _DECISION_CONTRACT
+    assert '"stage_reason"' in _DECISION_CONTRACT
+
+
+def test_decision_parses_stage_reason() -> None:
+    from app.modules.conversation.decision import parse_decision
+    d = parse_decision(
+        '{"reply":"hi","stage":"presenting","stage_reason":"лид назвал боль"}')
+    assert d.stage_reason == "лид назвал боль"
+    d2 = parse_decision('{"reply":"hi","stage":"presenting"}')
+    assert d2.stage_reason is None
+
+
 def test_students_are_a_target_segment() -> None:
     assert "STUDENTS (school-age) ARE A TARGET" in _DECISION_CONTRACT
     assert "10% student discount" in _DECISION_CONTRACT

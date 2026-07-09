@@ -41,6 +41,10 @@ class Decision:
     product_slug: str | None
     ready: bool
     needs_manager: bool
+    # The model's own short explanation for why it's moving the funnel stage this turn
+    # (null when the stage isn't changing) — logged to ThreadLog so the chat's chronology
+    # shows WHY, the same way a manual stage move's reason popup does.
+    stage_reason: str | None = None
     manager_question: str | None = None
     kb_gap: str | None = None
     ready_subtype: str | None = None  # 'deal' | 'openhouse' when ready
@@ -104,6 +108,8 @@ def parse_decision(raw_json: str) -> Decision:
     return Decision(
         reply=clean_reply(reply),
         stage=stage,
+        stage_reason=(str(data.get("stage_reason")).strip()[:300] or None)
+        if data.get("stage_reason") else None,
         product_slug=data.get("product_slug") or None,
         ready=bool(data.get("ready", False)),
         needs_manager=bool(data.get("needs_manager", False)),

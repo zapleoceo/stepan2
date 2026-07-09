@@ -935,7 +935,8 @@ def _last_msg_id(msgs: list) -> int:
 _LOG_KIND_KEY = {"context_cleared": "chat.cleared", "context_loaded": "chat.loaded",
                  "product_changed": "chat.product",
                  "manager_note_set": "chat.manager_note_set",
-                 "manager_note_cleared": "chat.manager_note_cleared"}
+                 "manager_note_cleared": "chat.manager_note_cleared",
+                 "stage_reason": "chat.stage_reason"}
 
 
 def _event_bubble(row: object) -> str:

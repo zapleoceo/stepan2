@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels.ig_parse import VOICE_PENDING_PH
-from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent
+from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent, ThreadLog
 from app.adapters.meta_capi import MetaCapi
 from app.config import settings
 from app.domain.enums import HUMAN_LED_STAGES, Stage
@@ -546,6 +546,14 @@ class ReplyService:
             reason="needs_manager" if decision.needs_manager else
                    ("ready" if ready else "model decision"),
         ))
+        if decision.stage_reason:
+            # Mirrors the manual stage-move reason popup, but for the bot's OWN decision —
+            # visible in the same chat chronology so a manager can see WHY Stepan moved the
+            # funnel, not just that it did.
+            self.session.add(ThreadLog(
+                branch_id=self.branch_id, thread_id=thread.id,
+                kind="stage_reason", detail=decision.stage_reason, actor="bot",
+            ))
         lead.stage = new_stage
         if new_stage == Stage.MANAGER:
             lead.agent_enabled = False  # human takes over; manager may re-enable

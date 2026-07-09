@@ -248,9 +248,9 @@ _DECISION_CONTRACT = (
     "- 'adult': a working adult / decision-maker who pays for themselves.\n"
     "This drives routing, reporting AND the sell path - never let it erase the temperature.\n\n"
     "Return ONLY this JSON (no prose, no markdown fences):\n"
-    '{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, '
-    '"ready_subtype": str|null, "lead_type": str|null, "audience": str|null, "phone": str|null, '
-    '"needs_manager": bool, "manager_question": str|null, "kb_gap": str|null, '
+    '{{"reply": str, "stage": str, "stage_reason": str|null, "product_slug": str|null, '
+    '"ready": bool, "ready_subtype": str|null, "lead_type": str|null, "audience": str|null, '
+    '"phone": str|null, "needs_manager": bool, "manager_question": str|null, "kb_gap": str|null, '
     '"reply_language": str|null, "jobs": [str], "pains": [str], "gains": [str], '
     '"discovery_complete": bool}}\n'
     "phone: the lead's phone / WhatsApp number if they wrote one in the chat (raw digits as "
@@ -275,6 +275,10 @@ _DECISION_CONTRACT = (
     "'qualifying' while DISCOVERING (the default until a need is captured); 'presenting' ONLY "
     "after a need is on the table. Do NOT use 'ready' here - readiness is signalled ONLY via the "
     "`ready` flag, and the system sets the ready stage once a phone is captured.\n"
+    "stage_reason: ONLY when `stage` differs from the lead's CURRENT stage (a real funnel "
+    "move) - ONE short line IN RUSSIAN for the owner, why you're moving them (e.g. 'лид "
+    "назвал конкретную боль — переход в presenting', 'нет ответа 3 дня — nurturing'). Null "
+    "when the stage isn't changing this turn.\n"
     "product_slug: the slug of the product the lead wants, from the catalog above; null if "
     "unsure.\n"
     "ready: true ONLY when the lead gave a contact (name + phone/WhatsApp, or a filled form) "
