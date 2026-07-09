@@ -84,9 +84,12 @@ _NON_TARGET_NUDGE = (
 _DUPLICATE_RATIO = 0.6
 _REPEAT_CORRECTION = (
     "[System: your draft repeats something you already said in this thread almost "
-    "word-for-word: {prior!r}. Do NOT send it again — pick a genuinely different angle "
-    "(their stated need, a cheaper entry point, a concrete yes/no question). Return the "
-    "JSON as usual.]"
+    "word-for-word: {prior!r}. Do NOT send it again — react SPECIFICALLY to what the lead "
+    "just said ({last_in!r}), not a generic reaction word disconnected from it (thread 2085: "
+    "a bare 'Mantap, Kak!' with no anchor to their actual message got 'Mantap apa nya kak?' "
+    "back — confusion, not re-engagement). Pick a genuinely different angle grounded in "
+    "their own words (their stated need, a cheaper entry point, a concrete yes/no question). "
+    "Return the JSON as usual.]"
 )
 # A '?'-ending clause, so a specific discovery question can be compared on its own —
 # whole-message similarity dilutes when the SAME question is wrapped in different framing
@@ -385,7 +388,8 @@ class ReplyService:
                     workflow, self.branch_id, thread_id, ratio)
                 raw, meta = await engine.complete(
                     ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
-                    extra_user_msg=_REPEAT_CORRECTION.format(prior=prior))
+                    extra_user_msg=_REPEAT_CORRECTION.format(
+                        prior=prior, last_in=last_in.text if last_in is not None else ""))
                 try:
                     decision = parse_decision(raw)
                 except ValueError:

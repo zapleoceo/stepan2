@@ -212,9 +212,11 @@ class FollowupService:
             logger.warning(
                 "followup: branch=%d thread=%d near-duplicate nudge (ratio=%.2f) → regen",
                 self.branch_id, thread_id, ratio)
+            last_in = next(
+                (m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
             raw, meta = await engine.complete(
                 ctx, thread_id, lang=lang, workflow="followup", capability=SMART,
-                extra_user_msg=_REPEAT_CORRECTION.format(prior=prior))
+                extra_user_msg=_REPEAT_CORRECTION.format(prior=prior, last_in=last_in))
             try:
                 decision = parse_decision(raw)
             except ValueError:

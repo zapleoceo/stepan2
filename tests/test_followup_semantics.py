@@ -294,6 +294,44 @@ async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
     assert row is not None and "Skill Booster" in row.text
 
 
+async def test_followup_dedup_regen_prompt_anchors_to_the_leads_last_message(
+    db_session,
+) -> None:
+    """Thread 2085: the regen instruction only said 'pick a different angle', with no
+    anchor to what the lead actually said — the model answered with a bare 'Mantap, Kak!'
+    and the lead replied 'Mantap apa nya kak?' (great about what?). The correction prompt
+    sent to the model must carry the lead's own last message forward."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True, followups_sent=1)
+    prior_line = "Halo Kak! Seneng banget Kakak tertarik. Boleh cerita dulu, mau belajar apa?"
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW - timedelta(hours=5)))
+    await db_session.flush()
+
+    class _SpyLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.regen_prompt: str | None = None
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            self.calls += 1
+            if self.calls == 1:
+                reply = prior_line
+            else:
+                self.regen_prompt = messages[-1]["content"]
+                reply = "Boleh, langsung aku kirim silabusnya ya"
+            return json.dumps({"reply": reply, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    llm = _SpyLLM()
+    assert await _svc(db_session, bid, llm=llm).run() == 1
+    assert llm.regen_prompt is not None
+    assert "halo" in llm.regen_prompt.lower()  # the lead's own last message ("halo")
+
+
 async def test_followup_regenerates_when_only_one_bubble_of_several_is_a_duplicate(
     db_session,
 ) -> None:
