@@ -123,6 +123,19 @@ def test_wrong_channel_claims_catches_dm_on_instagram() -> None:
     assert not guard.wrong_channel_claims("langsung aja tanya di sini ya Kak")
 
 
+def test_whatsapp_delivery_offers_catches_the_promise_not_just_the_lie() -> None:
+    # thread 1721: the bot promised a WhatsApp file delivery it could never fulfil, then
+    # repeatedly claimed to have already sent it — false_delivery_claims blocks the LIE,
+    # this must block the ORIGINAL PROMISE that started the whole disaster
+    assert guard.whatsapp_delivery_offers(
+        "Siap Kak! Aku kirim file dataset e-commerce Indonesia via WhatsApp ya. "
+        "Boleh aku minta nomor WA Kakak?")
+    assert guard.whatsapp_delivery_offers(
+        "Makasih Kak! Aku kirim file dataset ke WA Kakak sekarang ya.")
+    assert guard.whatsapp_delivery_offers("Boleh aku kirim brosur lengkapnya ke WhatsApp Kakak?")
+    assert not guard.whatsapp_delivery_offers("Boleh aku kirim link brosurnya di sini aja ya Kak")
+
+
 def test_premature_manager_handoff_catches_price_question_answered_in_kb() -> None:
     # thread 2285: "ini gratis ga kak?" escalated to a human even though the Skill
     # Booster price (Rp 700.000/600.000) was right there in the retrieved KB context

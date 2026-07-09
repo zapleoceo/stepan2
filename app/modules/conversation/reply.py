@@ -208,6 +208,7 @@ def _deterministic_issues(reply: str, context: str) -> list[str]:
         *guard.multiple_questions(reply),
         *guard.impossible_capability_offers(reply),
         *guard.wrong_channel_claims(reply),
+        *guard.whatsapp_delivery_offers(reply),
     ]
 
 

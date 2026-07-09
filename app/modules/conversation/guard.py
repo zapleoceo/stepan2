@@ -128,6 +128,24 @@ def impossible_capability_offers(reply: str) -> list[str]:
     return [m.group(0) for m in _IMPOSSIBLE_CAPABILITY_RE.finditer(reply or "")]
 
 
+# Thread 1721: the bot promised "aku kirim file dataset ... via WhatsApp ya", asked for the
+# lead's number, then repeatedly claimed to have already sent it (false_delivery_claims
+# above blocks THAT half) — but the ORIGINAL future-tense promise to reach the lead over
+# WhatsApp was never blocked, and it's just as impossible: Stepan has exactly one channel
+# (Instagram DM) and no WhatsApp send capability at all. Block the promise at its source
+# instead of only the lie that follows it.
+_WHATSAPP_DELIVERY_RE = re.compile(
+    r"\bkirim(?:in|kan)?\b[^.!?\n]{0,80}\b(?:via|lewat|ke)\s+(?:wa|whatsapp)\b"
+    r"|\b(?:via|lewat|ke)\s+(?:wa|whatsapp)\b[^.!?\n]{0,80}\bkirim(?:in|kan)?\b",
+    re.IGNORECASE)
+
+
+def whatsapp_delivery_offers(reply: str) -> list[str]:
+    """A promise to send anything over WhatsApp — always false, Stepan has no WhatsApp
+    channel and can only reply inside this Instagram DM thread."""
+    return [m.group(0) for m in _WHATSAPP_DELIVERY_RE.finditer(reply or "")]
+
+
 # Chat 2092: the bot told an Instagram lead to "langsung aja DM aku di Instagram" — but this
 # conversation IS the Instagram DM. Stepan has exactly one channel; redirecting a lead who
 # is already there to "go DM on Instagram" is always a self-contradiction, never a real
