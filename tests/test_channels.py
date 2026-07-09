@@ -446,6 +446,33 @@ def test_ig_form_step2_challenge_shows_challenge_specific_copy() -> None:
     assert "2FA Code" not in html
 
 
+def test_ig_form_step2_never_puts_disabled_elt_or_indicator_on_the_form() -> None:
+    """Real, empirically-confirmed htmx 1.9.12 bug: hx-disabled-elt="find button" and/or
+    hx-indicator="find .htmx-indicator" on a <form> silently swallows the click of any
+    OTHER descendant with its own independent hx-get/hx-post — no console error, the
+    request just never leaves the browser. This broke 'Start over' and the app-confirm
+    button (real report, 2026-07-09: clicking either did nothing). Every button in the
+    step-2 forms (both 'manual' and '2fa'/'challenge') must carry hx-disabled-elt/
+    hx-indicator on ITSELF instead of relying on the form to supply them."""
+    import re
+
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+
+    _lang.set("en")
+    for html in (
+        _ch_ig_form(5, step="2fa", flow_id="abc", kind="2fa", username="u"),
+        _ch_ig_form(5, step="2fa", flow_id="abc", kind="challenge", username="u"),
+        _ch_ig_form(5, step="2fa", flow_id="abc", kind="manual", username="u"),
+    ):
+        form_tag = re.search(r"<form\b[^>]*>", html).group(0)
+        assert "hx-disabled-elt" not in form_tag, form_tag
+        assert "hx-indicator" not in form_tag, form_tag
+        # every <button> in the form must carry its own hx-disabled-elt
+        for btn_tag in re.findall(r"<button\b[^>]*>", html):
+            assert "hx-disabled-elt=\"this\"" in btn_tag, btn_tag
+
+
 def test_ig_form_2fa_step_offers_skip_code_shortcut() -> None:
     """Instagram can fire the 2FA code prompt AND an in-app push for the same login
     attempt at once — if the operator already approved the push, they shouldn't have to

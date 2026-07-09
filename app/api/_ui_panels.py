@@ -940,13 +940,24 @@ def _ch_ig_form(
       real Instagram app, then retry" button, reusing the same client/device fingerprint.
     Showing all three as a bare "2FA code" field used to make a challenge/manual checkpoint
     look like a missing-2FA problem, so turning 2FA off didn't stop the prompt (real
-    report, 2026-07-08)."""
+    report, 2026-07-08).
+
+    IMPORTANT — hx-disabled-elt/hx-indicator on the <form> ITSELF, not per-button:
+    htmx 1.9.12 has a real bug (confirmed empirically, not documented) where an element
+    with hx-disabled-elt="find button" and/or hx-indicator="find .htmx-indicator" on an
+    ANCESTOR <form> silently swallows the click of any OTHER descendant that has its own
+    independent hx-get/hx-post — the request never leaves the browser, no console error.
+    This broke "Start over" and the app-confirm button from day one (real report,
+    2026-07-09: clicking either did visibly nothing). Fix: never put these two attributes
+    on a <form> that contains more than one independently-triggering element — set
+    hx-disabled-elt="this" and hx-indicator="#<id>" on each button individually instead."""
     err = _ch_err(error)
-    spin = (
-        f'<span class="htmx-indicator" style="margin-left:.5rem;color:#8b98a5;'
-        f'font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
-    )
     if step == "2fa":
+        spin_id = f"ig-spin-{ch_id}"
+        spin = (
+            f'<span id="{spin_id}" class="htmx-indicator" style="margin-left:.5rem;'
+            f'color:#8b98a5;font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
+        )
         who = (
             f'<div style="font-size:.76rem;color:#9aa5b1;margin-bottom:.6rem">'
             f'{_h.escape(t("ch.for_account"))} <b>@{_h.escape(username)}</b></div>'
@@ -957,12 +968,12 @@ def _ch_ig_form(
                 f'{_ch_step(t("ch.step2"))}{who}{err}'
                 f'{_ch_hint(t("ch.hint_manual"))}'
                 f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
-                f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-                f' hx-indicator="find .htmx-indicator" style="max-width:340px">'
+                f' hx-swap="innerHTML" style="max-width:340px">'
                 f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
-                f'<button type="submit" class="btn-sm btn-p">'
-                f'{_h.escape(t("ch.retry_manual"))}</button>'
+                f'<button type="submit" class="btn-sm btn-p" hx-disabled-elt="this"'
+                f' hx-indicator="#{spin_id}">{_h.escape(t("ch.retry_manual"))}</button>'
                 f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
+                f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
                 f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
                 f'{_h.escape(t("ch.start_over"))}</button>{spin}'
                 f'</form>'
@@ -979,28 +990,32 @@ def _ch_ig_form(
             f'<button type="button" class="btn-sm btn-g"'
             f' hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
             f' hx-swap="innerHTML" hx-include="closest form" hx-vals=\'{{"skip_code":"1"}}\''
-            f' hx-disabled-elt="find button" hx-indicator="find .htmx-indicator">'
+            f' hx-disabled-elt="this" hx-indicator="#{spin_id}">'
             f'{_h.escape(t("ch.already_confirmed"))}</button></div>'
             if not is_challenge else ""
         )
         return (
             f'{_ch_step(t("ch.step2"))}{who}{err}'
             f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
-            f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-            f' hx-indicator="find .htmx-indicator" style="max-width:340px">'
+            f' hx-swap="innerHTML" style="max-width:340px">'
             f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
             f'<div class="frm-grp">'
             f'<label class="frm-lbl">{_h.escape(code_lbl)}</label>'
             f'<input class="frm-inp" name="code" autocomplete="one-time-code" autofocus></div>'
             f'{_ch_hint(hint)}'
-            f'<button type="submit" class="btn-sm btn-p">'
-            f'{_h.escape(t("ch.verify"))}</button>'
+            f'<button type="submit" class="btn-sm btn-p" hx-disabled-elt="this"'
+            f' hx-indicator="#{spin_id}">{_h.escape(t("ch.verify"))}</button>'
             f'{app_confirm_btn}'
             f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
+            f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
             f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
             f'{_h.escape(t("ch.start_over"))}</button>{spin}'
             f'</form>'
         )
+    spin = (
+        f'<span class="htmx-indicator" style="margin-left:.5rem;color:#8b98a5;'
+        f'font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
+    )
     return (
         f'{_ch_step(t("ch.step1"))}{err}'
         f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
