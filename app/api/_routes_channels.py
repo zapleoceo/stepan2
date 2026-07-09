@@ -281,11 +281,17 @@ async def ig_login_start(
         fid = secrets.token_hex(8)
         _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "2fa",
                           "username": user, "password": pw}
-        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid))
+        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="2fa",
+                                        username=user))
     except ChallengeRequired:
         fid = secrets.token_hex(8)
-        _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "challenge"}
-        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid))
+        # username kept only for display here — the challenge is resolved via
+        # challenge_code_handler on the live client, not a re-login call, so it never
+        # needs the password like the 2fa branch does (see _resolve_ig_code).
+        _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "challenge",
+                          "username": user}
+        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="challenge",
+                                        username=user))
     except Exception as exc:
         return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:160]))
     return await _ig_save(ch_id, cl.get_settings())
@@ -330,7 +336,9 @@ async def ig_login_verify(
     try:
         await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())
     except Exception as exc:  # keep the flow so the user can retry the code
-        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=flow_id, error=str(exc)[:160]))
+        return HTMLResponse(_ch_ig_form(
+            ch_id, step="2fa", flow_id=flow_id, error=str(exc)[:160],
+            kind=flow.get("kind", "2fa"), username=flow.get("username", "")))
     _ig_flows.pop(flow_id, None)
     return await _ig_save(ch_id, cl.get_settings())
 

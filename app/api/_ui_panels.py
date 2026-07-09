@@ -911,46 +911,95 @@ def _ch_err(error: str) -> str:
     )
 
 
-def _ch_ig_form(ch_id: int, step: str = "login", flow_id: str = "", error: str = "") -> str:
+def _ch_step(label: str) -> str:
+    return (
+        f'<div style="font-size:.68rem;color:#6b7685;letter-spacing:.04em;'
+        f'text-transform:uppercase;margin-bottom:.5rem">{_h.escape(label)}</div>'
+    )
+
+
+def _ch_hint(text_: str) -> str:
+    return (
+        f'<div style="font-size:.72rem;color:#8a94a6;line-height:1.4;margin:-.25rem 0 .6rem">'
+        f'{_h.escape(text_)}</div>'
+    )
+
+
+def _ch_ig_form(
+    ch_id: int, step: str = "login", flow_id: str = "", error: str = "",
+    kind: str = "", username: str = "",
+) -> str:
+    """Two-step Instagram connect flow: (1) credentials, (2) a verification code, if
+    Instagram asks for one. Step 2's label/hint switch on `kind`: instagrapi hits two
+    UNRELATED Instagram mechanisms that both land here — real 2FA (`kind='2fa'`, code
+    from an authenticator app/SMS, resolved by re-login) vs. a security CHALLENGE
+    (`kind='challenge'`, a "is this really you" check on a new device/IP, code emailed or
+    texted, resolved via challenge_resolve) — see _resolve_ig_code. Showing both as a bare
+    "2FA code" field used to make a challenge code look like a missing-2FA problem, so
+    turning 2FA off didn't stop the prompt (real report, 2026-07-08)."""
     err = _ch_err(error)
     spin = (
         f'<span class="htmx-indicator" style="margin-left:.5rem;color:#8b98a5;'
         f'font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
     )
     if step == "2fa":
+        is_challenge = kind == "challenge"
+        code_lbl = t("ch.code_challenge") if is_challenge else t("ch.code_2fa")
+        hint = t("ch.hint_challenge") if is_challenge else t("ch.hint_2fa")
+        who = (
+            f'<div style="font-size:.76rem;color:#9aa5b1;margin-bottom:.6rem">'
+            f'{_h.escape(t("ch.for_account"))} <b>@{_h.escape(username)}</b></div>'
+            if username else ""
+        )
         return (
-            f'{err}'
+            f'{_ch_step(t("ch.step2"))}{who}{err}'
             f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
             f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-            f' hx-indicator="find .htmx-indicator" style="max-width:320px">'
+            f' hx-indicator="find .htmx-indicator" style="max-width:340px">'
             f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
             f'<div class="frm-grp">'
-            f'<label class="frm-lbl">{_h.escape(t("ch.code_2fa"))}</label>'
+            f'<label class="frm-lbl">{_h.escape(code_lbl)}</label>'
             f'<input class="frm-inp" name="code" autocomplete="one-time-code" autofocus></div>'
+            f'{_ch_hint(hint)}'
             f'<button type="submit" class="btn-sm btn-p">'
-            f'{_h.escape(t("ch.verify"))}</button>{spin}'
+            f'{_h.escape(t("ch.verify"))}</button>'
+            f'<button type="button" class="btn-sm" style="margin-left:.4rem;background:none"'
+            f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
+            f'{_h.escape(t("ch.start_over"))}</button>{spin}'
             f'</form>'
         )
     return (
-        f'{err}'
+        f'{_ch_step(t("ch.step1"))}{err}'
         f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
         f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-        f' hx-indicator="find .htmx-indicator" style="max-width:340px">'
+        f' hx-indicator="find .htmx-indicator" style="max-width:360px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.username"))}</label>'
+        f'<input class="frm-inp" name="username" autocomplete="username"></div>'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.password"))}</label>'
+        f'<input class="frm-inp" name="password" type="password"'
+        f' autocomplete="current-password"></div>'
+        f'{_ch_hint(t("ch.hint_login"))}'
+        f'<button type="submit" class="btn-sm btn-p">'
+        f'{_h.escape(t("ch.ig_login"))}</button>{spin}'
+        f'</form>'
+        # Session-JSON import is a power-user escape hatch (paste an already-logged-in
+        # instagrapi session, skip the login/2FA dance entirely) — collapsed by default so
+        # it doesn't compete with the normal path for attention.
+        f'<details style="margin-top:.7rem">'
+        f'<summary style="font-size:.72rem;color:#6b7685;cursor:pointer">'
+        f'{_h.escape(t("ch.advanced_json"))}</summary>'
+        f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
+        f' hx-swap="innerHTML" hx-disabled-elt="find button"'
+        f' hx-indicator="find .htmx-indicator" style="max-width:360px;margin-top:.5rem">'
         f'<div class="frm-grp">'
         f'<label class="frm-lbl">{_h.escape(t("ch.ig_json"))}</label>'
         f'<textarea class="frm-ta" name="session_json" rows="3"'
         f' placeholder=\'{{"device_settings":...}}\' style="min-height:4rem"></textarea></div>'
-        f'<div style="color:#6b7685;font-size:.71rem;text-align:center;margin:.3rem 0">'
-        f'{_h.escape(t("ch.or_login"))}</div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.username"))}</label>'
-        f'<input class="frm-inp" name="username"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.password"))}</label>'
-        f'<input class="frm-inp" name="password" type="password"></div>'
-        f'<button type="submit" class="btn-sm btn-p">'
-        f'{_h.escape(t("ch.ig_login"))}</button>{spin}'
-        f'</form>'
+        f'{_ch_hint(t("ch.hint_json"))}'
+        f'<button type="submit" class="btn-sm">{_h.escape(t("ch.save"))}</button>{spin}'
+        f'</form></details>'
     )
 
 

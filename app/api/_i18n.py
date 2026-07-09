@@ -638,8 +638,54 @@ _TR: dict[str, dict[str, str]] = {
     "ch.logging_in": {"ru": "входим в Instagram… (до 30 сек)",
                       "en": "logging in to Instagram… (up to 30s)",
                       "id": "masuk ke Instagram… (hingga 30 dtk)"},
-    "ch.or_login": {"ru": "— или войти напрямую —",
-                    "en": "— or login directly —", "id": "— atau login langsung —"},
+    "ch.step1": {"ru": "Шаг 1 из 2 · Вход", "en": "Step 1 of 2 · Login",
+                "id": "Langkah 1 dari 2 · Login"},
+    "ch.step2": {"ru": "Шаг 2 из 2 · Подтверждение", "en": "Step 2 of 2 · Verify",
+                "id": "Langkah 2 dari 2 · Verifikasi"},
+    "ch.for_account": {"ru": "Аккаунт:", "en": "Account:", "id": "Akun:"},
+    "ch.hint_login": {
+        "ru": "После входа Instagram может попросить код подтверждения — это нормально, "
+              "появится следующий шаг с объяснением, какой именно код нужен.",
+        "en": "After you submit this, Instagram may ask for a verification code — that's "
+              "normal, the next step will explain exactly which code it needs.",
+        "id": "Setelah ini, Instagram mungkin minta kode verifikasi — itu normal, langkah "
+              "berikutnya akan menjelaskan kode mana yang dibutuhkan.",
+    },
+    "ch.code_challenge": {"ru": "Код подтверждения", "en": "Verification code",
+                          "id": "Kode verifikasi"},
+    "ch.hint_2fa": {
+        "ru": "Двухфакторная аутентификация включена на этом аккаунте. Введите код из "
+              "приложения-аутентификатора (Google Authenticator и т.п.) или из SMS.",
+        "en": "Two-factor authentication is on for this account. Enter the code from your "
+              "authenticator app (Google Authenticator, etc.) or SMS.",
+        "id": "Autentikasi dua faktor aktif di akun ini. Masukkan kode dari aplikasi "
+              "authenticator (Google Authenticator, dll.) atau SMS.",
+    },
+    "ch.hint_challenge": {
+        "ru": "Это НЕ код двухфакторной аутентификации. Instagram посчитал этот вход "
+              "подозрительным (новое устройство/сервер) и отправил код подтверждения на "
+              "email или телефон, привязанные к аккаунту — проверьте почту/SMS.",
+        "en": "This is NOT a two-factor code. Instagram flagged this login as unusual (new "
+              "device/server) and sent a verification code to the email or phone linked to "
+              "the account — check your inbox/SMS.",
+        "id": "Ini BUKAN kode dua faktor. Instagram menganggap login ini mencurigakan "
+              "(perangkat/server baru) dan mengirim kode verifikasi ke email atau nomor "
+              "telepon yang terhubung ke akun — cek email/SMS Anda.",
+    },
+    "ch.start_over": {"ru": "Начать заново", "en": "Start over", "id": "Mulai lagi"},
+    "ch.advanced_json": {
+        "ru": "Продвинутый вариант: вставить готовую сессию (Session JSON)",
+        "en": "Advanced: paste an existing session (Session JSON)",
+        "id": "Lanjutan: tempel sesi yang sudah ada (Session JSON)",
+    },
+    "ch.hint_json": {
+        "ru": "Только если у вас уже есть экспортированная сессия instagrapi с другого "
+              "входа — заменяет логин/пароль и код подтверждения полностью.",
+        "en": "Only if you already have an exported instagrapi session from elsewhere — "
+              "replaces login/password and the verification code entirely.",
+        "id": "Hanya jika Anda sudah punya sesi instagrapi yang diekspor dari tempat lain — "
+              "menggantikan login/kata sandi dan kode verifikasi sepenuhnya.",
+    },
     # branch selector
     "branch.filter": {"ru": "Филиал", "en": "Branch", "id": "Cabang"},
     "branch.all":    {"ru": "Все филиалы", "en": "All branches", "id": "Semua cabang"},

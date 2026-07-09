@@ -307,6 +307,52 @@ def test_credential_panel_shows_session_after_connect() -> None:
     assert 'name="password"' in fresh  # entry form shown when not connected
 
 
+def test_ig_form_step1_shows_login_fields_and_collapsed_json() -> None:
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+
+    _lang.set("en")
+    html = _ch_ig_form(5)
+    assert "Step 1 of 2" in html
+    assert 'name="username"' in html and 'name="password"' in html
+    # session-JSON import is a collapsed advanced option, not competing with the main path
+    assert "<details" in html and 'name="session_json"' in html
+    assert "Advanced" in html
+
+
+def test_ig_form_step2_2fa_shows_2fa_specific_copy() -> None:
+    """Real bug: a genuine 2FA prompt and an unrelated Instagram security CHALLENGE used to
+    render as the exact same bare 'Code 2FA' field — turning off 2FA didn't stop the
+    prompt because it wasn't 2FA. kind='2fa' must show 2FA-specific copy."""
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+
+    _lang.set("en")
+    html = _ch_ig_form(5, step="2fa", flow_id="abc", kind="2fa", username="itstep.ph")
+    assert "Step 2 of 2" in html
+    assert "@itstep.ph" in html
+    assert "2FA Code" in html
+    assert "authenticator app" in html
+    assert "NOT a two-factor code" not in html
+    assert 'value="abc"' in html
+    assert "Start over" in html
+
+
+def test_ig_form_step2_challenge_shows_challenge_specific_copy() -> None:
+    """kind='challenge' must clearly say this ISN'T 2FA and point at email/SMS instead."""
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+
+    _lang.set("en")
+    html = _ch_ig_form(5, step="2fa", flow_id="xyz", kind="challenge", username="itstep.ph")
+    assert "Step 2 of 2" in html
+    assert "@itstep.ph" in html
+    assert "Verification code" in html
+    assert "NOT a two-factor code" in html
+    assert "email or phone" in html
+    assert "2FA Code" not in html
+
+
 # --- Registry --------------------------------------------------------------
 
 # --- InstagrapiTransport own-id resolution ----------------------------------
