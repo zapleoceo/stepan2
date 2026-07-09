@@ -324,6 +324,15 @@ def test_is_manual_challenge_matches_instagrapi_own_marker() -> None:
     assert not _is_manual_challenge(Exception(
         "Instagram returned a legacy challenge flow. Configure challenge_code_handler..."))
     assert not _is_manual_challenge(Exception("some unrelated error"))
+    # real report, 2026-07-08: this exact TwoFactorRequired message (raised on the 2FA-CODE
+    # submit, from _login_with_bloks_two_factor's missing-context branch) has no "Manual
+    # verification required" prefix at all — the second marker below is what catches it.
+    assert _is_manual_challenge(Exception(
+        "Instagram rejected the legacy two-factor login endpoint and may require a newer "
+        "Bloks-based two-factor verification flow, but the response did not include "
+        "two_step_verification_context required for the Bloks two-factor fallback. "
+        "Complete verification in the Instagram app or capture a fresh login response "
+        "with the current app flow."))
 
 
 async def test_attempt_ig_login_manual_challenge_shows_retry_not_code_field() -> None:

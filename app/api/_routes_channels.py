@@ -276,8 +276,19 @@ def _is_manual_challenge(exc: Exception) -> bool:
     ChallengeRequired._message_for_payload prefixes exactly these three cases with "Manual
     verification required" (checked in its source, 2.18.3) — the remaining cases (legacy
     email/SMS challenge, a named challenge step) are still worth trying
-    challenge_code_handler on, so only THIS exact marker routes to the no-code retry flow."""
-    return "Manual verification required" in str(exc)
+    challenge_code_handler on, so only THIS exact marker routes to the no-code retry flow.
+
+    A SECOND, separate instagrapi code path hits the same dead end from a different
+    exception: when a real 2FA code is submitted, instagrapi's re-login can fall back to
+    Bloks-based 2FA (_login_with_bloks_two_factor) and raise a TwoFactorRequired whose
+    message ends in "Complete verification in the Instagram app..." when Instagram's login
+    response never included the two_step_verification_context the Bloks fallback needs —
+    same "no code can fix this, go approve in the real app" situation, just phrased by a
+    different function (real report, 2026-07-08: this fired on the 2FA-code submit, not
+    the initial login, so the original marker alone didn't catch it)."""
+    msg = str(exc)
+    return ("Manual verification required" in msg
+            or "Complete verification in the Instagram app" in msg)
 
 
 async def _attempt_ig_login(
@@ -369,7 +380,14 @@ async def ig_login_verify(
         return await _attempt_ig_login(cl, ch_id, flow["username"], flow["password"], flow_id)
     try:
         await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())
-    except Exception as exc:  # keep the flow so the user can retry the code
+    except Exception as exc:  # keep the flow so the user can retry
+        if _is_manual_challenge(exc) and flow.get("password"):
+            # The code just submitted can never work (instagrapi's own Bloks-2FA fallback
+            # says so) — switch this flow to the no-code "confirm in the app, then retry"
+            # step instead of re-showing the same doomed code field with a red error.
+            flow["kind"] = "manual"
+            return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=flow_id, kind="manual",
+                                            username=flow.get("username", "")))
         return HTMLResponse(_ch_ig_form(
             ch_id, step="2fa", flow_id=flow_id, error=str(exc)[:160],
             kind=flow.get("kind", "2fa"), username=flow.get("username", "")))
