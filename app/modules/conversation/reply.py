@@ -102,21 +102,30 @@ def _last_question(text: str) -> str | None:
 def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
     """The prior bot message most similar to new_text, and that similarity ratio.
 
-    Checks both the WHOLE message (catches a broadly repeated pitch) and just the closing
-    QUESTION (catches one specific discovery question re-asked inside an otherwise different
-    reply) — see followup.py's identical helper for the live cases that motivated this."""
+    Checks the WHOLE message (catches a broadly repeated pitch), just the closing QUESTION
+    (catches one specific discovery question re-asked inside an otherwise different reply),
+    AND each individual '|||' bubble on its own (thread 237: a 3-bubble followup opened with
+    a bubble byte-for-byte identical to an earlier live reply's opening line - "Untuk
+    Sabtu/Minggu kantor kami memang tutup Kak..." - but the two EXTRA bubbles that followed
+    diluted the whole-message ratio well under the 0.6 gate, even though bubble #1 alone was
+    a 100% duplicate). See followup.py's identical helper for the live cases that motivated
+    the first two checks."""
     best_text, best_ratio = "", 0.0
     new_norm = (new_text or "").strip().lower()
     new_q = _last_question(new_text)
+    new_bubbles = [b.lower() for b in _split_bubbles(new_text)]
     for m in dialog:
         if m.direction != "out" or not (m.text or "").strip():
             continue
         prior = m.text.strip()
-        ratio = SequenceMatcher(None, new_norm, prior.lower()).ratio()
+        prior_lower = prior.lower()
+        ratio = SequenceMatcher(None, new_norm, prior_lower).ratio()
         if new_q:
             prior_q = _last_question(prior)
             if prior_q:
                 ratio = max(ratio, SequenceMatcher(None, new_q.lower(), prior_q.lower()).ratio())
+        for bubble in new_bubbles:
+            ratio = max(ratio, SequenceMatcher(None, bubble, prior_lower).ratio())
         if ratio > best_ratio:
             best_text, best_ratio = prior, ratio
     return best_text, best_ratio

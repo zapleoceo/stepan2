@@ -294,6 +294,44 @@ async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
     assert row is not None and "Skill Booster" in row.text
 
 
+async def test_followup_regenerates_when_only_one_bubble_of_several_is_a_duplicate(
+    db_session,
+) -> None:
+    """Thread 237: a 3-bubble followup opened with a bubble byte-for-byte identical to an
+    earlier live reply ("Untuk Sabtu/Minggu kantor kami memang tutup Kak..."), but the two
+    EXTRA bubbles that followed diluted the whole-message ratio well under the dedup gate.
+    Must catch a duplicate in ANY one bubble, not just the message as a whole."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    prior_line = "Untuk Sabtu/Minggu kantor kami memang tutup Kak, jadi kunjungan belum bisa 🙏"
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW - timedelta(hours=1)))
+    await db_session.flush()
+
+    class _ScriptLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            self.calls += 1
+            if self.calls == 1:
+                reply = (f"{prior_line}|||Tapi ada Demo Event Sabtu 18 Juli jam 9 pagi|||"
+                         "Tiketnya cuma Rp 100.000 aja")
+            else:
+                reply = "Kalau mau, Demo Event Sabtu 18 Juli masih ada slot - mau aku catat?"
+            return json.dumps({"reply": reply, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    llm = _ScriptLLM()
+    assert await _svc(db_session, bid, llm=llm, cfg=_cfg(reply_guard="urls")).run() == 1
+    assert llm.calls == 2  # first draft (duplicate bubble) + one regen
+    row = await _pending(db_session, tid)
+    assert row is not None and prior_line not in row.text
+
+
 async def test_followup_nudge_goes_through_the_reply_guard(db_session) -> None:
     """Followup nudges used to bypass the reply guard entirely (only ReplyService.decide
     called it) — a fabricated link in a nudge would ship unblocked. Must be caught the same
