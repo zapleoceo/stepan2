@@ -96,3 +96,14 @@ def test_compound_question_gets_every_part_answered() -> None:
     # lead had to chase the rest ("btw syllabus nya td gmn ya")
     assert "TWO OR MORE ASKS" in _DECISION_CONTRACT
     assert "EVERY part answered" in _DECISION_CONTRACT
+
+
+def test_plain_acknowledgment_never_needs_manager() -> None:
+    # threads 2324/2337/2272, 2026-07-09: "boleh min" / "Minat ka" / "Thanks untuk infonya"
+    # all got escalated to a human with nothing to actually resolve
+    assert "PLAIN ACKNOWLEDGMENT" in _DECISION_CONTRACT
+    assert "NEVER for a lead simply saying thanks or yes" in _DECISION_CONTRACT
+
+
+def test_stage_reason_required_not_optional() -> None:
+    assert "REQUIRED (not optional)" in _DECISION_CONTRACT
