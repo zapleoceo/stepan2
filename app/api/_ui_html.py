@@ -67,6 +67,7 @@ _CSS = (
     ".na-badge{margin-left:auto;padding:.05rem .45rem;border-radius:8px;font-size:.7rem;"
     "font-weight:700;background:#206bc4;color:#fff;flex-shrink:0}"
     ".na-badge:empty{display:none}"
+    ".awaiting-badge{background:#e8590c;cursor:pointer}"  # unanswered-queue accent, click-through
     ".sid.collapsed .na-badge{display:none}"
     ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
     ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
@@ -1483,7 +1484,7 @@ _FAVICON = (
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
-    lead_type: str = "", audience: str = "",
+    lead_type: str = "", audience: str = "", awaiting: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1508,13 +1509,24 @@ def app_shell(
         ' hx-trigger="load, every 15s" hx-swap="innerHTML" hx-target="this"'
         ' hx-push-url="false"></span>'  # poll must not rewrite the address bar
     )
+    # Inbox badge = chats awaiting a Stepan reply (the queue). The nav LINK opens the full
+    # inbox; the badge NUMBER opens only the awaiting chats (stopPropagation so the click
+    # doesn't also trigger the parent link). Empty when zero → hidden by .na-badge:empty.
+    inbox_badge = (
+        '<span class="na-badge awaiting-badge" id="inbox-badge"'
+        ' hx-get="/ui/inbox/awaiting-count" hx-trigger="load, every 15s"'
+        ' hx-swap="innerHTML" hx-target="this" hx-push-url="false"'
+        f' title="{_h.escape(t("inbox.awaiting_tip"))}"'
+        " onclick=\"event.stopPropagation();event.preventDefault();"
+        "location.href='/ui/inbox?awaiting=1';return false\"></span>"
+    )
 
     coach_extra = (
         ' hx-get="/ui/coach/panel" hx-target="#main" hx-push-url="/ui/coach"'
         " onclick=\"setOn(this,'na');showThr(false)\""
     )
     nav = (
-        _na("nav.inbox", "/ui/inbox", "fa-solid fa-inbox", "inbox")
+        _na("nav.inbox", "/ui/inbox", "fa-solid fa-inbox", "inbox", badge=inbox_badge)
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox", outbox_badge)
         + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
         + _na("nav.know", "/ui/knowledge", "fa-solid fa-book", "know")
@@ -1793,7 +1805,8 @@ def app_shell(
         _thr_params = "&".join(
             f"{k}={_h.escape(v)}"
             for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
-                         ("lead_type", lead_type), ("audience", audience)) if v)
+                         ("lead_type", lead_type), ("audience", audience),
+                         ("awaiting", awaiting)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
         _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
                     "dormant": t("rep.dormant")}.get(grp, "")
@@ -1817,11 +1830,18 @@ def app_shell(
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
         ) if (lead_type or audience) else ""
+        # awaiting filter (opened from the inbox badge) — dismissable back to the full inbox.
+        _await_chip = (
+            f'<div class="ad-filter">'
+            f'<span class="ad-filter-id">{_h.escape(t("inbox.awaiting_filter"))}</span>'
+            f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
+            f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
+        ) if awaiting else ""
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'
             f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
             f'<div class="thr-h">{inbox_lbl}</div>'
-            f'{_ad_chip}{_seg_chip}'
+            f'{_ad_chip}{_seg_chip}{_await_chip}'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
             f' data-help="{_h.escape(t("hint.search"))}"'
             f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'

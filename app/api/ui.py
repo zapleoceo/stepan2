@@ -88,13 +88,14 @@ _THREAD_TMPL = (
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "",
+    audience: str = "", awaiting: str = "",
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
                                   ad_id=ad_id.strip(), grp=grp.strip(),
                                   lead_type=lead_type.strip(), audience=audience.strip(),
+                                  awaiting=awaiting.strip(),
                                   is_super=is_super_admin(request)))
 
 
@@ -151,7 +152,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "",
+    audience: str = "", awaiting: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
@@ -186,6 +187,11 @@ async def threads_partial(
         names = [f":g{i}" for i in range(len(grp_stages))]
         conditions.append(f"l.stage IN ({', '.join(names)})")
         params.update({f"g{i}": st for i, st in enumerate(grp_stages)})
+    if awaiting.strip():  # chats where the lead spoke last and Stepan hasn't replied (queue)
+        conditions.append(
+            "ct.last_in_at IS NOT NULL"
+            " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
+            " AND l.is_blocked = false")
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (
