@@ -51,9 +51,12 @@ async def _render(request: Request, new_token: str | None = None) -> HTMLRespons
     async with session_scope() as session:
         tokens = await McpTokenService(session).list()
         enabled, url, has_secret = await _crm_cfg(session, branch_id)
+        branches = [
+            (r[0], r[1]) for r in (await session.execute(
+                text("SELECT id, name FROM branch ORDER BY name"))).all()]
     return HTMLResponse(mcp_page_html(
         _base_url(), tokens, crm_enabled=enabled, crm_url=url,
-        crm_has_secret=has_secret, new_token=new_token))
+        crm_has_secret=has_secret, new_token=new_token, branches=branches))
 
 
 @router.get("/mcp/panel", response_class=HTMLResponse)
@@ -67,14 +70,22 @@ async def mcp_panel(request: Request) -> HTMLResponse:
 @router.post("/mcp/token/create", response_class=HTMLResponse)
 async def mcp_token_create(
     request: Request, label: str = Form(...), scope: str = Form("read"),
+    branch_id: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
     if not is_super_admin(request):
         return _FORBIDDEN
     if scope not in ("read", "write"):
         scope = "read"
+    bid: int | None = None
+    if branch_id.strip().isdigit():
+        async with session_scope() as session:
+            exists = (await session.execute(
+                text("SELECT 1 FROM branch WHERE id = :b"),
+                {"b": int(branch_id)})).first()
+        bid = int(branch_id) if exists else None  # ignore an unknown/forged branch id
     async with session_scope() as session:
-        raw, _ = await McpTokenService(session).create(label, scope)
+        raw, _ = await McpTokenService(session).create(label, scope, bid)
     return await _render(request, new_token=raw)
 
 

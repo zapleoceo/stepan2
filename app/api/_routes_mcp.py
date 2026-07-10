@@ -14,16 +14,40 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.modules.conversation.sim import SimService
 from app.modules.leads import ops
-from app.modules.mcp.tokens import authorize_mcp
+from app.modules.mcp.tokens import McpAuthz, authorize_mcp
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
 
-async def _auth(authorization: str | None) -> None:
-    """Accept a write-scope token from the env secret or the mcp_token table."""
+async def _auth(authorization: str | None) -> McpAuthz:
+    """Accept a write-scope token from the env secret or the mcp_token table, returning its
+    branch scope (None = universal). Callers MUST pass that scope to _effective_branch."""
     token = authorization.removeprefix("Bearer ").strip() if authorization else ""
-    if not await authorize_mcp(token, "write"):
+    authz = await authorize_mcp(token, "write")
+    if authz is None:
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")
+    return authz
+
+
+def _effective_branch(authz: McpAuthz, requested: int | None) -> int | None:
+    """Resolve the branch a request may act on, given the token's scope.
+    - Universal token (branch_id=None): honour the caller's requested branch (or all).
+    - Branch-scoped token: the caller may only address that branch — a mismatching
+      requested branch is a 403, an omitted one defaults to the token's branch."""
+    if authz.branch_id is None:
+        return requested
+    if requested is not None and requested != authz.branch_id:
+        raise HTTPException(
+            status_code=403,
+            detail="this token is limited to a single branch and cannot access another")
+    return authz.branch_id
+
+
+def _guard_lead_branch(authz: McpAuthz, lead) -> None:  # noqa: ANN001
+    """Backstop: even after branch-scoped find, never let a branch-scoped token act on a
+    lead from another branch (defence in depth against a phone that resolves cross-branch)."""
+    if authz.branch_id is not None and lead.branch_id != authz.branch_id:
+        raise HTTPException(status_code=404, detail="no lead with that phone in this branch")
 
 
 class _PhoneReq(BaseModel):
@@ -57,11 +81,13 @@ async def find_lead(
     phone: str, branch_id: int | None = None,
     authorization: str | None = Header(default=None),
 ) -> dict:
-    await _auth(authorization)
+    authz = await _auth(authorization)
+    eff_branch = _effective_branch(authz, branch_id)
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone, branch_id)
+        lead = await ops.find_lead(session, phone, eff_branch)
         if lead is None:
             raise HTTPException(status_code=404, detail=f"no lead with phone {phone}")
+        _guard_lead_branch(authz, lead)
         return {
             "ok": True, "lead_id": lead.id, "name": lead.display_name,
             "phone": lead.phone_e164, "ig_username": lead.ig_username,
@@ -70,34 +96,35 @@ async def find_lead(
         }
 
 
-async def _resolve(session, req: _PhoneReq):  # noqa: ANN001, ANN202
-    lead = await ops.find_lead(session, req.phone, req.branch_id)
+async def _resolve(session, authz: McpAuthz, req: _PhoneReq):  # noqa: ANN001, ANN202
+    lead = await ops.find_lead(session, req.phone, _effective_branch(authz, req.branch_id))
     if lead is None:
         raise HTTPException(status_code=404, detail=f"no lead with phone {req.phone}")
+    _guard_lead_branch(authz, lead)
     return lead
 
 
 @router.post("/move_lead")
 async def move_lead(req: _MoveReq, authorization: str | None = Header(default=None)) -> dict:
-    await _auth(authorization)
+    authz = await _auth(authorization)
     async with session_scope() as session:
-        lead = await _resolve(session, req)
+        lead = await _resolve(session, authz, req)
         return _op_response(await ops.move_lead(session, lead, req.stage, req.note))
 
 
 @router.post("/close_deal")
 async def close_deal(req: _PhoneReq, authorization: str | None = Header(default=None)) -> dict:
-    await _auth(authorization)
+    authz = await _auth(authorization)
     async with session_scope() as session:
-        lead = await _resolve(session, req)
+        lead = await _resolve(session, authz, req)
         return _op_response(await ops.close_deal(session, lead, req.note))
 
 
 @router.post("/call_failed")
 async def call_failed(req: _PhoneReq, authorization: str | None = Header(default=None)) -> dict:
-    await _auth(authorization)
+    authz = await _auth(authorization)
     async with session_scope() as session:
-        lead = await _resolve(session, req)
+        lead = await _resolve(session, authz, req)
         return _op_response(await ops.call_failed(session, lead, req.note, BrokerLLM()))
 
 
@@ -108,7 +135,9 @@ async def sim_say(
     """One turn of a sandboxed lead conversation through the real reply path (see
     SimService) — for testing Stepan's behavior against the KB without touching prod/IG.
     session_key scopes the sandbox thread; repeat calls with the same key continue it."""
-    await _auth(authorization)
+    authz = await _auth(authorization)
+    # a branch-scoped token may only simulate against its own branch
+    _effective_branch(authz, req.branch_id)
     async with session_scope() as session:
         return await SimService(session, BrokerLLM()).say(
             req.branch_id, req.session_key, req.message)

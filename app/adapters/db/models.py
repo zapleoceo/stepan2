@@ -273,13 +273,18 @@ class ManagerAlert(SQLModel, table=True):
 class McpToken(SQLModel, table=True):
     """A bearer token issued to an MCP client. Only the SHA-256 hash is stored (shown once
     at creation, never again); `prefix` is the first chars for identification in the UI.
-    `scope` = write (funnel ops) | read (read-only reader). Platform-level, not per-branch:
-    a token grants API access across branches (the reader tool filters by branch itself)."""
+    `scope` = write (funnel ops) | read (read-only reader).
+    `branch_id` scopes the token to ONE branch (a token can only touch that branch's leads);
+    NULL = universal (every branch), for a platform-level integration. Env-secret tokens are
+    always universal (backward compat)."""
     __tablename__ = "mcp_token"
 
     id: int | None = Field(default=None, primary_key=True)
     label: str = Field(description="who this token is for, e.g. 'director' / 'partner CRM'")
     scope: str = Field(description="write | read")
+    branch_id: int | None = Field(
+        default=None, foreign_key="branch.id", index=True,
+        description="branch this token is limited to; NULL = all branches (universal)")
     token_hash: str = Field(index=True, unique=True, description="sha256 hex of the token")
     prefix: str = Field(description="first chars of the token, for identification only")
     created_at: datetime = Field(default_factory=_utcnow)

@@ -52,7 +52,15 @@ def _fmt_dt(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%d %H:%M") if isinstance(dt, datetime) else "—"
 
 
-def _token_row(tk: McpToken) -> str:
+def _branch_badge(name: str) -> str:
+    """A token's branch scope: the branch name, or a highlighted 'all branches' chip."""
+    if not name:
+        return ('<span style="color:#7ea6ff;border:1px solid #7ea6ff;border-radius:4px;'
+                'padding:0 .35rem;font-size:.7rem">все филиалы</span>')
+    return f'<span style="color:{_C_MUTE};font-size:.78rem">{_h.escape(name)}</span>'
+
+
+def _token_row(tk: McpToken, branch_name: str) -> str:
     when = _fmt_dt(tk.created_at)
     used = _fmt_dt(tk.last_used_at)
     if tk.revoked_at is not None:
@@ -70,6 +78,7 @@ def _token_row(tk: McpToken) -> str:
         f'<tr style="border-top:1px solid {_C_BORDER}">'
         f'<td style="padding:.35rem .5rem">{name}</td>'
         f'<td style="padding:.35rem .5rem">{_scope_badge(tk.scope)}</td>'
+        f'<td style="padding:.35rem .5rem">{_branch_badge(branch_name)}</td>'
         f'<td style="padding:.35rem .5rem"><code style="color:{_C_MUTE}">'
         f'{_h.escape(tk.prefix)}…</code></td>'
         f'<td style="padding:.35rem .5rem;color:{_C_MUTE};font-size:.75rem">{when}</td>'
@@ -77,13 +86,21 @@ def _token_row(tk: McpToken) -> str:
         f'<td style="padding:.35rem .5rem;text-align:right">{action}</td></tr>')
 
 
-def _incoming(base_url: str, tokens: list[McpToken], new_token: str | None) -> str:
+def _incoming(
+    base_url: str, tokens: list[McpToken], new_token: str | None,
+    branches: list[tuple[int, str]],
+) -> str:
     write_url = f"{base_url}/connector/mcp"
     read_url = f"{base_url}/reader/mcp"
-    rows = "".join(_token_row(t) for t in tokens) or (
-        f'<tr><td colspan="6" style="padding:.5rem;color:{_C_MUTE};font-size:.8rem">'
+    branch_by_id = {bid: nm for bid, nm in branches}
+    rows = "".join(
+        _token_row(t, branch_by_id.get(t.branch_id, "") if t.branch_id else "")
+        for t in tokens) or (
+        f'<tr><td colspan="7" style="padding:.5rem;color:{_C_MUTE};font-size:.8rem">'
         f'Токенов пока нет</td></tr>')
     banner = _new_token_banner(new_token) if new_token else ""
+    branch_opts = '<option value="">Все филиалы (универсальный)</option>' + "".join(
+        f'<option value="{bid}">{_h.escape(nm)}</option>' for bid, nm in branches)
     return _card(
         _h3("Входящие подключения — клиенты подключаются к Степану")
         + _endpoint_row("write (двигать воронку)", write_url)
@@ -92,18 +109,22 @@ def _incoming(base_url: str, tokens: list[McpToken], new_token: str | None) -> s
         + '<table style="width:100%;border-collapse:collapse;font-size:.82rem">'
         + f'<thead><tr style="color:{_C_MUTE};font-size:.72rem;text-align:left">'
         + '<th style="padding:.2rem .5rem">Название</th><th style="padding:.2rem .5rem">Тип</th>'
+        + '<th style="padding:.2rem .5rem">Филиал</th>'
         + '<th style="padding:.2rem .5rem">Префикс</th><th style="padding:.2rem .5rem">Создан</th>'
         + '<th style="padding:.2rem .5rem">Использован</th><th></th></tr></thead>'
         + f'<tbody>{rows}</tbody></table>'
         + '<form hx-post="/ui/mcp/token/create" hx-target="#mcp-page"'
         '  style="display:flex;gap:.4rem;margin-top:.7rem;flex-wrap:wrap">'
         f'<input name="label" placeholder="кому (директор, партнёр…)" required'
-        f' style="flex:1;min-width:160px;background:#0d1117;border:1px solid {_C_BORDER};'
+        f' style="flex:1;min-width:140px;background:#0d1117;border:1px solid {_C_BORDER};'
         f'color:{_C_INK};border-radius:5px;padding:.35rem .5rem">'
         f'<select name="scope" style="background:#0d1117;border:1px solid {_C_BORDER};'
         f'color:{_C_INK};border-radius:5px;padding:.35rem">'
         '<option value="read">read — только чтение</option>'
         '<option value="write">write — двигать воронку</option></select>'
+        f'<select name="branch_id" title="Доступ к филиалу"'
+        f' style="background:#0d1117;border:1px solid {_C_BORDER};'
+        f'color:{_C_INK};border-radius:5px;padding:.35rem">{branch_opts}</select>'
         f'<button style="background:{_C_ACCENT};border:none;color:#1a1d24;font-weight:600;'
         f'border-radius:5px;padding:.35rem .8rem;cursor:pointer">Создать токен</button>'
         '</form>')
@@ -136,6 +157,7 @@ def _outgoing(enabled: bool, url: str, has_secret: bool) -> str:
 def mcp_page_html(
     base_url: str, tokens: list[McpToken], *, crm_enabled: bool, crm_url: str,
     crm_has_secret: bool, new_token: str | None = None,
+    branches: list[tuple[int, str]] | None = None,
 ) -> str:
     return (
         '<div id="mcp-page" style="padding:1rem 1.2rem;max-width:920px">'
@@ -143,7 +165,7 @@ def mcp_page_html(
         'MCP — подключения и токены</div>'
         f'<div style="color:{_C_MUTE};font-size:.82rem;margin-bottom:1rem">Управление доступом'
         ' к Степану по MCP: входящие коннекторы (внешние клиенты) и исходящая связь с CRM.</div>'
-        + _incoming(base_url, tokens, new_token)
+        + _incoming(base_url, tokens, new_token, branches or [])
         + _outgoing(crm_enabled, crm_url, crm_has_secret)
         + f'<a href="/ui/mcp/docs" style="display:inline-block;color:{_C_ACCENT};'
         'font-size:.85rem;text-decoration:none;border:1px solid #3a4150;border-radius:6px;'

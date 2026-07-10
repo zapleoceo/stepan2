@@ -18,6 +18,7 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.api._mcp_auth import token_guard
 from app.modules.leads import ops
+from app.modules.mcp.tokens import mcp_effective_branch, mcp_guard_lead_branch
 
 # DNS-rebinding protection guards browser attacks on localhost dev servers by pinning
 # the Host header; it's the wrong tool for a public server behind Cloudflare/nginx (the
@@ -36,15 +37,25 @@ def _fmt(res: ops.LeadOpResult) -> dict:
     }
 
 
+async def _resolve_scoped(session, phone: str):  # noqa: ANN001, ANN202
+    """find_lead honouring the current token's branch scope, or None. Guards the resolved
+    lead's branch too (a phone can resolve cross-branch)."""
+    lead = await ops.find_lead(session, phone, mcp_effective_branch(None))
+    if lead is not None:
+        mcp_guard_lead_branch(lead)
+    return lead
+
+
 @mcp.tool()
 async def find_lead(phone: str, branch_id: int | None = None) -> dict:
     """Look up a lead by phone number (E.164, e.g. +6281234567890). Returns id, name,
     Instagram username, branch, current funnel stage and whether the bot is on. Call
     this first to confirm the lead exists before moving them."""
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone, branch_id)
+        lead = await ops.find_lead(session, phone, mcp_effective_branch(branch_id))
         if lead is None:
             return {"ok": False, "detail": f"no lead with phone {phone}"}
+        mcp_guard_lead_branch(lead)
         return {
             "ok": True, "lead_id": lead.id, "name": lead.display_name,
             "phone": lead.phone_e164, "ig_username": lead.ig_username,
@@ -58,7 +69,7 @@ async def close_deal(phone: str, note: str | None = None) -> dict:
     """Mark a lead's deal as WON: hand the lead off (stage → handed_off) and stop the
     bot messaging them. `note` is journaled on the funnel event."""
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone)
+        lead = await _resolve_scoped(session, phone)
         if lead is None:
             return {"ok": False, "detail": f"no lead with phone {phone}"}
         return _fmt(await ops.close_deal(session, lead, note))
@@ -71,7 +82,7 @@ async def call_failed(phone: str, note: str | None = None) -> dict:
     A lead already handed off / dormant is pulled back to `qualifying`. `note` (e.g.
     'no answer', 'wrong number') is journaled."""
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone)
+        lead = await _resolve_scoped(session, phone)
         if lead is None:
             return {"ok": False, "detail": f"no lead with phone {phone}"}
         return _fmt(await ops.call_failed(session, lead, note, BrokerLLM()))
@@ -83,7 +94,7 @@ async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
     presenting, objection, ready, handed_off, dormant, manager. `manager` turns the bot
     off (human takeover); an active stage turns it back on. `note` is journaled."""
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone)
+        lead = await _resolve_scoped(session, phone)
         if lead is None:
             return {"ok": False, "detail": f"no lead with phone {phone}"}
         return _fmt(await ops.move_lead(session, lead, stage, note))
@@ -102,6 +113,7 @@ async def sim_say(branch_id: int, session_key: str, text: str) -> dict:
 
     Returns Stepan's reply plus what the engine decided: funnel stage, product, captured
     needs (jobs/pains/gains), ready/needs_manager flags, and the LLM cost/model meta."""
+    mcp_effective_branch(branch_id)  # branch-scoped token may only sim its own branch
     from app.modules.conversation.sim import SimService  # noqa: PLC0415
     async with session_scope() as session:
         return await SimService(session, BrokerLLM()).say(branch_id, session_key, text)
@@ -111,6 +123,7 @@ async def sim_say(branch_id: int, session_key: str, text: str) -> dict:
 async def sim_reset(branch_id: int, session_key: str) -> dict:
     """Wipe a sim conversation so the next sim_say starts fresh (clears its messages and
     resets the sandbox lead's needs/stage). Only affects the sandbox, never real leads."""
+    mcp_effective_branch(branch_id)  # branch-scoped token may only sim its own branch
     from app.modules.conversation.sim import SimService  # noqa: PLC0415
     async with session_scope() as session:
         return await SimService(session, BrokerLLM()).reset(branch_id, session_key)
@@ -128,6 +141,7 @@ async def sim_persona(
     Personas: hot_ready, budget_student, skeptic_diy, confused_explorer, career_switcher,
     freelancer_upskill, parent_for_child, corporate_bulk, ghoster_busy, wrong_fit.
     Use a SIM/test branch_id (not a live branch). Fully sandboxed; nothing reaches Instagram."""
+    mcp_effective_branch(branch_id)  # branch-scoped token may only sim its own branch
     from app.modules.conversation.sim_persona import run_persona  # noqa: PLC0415
     async with session_scope() as session:
         return await run_persona(session, branch_id, persona, session_key,

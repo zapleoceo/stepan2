@@ -7,10 +7,22 @@ secrets.
 """
 from __future__ import annotations
 
+import contextvars
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
+
+# The authenticated MCP authorization (McpAuthz) for the current request, set by
+# token_guard so the mounted FastMCP tools — which never see the raw token — can read
+# the token's branch scope. None only outside a guarded request (tools always run inside).
+_authz_var: contextvars.ContextVar[Any] = contextvars.ContextVar("mcp_authz", default=None)
+
+
+def current_mcp_authz() -> Any:
+    """The McpAuthz for the in-flight MCP request, or None outside one."""
+    return _authz_var.get()
 
 
 def extract_token(scope: Scope) -> str:
@@ -28,14 +40,24 @@ def split_tokens(secret: str) -> list[str]:
     return [t.strip() for t in secret.split(",") if t.strip()]
 
 
-def token_guard(app, authorize: Callable[[str], Awaitable[bool]]):  # noqa: ANN001, ANN201
-    """Wrap an ASGI app, rejecting HTTP calls whose token authorize() denies."""
+def token_guard(app, authorize: Callable[[str], Awaitable[Any]]):  # noqa: ANN001, ANN201
+    """Wrap an ASGI app, rejecting HTTP calls whose token authorize() denies. `authorize`
+    returns a truthy McpAuthz on success (or None to deny); the authz is stashed in a
+    contextvar for the request so the app's tools can enforce its branch scope."""
 
     class _Guard:
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            if scope["type"] == "http" and not await authorize(extract_token(scope)):
-                await JSONResponse({"error": "unauthorized"}, status_code=401)(
-                    scope, receive, send)
+            if scope["type"] == "http":
+                authz = await authorize(extract_token(scope))
+                if not authz:
+                    await JSONResponse({"error": "unauthorized"}, status_code=401)(
+                        scope, receive, send)
+                    return
+                reset = _authz_var.set(authz)
+                try:
+                    await app(scope, receive, send)
+                finally:
+                    _authz_var.reset(reset)
                 return
             await app(scope, receive, send)
 

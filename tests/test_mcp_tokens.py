@@ -56,11 +56,12 @@ async def test_authorize_accepts_env_secret_by_scope(monkeypatch, db_session) ->
     monkeypatch.setattr(settings(), "mcp_read_secret", "envread")
     # DB path must be reachable but empty here → env decides
     _patch_scope(monkeypatch, db_session)
-    assert await authorize_mcp("envwrite", "write") is True
-    assert await authorize_mcp("envread", "read") is True
-    assert await authorize_mcp("envread", "write") is False   # right token, wrong scope
-    assert await authorize_mcp("nope", "write") is False
-    assert await authorize_mcp("", "read") is False
+    envw = await authorize_mcp("envwrite", "write")
+    assert envw is not None and envw.branch_id is None       # env tokens are universal
+    assert (await authorize_mcp("envread", "read")) is not None
+    assert await authorize_mcp("envread", "write") is None    # right token, wrong scope
+    assert await authorize_mcp("nope", "write") is None
+    assert await authorize_mcp("", "read") is None
 
 
 async def test_authorize_accepts_active_db_token(monkeypatch, db_session) -> None:
@@ -68,10 +69,21 @@ async def test_authorize_accepts_active_db_token(monkeypatch, db_session) -> Non
     monkeypatch.setattr(settings(), "mcp_read_secret", "")
     _patch_scope(monkeypatch, db_session)
     raw, row = await McpTokenService(db_session).create("director", "read")
-    assert await authorize_mcp(raw, "read") is True
-    assert await authorize_mcp(raw, "write") is False   # read token can't do write
+    authz = await authorize_mcp(raw, "read")
+    assert authz is not None and authz.branch_id is None      # universal token
+    assert await authorize_mcp(raw, "write") is None          # read token can't do write
     await McpTokenService(db_session).revoke(row.id)
-    assert await authorize_mcp(raw, "read") is False    # revoked → denied
+    assert await authorize_mcp(raw, "read") is None           # revoked → denied
+
+
+async def test_authorize_carries_branch_scope(monkeypatch, db_session) -> None:
+    """A branch-scoped token authorizes but reports its branch; universal reports None."""
+    monkeypatch.setattr(settings(), "mcp_secret", "")
+    monkeypatch.setattr(settings(), "mcp_read_secret", "")
+    _patch_scope(monkeypatch, db_session)
+    raw, _ = await McpTokenService(db_session).create("branch2", "write", branch_id=2)
+    authz = await authorize_mcp(raw, "write")
+    assert authz is not None and authz.branch_id == 2
 
 
 def _patch_scope(monkeypatch, session) -> None:  # noqa: ANN001

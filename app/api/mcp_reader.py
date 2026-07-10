@@ -16,6 +16,7 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.api._mcp_auth import token_guard
 from app.modules.leads import ops
+from app.modules.mcp.tokens import mcp_effective_branch
 
 _LANG_NAME = {"ru": "Russian", "en": "English", "id": "Indonesian"}
 
@@ -54,6 +55,7 @@ async def list_chats(limit: int = 30, branch_id: int | None = None,
     Returns each chat's thread_id, lead name, phone, stage, branch, last activity and
     message count — use thread_id or phone with get_chat/analyze_chat."""
     limit = max(1, min(limit, 100))
+    branch_id = mcp_effective_branch(branch_id)  # scoped token → forced to its own branch
     # CAST the optional filters: an untyped NULL bind in "(:p IS NULL OR col = :p)" makes
     # asyncpg fail with AmbiguousParameterError — the cast pins the type so NULL is fine.
     q = text(
@@ -89,6 +91,7 @@ async def get_chat(phone: str | None = None, thread_id: int | None = None,
         if resolved is None:
             return {"ok": False, "detail": "chat not found"}
         tid, branch_id, name, ph = resolved
+        mcp_effective_branch(branch_id)  # scoped token can't read another branch's chat
         rows = (await session.execute(
             text("SELECT direction, text, occurred_at FROM message"
                  " WHERE thread_id = :t AND text <> ''"
@@ -115,6 +118,7 @@ async def analyze_chat(phone: str | None = None, thread_id: int | None = None,
         if resolved is None:
             return {"ok": False, "detail": "chat not found"}
         tid, branch_id, _name, _ph = resolved
+        mcp_effective_branch(branch_id)  # scoped token can't analyze another branch's chat
         report = await _analyze(session, branch_id, tid, BrokerLLM(),
                                 lang=_LANG_NAME.get(lang, "Russian"))
     return {"ok": bool(report), "thread_id": tid, "analysis": report or "(empty)"}
