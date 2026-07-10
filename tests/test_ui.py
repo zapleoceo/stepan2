@@ -1019,17 +1019,38 @@ def test_landing_has_in_page_chat_widget() -> None:
 
 
 def test_landing_pricing_section_states_the_flat_per_lead_fee() -> None:
-    """First 100 leads free, then a flat $0.10/lead regardless of conversation length —
-    no per-message/per-minute metering, so a long qualification never costs more."""
+    """Up to 10 leads/day free, then a flat $1/lead regardless of outcome or conversation
+    length — no per-message/per-token metering, so a long qualification never costs more."""
     client = TestClient(app, follow_redirects=False)
     body = client.get("/").text
     assert 'id="pricing"' in body
-    assert "First 100 leads" in body
+    assert "Up to 10 leads / day" in body
     assert "Free" in body
-    assert "$0.10" in body and "/lead" in body
-    assert "no matter how long Stepan talks to them" in body
+    assert "$1" in body and "/lead" in body
+    assert "no matter the outcome or how long Stepan talks to them" in body
     assert "Unlimited messages per lead" in body
     assert 'id="stp-w"' in body                    # the chat panel is present
+
+
+def test_landing_has_meta_business_agent_comparison_table() -> None:
+    """A grounded, fact-checkable comparison vs Meta's own June-2026 Business Agent —
+    not a strawman: Meta's real capabilities are represented, not omitted."""
+    client = TestClient(app, follow_redirects=False)
+    body = client.get("/").text
+    assert "Meta Business Agent" in body
+    assert '<table class="mtable">' in body
+    assert "Flat $1 per lead" in body
+    assert "Per-token" in body                     # Meta's real pricing model, stated fairly
+    assert "Not publicly documented" in body        # honest, not overclaiming vs Meta
+
+
+def test_landing_has_enterprise_trust_section() -> None:
+    """Multi-brand/role-based-access signals for a buyer evaluating Stepan across many
+    locations or brands, not just a single small account."""
+    client = TestClient(app, follow_redirects=False)
+    body = client.get("/").text
+    assert "Built for multiple brands" in body
+    assert "Role-based access" in body
 
 
 def test_demo_chat_empty_returns_fallback_without_llm() -> None:

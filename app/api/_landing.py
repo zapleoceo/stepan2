@@ -136,6 +136,27 @@ h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;
 .col.bad li::before{content:"";position:absolute;left:0;top:.85rem;width:11px;height:1.5px;background:var(--faint)}
 .col.good li::before{content:"";position:absolute;left:1px;top:.68rem;width:6px;height:10px;border:solid var(--ok);border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
 .col.good li{color:var(--ink)}
+/* meta comparison table */
+.mtwrap{margin-top:2.8rem;border:1px solid var(--line);border-radius:16px;overflow:hidden;overflow-x:auto}
+.mtable{width:100%;border-collapse:collapse;min-width:640px}
+.mtable th,.mtable td{padding:.9rem 1.1rem;text-align:left;font-size:.88rem;border-top:1px solid var(--line)}
+.mtable thead th{border-top:none;background:var(--panel2);font-family:var(--disp);font-weight:600;font-size:.86rem;letter-spacing:-.01em;color:var(--ink)}
+.mtable thead th:first-child{color:var(--faint);font-family:var(--sans);font-weight:500;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em}
+.mtable tbody th{font-weight:500;color:var(--mut);white-space:nowrap}
+.mtable td{color:var(--mut)}
+.mtable td.win{color:var(--ink)}
+.mtable td .yes{color:var(--ok)}
+.mtable td .no{color:var(--faint)}
+.mtable tbody tr:hover td,.mtable tbody tr:hover th{background:rgba(255,255,255,.02)}
+.mtcap{font-size:.72rem;color:var(--faint);margin-top:.9rem}
+/* enterprise trust strip */
+.trust{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:2.8rem}
+.tcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.4rem 1.2rem}
+.tcard .ic{color:var(--acc);margin-bottom:.9rem;display:block}
+.tcard h3{font-family:var(--disp);font-size:.92rem;font-weight:600;margin-bottom:.35rem;letter-spacing:-.01em}
+.tcard p{font-size:.8rem;color:var(--mut);line-height:1.5}
+@media (max-width:860px){.trust{grid-template-columns:1fr 1fr}}
+@media (max-width:480px){.trust{grid-template-columns:1fr}}
 /* mcp / crm */
 .mcp{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:0;margin-top:2.8rem;border:1px solid var(--line);border-radius:18px;background:var(--panel);padding:1.6rem}
 .mnode{padding:1.3rem;text-align:center}
@@ -288,6 +309,11 @@ _IC = {
     "msgr": '<path d="M12 3C6.5 3 2 7.1 2 12c0 2.7 1.3 5.1 3.4 6.7V22l3.1-1.7c1.1.3 2.3.5 3.5.5 5.5 0 10-4.1 10-9s-4.5-9-10-9Z"/><path d="m7 13 3-3 2.5 2L16 11l-3 3-2.5-2Z"/>',
     "tiktok": '<path d="M16 3c.3 2 1.7 3.6 4 4v3c-1.6 0-3-.4-4-1v6.5A5.5 5.5 0 1 1 10.5 10v3a2.5 2.5 0 1 0 2.5 2.5V3z"/>',
     "check": '<path d="M20 6 9 17l-5-5"/>',
+    "layers": '<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+    "building": '<rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/>'
+                '<path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01'
+                'M8 14h.01M12 14h.01M16 14h.01"/>',
+    "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
 }
 
 
@@ -308,11 +334,11 @@ def _adrow(mark: str, name: str, stats: str, booked: str, roas: str) -> str:
 
 
 def _pricing_section() -> str:
-    """Simple usage-based pricing: first 100 leads free, then a flat per-lead fee — no
-    per-message or per-conversation-length metering, so a long qualification chat never
-    costs more than a one-liner."""
+    """Simple usage-based pricing: up to 10 leads/day free, then a flat $1/lead — charged
+    once per lead regardless of outcome or how long the conversation runs. No per-message
+    or per-token metering (unlike Meta's own token-billed agent)."""
     included = [
-        "Unlimited messages per lead — a 40-turn qualification costs the same as one reply",
+        "Unlimited messages per lead — a 40-turn qualification costs the same $1 as one reply",
         "Instagram + WhatsApp + Messenger, every language",
         "CRM sync via MCP, ad attribution, analytics dashboard",
     ]
@@ -322,27 +348,97 @@ def _pricing_section() -> str:
         "<div class=\"shead\">"
         "<div class=\"kick\">Pricing</div>"
         "<h2>Pay for leads, not for chatting</h2>"
-        "<p class=\"lead\">No seats, no message caps, no surprise usage tiers — "
-        "one price per lead, no matter how long Stepan talks to them.</p></div>"
+        "<p class=\"lead\">No seats, no message caps, no token metering — a flat fee per "
+        "lead, charged once, no matter the outcome or how long Stepan talks to them.</p></div>"
         "<div class=\"pgrid\">"
         "<div class=\"pcard\">"
         "<div class=\"ptag\">Get started</div>"
         "<div class=\"pnum\">Free</div>"
-        "<div class=\"pwhat\">First 100 leads</div>"
+        "<div class=\"pwhat\">Up to 10 leads / day</div>"
         "<p class=\"pnote\">Run Stepan on real traffic before you pay anything.</p>"
         "</div>"
         "<div class=\"pcard hi\">"
         "<div class=\"ptag\">Pay as you grow</div>"
-        "<div class=\"pnum\">$0.10<small>/lead</small></div>"
-        "<div class=\"pwhat\">After the first 100</div>"
-        "<p class=\"pnote\">Billed per lead, once — not per message, not per hour of "
-        "back-and-forth.</p>"
+        "<div class=\"pnum\">$1<small>/lead</small></div>"
+        "<div class=\"pwhat\">Past 10 leads / day</div>"
+        "<p class=\"pnote\">Charged once per lead — regardless of result or how long the "
+        "conversation runs. Never per message, never per token.</p>"
         "</div></div>"
         f"<ul class=\"pinc\">{inc_items}</ul>"
+        "<p class=\"mnote\" style=\"margin-top:1.4rem\">Running hundreds of leads a day across "
+        "multiple brands or locations? <a href=\"javascript:void(0)\" style=\"color:var(--acc);"
+        "text-decoration:underline\" onclick=\"openStepan()\">talk to us</a> about volume "
+        "pricing and a dedicated rollout.</p>"
         "<div class=\"cta\" style=\"margin-top:1.6rem\">"
         "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button></div>"
         "</div></section>"
     )
+
+
+def _meta_compare_section() -> str:
+    """Head-to-head vs Meta's own Business Agent (launched June 2026) — grounded in Meta's
+    public announcement + independent reviews, not a strawman. Framed for a buyer who will
+    fact-check both, so claims about Meta stay to what's publicly documented."""
+    rows = [
+        ("Pricing model", "Per-token — cost scales with every reply sent",
+         "Flat $1 per lead, charged once, any length"),
+        ("Sales approach", "Q&amp;A + catalog recommendations + booking",
+         "Consultative: discovery &rarr; needs &rarr; objection handling &rarr; timed offer"),
+        ("Grounding / anti-hallucination", "Not publicly documented",
+         "Built-in fact-checking guard — regenerates or hands off rather than invent"),
+        ("Lead scoring", "Basic qualifying questions",
+         "Two-axis intent + audience scoring, re-qualifies mid-conversation"),
+        ("CRM integration", "No native CRM — custom API work required",
+         "Open MCP connector — plugs into your CRM's own fields"),
+        ("Ad performance &amp; attribution", "Not a stated feature",
+         "Pulls ad spend/CPL, maps every lead to its exact ad, merges identity across ads"),
+        ("Multi-brand / multi-location", "Not documented for franchise-style management",
+         "Native multi-branch with role-based access per team"),
+        ("Channels", "WhatsApp, Instagram, Messenger", "Instagram, WhatsApp, Messenger, TikTok soon"),
+    ]
+    body = "".join(
+        f'<tr><th scope="row">{k}</th><td>{m}</td><td class="win">{s}</td></tr>'
+        for k, m, s in rows
+    )
+    return (
+        "<section class=\"divide\"><div class=\"wrap\">"
+        "<div class=\"shead\">"
+        "<div class=\"kick\">Stepan vs. Meta's own AI</div>"
+        "<h2>Meta just shipped an AI agent too. Here's the real difference.</h2>"
+        "<p class=\"lead\">Meta Business Agent launched June 2026 and answers messages "
+        "across WhatsApp, Instagram and Messenger for free, at first. It's a solid Q&amp;A "
+        "bot. It isn't a closer.</p></div>"
+        "<div class=\"mtwrap\"><table class=\"mtable\">"
+        "<thead><tr><th scope=\"col\"></th><th scope=\"col\">Meta Business Agent</th>"
+        "<th scope=\"col\">Stepan</th></tr></thead>"
+        f"<tbody>{body}</tbody>"
+        "</table></div>"
+        "<p class=\"mtcap\">Meta Business Agent details from Meta's June 2026 announcement "
+        "and independent reviews at time of writing — features change; verify current specs "
+        "with Meta.</p>"
+        "</div></section>"
+    )
+
+
+def _trust_section() -> str:
+    """Enterprise-facing trust strip: what a buyer running multiple brands/locations
+    actually asks about before signing — access control, auditability, integration depth,
+    rollout support. All facts, no illustrative mockup data."""
+    cards = [
+        ("building", "Built for multiple brands", "Run every location or brand as its own "
+         "branch — separate knowledge base, numbers and reporting, one account."),
+        ("users", "Role-based access", "Admin, branch admin or view-only — control exactly "
+         "who can see or touch which brand's leads."),
+        ("shield", "Grounded &amp; auditable", "Every claim traces back to your own facts. "
+         "Full transcript on every lead, synced to your CRM."),
+        ("layers", "Deep integrations", "MCP connector, ad-account attribution, CRM sync — "
+         "built to sit inside a real stack, not replace it."),
+    ]
+    items = "".join(
+        f'<div class="tcard">{_svg(_IC[ic], 22)}<h3>{t}</h3><p>{b}</p></div>'
+        for ic, t, b in cards
+    )
+    return f'<div class="trust">{items}</div>'
 
 
 def _ad_accounts_section() -> str:
@@ -448,17 +544,19 @@ def landing_html() -> str:
         "</div></nav>"
         # hero
         "<header class=\"hero\"><div class=\"wrap\">"
-        "<span class=\"eyebrow\"><span class=\"d\"></span>Your DMs, working while you sleep</span>"
-        "<h1>Your best salesperson,<br><em>on autopilot, in every DM.</em></h1>"
+        "<span class=\"eyebrow\"><span class=\"d\"></span>Built for teams running serious lead "
+        "volume</span>"
+        "<h1>Your best salesperson,<br><em>scaled across every brand you run.</em></h1>"
         "<p class=\"sub\">Stepan is an AI sales agent that greets, qualifies and actually "
-        "<b>sells</b> to your leads in Instagram and WhatsApp — like your sharpest rep, "
-        "24/7, in any language.</p>"
+        "<b>sells</b> to every lead across your brands and locations in Instagram and "
+        "WhatsApp — consistent, auditable, and instantly scalable, in any language.</p>"
         "<div class=\"cta\">"
         "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button>"
         "<a class=\"btn btn-g\" href=\"#how\">See how it works</a>"
         "</div>"
         "<p class=\"note\">The best demo is Stepan itself — message it and watch it qualify "
         "you.</p>"
+        f"{_trust_section()}"
         "</div></header>"
         # how it works
         "<section id=\"how\" class=\"divide\"><div class=\"wrap\">"
@@ -583,6 +681,8 @@ def landing_html() -> str:
         "<li>Grounded in your facts — never invents</li>"
         "<li>IG + WhatsApp + Messenger, any language</li></ul></div>"
         "</div></div></section>"
+        # meta business agent comparison
+        + _meta_compare_section() +
         # channels — with TikTok coming soon
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
