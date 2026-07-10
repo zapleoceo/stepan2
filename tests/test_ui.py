@@ -1050,6 +1050,18 @@ def test_landing_has_enterprise_trust_section() -> None:
     client = TestClient(app, follow_redirects=False)
     body = client.get("/").text
     assert "Built for multiple brands" in body
+
+
+def test_landing_states_telegram_and_any_api_messenger_as_architecture_not_roadmap() -> None:
+    """Telegram (and any messenger with an API) isn't a shipping channel today — state it
+    as an architectural capability ('on request'), distinct from TikTok's dated 'soon' tag,
+    so the claim stays honest without promising a fixed ship date for every customer."""
+    client = TestClient(app, follow_redirects=False)
+    body = client.get("/").text
+    assert "Telegram" in body
+    assert "on request" in body.lower()
+    assert "Any messenger with an API can be wired in" in body
+    assert "plus Telegram or any messenger with" in body  # comparison table row too
     assert "Role-based access" in body
 
 
