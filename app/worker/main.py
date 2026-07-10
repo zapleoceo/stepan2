@@ -652,32 +652,18 @@ class WorkerSettings:
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         reindex_knowledge, aggregate_needs,
-        # Per-branch jobs the dispatchers enqueue — the actual work, one branch each.
-        # keep_result=0 is MANDATORY here: each is enqueued with a STABLE _job_id
-        # ({job_name}:{branch_id}) so a still-running job dedups the next tick's enqueue —
-        # but arq's enqueue_job ALSO returns None while a stored RESULT exists, so the
-        # worker's default keep_result=3600 made every per-branch job re-enqueueable only
-        # ONCE PER HOUR (its result blocked re-dispatch for the full hour), silently
-        # throttling reply/send/ingest/followups to 1 run/hour/branch instead of per-tick
-        # (prod incident 2026-07-10: 20+ threads stuck "awaiting reply", reply_pending
-        # reporting 0 enqueued every minute). keep_result=0 frees the id the instant the
-        # job finishes, same as generate_one_reply.
-        func(ingest_branch, keep_result=0),
-        func(reply_pending_branch, keep_result=0),
-        func(send_outbox_branch, keep_result=0),
-        func(schedule_followups_branch, keep_result=0),
-        func(process_deletions_branch, keep_result=0),
-        func(sync_crm_branch, keep_result=0),
-        func(refresh_profiles_branch, keep_result=0),
-        func(backfill_media_branch, keep_result=0),
-        func(reindex_knowledge_branch, keep_result=0),
-        func(aggregate_needs_branch, keep_result=0),
-        # Per-reply job: its OWN long timeout (waits out a slow broker); no result kept so the
-        # reply:{thread_id} dedup frees the instant it finishes → the thread can be re-dispatched
-        # for its NEXT message; no ARQ retry (a broker timeout re-dispatches next tick instead of
-        # immediately re-hitting the same slow broker and double-billing).
-        func(generate_one_reply, timeout=settings().reply_job_timeout_s, keep_result=0,
-             max_tries=1),
+        # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
+        # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
+        # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
+        # id the instant the job ends, so the dedup never outlives the run.
+        ingest_branch, reply_pending_branch, send_outbox_branch, schedule_followups_branch,
+        process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
+        backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
+        # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
+        # timeout re-dispatches next tick rather than immediately re-hitting the same slow broker
+        # and double-billing). keep_result=0 is the worker default — a killed/failed reply job
+        # frees its reply:{thread_id} id next tick instead of blocking it (prod 2026-07-10).
+        func(generate_one_reply, timeout=settings().reply_job_timeout_s, max_tries=1),
     ]
     cron_jobs = [
         # Ingest every 2 min: an IG poll costs several private-API calls each with a
@@ -726,4 +712,14 @@ class WorkerSettings:
     redis_settings = _redis_settings()
     max_jobs = settings().worker_max_jobs
     job_timeout = settings().worker_job_timeout_s
-    keep_result = 3600
+    # keep_result=0: every job here is FIRE-AND-FORGET — nothing reads a job's result via
+    # arq (grep: no .result() anywhere). A non-zero keep_result was actively harmful: arq's
+    # enqueue_job returns None while a stored RESULT exists, so a completed/failed job with a
+    # STABLE _job_id ({job}:{branch} or reply:{thread}) blocked its own re-dispatch for the
+    # whole keep_result window. Worse, a reply job KILLED by its arq timeout (slow broker)
+    # stores a JobExecutionFailed result under the WORKER default (the per-func keep_result=0
+    # only governs SUCCESS), so a single slow generation stuck the thread "awaiting" for an
+    # hour with no reply/send (prod 2026-07-10, threads 2566-2570). 0 frees every dedup id the
+    # instant the job ends; in-flight dedup is unaffected (the arq:job/in-progress keys live
+    # only while the job runs, independent of keep_result).
+    keep_result = 0
