@@ -147,6 +147,24 @@ def test_inbox_segment_filter_renders_chip_and_scoped_thread_load() -> None:
     assert "/ui/threads?lead_type=warm" in resp.text      # thread list loads scoped to segment
 
 
+def test_inbox_nav_has_awaiting_badge_that_opens_the_queue() -> None:
+    # The Inbox nav carries a polled badge; clicking the NUMBER opens the awaiting-only view.
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox")
+    assert resp.status_code == 200
+    assert 'id="inbox-badge"' in resp.text                 # the count badge on the nav
+    assert "/ui/inbox/awaiting-count" in resp.text         # polled endpoint
+    assert "/ui/inbox?awaiting=1" in resp.text             # badge click → awaiting queue
+
+
+def test_inbox_awaiting_filter_renders_chip_and_scoped_thread_load() -> None:
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox?awaiting=1")
+    assert resp.status_code == 200
+    assert "ad-filter" in resp.text                        # dismissable chip
+    assert "/ui/threads?awaiting=1" in resp.text           # thread list scoped to the queue
+
+
 def test_ad_product_map_rejects_without_single_branch() -> None:
     # No branch cookie → branch_ids is None → the route refuses before any DB work.
     client = TestClient(app, raise_server_exceptions=False)
