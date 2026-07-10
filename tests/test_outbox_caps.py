@@ -190,6 +190,10 @@ async def test_permanently_failed_followup_rearms_next_followup_at(db_session) -
         db_session, hourly_cap=999, daily_cap=999, sent_now=0, pending_source="followup")
     db_session.add(AppSetting(branch_id=bid, key="followup_enabled", value="true"))
     db_session.add(AppSetting(branch_id=bid, key="followup_schedule_h", value="1,4,24"))
+    # Pin outside quiet hours — is_quiet_hour() reads the real wall clock, and this test's
+    # send_next() call for a "followup" row is a no-op during quiet hours (outbox.py:73-74).
+    db_session.add(AppSetting(branch_id=bid, key="quiet_start", value="0"))
+    db_session.add(AppSetting(branch_id=bid, key="quiet_end", value="0"))
     await db_session.execute(
         _text("UPDATE channel_thread SET next_followup_at=NULL, followups_sent=0"
               " WHERE id=:t"), {"t": tid})
