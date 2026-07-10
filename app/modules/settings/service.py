@@ -59,6 +59,10 @@ class BranchSettings:
     # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
     # verify on risky replies), 'urls' (deterministic only), 'off'. See conversation.guard.
     reply_guard: str = "full"
+    # Trunk country code for phones mined from a lead's free-text message (see
+    # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
+    # branch doesn't stamp its leads' local numbers as +62.
+    phone_country_code: str = "62"
     # Independent from agent_enabled: agent_enabled gates whether Stepan SCANS incoming and
     # QUEUES a reply (reply_pending/schedule_followups); this gates whether send_outbox
     # actually DRAINS the queue. Off = the queue just accumulates, nothing goes out — the
@@ -161,5 +165,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         reply_routing=raw.get("reply_routing", "hybrid"),
         smart_stages=raw.get("smart_stages", "presenting,objection,ready"),
         reply_guard=raw.get("reply_guard", "full"),
+        phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
     )

@@ -47,7 +47,9 @@ class IngestService:
         self, channel_id: int, messages: list[InboundMessage]
     ) -> list[Message]:
         """Persist each new inbound; skip duplicates. Returns the rows it created."""
+        from app.modules.settings.service import get_settings  # noqa: PLC0415
         created: list[Message] = []
+        cc = (await get_settings(self.session, self.branch_id)).phone_country_code
         await self._advance_read_receipts(channel_id, messages)
         for inbound in messages:
             external_id = inbound.external_id or _external_id(inbound)
@@ -62,7 +64,7 @@ class IngestService:
                 if row is not None:
                     created.append(row)
                 continue
-            phone = extract_phone(inbound.text)  # merge key when the lead shares a number
+            phone = extract_phone(inbound.text, cc)  # merge key when the lead shares a number
             lead, thread = await self.identity.resolve_or_create(
                 inbound.external_thread_id, channel_id,
                 display_name=inbound.sender_name,

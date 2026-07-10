@@ -26,20 +26,27 @@ def normalize_phone(raw: str) -> str | None:
     return digits if len(digits) >= _MIN_DIGITS else None
 
 
-def extract_phone(text: str | None) -> str | None:
-    """Pull an Indonesian mobile from free text, canonicalized to +62…E.164; None if none.
+def extract_phone(text: str | None, country_code: str = "62") -> str | None:
+    """Pull a mobile from free text, canonicalized to +<cc>…E.164; None if none.
 
     `0812…`, `62812…` and `+62 812…` all yield the same `+62…` key so the same person
     merges into one lead across channels. The canonical form is both stored on the lead
-    and used for lookup — the only writer/reader of phone_e164."""
+    and used for lookup — the only writer/reader of phone_e164.
+
+    `country_code` (the branch's own, default Indonesia "62") is the trunk prefix applied to
+    a local `0…` number, so a non-Indonesian branch no longer stamps its leads as +62. The
+    shape detector is tuned for Indonesian mobiles; a number that doesn't match it returns
+    None — never mis-prefixed — which keeps the cross-branch merge safe until per-country
+    shapes are added."""
     if not text:
         return None
+    cc = (country_code or "62").strip() or "62"
     match = _SHAPED.search(text)
     digits = normalize_phone(match.group(0)) if match else None
     if not digits:
         return None
     if digits.startswith("0"):
-        digits = "62" + digits[1:]
+        digits = cc + digits[1:]
     elif digits.startswith("8"):
-        digits = "62" + digits
-    return "+" + digits if digits.startswith("62") else None
+        digits = cc + digits
+    return "+" + digits if digits.startswith(cc) else None

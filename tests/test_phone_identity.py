@@ -26,6 +26,39 @@ def test_extract_phone_ignores_prices_and_prose() -> None:
     assert extract_phone(None) is None
 
 
+def test_extract_phone_honours_branch_country_code() -> None:
+    """A non-Indonesian branch's local 0-number gets ITS trunk code, not a hardcoded +62.
+    "0812-3456-7890" → digits "081234567890"; cc=60 drops the 0 → +6081234567890."""
+    assert extract_phone("0812-3456-7890", country_code="60") == "+6081234567890"
+    assert extract_phone("0812-3456-7890") == "+6281234567890"  # default stays Indonesia
+
+
+async def test_existing_thread_not_repointed_by_a_typed_number(db_session) -> None:
+    """The hijack/data-loss path: an ALREADY-ESTABLISHED conversation whose lead later
+    types SOMEONE ELSE'S number must keep its own lead — a text-mined phone must never
+    re-point a live thread onto that number's owner. (New-contact cross-channel merge is a
+    separate, intended behaviour — see test_ingest_merges_same_phone_across_channels.)"""
+    s = db_session
+    branch = Branch(name="T", lang="id")
+    s.add(branch)
+    await s.flush()
+    ig = Channel(branch_id=branch.id, kind=ChannelKind.INSTAGRAM)
+    s.add(ig)
+    await s.flush()
+    svc = IngestService(s, branch.id)
+    when = datetime(2026, 6, 30, 10, 0)
+    # lead A establishes their thread with their own number
+    await svc.ingest(ig.id, [InboundMessage("ig-A", "ua", "saya 0812-3456-7890", when)])
+    # lead B establishes a SEPARATE thread first (no phone) → a distinct lead
+    await svc.ingest(ig.id, [InboundMessage("ig-B", "ub", "halo kak", when)])
+    before = list((await s.exec(select(Lead).where(Lead.branch_id == branch.id))).all())
+    assert len(before) == 2  # two distinct leads exist before the re-point attempt
+    # B's EXISTING thread now types A's number — must NOT be re-pointed onto A
+    await svc.ingest(ig.id, [InboundMessage("ig-B", "ub", "teman saya 0812-3456-7890", when)])
+    leads = list((await s.exec(select(Lead).where(Lead.branch_id == branch.id))).all())
+    assert len(leads) == 2  # B kept its own lead; not merged onto A
+
+
 async def test_ingest_merges_same_phone_across_channels(db_session) -> None:
     s = db_session
     branch = Branch(name="T", lang="id")

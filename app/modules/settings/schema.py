@@ -63,6 +63,13 @@ SCHEMA: list[SettingSection] = [
         _f("quiet_end", "int", "8",
            _l("Тихие часы до (0–23)", "Quiet to (0–23)", "Tenang sampai (0–23)"),
            ph=_l("8", "8", "8"), width="64px"),
+        _f("phone_country_code", "text", "62",
+           _l("Код страны телефона", "Phone country code", "Kode negara telepon"),
+           ph=_l("62", "62", "62"),
+           help=_l("Для номеров из текста лида (62=Индонезия, 60=Малайзия, 63=Филиппины)",
+                   "For phones in a lead's text (62=Indonesia, 60=Malaysia, 63=Philippines)",
+                   "Untuk nomor dari teks lead (62=Indonesia, 60=Malaysia, 63=Filipina)"),
+           width="64px"),
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [

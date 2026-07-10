@@ -48,16 +48,22 @@ class IdentityService:
         ig_username: str | None = None,
         avatar_url: str | None = None,
     ) -> Lead:
-        if phone:
-            existing = await self.leads.by_phone(phone)
-            if existing is not None:
-                self._backfill(existing, phone, display_name, ig_user_id, ig_username, avatar_url)
-                return existing
+        # An EXISTING thread's identity wins over a phone. The phone is mined from free
+        # message text (see ingest.extract_phone) — a lead who types SOMEONE ELSE'S number
+        # used to re-point their live conversation onto that number's owner (a hijack /
+        # data-loss path). So phone-match merge only runs for a BRAND-NEW thread (genuine
+        # first contact, the intended cross-channel merge); on an existing thread we keep
+        # the thread's own lead and only backfill its empty phone.
         if thread is not None:
             lead = await self.leads.get(thread.lead_id)
             if lead is not None:
                 self._backfill(lead, phone, display_name, ig_user_id, ig_username, avatar_url)
                 return lead
+        if phone:
+            existing = await self.leads.by_phone(phone)
+            if existing is not None:
+                self._backfill(existing, phone, display_name, ig_user_id, ig_username, avatar_url)
+                return existing
         return await self.leads.add(
             Lead(
                 display_name=display_name,
