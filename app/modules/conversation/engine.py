@@ -132,7 +132,8 @@ class DecisionEngine:
         capability picks the model tier (see routing.pick_capability) — default stays smart
         so any caller that doesn't route keeps the strong model."""
         context = await self.knowledge.knowledge_context(
-            ctx.thread.product_slug, query=_retrieval_query(ctx.dialog), thread_id=thread_id)
+            ctx.thread.product_slug, query=_retrieval_query(ctx.dialog), thread_id=thread_id,
+            light=workflow == "followup")
         self.last_context = context  # reply-guard checks the draft against exactly this
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(

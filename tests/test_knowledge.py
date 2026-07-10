@@ -84,3 +84,55 @@ async def test_knowledge_context_lang_override(db_session):
     svc = KnowledgeService(s, a)
     ctx = await svc.knowledge_context(None, lang="en")
     assert "lang=en" in ctx  # explicit param wins over Branch.lang
+
+
+class _FixedChunkLLM:
+    """Returns identical embeddings, so every chunk 'matches' any query — retrieval order
+    is by DB order, and the test controls total volume purely by chunk count/size."""
+
+    async def chat(self, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN201
+        raise NotImplementedError
+
+    async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201
+        return [[1.0] for _ in texts]
+
+
+async def test_knowledge_context_trims_rag_chunks_to_the_char_budget(db_session):
+    """Past ~30k chars the cheap JSON-mode providers return empty bodies instead of JSON —
+    the ceiling drops the lowest-ranked chunks so the assembled context always fits."""
+    from app.adapters.db.models import KnowledgeChunk
+    from app.modules.knowledge import service as ksvc
+
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona " * 100, [("vibe", "Vibe", "card " * 200)])
+    # 40 fat chunks × ~900 chars ≈ 36k — far past the 16k budget
+    for i in range(40):
+        s.add(KnowledgeChunk(branch_id=a, source_type="doc", source_slug=f"d{i}",
+                             title=f"Doc {i}", seq=0, text="z" * 900, embedding="[1.0]"))
+    await s.flush()
+    svc = KnowledgeService(s, a, llm=_FixedChunkLLM())
+    ctx = await svc.knowledge_context("vibe", query="anything")
+    assert len(ctx) <= ksvc._CTX_CHAR_BUDGET
+    assert "focus product=vibe" in ctx      # persona/focus/catalog never trimmed
+    assert "[relevant knowledge]" in ctx    # some chunks still made it in
+
+
+async def test_knowledge_context_light_retrieves_fewer_chunks(db_session):
+    """workflow='followup' passes light=True — a nudge leans on the focus card, not broad
+    recall, so it asks the index for fewer chunks (cheaper and smaller every time)."""
+    from app.adapters.db.models import KnowledgeChunk
+    from app.modules.knowledge import service as ksvc
+
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona", [("vibe", "Vibe", "card")])
+    for i in range(12):
+        s.add(KnowledgeChunk(branch_id=a, source_type="doc", source_slug=f"d{i}",
+                             title=f"Doc {i}", seq=0, text=f"chunk {i}", embedding="[1.0]"))
+    await s.flush()
+    svc = KnowledgeService(s, a, llm=_FixedChunkLLM())
+    full = await svc.knowledge_context("vibe", query="anything")
+    light = await svc.knowledge_context("vibe", query="anything", light=True)
+    assert light.count("--- Doc") == ksvc._FOLLOWUP_RAG_K
+    assert full.count("--- Doc") > light.count("--- Doc")
