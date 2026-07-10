@@ -186,6 +186,13 @@ class Settings(BaseSettings):
                                   "thread (the top-10 longest threads carried 5-13k chars in "
                                   "their newest 30 messages) while the newest turns stay "
                                   "verbatim for the dedup/don't-repeat checks")
+    knowledge_context_char_budget: int = Field(
+        default=16000, description="char ceiling on the assembled KB context (persona + focus "
+                                   "card + catalog + RAG chunks) — lowest-ranked RAG chunks "
+                                   "are dropped to fit. Past ~30k chars the cheap JSON-mode "
+                                   "providers stop returning valid JSON at all (verified live "
+                                   "on deepseek), so an oversized context buys empty "
+                                   "responses, not recall")
     translate_max_tokens: int = Field(
         default=1500, description="output token budget for a per-bubble translation (Cyrillic "
                                   "is token-heavy)")
