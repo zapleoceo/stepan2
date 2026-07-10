@@ -226,14 +226,28 @@ class InstagrapiTransport:
             "avatar_url": str(getattr(info, "profile_pic_url", "") or "") or None,
         }
 
+    _MEDIA_MAX_BYTES = 60 * 1024 * 1024  # 60 MB — a DM video well past this is dropped
+    _MEDIA_TIMEOUT = 90.0                 # a large video CDN fetch needs more than 30s
+
     async def download_media(self, url: str) -> bytes:
-        """Fetch raw media bytes from a CDN url (instagrapi item ids not needed here)."""
+        """Stream raw media bytes from a CDN url, bounded so a huge video can't OOM the
+        worker (the old `r.content` loaded the whole file into memory with a 30s cap)."""
         import httpx  # lazy: real transport only, never imported by unit tests
 
-        async with httpx.AsyncClient(timeout=30) as c:
-            r = await c.get(url)
-        r.raise_for_status()
-        return r.content
+        # connect kept short; read stretched for a big video over a slow CDN.
+        timeout = httpx.Timeout(self._MEDIA_TIMEOUT, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as c, \
+                c.stream("GET", url) as r:
+            r.raise_for_status()
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in r.aiter_bytes():
+                total += len(chunk)
+                if total > self._MEDIA_MAX_BYTES:
+                    raise ValueError(
+                        f"media exceeds {self._MEDIA_MAX_BYTES} bytes — refusing to buffer")
+                chunks.append(chunk)
+        return b"".join(chunks)
 
 
 class EvolutionTransport:
@@ -332,6 +346,10 @@ class GraphTransportHTTP:
                 f"/{self._account_id}/messages",
                 json={"recipient": {"id": recipient_id}, "message": {"text": text}},
             )
+        # A 4xx/5xx from Graph must raise (like fetch_conversations/token_debug do) so the
+        # adapter maps it to SendResult(ok=False) — without this, r.json() on an error
+        # envelope returned a message_id=None "success", silently dropping the send.
+        r.raise_for_status()
         data = r.json()
         return {"message_id": data.get("message_id"), "error": data.get("error")}
 

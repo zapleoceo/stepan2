@@ -24,6 +24,9 @@ _DEFAULT_TIMEOUT = httpx.Timeout(
 _SLOW_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_slow_s, write=10.0, pool=5.0)
 _SLOW_CAPS = frozenset({"chat:smart"})
+# chat:deep is submit+poll; a transient poll failure (502/timeout) must not discard the
+# whole multi-minute job — tolerate this many consecutive poll errors before giving up.
+_DEEP_POLL_MAX_ERRORS = 5
 
 # chat:deep is submit+poll now (2026-07-05, see BrokerLLM.chat_deep) — the broker itself
 # made /v1/chat?capability=chat:deep return 400 unconditionally, because a single blocking
@@ -145,14 +148,30 @@ class BrokerLLM:
                 job_id, poll_after_s = job["job_id"], job.get("poll_after_s") or 5
 
                 deadline = start + settings().llm_read_timeout_deep_s
+                poll_errors = 0
                 while True:
                     await asyncio.sleep(poll_after_s)
-                    pr = await c.get(
-                        f"{self._url}/v1/deep/{job_id}",
-                        headers={"X-Project-Key": self._key},
-                    )
-                    pr.raise_for_status()
-                    d = pr.json()
+                    try:
+                        pr = await c.get(
+                            f"{self._url}/v1/deep/{job_id}",
+                            headers={"X-Project-Key": self._key},
+                        )
+                        pr.raise_for_status()
+                        d = pr.json()
+                    except (httpx.HTTPError, KeyError, ValueError) as exc:
+                        # A transient poll error (502/timeout) must NOT discard an 8-minute
+                        # job — tolerate a few in a row, only give up on a run of them.
+                        poll_errors += 1
+                        if poll_errors > _DEEP_POLL_MAX_ERRORS:
+                            raise
+                        _log.warning("chat:deep poll error %d/%d job=%s: %s",
+                                       poll_errors, _DEEP_POLL_MAX_ERRORS, job_id, exc)
+                        if time.perf_counter() > deadline:
+                            raise TimeoutError(
+                                f"chat:deep job {job_id} unresolved after "
+                                f"{settings().llm_read_timeout_deep_s:.0f}s") from exc
+                        continue
+                    poll_errors = 0  # a clean poll resets the run
                     if d["status"] == "done":
                         break
                     if d["status"] == "error":
