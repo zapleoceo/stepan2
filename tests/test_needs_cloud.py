@@ -91,6 +91,18 @@ async def test_unchanged_leads_are_not_reclassified(db_session) -> None:
     assert llm.calls == calls_after_first
 
 
+async def test_garbage_script_label_is_rejected(db_session) -> None:
+    bid = await _branch(db_session)
+    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal", "aneh"])))
+    await db_session.flush()
+    # the model drifts to Arabic for one phrase — that label must be dropped, not made a category
+    rules = {"mahal": "Цена", "aneh": "برمجة"}
+    await classify_branch(db_session, bid, _FakeLLM(rules))
+    labels = [e.label for e in (await db_session.execute(
+        select(NeedEntity).where(NeedEntity.branch_id == bid))).scalars()]
+    assert labels == ["Цена"]  # only the clean Russian label survived
+
+
 async def test_snapshot_freezes_current_counts(db_session) -> None:
     bid = await _branch(db_session)
     db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
