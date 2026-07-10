@@ -114,7 +114,7 @@ class BrokerLLM:
         return await self._submit_and_poll(
             body, capability="chat:deep", workflow=workflow,
             thread_id=thread_id, branch_id=branch_id,
-            budget_s=settings().llm_read_timeout_deep_s, on_403=_fallback_to_smart)
+            budget_s=_poll_budget_s("chat:deep"), on_403=_fallback_to_smart)
 
     async def _submit_and_poll(
         self,
@@ -159,7 +159,10 @@ class BrokerLLM:
                 "elapsed_ms": int((time.perf_counter() - start) * 1000),
                 "request_id": d.get("request_id") or d.get("id"),
             }
-            reply_text = d["text"]
+            # A done job may legitimately have empty/absent text (e.g. a tiny max_tokens) —
+            # treat it as "" (a successful zero-length reply), NOT a KeyError that would
+            # discard the cost/tokens already in meta and mislabel a billed call as failed.
+            reply_text = d.get("text") or ""
         except Exception as exc:
             await _log_call(capability, workflow or "chat", thread_id, branch_id,
                             {"elapsed_ms": int((time.perf_counter() - start) * 1000)},

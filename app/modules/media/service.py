@@ -83,7 +83,17 @@ class MediaService:
                 continue
             try:
                 data = await downloader.download_media(stub.url)
-            except Exception as exc:  # noqa: BLE001 — keep flag, retry next tick
+            except ValueError as exc:
+                # A permanent reject (e.g. the transport's size cap — a video too big to
+                # buffer): clear the flag so we don't re-stream it every tick forever.
+                logger.warning(
+                    "media permanently skipped branch=%d msg=%d: %s",
+                    self.branch_id, msg.id, exc)
+                msg.media_pending = False
+                self.session.add(msg)
+                await self.session.flush()
+                continue
+            except Exception as exc:  # noqa: BLE001 — transient: keep flag, retry next tick
                 logger.warning(
                     "media download failed branch=%d msg=%d: %s",
                     self.branch_id, msg.id, exc)

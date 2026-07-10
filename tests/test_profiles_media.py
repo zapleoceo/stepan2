@@ -167,6 +167,21 @@ async def test_backfill_failure_keeps_pending(db_session) -> None:
     assert asset is not None and asset.data is None  # stub kept, undownloaded
 
 
+async def test_backfill_permanent_reject_clears_flag(db_session) -> None:
+    """A ValueError (e.g. the transport's size cap on a huge video) is permanent — the flag
+    is cleared so it isn't re-streamed every tick forever, unlike a transient failure."""
+    class _TooBigDownloader:
+        async def download_media(self, url: str) -> bytes:
+            raise ValueError("media exceeds 62914560 bytes — refusing to buffer")
+
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="m1")
+    assert await MediaService(db_session, bid).backfill(cid, _TooBigDownloader(), 20) == 0
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.media_pending is False  # cleared → won't retry the oversized media
+
+
 async def test_backfill_noop_when_nothing_flagged(db_session) -> None:
     bid = await _branch(db_session)
     cid = await _channel(db_session, bid)

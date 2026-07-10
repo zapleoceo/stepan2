@@ -38,26 +38,43 @@ class McpBranchForbidden(Exception):
     """A branch-scoped MCP token tried to reach a branch it isn't allowed to."""
 
 
-def mcp_effective_branch(requested: int | None) -> int | None:
-    """The branch the CURRENT MCP request (via contextvar) may act on. Universal token →
-    honour `requested`; branch-scoped token → its own branch, rejecting a mismatch. Used by
-    the mounted FastMCP tools, which can't pass the authz explicitly."""
-    authz = current_mcp_authz()
-    branch = authz.branch_id if authz is not None else None
-    if branch is None:
+# ── the ONE scope rule — both surfaces (HTTP routes + FastMCP tools) wrap these ─────
+def scope_effective_branch(authz_branch: int | None, requested: int | None) -> int | None:
+    """The branch a request may act on. Universal (authz_branch=None) → honour `requested`;
+    branch-scoped → its own branch, rejecting a mismatching `requested`. The single source
+    of truth for the scope rule; _routes_mcp and the FastMCP contextvar helpers both wrap
+    it so the two surfaces can never drift."""
+    if authz_branch is None:
         return requested
-    if requested is not None and requested != branch:
+    if requested is not None and requested != authz_branch:
         raise McpBranchForbidden(
             "this token is limited to a single branch and cannot access another")
-    return branch
+    return authz_branch
+
+
+def scope_lead_allowed(authz_branch: int | None, lead_branch: int | None) -> bool:
+    """A universal token may act on any lead; a branch-scoped token only on its own branch."""
+    return authz_branch is None or lead_branch == authz_branch
+
+
+def mcp_effective_branch(requested: int | None) -> int | None:
+    """scope_effective_branch for the CURRENT MCP request (authz from the contextvar). Used
+    by the mounted FastMCP tools, which can't pass the authz explicitly. Fail-CLOSED: if no
+    authz is in context (a guarded tool should always have one), deny rather than default
+    to universal — the isolation model's trust anchor."""
+    authz = current_mcp_authz()
+    if authz is None:
+        raise McpBranchForbidden("no MCP authorization in context")
+    return scope_effective_branch(authz.branch_id, requested)
 
 
 def mcp_guard_lead_branch(lead: object) -> None:
     """Defence in depth for the FastMCP tools: a branch-scoped token must never act on a
-    lead from another branch (a phone can resolve cross-branch)."""
+    lead from another branch (a phone can resolve cross-branch). Fail-closed on missing authz."""
     authz = current_mcp_authz()
-    branch = authz.branch_id if authz is not None else None
-    if branch is not None and getattr(lead, "branch_id", None) != branch:
+    if authz is None:
+        raise McpBranchForbidden("no MCP authorization in context")
+    if not scope_lead_allowed(authz.branch_id, getattr(lead, "branch_id", None)):
         raise McpBranchForbidden("no lead with that phone in this token's branch")
 
 

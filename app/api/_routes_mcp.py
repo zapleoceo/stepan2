@@ -14,7 +14,13 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.modules.conversation.sim import SimService
 from app.modules.leads import ops
-from app.modules.mcp.tokens import McpAuthz, authorize_mcp
+from app.modules.mcp.tokens import (
+    McpAuthz,
+    McpBranchForbidden,
+    authorize_mcp,
+    scope_effective_branch,
+    scope_lead_allowed,
+)
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
 
@@ -30,23 +36,18 @@ async def _auth(authorization: str | None) -> McpAuthz:
 
 
 def _effective_branch(authz: McpAuthz, requested: int | None) -> int | None:
-    """Resolve the branch a request may act on, given the token's scope.
-    - Universal token (branch_id=None): honour the caller's requested branch (or all).
-    - Branch-scoped token: the caller may only address that branch — a mismatching
-      requested branch is a 403, an omitted one defaults to the token's branch."""
-    if authz.branch_id is None:
-        return requested
-    if requested is not None and requested != authz.branch_id:
-        raise HTTPException(
-            status_code=403,
-            detail="this token is limited to a single branch and cannot access another")
-    return authz.branch_id
+    """The branch a request may act on — the shared scope rule (scope_effective_branch),
+    translating its McpBranchForbidden into an HTTP 403 for this REST surface."""
+    try:
+        return scope_effective_branch(authz.branch_id, requested)
+    except McpBranchForbidden as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 def _guard_lead_branch(authz: McpAuthz, lead) -> None:  # noqa: ANN001
-    """Backstop: even after branch-scoped find, never let a branch-scoped token act on a
-    lead from another branch (defence in depth against a phone that resolves cross-branch)."""
-    if authz.branch_id is not None and lead.branch_id != authz.branch_id:
+    """Backstop: even after a branch-scoped find, never let a branch-scoped token act on a
+    lead from another branch (a phone can resolve cross-branch)."""
+    if not scope_lead_allowed(authz.branch_id, lead.branch_id):
         raise HTTPException(status_code=404, detail="no lead with that phone in this branch")
 
 

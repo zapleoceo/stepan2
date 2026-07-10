@@ -327,14 +327,25 @@ async def _send_thread(
     return 1 if await sender.send_next(thread_id) is not None else 0
 
 
-# IG's private-API unsend call has been observed taking 40-90s (likely IG-side
-# throttling after a send burst) with no internal timeout of its own — batching many
-# threads' worth of revokes in one tick reliably blows past ARQ's 120s job_timeout.
-# Revoking is idempotent-ish (a retried revoke of an already-gone message just fails
-# gracefully) so a kill+retry here is not the correctness hazard reply/send batching
-# was, but it wastes the whole tick on nothing — cap it so at least SOME progress
-# commits every cycle instead of none.
+# IG's private-API unsend is slow (observed 40-90s under IG-side throttling); each single
+# revoke is bounded by DeletionService's own asyncio.wait_for, but a thread with many
+# pending messages can still take long, so batching many threads' revokes in one tick can
+# overrun ARQ's worker_job_timeout_s. Revoking is idempotent-ish (a retried revoke of an
+# already-gone message fails gracefully) and each thread now commits in its OWN transaction
+# (a kill+retry can't roll back a committed unsend), but the per-TICK cap still bounds how
+# many threads a single tick attempts so at least SOME progress commits every cycle.
 _DELETION_THREAD_CAP = settings().deletion_thread_cap
+
+
+async def _try_build_port(session: AsyncSession, channel: Channel, capability: str):  # noqa: ANN202
+    """Build the channel port, or None (logged) when it can't be built or lacks `capability`
+    — the shared skip path for the maintenance crons (deletions/profiles/media)."""
+    try:
+        port = await wiring.build_channel_port(session, channel)
+    except (NotImplementedError, KeyError, RuntimeError) as exc:
+        logger.warning("skip channel %s: %s", channel.id, exc)
+        return None
+    return port if hasattr(port, capability) else None
 
 
 async def process_deletions(ctx: dict[str, Any]) -> int:
@@ -386,14 +397,11 @@ async def _process_one_deletion(branch_id: int, channel: Channel, ext_thread: st
     from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
     try:
         async with session_scope() as session:
-            port = await wiring.build_channel_port(session, channel)
-            if not hasattr(port, "revoke"):
-                return 0  # channel doesn't support unsend
+            port = await _try_build_port(session, channel, "revoke")
+            if port is None:
+                return 0  # can't build / channel doesn't support unsend
             return await DeletionService(session, branch_id).process(
                 channel.id, ext_thread, port)  # type: ignore[arg-type]
-    except (NotImplementedError, KeyError, RuntimeError) as exc:
-        logger.warning("skip unsend channel=%s: %s", channel.id, exc)
-        return 0
     except Exception:
         logger.exception(
             "unsend failed branch=%d channel=%s thread=%s", branch_id, channel.id, ext_thread)
@@ -447,13 +455,9 @@ async def refresh_profiles(ctx: dict[str, Any]) -> int:
             async with session_scope() as session:
                 svc = ProfileService(session, branch.id)
                 for channel in await wiring.active_channels(session, branch.id):
-                    try:
-                        port = await wiring.build_channel_port(session, channel)
-                    except (NotImplementedError, KeyError, RuntimeError) as exc:
-                        logger.warning("skip profiles channel %s: %s", channel.id, exc)
-                        continue
-                    if not hasattr(port, "fetch_profile"):
-                        continue  # channel kind has no profile stats
+                    port = await _try_build_port(session, channel, "fetch_profile")
+                    if port is None:
+                        continue  # can't build / channel kind has no profile stats
                     refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
         except Exception:
             logger.exception("refresh_profiles: branch=%s failed", branch.id)
@@ -481,13 +485,9 @@ async def backfill_media(ctx: dict[str, Any]) -> int:
                     assert channel.id is not None
                     if not await svc.pending(channel.id, limit=1):
                         continue  # nothing flagged — skip building the port
-                    try:
-                        port = await wiring.build_channel_port(session, channel)
-                    except (NotImplementedError, KeyError, RuntimeError) as exc:
-                        logger.warning("skip media channel %s: %s", channel.id, exc)
-                        continue
-                    if not hasattr(port, "download_media"):
-                        continue  # channel kind can't download media
+                    port = await _try_build_port(session, channel, "download_media")
+                    if port is None:
+                        continue  # can't build / channel kind can't download media
                     done += await svc.backfill(
                         channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
         except Exception:

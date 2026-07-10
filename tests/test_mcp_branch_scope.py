@@ -82,3 +82,32 @@ def test_mcp_guard_lead_branch_contextvar() -> None:
         mcp_guard_lead_branch(SimpleNamespace(branch_id=5))
         with pytest.raises(McpBranchForbidden):
             mcp_guard_lead_branch(SimpleNamespace(branch_id=7))
+
+
+# ── fail-CLOSED: no authz in context → deny, never default to universal ─────
+
+def test_mcp_effective_branch_fails_closed_without_authz() -> None:
+    """The trust anchor: if a tool somehow runs with no authz in context, deny — a missing
+    authz must NOT be treated as a universal (all-branch) token."""
+    assert _mcp_auth.current_mcp_authz() is None  # nothing set here
+    with pytest.raises(McpBranchForbidden):
+        mcp_effective_branch(None)
+    with pytest.raises(McpBranchForbidden):
+        mcp_guard_lead_branch(SimpleNamespace(branch_id=1))
+
+
+# ── shared pure predicate (single source of truth for both surfaces) ─────────
+
+def test_scope_predicates() -> None:
+    from app.modules.mcp.tokens import scope_effective_branch, scope_lead_allowed
+    # universal
+    assert scope_effective_branch(None, None) is None
+    assert scope_effective_branch(None, 7) == 7
+    assert scope_lead_allowed(None, 99) is True
+    # scoped
+    assert scope_effective_branch(3, None) == 3
+    assert scope_effective_branch(3, 3) == 3
+    with pytest.raises(McpBranchForbidden):
+        scope_effective_branch(3, 4)
+    assert scope_lead_allowed(3, 3) is True
+    assert scope_lead_allowed(3, 4) is False

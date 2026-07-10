@@ -7,6 +7,8 @@ from .tokens import (
     hash_token,
     mcp_effective_branch,
     mcp_guard_lead_branch,
+    scope_effective_branch,
+    scope_lead_allowed,
 )
 
 __all__ = [
@@ -17,4 +19,6 @@ __all__ = [
     "hash_token",
     "mcp_effective_branch",
     "mcp_guard_lead_branch",
+    "scope_effective_branch",
+    "scope_lead_allowed",
 ]

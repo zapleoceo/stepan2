@@ -285,3 +285,44 @@ async def test_job_client_uses_short_http_timeout(monkeypatch) -> None:
     await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:smart")
     assert len(seen) == 1
     assert seen[0].read == 30.0 and seen[0].connect == 5.0
+
+
+async def test_done_job_with_no_text_is_ok_empty_not_a_failure(monkeypatch) -> None:
+    """A done job that returns no text (e.g. tiny max_tokens) is a successful empty reply —
+    it must NOT become a KeyError that discards the billed cost/tokens and logs a failure."""
+    done_no_text = _FakeResp({"status": "done", "model": "m", "tokens_in": 3,
+                              "tokens_out": 0, "provider": "cerebras", "cost_usd": 0.004,
+                              "request_id": "r"})
+    client = _JobClient([_job(1)], [done_no_text])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    text, meta = await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+    assert text == ""                       # empty, not a crash
+    assert meta["cost_usd"] == 0.004        # cost preserved, not discarded
+    assert calls[-1]["ok"] is True          # logged as success, not failure
+
+
+async def test_done_job_with_null_text_is_ok_empty(monkeypatch) -> None:
+    done_null = _FakeResp({"status": "done", "text": None, "model": "m", "provider": "p",
+                           "cost_usd": 0.0, "request_id": "r"})
+    client = _JobClient([_job(1)], [done_null])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    _capture_log(monkeypatch)
+    text, _ = await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+    assert text == ""
+
+
+async def test_poll_gives_up_after_too_many_transient_errors(monkeypatch) -> None:
+    """More than _POLL_MAX_ERRORS consecutive poll errors → re-raise (don't poll forever)."""
+    class _AlwaysFlakyPoll(_JobClient):
+        def __init__(self) -> None:
+            super().__init__([_job(1)])
+
+        async def get(self, *a: object, **k: object) -> _FakeResp:
+            raise httpx.ConnectError("always down")
+
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _AlwaysFlakyPoll())
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(httpx.ConnectError):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+    assert calls[-1]["ok"] is False

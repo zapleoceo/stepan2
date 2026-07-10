@@ -18,9 +18,11 @@ class LLMPort(Protocol):
         workflow: str | None = None,
         thread_id: int | None = None,
         branch_id: int | None = None,
+        read_timeout_s: float | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Returns (text, meta). meta carries cost_usd / model / tokens for budgeting.
         workflow/thread_id/branch_id are audit context for broker_log (optional).
+        read_timeout_s overrides the total poll budget for this one call (optional).
 
         The broker adapter runs every chat capability over the async job queue (submit +
         poll) so a slow provider can't 504 a held connection — the caller never sees the

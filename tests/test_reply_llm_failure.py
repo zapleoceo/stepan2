@@ -109,3 +109,28 @@ async def test_worker_reply_thread_returns_false_when_llm_raises(monkeypatch) ->
 
     result = await worker_main._reply_thread(1, 42, _RaisingLLM())
     assert result is False
+
+
+class _BadJsonLLM:
+    """Returns unparseable text for EVERY chat call (both fast and the smart escalation)."""
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        self.calls += 1
+        return "not json at all", {"model": "m", "cost_usd": 0.0}
+
+    async def embed(self, texts):  # noqa: ANN001, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_decide_returns_none_when_both_fast_and_smart_unparseable(db_session) -> None:
+    """A double-unparseable decision (fast fails → smart escalation also fails) must degrade
+    to None (caller skips + retries), NOT raise ValueError and abort the reply job."""
+    bid, tid, _lead, _thread = await _world(db_session)
+    llm = _BadJsonLLM()
+    svc = ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid),
+                       branch_settings=_parse({}))
+    decision = await svc.decide(tid)
+    assert decision is None
+    assert llm.calls >= 2  # fast attempt + smart escalation both tried

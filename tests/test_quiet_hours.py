@@ -160,3 +160,39 @@ async def test_one_thread_failing_does_not_discard_others_this_cycle(
     # — thread 2's failure didn't prevent thread 3's own independent transaction from
     # opening and succeeding
     assert session_opens == 1 + 1 + 3
+
+
+async def test_process_deletions_gated_by_platform_kill_switch(monkeypatch) -> None:
+    """An unsend is a real outbound IG write — the platform kill-switch must stop it:
+    process_deletions returns 0 and never enumerates branches when the switch is off."""
+    enumerated: list[int] = []
+
+    async def _platform_off(_session) -> bool:
+        return False
+
+    async def _branches_spy(_session):
+        enumerated.append(1)
+        return []
+
+    monkeypatch.setattr(worker_main, "_platform_agent_on", _platform_off)
+    monkeypatch.setattr(wiring, "active_branches", _branches_spy)
+    assert await worker_main.process_deletions({}) == 0
+    assert enumerated == []  # short-circuited before touching any branch
+
+
+async def test_refresh_and_backfill_gated_by_platform_kill_switch(monkeypatch) -> None:
+    """Both IG-private-API maintenance crons must also stop when the platform switch is off."""
+    seen: list[str] = []
+
+    async def _platform_off(_session) -> bool:
+        return False
+
+    async def _branches_spy(_session):
+        seen.append("branches")
+        return []
+
+    monkeypatch.setattr(worker_main, "_platform_agent_on", _platform_off)
+    monkeypatch.setattr(wiring, "active_branches", _branches_spy)
+    assert await worker_main.refresh_profiles({}) == 0
+    assert await worker_main.backfill_media({}) == 0
+    assert seen == []  # neither enumerated branches

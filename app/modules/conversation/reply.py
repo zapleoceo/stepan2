@@ -673,6 +673,11 @@ class ReplyService:
         now = datetime.now(UTC).replace(tzinfo=None)
         lead.agent_enabled = False
         lead.handed_off_at = now
+        # A genuine (non-openhouse) hand-off must not inherit a stale 'openhouse' marker
+        # left by an earlier RSVP — the enrollment is the real outcome, so drop the stale
+        # marker and re-derive the deal subtype (else the deal reports as ready_openhouse).
+        if lead.ready_subtype == "openhouse" and subtype != "openhouse":
+            lead.ready_subtype = None
         lead.ready_subtype = lead.ready_subtype or subtype or "deal"
         kind = f"ready_{lead.ready_subtype}"
         alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)

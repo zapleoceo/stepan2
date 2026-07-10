@@ -78,12 +78,17 @@ async def mcp_token_create(
     if scope not in ("read", "write"):
         scope = "read"
     bid: int | None = None
-    if branch_id.strip().isdigit():
+    chose_branch = bool(branch_id.strip())  # empty = the operator picked "all branches"
+    if chose_branch and branch_id.strip().isdigit():
         async with session_scope() as session:
             exists = (await session.execute(
                 text("SELECT 1 FROM branch WHERE id = :b"),
                 {"b": int(branch_id)})).first()
-        bid = int(branch_id) if exists else None  # ignore an unknown/forged branch id
+        bid = int(branch_id) if exists else None
+    # Fail CLOSED: if a branch WAS chosen but doesn't resolve (stale/typo/forged), refuse —
+    # never silently mint a universal (all-branch) token, which would grant MORE access.
+    if chose_branch and bid is None:
+        return await _render(request)
     async with session_scope() as session:
         raw, _ = await McpTokenService(session).create(label, scope, bid)
     return await _render(request, new_token=raw)
