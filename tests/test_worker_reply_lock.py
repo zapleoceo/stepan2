@@ -17,7 +17,7 @@ async def test_try_lock_thread_is_noop_off_postgres(db_session) -> None:
 
 
 async def test_reply_thread_skips_without_calling_llm_when_lock_denied(monkeypatch) -> None:
-    """When another tick already holds the thread's lock, _reply_thread must return False
+    """When another job already holds the thread's lock, generate_one_reply must return False
     before ever calling the LLM — that's the whole point of checking the lock first."""
 
     class _NeverCalledLLM:
@@ -31,10 +31,15 @@ async def test_reply_thread_skips_without_calling_llm_when_lock_denied(monkeypat
     async def _denied(_session, _thread_id) -> bool:
         return False
 
+    async def _platform_on(_session) -> bool:
+        return True
+
     monkeypatch.setattr(worker_main, "session_scope", _fake_scope)
+    monkeypatch.setattr(worker_main, "_platform_agent_on", _platform_on)
+    monkeypatch.setattr(worker_main, "BrokerLLM", _NeverCalledLLM)
     monkeypatch.setattr(wiring, "try_lock_thread", _denied)
 
-    result = await worker_main._reply_thread(1, 42, _NeverCalledLLM())
+    result = await worker_main.generate_one_reply({}, 1, 42)
     assert result is False
 
 

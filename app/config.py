@@ -82,6 +82,22 @@ class Settings(BaseSettings):
         default=20, description="SQLAlchemy max_overflow (burst connections above pool_size)")
     db_pool_timeout_s: float = Field(
         default=30.0, description="seconds to wait for a pooled connection before TimeoutError")
+    # ── Per-thread reply jobs ───────────────────────────────────────────────────
+    # reply_pending only DISPATCHES: it enqueues one generate_one_reply job per awaiting
+    # thread (deduped by _job_id=reply:{thread_id}). Each job polls the broker to completion
+    # on its OWN timeout, so a slow generation no longer gets killed by the shared tick budget
+    # (the head-of-line + timeout→retry→double-bill problem of the old batch loop).
+    reply_broker_budget_s: float = Field(
+        default=150.0, description="how long ONE reply waits for the broker per chat call before "
+                                   "giving up — generous (vs the old 90s) so a slow provider "
+                                   "completes instead of timing out and re-billing on retry")
+    reply_job_timeout_s: int = Field(
+        default=420, description="per-reply ARQ job kill deadline; must exceed the worst single "
+                                 "thread: initial chat:smart + a guard regen (each up to "
+                                 "reply_broker_budget_s) + a chat:fast verify")
+    reply_dispatch_cap: int = Field(
+        default=100, description="max threads the dispatcher enqueues per tick; real concurrency "
+                                 "is bounded by worker_max_jobs, this just caps one tick's fan-out")
     worker_job_timeout_s: int = Field(
         default=240, description="per-job kill deadline; every batch cap below is sized to "
                                  "finish inside this. Must comfortably clear a single thread's "

@@ -36,7 +36,7 @@ async def test_reply_pending_ignores_quiet_hours(db_session, monkeypatch) -> Non
     async def _fake_get_settings(_session, _branch_id):
         return _ALWAYS_QUIET
 
-    async def _fake_threads_awaiting_reply(_session, branch_id):
+    async def _fake_threads_awaiting_reply(_session, branch_id, limit=None):  # noqa: ANN001
         called.append(branch_id)
         return []  # stop here — proves reply_pending reached past the quiet-hour gate
 
@@ -45,7 +45,7 @@ async def test_reply_pending_ignores_quiet_hours(db_session, monkeypatch) -> Non
     monkeypatch.setattr(worker_main, "get_settings", _fake_get_settings)
     monkeypatch.setattr(wiring, "threads_awaiting_reply", _fake_threads_awaiting_reply)
 
-    await worker_main.reply_pending({})
+    await worker_main.reply_pending({"redis": object()})  # no threads → redis never touched
     assert called == [b.id]  # reached threads_awaiting_reply despite is_quiet_hour()=True
 
 

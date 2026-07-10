@@ -67,9 +67,11 @@ _AWAITING_REPLY_MAX_AGE = timedelta(days=settings().awaiting_reply_max_age_days)
 _REPLY_BATCH_CAP = settings().reply_batch_cap
 
 
-async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[int]:
+async def threads_awaiting_reply(
+    session: AsyncSession, branch_id: int, limit: int | None = None,
+) -> list[int]:
     """Thread ids with a fresh inbound the bot still owns (lead spoke last, not silent),
-    oldest-waiting-first, capped per tick (see _REPLY_BATCH_CAP).
+    oldest-waiting-first, capped at `limit` (defaults to _REPLY_BATCH_CAP).
 
     Per-lead agent_enabled gates manager takeovers; the NOT-EXISTS pending guard stops
     a second generation while a queued reply waits out its human-typing delay."""
@@ -94,7 +96,7 @@ async def threads_awaiting_reply(session: AsyncSession, branch_id: int) -> list[
             ~pending,
         )
         .order_by(ChannelThread.last_in_at.asc())  # type: ignore[union-attr]
-        .limit(_REPLY_BATCH_CAP)
+        .limit(limit if limit is not None else _REPLY_BATCH_CAP)
     )
     return [tid for tid in rows.scalars().all() if tid is not None]
 

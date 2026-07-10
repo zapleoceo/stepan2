@@ -12,7 +12,7 @@ import random
 from datetime import UTC, datetime
 from typing import Any
 
-from arq import cron
+from arq import cron, func
 from arq.connections import RedisSettings
 from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -151,16 +151,19 @@ async def _platform_agent_on(session: AsyncSession) -> bool:
 
 
 async def reply_pending(ctx: dict[str, Any]) -> int:
-    """Decide and enqueue the agent reply for every thread awaiting one. Returns enqueued.
+    """DISPATCHER: enqueue one generate_one_reply job per awaiting thread. Returns enqueued.
 
-    Quiet hours do NOT apply here — they throttle proactive follow-ups (see
-    schedule_followups), never a reply to something the lead already said. A lead who
-    writes at 3am still gets answered; only the BOT-initiated nudge waits for daytime.
+    Does NO broker work itself — it just finds threads (lead spoke last, bot-owned, no pending
+    reply) and hands each to its own ARQ job. Deduped by _job_id=reply:{thread_id}, so a thread
+    already being generated is not double-enqueued; concurrency is bounded by worker_max_jobs.
+    This replaces the old batch loop where one slow generation blocked the other threads in the
+    tick and a >budget generation got killed and retried (double-billed).
 
-    Each thread runs in its OWN transaction so a poison thread (bad LLM JSON, DB error)
-    can't roll back replies already committed for other threads/branches this tick."""
+    Quiet hours do NOT apply here — they throttle proactive follow-ups, never a reply to
+    something the lead already said. A lead who writes at 3am still gets answered."""
     enqueued = 0
-    llm = BrokerLLM()
+    redis = ctx["redis"]
+    cap = settings().reply_dispatch_cap
     async with session_scope() as session:
         if not await _platform_agent_on(session):
             logger.info("platform agent OFF — skip reply_pending for all branches")
@@ -174,33 +177,40 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
                 if not cfg.agent_enabled:
                     logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
                     continue
-                thread_ids = await wiring.threads_awaiting_reply(session, branch.id)
+                thread_ids = await wiring.threads_awaiting_reply(session, branch.id, limit=cap)
         except Exception:
-            # An error here (not inside _reply_thread's own try) used to propagate out of
-            # reply_pending entirely, aborting every remaining branch for the tick and making
-            # ARQ retry the WHOLE job from scratch — the retry's fresh thread_ids query is
-            # itself safe (a thread already replied-to drops out of it), but every branch
-            # AFTER the one that errored had to wait a full extra tick for no reason. Isolate
-            # per branch, same as _reply_thread isolates per thread.
-            logger.exception("reply_pending: branch=%s bookkeeping failed, skipping", branch.id)
+            logger.exception("reply_pending: branch=%s dispatch failed, skipping", branch.id)
             continue
         for thread_id in thread_ids:
-            if await _reply_thread(branch.id, thread_id, llm):
+            job = await redis.enqueue_job(
+                "generate_one_reply", branch.id, thread_id,
+                _job_id=f"reply:{thread_id}")  # None → a job for this thread is already in flight
+            if job is not None:
                 enqueued += 1
     return enqueued
 
 
-async def _reply_thread(branch_id: int, thread_id: int, llm: BrokerLLM) -> bool:
-    """One thread's decide+enqueue in its own transaction; isolate failures per thread."""
+async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int) -> bool:
+    """One thread's decide+enqueue, as its OWN ARQ job so it can poll the broker to completion
+    on its own timeout (settings.reply_job_timeout_s) without a shared tick budget killing it.
+
+    Idempotent by construction: the reply:{thread_id} _job_id stops a second in-flight job, the
+    advisory lock guards concurrent runs, and the NOT-EXISTS pending-outbox guard stops a second
+    generation once a reply is queued. Kill-switch re-checked here in case it flipped OFF between
+    dispatch and execution."""
+    llm = BrokerLLM()
     try:
         async with session_scope() as session:
+            if not await _platform_agent_on(session):
+                return False
             if not await wiring.try_lock_thread(session, thread_id):
-                return False  # another tick already owns this thread right now
+                return False  # another job owns this thread right now
             cfg = await get_settings(session, branch_id)
             kb = await effective_kb_branch(session, branch_id)  # shared-KB link, if any
             reply = ReplyService(
                 session, branch_id, llm, KnowledgeService(session, kb, llm),
                 branch_settings=cfg, notifier=_build_notifier(cfg),
+                broker_budget_s=settings().reply_broker_budget_s,
             )
             decision = await reply.decide(thread_id)
             if decision is None:
@@ -587,6 +597,12 @@ class WorkerSettings:
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         reindex_knowledge, aggregate_needs,
+        # Per-reply job: its OWN long timeout (waits out a slow broker); no result kept so the
+        # reply:{thread_id} dedup frees the instant it finishes → the thread can be re-dispatched
+        # for its NEXT message; no ARQ retry (a broker timeout re-dispatches next tick instead of
+        # immediately re-hitting the same slow broker and double-billing).
+        func(generate_one_reply, timeout=settings().reply_job_timeout_s, keep_result=0,
+             max_tries=1),
     ]
     cron_jobs = [
         # Ingest every 2 min: an IG poll costs several private-API calls each with a

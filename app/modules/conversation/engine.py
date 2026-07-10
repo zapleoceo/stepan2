@@ -85,11 +85,15 @@ class DecisionEngine:
         branch_id: int,
         llm: LLMPort,
         knowledge: KnowledgeService,
+        broker_budget_s: float | None = None,
     ) -> None:
         self.session = session
         self.branch_id = branch_id
         self.llm = llm
         self.knowledge = knowledge
+        # Per-reply generation overrides the model's poll budget (None = the capability default)
+        # so a per-thread reply job can wait out a slow broker instead of the old 90s tick cap.
+        self._broker_budget_s = broker_budget_s
         self.threads = ThreadRepo(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
@@ -144,6 +148,7 @@ class DecisionEngine:
         raw, meta = await self.llm.chat(
             messages, capability=capability, require_json_schema=True,
             workflow=workflow, thread_id=thread_id, branch_id=self.branch_id,
+            read_timeout_s=self._broker_budget_s,
         )
         if bill:  # sandbox sim runs don't charge the branch's daily LLM budget
             await ctx.budget.record(float(meta.get("cost_usd") or 0.0))
