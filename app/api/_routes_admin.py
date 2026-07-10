@@ -83,6 +83,22 @@ async def outbox_count(request: Request) -> HTMLResponse:
     return HTMLResponse(outbox_count_html(int(n)))
 
 
+@router.get("/inbox/awaiting-count", response_class=HTMLResponse)
+async def inbox_awaiting_count(request: Request) -> HTMLResponse:
+    """Polled by the Inbox nav badge — chats where the lead spoke last and Stepan hasn't
+    replied yet (the queue). Clicking the badge opens /ui/inbox?awaiting=1 (same filter)."""
+    branch_ids = branch_ids_from_request(request)
+    where, params = _branch_where(branch_ids, col="l.branch_id")
+    cond = ("AND" if where else "WHERE")
+    async with session_scope() as session:
+        n = (await session.execute(text(
+            "SELECT count(*) FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"  # noqa: S608
+            f" {where} {cond} ct.last_in_at IS NOT NULL"
+            " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
+            " AND l.is_blocked = false"), params)).scalar() or 0
+    return HTMLResponse(outbox_count_html(int(n)))
+
+
 @router.get("/outbox/panel", response_class=HTMLResponse)
 async def outbox_panel(request: Request) -> HTMLResponse:
     """Queued (pending) sends only — a sent/failed row belongs in the message history or
