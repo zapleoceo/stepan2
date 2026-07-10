@@ -17,6 +17,7 @@ from app.modules.leads.repository import MessageRepo as _LeadMessageRepo
 from app.modules.leads.repository import ThreadRepo as _LeadThreadRepo
 
 _MAX_CONTEXT_MSGS = settings().max_context_msgs  # dialog fed to the LLM (token-cost bound)
+_DIALOG_CHAR_BUDGET = settings().dialog_char_budget  # char bound on the same dialog
 
 
 class ThreadRepo(_LeadThreadRepo):
@@ -36,15 +37,28 @@ class MessageRepo(_LeadMessageRepo):
     ) -> list[Message]:
         """The thread's most recent messages (capped), oldest-first for the prompt builder.
 
-        Capped at _MAX_CONTEXT_MSGS so an active thread doesn't grow the LLM context —
-        and the bill — without bound. `since` (a thread's context_cleared_at) drops
-        history before a manual clear so it never re-enters the prompt."""
+        Two bounds, newest kept first: _MAX_CONTEXT_MSGS (count) and _DIALOG_CHAR_BUDGET
+        (chars). The count cap alone let a wordy thread ship 13k chars of raw history
+        (thread 452: its newest 30 messages are 12.8k chars) while the median thread is 6
+        messages — the char budget trims the OLDEST tail past it, keeping the newest turns
+        verbatim (the dedup guard and don't-repeat rules compare against exactly these).
+        Summary-based compaction was considered and rejected: it breaks the verbatim
+        comparison in _most_similar_prior and adds a broker call per turn on the busiest
+        threads — the broker is the scarce resource this protects. `since` (a thread's
+        context_cleared_at) drops history before a manual clear."""
         q = self._q().where(Message.thread_id == thread_id)
         if since is not None:
             q = q.where(Message.occurred_at > since)
         q = q.order_by(Message.occurred_at.desc(), Message.id.desc()).limit(_MAX_CONTEXT_MSGS)
-        rows = list((await self.session.exec(q)).all())
-        return list(reversed(rows))
+        rows = list((await self.session.exec(q)).all())  # newest first
+        kept: list[Message] = []
+        chars = 0
+        for m in rows:
+            chars += len(m.text or "")
+            if kept and chars > _DIALOG_CHAR_BUDGET:
+                break  # keep at least the newest message, however long it is
+            kept.append(m)
+        return list(reversed(kept))
 
     async def inbound_count(self, thread_id: int) -> int:
         """How many messages the lead has sent in this thread — the discovery-length signal
