@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+import app.config as config
 from app.config import Settings
 
 _DB = "postgresql+asyncpg://u:p@h/db"
@@ -37,7 +38,12 @@ def test_valid_staff_json_ok() -> None:
     _mk(bootstrap_staff_json='[{"tg": 1, "name": "A", "role": "branch_admin"}]').validate_runtime()
 
 
-def test_empty_broker_and_secret_only_warn(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level("WARNING", logger="stepan2.config"):
-        _mk(broker_url="", secret_key="").validate_runtime()  # no raise
-    assert "BROKER_URL" in caplog.text and "SECRET_KEY" in caplog.text
+def test_empty_broker_and_secret_only_warn(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Spy the module logger directly — another test in the full suite calls logging.disable(),
+    # which short-circuits before any handler/caplog, so we assert on the call, not the output.
+    warnings: list[str] = []
+    monkeypatch.setattr(config._log, "warning",
+                        lambda msg, *a, **k: warnings.append(msg % a if a else msg))
+    _mk(broker_url="", secret_key="").validate_runtime()  # no raise
+    text = " ".join(warnings)
+    assert "BROKER_URL" in text and "SECRET_KEY" in text
