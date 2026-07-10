@@ -6,6 +6,7 @@ import json
 import secrets
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
@@ -22,6 +23,8 @@ from app.admin._branch import (
 from app.config import settings
 from app.domain.enums import ChannelKind
 from app.modules.channels.service import ChannelService
+from app.modules.meta.tokens import page_access_token
+from app.modules.settings.service import get_settings
 
 from ._i18n import apply_lang
 from ._ui_panels import (
@@ -425,17 +428,40 @@ async def meta_connect(
     request: Request,
     token: str = Form(default=""),
     page_id: str = Form(default=""),
+    platform: str = Form(default="instagram_graph"),
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
+        branch_id = await _channel_branch(session, ch_id, writable_branch_ids(request))
+        if branch_id is None:
             return HTMLResponse(_ch_meta_form(ch_id, error="Forbidden"))
-    if not token.strip():
+
+    resolved_token = token.strip()
+    if not resolved_token and platform == "facebook_page" and page_id.strip():
+        async with session_scope() as session:
+            branch_cfg = await get_settings(session, branch_id)
+        if not branch_cfg.meta_system_user_token:
+            return HTMLResponse(
+                _ch_meta_form(ch_id, error="No meta_system_user_token in branch settings")
+            )
+        try:
+            resolved_token = await page_access_token(
+                branch_cfg.meta_system_user_token, page_id.strip()
+            )
+        except (httpx.HTTPError, ValueError) as exc:
+            return HTMLResponse(_ch_meta_form(ch_id, error=f"Auto token failed: {exc}"[:200]))
+    if not resolved_token:
         return HTMLResponse(_ch_meta_form(ch_id, error="Access token is required"))
+
+    base_url = (
+        f"https://graph.facebook.com/{settings().ig_graph_version}"
+        if platform == "facebook_page"
+        else f"https://graph.instagram.com/{settings().ig_graph_version}"
+    )
     dump = {
-        "token": token.strip(),
+        "token": resolved_token,
         "account_id": page_id.strip(),
-        "base_url": f"https://graph.instagram.com/{settings().ig_graph_version}",
+        "base_url": base_url,
     }
     enc = encrypt(json.dumps(dump))
     async with session_scope() as session:
