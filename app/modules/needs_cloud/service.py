@@ -246,31 +246,33 @@ async def translate_labels(session: AsyncSession, branch_id: int, llm: LLMPort) 
                                  NeedEntity.label_i18n.is_(None)))).scalars().all()
     if not ents:
         return 0
-    numbered = {str(i): e.label for i, e in enumerate(ents)}
-    user = json.dumps({"labels": numbered}, ensure_ascii=False)
-    try:
-        raw, _ = await llm.chat(
-            [{"role": "system", "content": _I18N_SYSTEM}, {"role": "user", "content": user}],
-            capability="chat:fast", temperature=0.0, max_tokens=2000,
-            workflow="needs_cloud", branch_id=branch_id)
-        mapping = json.loads(_strip_json(raw))
-    except Exception:
-        logger.warning("needs_cloud: label i18n failed branch=%d", branch_id, exc_info=True)
-        return 0
-    if not isinstance(mapping, dict):
-        return 0
     n = 0
-    for i, e in enumerate(ents):
-        item = mapping.get(str(i))
-        if not isinstance(item, dict):
+    for start in range(0, len(ents), _BATCH):  # batch: all labels in one call overflows max_tokens
+        chunk = ents[start:start + _BATCH]
+        numbered = {str(i): e.label for i, e in enumerate(chunk)}
+        user = json.dumps({"labels": numbered}, ensure_ascii=False)
+        try:
+            raw, _ = await llm.chat(
+                [{"role": "system", "content": _I18N_SYSTEM}, {"role": "user", "content": user}],
+                capability="chat:fast", temperature=0.0, max_tokens=2000,
+                workflow="needs_cloud", branch_id=branch_id)
+            mapping = json.loads(_strip_json(raw))
+        except Exception:
+            logger.warning("needs_cloud: label i18n failed branch=%d", branch_id, exc_info=True)
             continue
-        en, idn = str(item.get("en") or "").strip(), str(item.get("id") or "").strip()
-        # drop a drift to the wrong script; leave label_i18n NULL → retried next run
-        if not en or not idn or wrong_script(en, "en") or wrong_script(idn, "id"):
+        if not isinstance(mapping, dict):
             continue
-        e.label_i18n = json.dumps({"en": en, "id": idn}, ensure_ascii=False)
-        session.add(e)
-        n += 1
+        for i, e in enumerate(chunk):
+            item = mapping.get(str(i))
+            if not isinstance(item, dict):
+                continue
+            en, idn = str(item.get("en") or "").strip(), str(item.get("id") or "").strip()
+            # drop a drift to the wrong script; leave label_i18n NULL → retried next run
+            if not en or not idn or wrong_script(en, "en") or wrong_script(idn, "id"):
+                continue
+            e.label_i18n = json.dumps({"en": en, "id": idn}, ensure_ascii=False)
+            session.add(e)
+            n += 1
     return n
 
 
