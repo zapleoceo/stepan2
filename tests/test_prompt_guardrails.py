@@ -99,10 +99,19 @@ def test_compound_question_gets_every_part_answered() -> None:
 
 
 def test_plain_acknowledgment_never_needs_manager() -> None:
-    # threads 2324/2337/2272, 2026-07-09: "boleh min" / "Minat ka" / "Thanks untuk infonya"
-    # all got escalated to a human with nothing to actually resolve
-    assert "PLAIN ACKNOWLEDGMENT" in _DECISION_CONTRACT
-    assert "NEVER for a lead simply saying thanks or yes" in _DECISION_CONTRACT
+    # threads 2324/2337/2272/2403, 2026-07-09/10: "boleh min" / "Minat ka" /
+    # "Thanks untuk infonya" / "kayanya mau serius jadi spesialis SMM" all got escalated to
+    # a human with nothing to actually resolve — judge INTENT, not exact wording
+    assert "ANY POSITIVE, AGREEING OR READY SIGNAL" in _DECISION_CONTRACT
+    assert "Judge the INTENT" in _DECISION_CONTRACT
+    assert "NEVER for a lead simply agreeing" in _DECISION_CONTRACT
+
+
+def test_undecipherable_slang_is_non_target_not_needs_manager() -> None:
+    # thread 2397, 2026-07-09: PUBG gaming slang ("main epep", "ratain satu squad di bermuda")
+    # escalated to a human who can't decode it either — should be non_target + soft close
+    assert "UNDECIPHERABLE SLANG" in _DECISION_CONTRACT
+    assert "non_target, NOT needs_manager" in _DECISION_CONTRACT
 
 
 def test_stage_reason_required_not_optional() -> None:
