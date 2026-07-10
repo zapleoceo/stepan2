@@ -67,8 +67,14 @@ _CSS = (
     ".na-badge{margin-left:auto;padding:.05rem .45rem;border-radius:8px;font-size:.7rem;"
     "font-weight:700;background:#206bc4;color:#fff;flex-shrink:0}"
     ".na-badge:empty{display:none}"
-    ".awaiting-badge{background:#e8590c;cursor:pointer}"  # unanswered-queue accent, click-through
-    ".sid.collapsed .na-badge{display:none}"
+    # Inbox two-number badge: in-queue pill (orange) + won't-reply pill (grey), sum = unanswered
+    ".na-badge2{margin-left:auto;display:flex;gap:3px;flex-shrink:0}"
+    ".na-badge2:empty{display:none}"
+    ".iaw{padding:.05rem .4rem;border-radius:8px;font-size:.7rem;font-weight:700;color:#fff;"
+    "cursor:pointer}"
+    ".iaw-q{background:#e8590c}"    # in generation queue — Stepan will reply
+    ".iaw-off{background:#6b7685}"  # bot off / silent / too old / already queued — won't reply
+    ".sid.collapsed .na-badge,.sid.collapsed .na-badge2{display:none}"
     ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
     ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
     ".lrow{display:flex;gap:.22rem;margin-top:.3rem}"
@@ -1535,13 +1541,12 @@ def app_shell(
     # Inbox badge = chats awaiting a Stepan reply (the queue). The nav LINK opens the full
     # inbox; the badge NUMBER opens only the awaiting chats (stopPropagation so the click
     # doesn't also trigger the parent link). Empty when zero → hidden by .na-badge:empty.
+    # Two-number badge: the endpoint fills it with an in-queue pill + a won't-reply pill, each
+    # clickable to its own filter. The outer span just polls and holds them (no own onclick).
     inbox_badge = (
-        '<span class="na-badge awaiting-badge" id="inbox-badge"'
+        '<span class="na-badge2" id="inbox-badge"'
         ' hx-get="/ui/inbox/awaiting-count" hx-trigger="load, every 15s"'
-        ' hx-swap="innerHTML" hx-target="this" hx-push-url="false"'
-        f' title="{_h.escape(t("inbox.awaiting_tip"))}"'
-        " onclick=\"event.stopPropagation();event.preventDefault();"
-        "location.href='/ui/inbox?awaiting=1';return false\"></span>"
+        ' hx-swap="innerHTML" hx-target="this" hx-push-url="false"></span>'
     )
 
     coach_extra = (
@@ -1861,10 +1866,12 @@ def app_shell(
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
         ) if (lead_type or audience) else ""
-        # awaiting filter (opened from the inbox badge) — dismissable back to the full inbox.
+        # awaiting filter (opened from an inbox badge number) — dismissable back to full inbox.
+        _await_lbl = {"queue": "inbox.await_queue", "off": "inbox.await_off"}.get(
+            awaiting, "inbox.awaiting_filter")
         _await_chip = (
             f'<div class="ad-filter">'
-            f'<span class="ad-filter-id">{_h.escape(t("inbox.awaiting_filter"))}</span>'
+            f'<span class="ad-filter-id">{_h.escape(t(_await_lbl))}</span>'
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
         ) if awaiting else ""

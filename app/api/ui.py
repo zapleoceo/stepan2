@@ -24,7 +24,10 @@ from app.admin._branch import branch_ids_from_request, is_super_admin
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     AD_FUNNEL_GROUPS,
+    AWAITING_BASE,
+    IN_QUEUE_EXTRA,
     _branch_where,
+    awaiting_cutoff,
     fetch_audience_segment_stage_dist,
     fetch_blocked_count,
     fetch_bot_enabled_count,
@@ -188,11 +191,16 @@ async def threads_partial(
         names = [f":g{i}" for i in range(len(grp_stages))]
         conditions.append(f"l.stage IN ({', '.join(names)})")
         params.update({f"g{i}": st for i, st in enumerate(grp_stages)})
-    if awaiting.strip():  # chats where the lead spoke last and Stepan hasn't replied (queue)
-        conditions.append(
-            "ct.last_in_at IS NOT NULL"
-            " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
-            " AND l.is_blocked = false")
+    aw = awaiting.strip()
+    if aw:  # unanswered chats; 'queue' = Stepan will reply, 'off' = won't, else = all unanswered
+        if aw == "queue":
+            conditions.append(f"({AWAITING_BASE}) AND ({IN_QUEUE_EXTRA})")
+            params["awaiting_cutoff"] = awaiting_cutoff()
+        elif aw == "off":
+            conditions.append(f"({AWAITING_BASE}) AND NOT ({IN_QUEUE_EXTRA})")
+            params["awaiting_cutoff"] = awaiting_cutoff()
+        else:
+            conditions.append(AWAITING_BASE)
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (
