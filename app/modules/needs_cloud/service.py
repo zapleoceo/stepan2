@@ -31,11 +31,18 @@ _MAX_LEADS_PER_RUN = 400  # cap the nightly LLM work per branch; the rest drain 
 
 _SYSTEM = (
     "You group short customer-need phrases (Indonesian/English, from Instagram sales chats) "
-    "into a SMALL set of stable categories. Return STRICT JSON: an object mapping each input "
-    "phrase EXACTLY as given to a short category label IN RUSSIAN (1-3 words, Title case). "
-    "REUSE an existing category label verbatim whenever the phrase fits it — only invent a new "
-    "label when none fits. Merge synonyms and paraphrases aggressively (e.g. 'mahal', 'gak ada "
-    "budget', 'terlalu mahal' → 'Цена'). Never output anything but the JSON object."
+    "into a SMALL set of BROAD, stable categories. Return STRICT JSON: an object mapping each "
+    "input phrase EXACTLY as given to a short category label IN RUSSIAN (1-2 words, Title case, "
+    "a plural noun where natural). \n"
+    "RULES:\n"
+    "1. REUSE an existing category label VERBATIM whenever the phrase fits it — do not coin a "
+    "near-synonym of one already listed.\n"
+    "2. Merge synonyms, paraphrases, and sub-topics AGGRESSIVELY into ONE category: e.g. "
+    "'mahal'/'gak ada budget'/'terlalu mahal' → 'Цена'; 'SMM'/'социальные сети'/'соцсети'/"
+    "'изучение маркетинга соцсетей с нуля' → 'Соцсети'; 'карьера'/'карьерный рост' → 'Карьера'.\n"
+    "3. Prefer the BROADEST sensible category — better 10 categories than 40. Avoid vague "
+    "catch-alls like 'Услуги'/'Обучение' unless nothing specific fits.\n"
+    "Never output anything but the JSON object."
 )
 
 
@@ -65,9 +72,10 @@ async def _classify_phrases(
     parse/broker failure yields {} (those phrases go untagged this run, retried when the
     lead's needs next change) rather than corrupting the taxonomy."""
     out: dict[str, str] = {}
-    for i in range(0, len(phrases), _BATCH):
+    labels = list(existing)  # grows as batches coin new labels, so LATER batches reuse EARLIER
+    for i in range(0, len(phrases), _BATCH):        # ones instead of coining a near-duplicate
         chunk = phrases[i:i + _BATCH]
-        user = json.dumps({"existing_categories": existing, "phrases": chunk},
+        user = json.dumps({"existing_categories": labels, "phrases": chunk},
                           ensure_ascii=False)
         try:
             raw, _ = await llm.chat(
@@ -84,6 +92,8 @@ async def _classify_phrases(
                 label = mapping.get(ph)
                 if isinstance(label, str) and label.strip():
                     out[ph] = label.strip()
+                    if label.strip() not in labels:
+                        labels.append(label.strip())
     return out
 
 
