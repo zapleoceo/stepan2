@@ -7,7 +7,12 @@ import json
 from sqlmodel import select
 
 from app.adapters.db.models import Branch, Lead, NeedAggSnapshot, NeedEntity
-from app.modules.needs_cloud import classify_branch, cloud_for, write_snapshot
+from app.modules.needs_cloud import (
+    classify_branch,
+    cloud_for,
+    translate_labels,
+    write_snapshot,
+)
 
 
 class _FakeLLM:
@@ -101,6 +106,58 @@ async def test_garbage_script_label_is_rejected(db_session) -> None:
     labels = [e.label for e in (await db_session.execute(
         select(NeedEntity).where(NeedEntity.branch_id == bid))).scalars()]
     assert labels == ["Цена"]  # only the clean Russian label survived
+
+
+class _I18nLLM:
+    """Returns index→{en,id} for label translation (or an Arabic drift to test the guard)."""
+
+    def __init__(self, mapping: dict[str, dict], drift: bool = False) -> None:
+        self._mapping = mapping
+        self._drift = drift
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        payload = json.loads(messages[-1]["content"])
+        out = {}
+        for idx, ru in payload["labels"].items():
+            if self._drift:
+                out[idx] = {"en": "تعلم", "id": "برمجة"}  # Arabic → must be rejected
+            else:
+                out[idx] = self._mapping.get(ru, {"en": ru, "id": ru})
+        return json.dumps(out, ensure_ascii=False), {"cost_usd": 0.0}
+
+    async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_translate_labels_caches_en_id_and_localizes(db_session) -> None:
+    bid = await _branch(db_session)
+    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
+    await db_session.flush()
+    await classify_branch(db_session, bid, _FakeLLM(_RULES))  # → entity "Цена"
+    n = await translate_labels(db_session, bid,
+                               _I18nLLM({"Цена": {"en": "Price", "id": "Harga"}}))
+    await db_session.flush()  # persist label_i18n before the raw-SQL cloud_for reads it
+    assert n == 1
+    ru = await cloud_for(db_session, [bid], "pains", None, None, lang="ru")
+    en = await cloud_for(db_session, [bid], "pains", None, None, lang="en")
+    idn = await cloud_for(db_session, [bid], "pains", None, None, lang="id")
+    assert ru[0].label == "Цена"      # canonical Russian untouched
+    assert en[0].label == "Price"     # localized from the cache, no LLM at render
+    assert idn[0].label == "Harga"
+
+
+async def test_translate_labels_rejects_wrong_script_drift(db_session) -> None:
+    bid = await _branch(db_session)
+    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
+    await db_session.flush()
+    await classify_branch(db_session, bid, _FakeLLM(_RULES))
+    assert await translate_labels(db_session, bid, _I18nLLM({}, drift=True)) == 0
+    ent = (await db_session.execute(
+        select(NeedEntity).where(NeedEntity.branch_id == bid))).scalars().first()
+    assert ent.label_i18n is None  # Arabic drift not cached — retried next run
+    # render falls back to the canonical Russian for a non-ru viewer
+    en = await cloud_for(db_session, [bid], "pains", None, None, lang="en")
+    assert en[0].label == "Цена"
 
 
 async def test_snapshot_freezes_current_counts(db_session) -> None:
