@@ -116,7 +116,20 @@ async def test_worker_reply_thread_returns_false_when_llm_raises(monkeypatch) ->
     monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **kw: object())
     monkeypatch.setattr(worker_main, "ReplyService", _RaisingReply)
 
-    result = await worker_main.generate_one_reply({}, 1, 42)
+    class _FakeRedis:
+        async def zremrangebyscore(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+            return 0
+
+        async def zadd(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+            return 1
+
+        async def zcard(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+            return 1
+
+        async def zrem(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+            return 1
+
+    result = await worker_main.generate_one_reply({"redis": _FakeRedis()}, 1, 42)
     assert result is False
 
 

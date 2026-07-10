@@ -10,6 +10,22 @@ from app.worker import main as worker_main
 from app.worker import wiring
 
 
+class _FakeRedis:
+    """Minimal redis for generate_one_reply's concurrency-cap sorted-set ops (under the cap)."""
+
+    async def zremrangebyscore(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 0
+
+    async def zadd(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 1
+
+    async def zcard(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 1
+
+    async def zrem(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 1
+
+
 async def test_try_lock_thread_is_noop_off_postgres(db_session) -> None:
     """Sqlite (tests, and any non-Postgres deploy) always acquires — no locking needed."""
     assert await wiring.try_lock_thread(db_session, 1) is True
@@ -39,7 +55,7 @@ async def test_reply_thread_skips_without_calling_llm_when_lock_denied(monkeypat
     monkeypatch.setattr(worker_main, "BrokerLLM", _NeverCalledLLM)
     monkeypatch.setattr(wiring, "try_lock_thread", _denied)
 
-    result = await worker_main.generate_one_reply({}, 1, 42)
+    result = await worker_main.generate_one_reply({"redis": _FakeRedis()}, 1, 42)
     assert result is False
 
 

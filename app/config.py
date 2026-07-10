@@ -96,8 +96,11 @@ class Settings(BaseSettings):
                                  "thread: initial chat:smart + a guard regen (each up to "
                                  "reply_broker_budget_s) + a chat:fast verify")
     reply_dispatch_cap: int = Field(
-        default=100, description="max threads the dispatcher enqueues per tick; real concurrency "
-                                 "is bounded by worker_max_jobs, this just caps one tick's fan-out")
+        default=20, description="max threads the dispatcher enqueues per tick; excess over the "
+                                "concurrency cap fast-return and re-dispatch next tick")
+    reply_max_concurrency: int = Field(
+        default=6, description="max SLOW reply jobs running at once — kept below worker_max_jobs "
+                               "so a burst can't fill every worker slot and starve ingest/send")
     worker_job_timeout_s: int = Field(
         default=240, description="per-job kill deadline; every batch cap below is sized to "
                                  "finish inside this. Must comfortably clear a single thread's "
