@@ -565,11 +565,18 @@ class WorkerSettings:
         # retried, and the retry re-picks a thread whose advisory lock already released →
         # duplicate LLM decision AND duplicate real IG send (live: thread 2161, 2026-07-07).
         # A 60s cadence leaves a full job_timeout of headroom before the next tick can overlap.
+        # PHASE (not cadence): fire at second=45, just after the ~:00-:50 ingest cycle commits,
+        # so a message ingested THIS cycle is decided the same minute instead of waiting ~60s
+        # for the next tick — then send_outbox at :50 ships it ~5s later. Still exactly once/min,
+        # so the kill-retry duplicate guard above is unchanged; only the ingest→reply handoff
+        # shrinks. A slow ingest that commits after :45 simply falls to the next tick (no worse
+        # than before). Measured 2026-07-10: median lead→reply 170s was dominated by cron-handoff
+        # gaps, not the LLM (p50 ~1.7s) — this trims the reply half of that.
         # send_outbox stays every 20s: it's cheap (one due row per call) and never overlaps a
         # reply for the same thread (its own advisory lock), so latency there is worth keeping.
-        cron(reply_pending, second={0}, run_at_startup=False),
+        cron(reply_pending, second={45}, run_at_startup=False),
         cron(send_outbox, second={10, 30, 50}, run_at_startup=False),
-        # Unsend requests every minute (second=30, between reply and send)
+        # Unsend requests every minute (second=30; independent of the reply/send phase)
         cron(process_deletions, second=30, run_at_startup=False),
         # Follow-ups run every 10 minutes (minute divisible by 10, second=50)
         cron(schedule_followups, minute={0, 10, 20, 30, 40, 50}, second=50,
