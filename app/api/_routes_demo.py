@@ -6,6 +6,8 @@ pipeline (whose prompt is EdTech-specific) so this can't touch real sales."""
 from __future__ import annotations
 
 import logging
+import time
+from collections import defaultdict, deque
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -18,6 +20,42 @@ _log = logging.getLogger(__name__)
 _MAX_TURNS = 16  # keep the last N messages for sane context (not a usage cap)
 _ATTEMPTS = 2  # one retry: a stuck provider fails fast, the retry lands on a fast one
 _ATTEMPT_TIMEOUT_S = 45.0  # per-attempt read cap (< the 90s broker ceiling) for snappy UX
+
+# Abuse guard: this endpoint is PUBLIC (no auth) and calls a paid-capable broker capability,
+# so an open loop could burn provider quota / drive spend (see the burn incidents). Cap per-IP
+# request rate AND total concurrent broker calls from the demo. In-process (per uvicorn worker)
+# — good enough to stop a trivial flood without standing up Redis for a landing gimmick.
+_RATE_WINDOW_S = 60.0
+_RATE_MAX = 20                # requests per IP per window
+_GLOBAL_INFLIGHT_MAX = 8      # concurrent demo broker calls across all IPs (this worker)
+_hits: dict[str, deque[float]] = defaultdict(deque)
+_inflight = 0
+_BUSY = "One sec — a lot of people are chatting with me right now. Try again in a moment. 🎩"
+
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def _rate_ok(ip: str) -> bool:
+    now = time.monotonic()
+    dq = _hits[ip]
+    while dq and now - dq[0] > _RATE_WINDOW_S:
+        dq.popleft()
+    if len(dq) >= _RATE_MAX:
+        return False
+    dq.append(now)
+    if len(_hits) > 5000:  # bound distinct-IP memory: sweep expired buckets
+        for k in list(_hits):
+            d = _hits[k]
+            while d and now - d[0] > _RATE_WINDOW_S:
+                d.popleft()
+            if not d:
+                del _hits[k]
+    return True
 
 _SYSTEM = (
     "You are Stepan — an AI sales agent that businesses hire to qualify and sell to their "
@@ -111,6 +149,8 @@ _FALLBACK = "Sorry, I glitched for a second — say that again?"
 
 @router.post("/demo/chat")
 async def demo_chat(request: Request) -> JSONResponse:
+    if not _rate_ok(_client_ip(request)):
+        return JSONResponse({"reply": _BUSY}, status_code=429)
     try:
         payload = await request.json()
     except Exception:  # noqa: BLE001
@@ -125,20 +165,27 @@ async def demo_chat(request: Request) -> JSONResponse:
     if not history:
         return JSONResponse({"reply": _FALLBACK})
     messages = [{"role": "system", "content": _SYSTEM}, *history]
+    global _inflight
+    if _inflight >= _GLOBAL_INFLIGHT_MAX:  # atomic: no await between check and the increment below
+        return JSONResponse({"reply": _BUSY}, status_code=429)
+    _inflight += 1
     # Broker latency for chat:smart is spiky (provider fallback can drag to the 90s ceiling);
     # for an interactive site chat that reads as "hung". Cap each attempt short and retry once
     # so a stuck provider fails fast and the retry usually lands on a fast one.
     reply = ""
-    for attempt in range(_ATTEMPTS):
-        try:
-            text, _meta = await BrokerLLM().chat(
-                messages, capability="chat:smart", max_tokens=500, temperature=0.6,
-                workflow="landing_demo", read_timeout_s=_ATTEMPT_TIMEOUT_S,
-            )
-            reply = (text or "").strip()
-            if reply:
-                break
-        except Exception as exc:  # noqa: BLE001
-            _log.warning("landing demo attempt %d/%d failed: %s",
-                         attempt + 1, _ATTEMPTS, type(exc).__name__)
+    try:
+        for attempt in range(_ATTEMPTS):
+            try:
+                text, _meta = await BrokerLLM().chat(
+                    messages, capability="chat:smart", max_tokens=500, temperature=0.6,
+                    workflow="landing_demo", read_timeout_s=_ATTEMPT_TIMEOUT_S,
+                )
+                reply = (text or "").strip()
+                if reply:
+                    break
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("landing demo attempt %d/%d failed: %s",
+                             attempt + 1, _ATTEMPTS, type(exc).__name__)
+    finally:
+        _inflight -= 1
     return JSONResponse({"reply": reply or _FALLBACK})
