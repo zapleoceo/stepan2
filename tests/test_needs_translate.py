@@ -154,3 +154,23 @@ async def test_batch_translate_uses_a_generous_max_tokens_for_a_full_profile() -
     assert len(translated.gains) == len(long_phrases_gains)
     assert llm.last_kw is not None
     assert llm.last_kw.get("max_tokens", 0) >= 2000
+
+
+class _ArabicLLM:
+    """Drifts to Arabic regardless of the requested target (the real provider misbehaviour)."""
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        lines = [ln for ln in messages[-1]["content"].splitlines() if ln.strip()]
+        return json.dumps(["تعلم البرمجة" for _ in lines]), {"cost_usd": 0.0}
+
+    async def embed(self, texts):  # noqa: ANN001, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_arabic_drift_is_not_cached_and_degrades_to_original() -> None:
+    # thread 2523: a RU-target translation drifted to Arabic and got cached as needs_tr. The
+    # script guard now drops it — nothing is cached and the render shows the original phrase.
+    profile = NeedsProfile(jobs=["belajar coding"], pains=["takut gagal"])
+    translated, new_tr = await translated_needs(profile, None, "ru", _ArabicLLM())
+    assert new_tr is None
+    assert translated.jobs == ["belajar coding"] and translated.pains == ["takut gagal"]
