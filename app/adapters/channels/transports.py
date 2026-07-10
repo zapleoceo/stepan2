@@ -10,6 +10,8 @@ import logging
 import re
 from typing import Any
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 # Ad click-to-DM attribution codes. Word-boundary matched so an ordinary name that merely
@@ -339,27 +341,41 @@ class GraphTransportHTTP:
         )
 
     async def fetch_conversations(self) -> list[dict[str, Any]]:
-        async with self._client() as c:
-            r = await c.get(
-                f"/{self._account_id}/conversations",
-                params={"fields": "id,messages{from,message,created_time}"},
-            )
-        r.raise_for_status()
+        # The default /conversations page is ~25, so older-but-active chats were dropped. Page
+        # through with the `after` cursor up to a config cap (header auth kept — following the
+        # opaque paging.next URL would leak the token into logs; the cursor doesn't).
+        cap = settings().meta_live_conversations
+        page_size = max(1, min(50, cap))
+        max_pages = max(1, -(-cap // page_size)) + 2  # safety: cap/page_size pages + slack
         out: list[dict[str, Any]] = []
-        for conv in r.json().get("data", []):
-            msgs = (conv.get("messages") or {}).get("data") or []
-            if not msgs:
-                continue
-            last = msgs[0]
-            out.append(
-                {
-                    "thread_id": conv.get("id", ""),
-                    "from_id": (last.get("from") or {}).get("id", ""),
-                    "message": last.get("message", ""),
-                    "created_time": last.get("created_time"),
-                }
-            )
-        return out
+        cursor: str | None = None
+        async with self._client() as c:
+            for _ in range(max_pages):
+                params: dict[str, Any] = {
+                    "fields": "id,messages{from,message,created_time}", "limit": page_size}
+                if cursor:
+                    params["after"] = cursor
+                r = await c.get(f"/{self._account_id}/conversations", params=params)
+                r.raise_for_status()
+                body = r.json()
+                for conv in body.get("data", []):
+                    msgs = (conv.get("messages") or {}).get("data") or []
+                    if not msgs:
+                        continue
+                    last = msgs[0]
+                    out.append(
+                        {
+                            "thread_id": conv.get("id", ""),
+                            "from_id": (last.get("from") or {}).get("id", ""),
+                            "message": last.get("message", ""),
+                            "created_time": last.get("created_time"),
+                        }
+                    )
+                paging = body.get("paging") or {}
+                cursor = ((paging.get("cursors") or {}).get("after"))
+                if len(out) >= cap or not cursor or not paging.get("next"):
+                    break
+        return out[:cap]
 
     async def _resolve_psid(self, thread_id: str, c: Any) -> str:
         """The Send API needs the lead's PSID, not the conversation id fetch_conversations

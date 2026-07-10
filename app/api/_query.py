@@ -351,11 +351,15 @@ async def fetch_thread_events(
 
 
 async def fetch_pending(session: AsyncSession, thread_id: int) -> list:
+    # Include 'failed' rows so a send that never reached the lead (e.g. Meta 24h window closed
+    # on a manager reply) shows the manager an error bubble instead of the queued line silently
+    # vanishing. 'skipped' rows are automated + expected, so they stay hidden.
     return (
         await session.execute(
             text(
-                "SELECT id, text, scheduled_at, llm_info, tr_text FROM outbox"
-                " WHERE thread_id = :tid AND status = 'pending' ORDER BY scheduled_at, id"
+                "SELECT id, text, scheduled_at, llm_info, tr_text, status, error FROM outbox"
+                " WHERE thread_id = :tid AND status IN ('pending', 'failed')"
+                " ORDER BY scheduled_at, id"
             ),
             {"tid": thread_id},
         )

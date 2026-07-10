@@ -675,8 +675,9 @@ def test_bubble_renders_media_link_preview_and_receipt() -> None:
 def test_pending_bubble_queue_time_buttons_and_oob() -> None:
     from app.api._ui_html import messages_html, since_bubbles_html
     _set_lang("en")
-    pending = [(11, "first reply", "2026-07-03 08:15:30", "mistral · free", None),
-               (12, "second reply", "2026-07-03 08:15:36", None, "перевод")]
+    pending = [(11, "first reply", "2026-07-03 08:15:30", "mistral · free", None,
+                "pending", None),
+               (12, "second reply", "2026-07-03 08:15:36", None, "перевод", "pending", None)]
     html = messages_html([], pending, 4)
     assert 'id="pend-4"' in html                    # pending pinned in its own container
     assert 'id="ppb-11"' in html and "№1" in html   # queued bubble + queue position
@@ -688,6 +689,21 @@ def test_pending_bubble_queue_time_buttons_and_oob() -> None:
     # the 4s poll re-renders pending out-of-band so it stays below new messages
     since = since_bubbles_html([], 4, 9, pending=pending)
     assert 'id="pend-4" hx-swap-oob="true"' in since
+
+
+def test_failed_send_bubble_shows_error_with_retry_and_dismiss() -> None:
+    from app.api._ui_html import messages_html
+    _set_lang("en")
+    pending = [(20, "manager reply", "2026-07-03 08:15:30", None, None,
+                "failed", "meta_window_closed")]
+    html = messages_html([], pending, 4)
+    assert 'id="ppb-20"' in html
+    assert "bb-o bb-f" in html                         # failed styling (distinct from queued)
+    assert "not sent" in html                          # manager sees it did NOT reach the lead
+    assert "meta_window_closed" in html                # …and why
+    assert "/ui/chat/4/pending/20/retry" in html       # can re-attempt
+    assert "/ui/chat/4/pending/20/delete" in html      # …or dismiss
+    assert "№" not in html.split('id="ppb-20"')[1][:60]  # no queue number on a failed line
 
 
 def test_since_bubbles_empty_keeps_cursor() -> None:
