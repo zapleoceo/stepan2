@@ -56,7 +56,7 @@ app/
   modules/       bounded contexts: branches, channels, leads, knowledge, auth, notifications
   api/           FastAPI-роутеры (тонкие: валидация → use-case)
   admin/         SQLAdmin-панель
-  worker/        ARQ-задачи (ingest/reply/outbox/followup) — на филиал
+  worker/        ARQ-задачи (ingest/reply/outbox/followup) — диспетчер + per-branch job
   config.py      Pydantic Settings
 migrations/      Alembic
 tests/
@@ -78,6 +78,12 @@ tests/
   `external_thread_id`, `product_slug`, `window_until`, `last_in_at`/`last_out_at`.
   Несколько тредов на лида = чаты по разным продуктам/каналам.
 - Доменные таблицы (знания/продукты/настройки/алерты) получают `branch_id`.
+- **`app_setting`** — настройки в **трёх уровнях видимости** `(branch_id, channel_id, key)`,
+  разрешаемых по возрастанию точности: платформа `(NULL, NULL)` → филиал `(branch, NULL)` →
+  коннектор `(branch, channel)`. Уникальность — COALESCE-индекс `uq_setting_scope`
+  (обычный UNIQUE считает NULL-ы различными и допустил бы дубли). Мёрж — в
+  [`SettingRepo.load_all(branch_id, channel_id)`](../app/modules/settings/repository.py);
+  единственный писатель — `SettingRepo.upsert`.
 - **RBAC:** `app_user` (telegram_id, name) + `membership` (user_id, branch_id, role):
   `super_admin` (branch_id NULL) / `branch_admin` / `branch_viewer`.
 
@@ -172,6 +178,27 @@ read-only.
 
 Честное ограничение: фолоап через приватный канал **не появится** в чате MBS (разные
 каналы внутри Meta), но единая личность `lead` агрегирует все треды у нас.
+
+### Настройки: филиал vs коннектор
+
+Каждое поле схемы ([`app/modules/settings/schema.py`](../app/modules/settings/schema.py))
+имеет `scope`:
+
+- **`branch`** — общие для филиала: главный тумблер бота, тихие часы, роутинг модели,
+  Telegram-группа менеджеров, дневной бюджет, CRM. Рендерятся в панели «Настройки».
+- **`channel`** — индивидуальны для коннектора: расписание фолоапов, анти-бан капы
+  (`hourly_cap`/`daily_cap`), `sending_enabled`, задержки ответа, код страны телефона и
+  весь блок Meta (App/Business/Ad Account/Page ID, System User токен, пиксель). Рендерятся
+  в редакторе коннектора (Филиалы → канал) и **резолвятся на канал**.
+
+Почему фолоапы per-connector: у Meta Messenger стандартное окно ответа ~24ч — расписание
+должно быть **короче**, чем у Instagram, иначе нудж уйдёт уже после закрытия окна.
+Резолв — `get_channel_settings(session, branch_id, channel_id)`: channel-поля берут
+override канала, иначе значение филиала, иначе платформы/дефолт; branch-поля идентичны
+`get_settings`. Потребители на конкретном треде (outbox-капы/`sending_enabled`, взвод
+фолоапа в `OutboxSender`, `FollowupService.due_threads`, код телефона в ingest) ходят через
+`get_channel_settings(... thread.channel_id)`; branch-потребители (тихие часы, TG-группа,
+бюджет, kill-switch) — через `get_settings`.
 
 ## Миграция и старт
 

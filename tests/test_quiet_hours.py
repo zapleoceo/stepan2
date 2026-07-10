@@ -45,7 +45,10 @@ async def test_reply_pending_ignores_quiet_hours(db_session, monkeypatch) -> Non
     monkeypatch.setattr(worker_main, "get_settings", _fake_get_settings)
     monkeypatch.setattr(wiring, "threads_awaiting_reply", _fake_threads_awaiting_reply)
 
-    await worker_main.reply_pending({"redis": object()})  # no threads → redis never touched
+    # reply_pending now fans out one reply_pending_branch job per branch; the per-branch job
+    # holds the quiet-hours-agnostic reply dispatch.
+    # no threads → redis never touched
+    await worker_main.reply_pending_branch({"redis": object()}, b.id)
     assert called == [b.id]  # reached threads_awaiting_reply despite is_quiet_hour()=True
 
 
@@ -89,7 +92,7 @@ async def test_schedule_followups_queues_during_quiet_hours(db_session, monkeypa
     monkeypatch.setattr(worker_main, "effective_kb_branch", _fake_effective_kb_branch)
     monkeypatch.setattr(worker_main, "FollowupService", _FakeFollowupService)
 
-    queued = await worker_main.schedule_followups({})
+    queued = await worker_main.schedule_followups_branch({}, b.id)
     assert queued == 3
     # one FollowupService per branch-bookkeeping call PLUS one per queued thread (each
     # thread now opens its own transaction/service instance — see _queue_one_followup)
@@ -154,12 +157,12 @@ async def test_one_thread_failing_does_not_discard_others_this_cycle(
     monkeypatch.setattr(worker_main, "FollowupService", _FakeFollowupService)
     monkeypatch.setattr(worker_main, "session_scope", lambda: _CountingScope())
 
-    queued = await worker_main.schedule_followups({})
+    queued = await worker_main.schedule_followups_branch({}, b.id)
     assert queued == 2  # threads 1 and 3 succeeded despite thread 2 raising
-    # 1 open for platform-flag+branch-listing + 1 for branch bookkeeping + 1 per thread (3)
-    # — thread 2's failure didn't prevent thread 3's own independent transaction from
-    # opening and succeeding
-    assert session_opens == 1 + 1 + 3
+    # 1 open for the branch's bookkeeping (due_threads) + 1 per thread (3) — thread 2's
+    # failure didn't prevent thread 3's own independent transaction from opening and
+    # succeeding. The platform-flag/branch-listing open now lives in the dispatcher, not here.
+    assert session_opens == 1 + 3
 
 
 async def test_process_deletions_gated_by_platform_kill_switch(monkeypatch) -> None:

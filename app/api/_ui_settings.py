@@ -53,8 +53,13 @@ def _is_wide(f: S.SettingField) -> bool:
     return False
 
 
-def _control(f: S.SettingField, value: str, lang: str, width: str | None = None) -> str:
-    hx_vals = f"hx-vals='{{\"key\": \"{f.key}\"}}'"
+def _control(
+    f: S.SettingField, value: str, lang: str, width: str | None = None,
+    channel_id: int | None = None,
+) -> str:
+    # channel_id present → the field autosaves to the connector tier, else the branch tier.
+    _cid = f', "channel_id": "{channel_id}"' if channel_id is not None else ""
+    hx_vals = f"hx-vals='{{\"key\": \"{f.key}\"{_cid}}}'"
     style = f"{_INP};width:{width or f.width}"
     if f.kind == "multi":  # checkbox group → a comma-list saved via a hidden input
         selected = parse_smart_stages(value)  # effective set, so UI always matches behaviour
@@ -121,10 +126,12 @@ def _usage_badge(used: int, cap: int, lang: str) -> str:
 def field_html(
     f: S.SettingField, value: str, lang: str, *, saved: bool = False,
     cap_usage: dict[str, tuple[int, int]] | None = None,
+    channel_id: int | None = None,
 ) -> str:
     """One compact auto-saving row — reused for the panel and the save response. `cap_usage`
     (e.g. {"hourly_cap": (used, cap)}) adds a live usage badge under a rate-limit field,
-    computed fresh by the route each request — this function never hardcodes a threshold."""
+    computed fresh by the route each request — this function never hardcodes a threshold.
+    `channel_id` routes the autosave to the connector tier instead of the branch tier."""
     check = ' <span style="color:#51cf66">✓</span>' if saved else ""
     help_txt = S.tr(f.help, lang) if f.help else ""
     help_html = f'<div style="{_HELP}">{_h.escape(help_txt)}</div>' if help_txt else ""
@@ -135,7 +142,8 @@ def field_html(
     if f.kind == "multi" or _is_wide(f):
         # A wide control (checkbox group, token, URL) can't share the row — the label collapses
         # to one word per line. Stack it: label + help on top, control full-width below.
-        ctrl = _control(f, value, lang) if f.kind == "multi" else _control(f, value, lang, "100%")
+        ctrl = (_control(f, value, lang, channel_id=channel_id) if f.kind == "multi"
+                else _control(f, value, lang, "100%", channel_id=channel_id))
         return (
             f'<div class="set-fld" style="{_ROW};display:block">'
             f'{label}{help_html}'
@@ -145,7 +153,7 @@ def field_html(
     return (
         f'<div class="set-fld" style="{_ROW}">'
         f'<div style="min-width:0">{label}{help_html}</div>'
-        f'<div style="flex-shrink:0">{_control(f, value, lang)}</div>'
+        f'<div style="flex-shrink:0">{_control(f, value, lang, channel_id=channel_id)}</div>'
         f'</div>'
     )
 
@@ -153,9 +161,11 @@ def field_html(
 def _section_html(
     sec: S.SettingSection, values: dict[str, str], lang: str,
     cap_usage: dict[str, tuple[int, int]] | None = None,
+    channel_id: int | None = None,
 ) -> str:
     rows = "".join(
-        field_html(f, values.get(f.key, f.default), lang, cap_usage=cap_usage)
+        field_html(f, values.get(f.key, f.default), lang, cap_usage=cap_usage,
+                   channel_id=channel_id)
         for f in sec.fields if not f.hidden
     )
     if not rows:  # a section with only hidden fields — don't render an empty card
@@ -182,7 +192,10 @@ def settings_form_html(
     from app.api._i18n import t  # noqa: PLC0415
     title = _h.escape(t("nav.settings"))
     autosave = _h.escape(t("set.autosave"))
-    body = "".join(_section_html(sec, values, lang, cap_usage) for sec in S.SCHEMA)
+    # Branch panel shows only branch-scoped settings; connector-scoped ones (follow-ups,
+    # anti-ban caps, phone code, Meta) live in the per-channel editor (Филиалы → канал).
+    body = "".join(
+        _section_html(sec, values, lang, cap_usage) for sec in S.sections_for_scope("branch"))
     # checkbox group → recompute the comma-list into the hidden input, then fire its autosave
     script = (
         '<script>function multiSave(cb){var g=cb.closest(".multi-grp");'
@@ -199,4 +212,36 @@ def settings_form_html(
         f'<div class="pnl-body" style="max-width:1400px">'
         f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));'
         f'gap:.8rem;align-items:start">{body}</div></div>'
+    )
+
+
+def _field_for_kind(f: S.SettingField, kind: str) -> bool:
+    """A connector-scope field shows in a channel's editor unless it's Meta-specific (key
+    prefixed meta_/fb_), which only makes sense on a meta_business connector."""
+    if f.key.startswith(("meta_", "fb_")):
+        return kind == "meta_business"
+    return True
+
+
+def channel_settings_html(
+    kind: str, values: dict[str, str], lang: str, channel_id: int,
+    cap_usage: dict[str, tuple[int, int]] | None = None,
+) -> str:
+    """Per-connector settings block for the channel editor: the scope='channel' sections,
+    each field autosaving to app_setting(branch_id, channel_id, key). Meta fields are hidden
+    on non-Meta connectors. `cap_usage` shows the per-channel live anti-ban usage badge.
+    Reuses the same field renderer as the branch panel (DRY)."""
+    cards = []
+    for sec in S.sections_for_scope("channel"):
+        kept = S.SettingSection(
+            sec.icon, sec.title,
+            [f for f in sec.fields if not f.hidden and _field_for_kind(f, kind)])
+        if kept.fields:
+            cards.append(_section_html(
+                kept, values, lang, cap_usage=cap_usage, channel_id=channel_id))
+    if not cards:
+        return ""
+    return (
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));'
+        f'gap:.7rem;align-items:start;margin-top:.6rem">{"".join(cards)}</div>'
     )

@@ -20,6 +20,7 @@ from app.domain.clock import branch_day_start_utc, utc_now
 from app.modules.ads import AdMappingService
 from app.modules.knowledge.repository import ProductRepo
 from app.modules.settings import schema as settings_schema
+from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import get_settings, invalidate
 
 from ._i18n import apply_lang, t
@@ -365,30 +366,9 @@ async def settings_panel(request: Request) -> HTMLResponse:
     async with session_scope() as session:
         q = f"SELECT key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
         rows = (await session.execute(text(q), params)).all()
-        # Live usage badge under hourly_cap/daily_cap — single-branch only (ambiguous which
-        # branch's counts to show across a cross-branch view), computed fresh each request
-        # from real sent counts, never hardcoded.
-        cap_usage: dict[str, tuple[int, int]] = {}
-        if branch_ids and len(branch_ids) == 1:
-            bid = branch_ids[0]
-            cfg = await get_settings(session, bid)
-            now = utc_now()
-            if cfg.hourly_cap > 0:
-                n = (await session.execute(
-                    text("SELECT count(*) FROM outbox WHERE branch_id=:b AND status='sent'"
-                         " AND sent_at >= :since"),
-                    {"b": bid, "since": now - timedelta(hours=1)},
-                )).scalar_one()
-                cap_usage["hourly_cap"] = (n, cfg.hourly_cap)
-            if cfg.daily_cap > 0:
-                day_start = branch_day_start_utc(now, cfg.tz_offset_h)
-                n = (await session.execute(
-                    text("SELECT count(*) FROM outbox WHERE branch_id=:b AND status='sent'"
-                         " AND sent_at >= :since"),
-                    {"b": bid, "since": day_start},
-                )).scalar_one()
-                cap_usage["daily_cap"] = (n, cfg.daily_cap)
-    return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang, cap_usage))
+    # Anti-ban caps moved to the per-connector editor (with a per-channel live-usage badge),
+    # so the branch panel no longer shows or computes them.
+    return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
 
 
 
@@ -411,36 +391,58 @@ async def broker_log_page(request: Request, page: int = 0) -> HTMLResponse:
 @router.post("/settings/save", response_class=HTMLResponse)
 async def settings_save_by_key(
     request: Request, key: str = Form(...), value: str = Form(default=""),
+    channel_id: int | None = Form(default=None),
 ) -> HTMLResponse:
-    """Upsert one setting by key for the active branch and re-render that field.
+    """Upsert one setting by key and re-render that field. Without channel_id it writes the
+    branch tier; with channel_id (from the per-connector editor) it writes the connector tier.
 
     A blank secret is treated as "keep current" (the value is never echoed back)."""
     lang = apply_lang(request)
     field = settings_schema.field_for(key)
     if field is None:
         return HTMLResponse("", status_code=400)
+    # A connector write must target a channel-scope field, and channel_id must belong to a
+    # branch the caller can write — reuse the channel-branch ownership guard (blocks IDOR).
+    if channel_id is not None and field.scope != "channel":
+        return HTMLResponse("", status_code=400)
     # Settings write → scope by WRITE right (viewer can't); middleware blocks a pure viewer.
     writable = writable_branch_ids(request)
     bid = writable[0] if writable else 1
+    if channel_id is not None:
+        async with session_scope() as session:
+            owner = await _channel_branch_id(session, channel_id, writable)
+        if owner is None:
+            return HTMLResponse("", status_code=403)
+        bid = owner
     val = value.strip()
     async with session_scope() as session:
         if field.kind == "secret" and not val:
             cur = (
                 await session.execute(
-                    text("SELECT value FROM app_setting WHERE branch_id=:b AND key=:k"),
-                    {"b": bid, "k": key},
+                    text("SELECT value FROM app_setting"
+                         " WHERE branch_id=:b AND key=:k"
+                         " AND (channel_id = :c OR (channel_id IS NULL AND :c IS NULL))"),
+                    {"b": bid, "k": key, "c": channel_id},
                 )
             ).first()
-            return HTMLResponse(field_html(field, cur[0] if cur else "", lang))
-        await session.execute(
-            text(
-                "INSERT INTO app_setting (branch_id, key, value) VALUES (:b, :k, :v)"
-                " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"
-            ),
-            {"b": bid, "k": key, "v": val},
-        )
-    invalidate(bid)
-    return HTMLResponse(field_html(field, val, lang, saved=True))
+            return HTMLResponse(
+                field_html(field, cur[0] if cur else "", lang, channel_id=channel_id))
+        await SettingRepo(session).upsert(key, val, branch_id=bid, channel_id=channel_id)
+    invalidate(bid, channel_id)
+    return HTMLResponse(field_html(field, val, lang, saved=True, channel_id=channel_id))
+
+
+async def _channel_branch_id(session, channel_id: int, writable: list[int] | None) -> int | None:
+    """The channel's branch_id if it belongs to a branch the caller can write, else None —
+    the tenant-ownership guard for per-connector setting writes (blocks cross-branch IDOR)."""
+    row = (await session.execute(
+        text("SELECT branch_id FROM channel WHERE id=:id"), {"id": channel_id})).first()
+    if row is None:
+        return None
+    bid = row[0]
+    if writable is not None and bid not in writable:
+        return None
+    return bid
 
 
 _PLATFORM_KEY = "agent_enabled_platform"  # branch_id IS NULL row = whole-platform switch
@@ -460,20 +462,9 @@ async def _read_flag(session, branch_id: int | None, key: str) -> bool:
 
 
 async def _write_flag(session, branch_id: int | None, key: str, on: bool) -> None:
-    if branch_id is not None:
-        await session.execute(
-            text("INSERT INTO app_setting (branch_id, key, value) VALUES (:bid, :k, :v)"
-                 " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"),
-            {"bid": branch_id, "k": key, "v": "true" if on else "false"})
-    else:
-        # branch_id NULL can't use the (branch_id,key) unique-constraint upsert cleanly
-        upd = await session.execute(
-            text("UPDATE app_setting SET value=:v WHERE branch_id IS NULL AND key=:k"),
-            {"k": key, "v": "true" if on else "false"})
-        if not upd.rowcount:
-            await session.execute(
-                text("INSERT INTO app_setting (branch_id, key, value) VALUES (NULL, :k, :v)"),
-                {"k": key, "v": "true" if on else "false"})
+    # The COALESCE upsert handles the platform (branch_id NULL) tier uniformly too.
+    await SettingRepo(session).upsert(
+        key, "true" if on else "false", branch_id=branch_id)
 
 
 async def _single_selected_branch(request: Request) -> int | None:

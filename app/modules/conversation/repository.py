@@ -98,8 +98,9 @@ class OutboxRepo(BranchScoped[Outbox]):
         )
         return (await self.session.exec(q)).first()
 
-    async def count_sent_since(self, since: datetime) -> int:
-        """How many lines this branch actually sent since `since` — hourly/daily cap accounting."""
+    async def count_sent_since(self, since: datetime, channel_id: int | None = None) -> int:
+        """Lines sent since `since` for hourly/daily cap accounting. With channel_id the count
+        is scoped to that connector (anti-ban caps are per-channel); without it, branch-wide."""
         # COUNT in SQL instead of materializing rows; branch_id filter replicates
         # BranchScoped._q() — tenant isolation must not be lost here.
         q = (
@@ -111,4 +112,7 @@ class OutboxRepo(BranchScoped[Outbox]):
                 Outbox.sent_at >= since,
             )
         )
+        if channel_id is not None:
+            q = q.join(ChannelThread, ChannelThread.id == Outbox.thread_id).where(
+                ChannelThread.channel_id == channel_id)
         return int((await self.session.execute(q)).scalar_one())

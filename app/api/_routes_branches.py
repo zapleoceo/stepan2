@@ -12,6 +12,7 @@ from app.adapters.db.session import session_scope
 from app.admin._branch import require_super_admin
 from app.modules.knowledge.canonical import ensure_canonical_docs
 from app.modules.knowledge.source import copy_kb
+from app.modules.settings.repository import SettingRepo
 from app.modules.settings.schema import defaults as _schema_defaults
 
 from ._i18n import apply_lang
@@ -105,15 +106,9 @@ async def branches_create(
             )
         ).first()
         new_id = row[0]
-        for key, value in _SEED_SETTINGS.items():
-            await session.execute(
-                text(
-                    "INSERT INTO app_setting (branch_id, key, value)"
-                    " VALUES (:bid, :key, :val)"
-                    " ON CONFLICT (branch_id, key) DO NOTHING"
-                ),
-                {"bid": new_id, "key": key, "val": value},
-            )
+        repo = SettingRepo(session)
+        for key, value in _SEED_SETTINGS.items():  # create-time seed: branch row is empty
+            await repo.upsert(key, value, branch_id=new_id)
         created = await ensure_canonical_docs(session, new_id, lang)
         _log.info("created branch id=%s name=%r; seeded %d settings + %d KB docs",
                   new_id, name, len(_SEED_SETTINGS), created)
