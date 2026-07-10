@@ -848,14 +848,17 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
     # nav) rebuilds the shell with the same filtered thread list, not the whole inbox.
     _chat_url = f"/ui/chat/{tid}?{filter_qs}" if filter_qs else f"/ui/chat/{tid}"
     _back_url = f"/ui/inbox?{filter_qs}" if filter_qs else "/ui/inbox"
+    _kind_attr = _h.escape(str(channel_kind or ""))
+    _name_esc = _h.escape(str(name or "Lead"))
     return (
-        f'<a class="ti{on}" data-search="{search_idx}" data-channel-kind="{_h.escape(str(channel_kind or ""))}"'
+        f'<a class="ti{on}" data-search="{search_idx}" data-channel-kind="{_kind_attr}"'
         f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="{_h.escape(_chat_url)}"'
         f' onclick="setOn(this);setOpenThread({tid})"'
         f' href="{_h.escape(_back_url)}">'
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
-        f'<div class="ti-t">{_channel_badge(channel_kind)} <span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
+        f'<div class="ti-t">{_channel_badge(channel_kind)}'
+        f' <span class="ti-n">{_name_esc}</span>'
         f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_fmt_dt_short(dt)}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge}</div>'
@@ -1600,7 +1603,8 @@ def app_shell(
         "function toggleNav(){document.body.classList.toggle('nav-open');}"
         "var _tiKindOff={};"
         "function toggleKind(btn){var k=btn.getAttribute('data-kind');"
-        "if(_tiKindOff[k]){delete _tiKindOff[k];btn.classList.add('on');btn.classList.remove('off');}"
+        "if(_tiKindOff[k]){delete _tiKindOff[k];"
+        "btn.classList.add('on');btn.classList.remove('off');}"
         "else{_tiKindOff[k]=true;btn.classList.remove('on');btn.classList.add('off');}"
         "filterTi();}"
         "function filterTi(){var i=document.getElementById('ti-q');var q=i?i.value:'';"
