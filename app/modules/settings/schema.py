@@ -162,8 +162,7 @@ SCHEMA: list[SettingSection] = [
            ph=_l("10", "10", "10"), help=_UNLIMITED, width="76px"),
     ]),
     SettingSection("fa-solid fa-bullseye",
-                   _l("Meta (реклама, пиксель, сообщения)", "Meta (ads, pixel, messaging)",
-                      "Meta (iklan, pixel, pesan)"), [
+                   _l("Коннектор Meta", "Meta connector", "Konektor Meta"), [
         _f("meta_app_id", "text", "", _l("App ID", "App ID", "App ID"),
            ph=_l("1068545755735887", "1068545755735887", "1068545755735887"), width="220px"),
         _f("fb_business_id", "text", "", _l("Business ID", "Business ID", "Business ID"),
@@ -172,8 +171,6 @@ SCHEMA: list[SettingSection] = [
            ph=_l("act_1234567890", "act_1234567890", "act_1234567890"), width="220px"),
         _f("meta_page_id", "text", "", _l("Page ID", "Page ID", "Page ID"),
            ph=_l("447466948457973", "447466948457973", "447466948457973"), width="220px"),
-        _f("meta_pixel_id", "text", "", _l("Pixel ID", "Pixel ID", "Pixel ID"),
-           ph=_l("1234567890", "1234567890", "1234567890"), width="220px"),
         _f("meta_system_user_token", "secret", "",
            _l("System User токен (реклама + пиксель + сообщения)",
               "System User token (ads + pixel + messaging)",
@@ -195,7 +192,7 @@ SCHEMA: list[SettingSection] = [
            help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
                    "Legacy field — use the System User token above. Blank = keep current",
                    "Field lama — gunakan token System User di atas. Kosong = tetap"),
-           width="340px"),
+           width="340px", hidden=True),
         _f("meta_ads_token", "secret", "",
            _l("Marketing API токен (устар.)", "Marketing API token (legacy)",
               "Token Marketing API (lama)"),
@@ -203,7 +200,25 @@ SCHEMA: list[SettingSection] = [
            help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
                    "Legacy field — use the System User token above. Blank = keep current",
                    "Field lama — gunakan token System User di atas. Kosong = tetap"),
-           width="340px"),
+           width="340px", hidden=True),
+    ]),
+    SettingSection("fa-solid fa-chart-line",
+                   _l("Meta — доп. опция: пиксель (CAPI)", "Meta — add-on: pixel (CAPI)",
+                      "Meta — opsi tambahan: pixel (CAPI)"), [
+        _f("meta_pixel_send_enabled", "bool", "false",
+           _l("Слать события в пиксель", "Send events to pixel", "Kirim event ke pixel"),
+           help=_l("Доп. опция поверх коннектора Meta — требует System User токен и Pixel ID "
+                   "выше. Выкл. по умолчанию: включайте только когда пиксель настроен и "
+                   "проверен.",
+                   "Add-on on top of the Meta connector — needs the System User token and "
+                   "Pixel ID above. Off by default: enable only once the pixel is configured "
+                   "and verified.",
+                   "Opsi tambahan di atas konektor Meta — perlu token System User dan Pixel ID "
+                   "di atas. Nonaktif secara default: aktifkan hanya setelah pixel diatur dan "
+                   "diverifikasi."),
+           width="130px"),
+        _f("meta_pixel_id", "text", "", _l("Pixel ID", "Pixel ID", "Pixel ID"),
+           ph=_l("1234567890", "1234567890", "1234567890"), width="220px"),
     ]),
     SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [
         _f("crm_enabled", "bool", "false",

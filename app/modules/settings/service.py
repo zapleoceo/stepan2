@@ -75,6 +75,9 @@ class BranchSettings:
     fb_account_id: str = ""
     meta_page_id: str = ""
     meta_system_user_token: str = ""
+    # Add-on toggle on top of the connector above — pixel CAPI sends stay off until a branch
+    # explicitly opts in, even if the connector fields are already filled in.
+    meta_pixel_send_enabled: bool = False
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -176,4 +179,5 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         fb_account_id=raw.get("fb_account_id", ""),
         meta_page_id=raw.get("meta_page_id", ""),
         meta_system_user_token=raw.get("meta_system_user_token", ""),
+        meta_pixel_send_enabled=_b(raw, "meta_pixel_send_enabled"),
     )
