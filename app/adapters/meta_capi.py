@@ -15,7 +15,11 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-_GRAPH = f"https://graph.facebook.com/{settings().meta_graph_version}"
+
+def _graph_base() -> str:
+    # Lazy (not module-level) — matches the other adapters and keeps this module importable
+    # before config/env is initialized (e.g. test collection); also picks up a version change.
+    return f"https://graph.facebook.com/{settings().meta_graph_version}"
 
 
 def hash_phone(phone: str | None) -> str | None:
@@ -71,8 +75,9 @@ class MetaCapi:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.post(
-                    f"{_GRAPH}/{pixel_id}/events",
-                    params={"access_token": token},
+                    f"{_graph_base()}/{pixel_id}/events",
+                    headers={"Authorization": f"Bearer {token}"},  # NOT ?access_token= — a
+                    # query-string token lands in the exception URL and then in the log below.
                     json=payload,
                 )
             response.raise_for_status()

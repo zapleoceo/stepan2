@@ -6,7 +6,15 @@ inject fakes instead. Swap the underlying API here; adapters stay untouched."""
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Ad click-to-DM attribution codes. Word-boundary matched so an ordinary name that merely
+# CONTAINS these letters ("Ahmad", "Nadia", "Murad") is not misfiled as an ad lead.
+_AD_ATTR_RE = re.compile(r"\b(ctd|ads?|click.?to.?(dm|direct|message))\b")
 
 # Live polling only needs the most-recent threads (new messages surface at the top);
 # deep pagination every minute is slow (each page costs an IG call + 2-5s delay) and
@@ -62,7 +70,7 @@ def _detect_lead_source(thread: dict, lead_pk: Any) -> str | None:
         if str(uid) != lead_str:
             continue
         low = (sa or "").lower()
-        if "ctd" in low or "ad" in low:
+        if _AD_ATTR_RE.search(low):
             return "ad_clicktomsg"
         if "story" in low:
             return "story"
@@ -127,8 +135,7 @@ class InstagrapiTransport:
             try:
                 threads = await asyncio.to_thread(_paged_threads, client, endpoint)
             except Exception as exc:  # noqa: BLE001
-                import logging  # noqa: PLC0415
-                logging.getLogger(__name__).warning("IG %s failed: %s", endpoint, exc)
+                logger.warning("IG %s failed: %s", endpoint, exc)
                 continue
             for t in threads:
                 items = t.get("items") or []
@@ -205,8 +212,19 @@ class InstagrapiTransport:
         client = self._ensure_client()
         try:
             await asyncio.to_thread(client.get_timeline_feed)
-        except Exception as exc:  # instagrapi raises ChallengeRequired/LoginRequired here
-            return "challenge" if "challenge" in type(exc).__name__.lower() else "expired"
+        except Exception as exc:
+            name = type(exc).__name__.lower()
+            if "challenge" in name:
+                return "challenge"
+            if "login" in name:  # LoginRequired → the session genuinely needs re-auth
+                return "expired"
+            # A transport blip (timeout/connection/throttle) or any unrecognized error must NOT
+            # be reported as 'expired': that triggers a needless re-login, and a fresh login from
+            # a datacenter IP is exactly the checkpoint/blacklist path we avoid. Assume the
+            # session is still valid and retry next tick.
+            logger.warning("account_health inconclusive (%s): %s — treating as ok",
+                           type(exc).__name__, exc)
+            return "ok"
         return "ok"
 
     async def fetch_user_stats(self, ig_user_id: str) -> dict[str, Any]:

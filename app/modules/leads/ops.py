@@ -35,10 +35,13 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _normalize_phone(phone: str) -> str:
-    """Strip everything but digits, keep a single leading '+'. '+62 812-3' → '+62812'."""
+def _match_key(phone: str) -> str:
+    """Country/format-agnostic lookup key: the trailing national digits. Stored phones are
+    canonical '+<cc>…' E.164 (the only writers are phone.to_e164 / phone.extract_phone), but
+    a find_lead query may arrive as '0812…', '62…' or '+62…' — comparing the last 9 significant
+    digits matches all of those within a branch without re-hardcoding a country prefix here."""
     digits = "".join(c for c in phone if c.isdigit())
-    return ("+" + digits) if phone.strip().startswith("+") else digits
+    return digits[-9:] if len(digits) >= 9 else digits
 
 
 @dataclass
@@ -59,15 +62,15 @@ async def find_lead(
 ) -> Lead | None:
     """Match a lead by phone across channels. Phone is the cross-channel identity key;
     branch_id narrows the search when the caller knows it, else searches every branch."""
-    norm = _normalize_phone(phone)
+    norm = _match_key(phone)
     if not norm:
         return None
     stmt = select(Lead).where(Lead.phone_e164.is_not(None))
     if branch_id is not None:
         stmt = stmt.where(Lead.branch_id == branch_id)
     leads = (await session.execute(stmt)).scalars().all()
-    for lead in leads:  # normalize BOTH sides — stored numbers vary in spacing/format
-        if _normalize_phone(lead.phone_e164 or "") == norm:
+    for lead in leads:  # match BOTH sides on the national number — formats/country prefixes vary
+        if _match_key(lead.phone_e164 or "") == norm:
             return lead
     return None
 
