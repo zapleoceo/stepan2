@@ -96,7 +96,14 @@ _CSS = (
     ".thr{width:305px;flex-shrink:0;background:#0f1117;border-right:1px solid #2d3748;"
     "display:flex;flex-direction:column;overflow:hidden}"
     ".thr-h{padding:.56rem .8rem;border-bottom:1px solid #2d3748;font-size:.82rem;"
-    "font-weight:600;color:#e8eef4;flex-shrink:0}"
+    "font-weight:600;color:#e8eef4;flex-shrink:0;display:flex;align-items:center;gap:.5rem}"
+    ".chk-kinds{display:flex;gap:.3rem;margin-left:auto}"
+    ".chk-kind{background:none;border:1px solid #2d3748;border-radius:5px;padding:.15rem .4rem;"
+    "cursor:pointer;font-size:.82rem;line-height:1}"
+    ".chk-kind.on{border-color:#3a4759}"
+    ".chk-kind.off{opacity:.35;position:relative}"
+    ".chk-kind.off::after{content:'';position:absolute;left:10%;right:10%;top:50%;"
+    "border-top:1.5px solid #e8eef4}"
     ".ad-filter{display:flex;align-items:center;gap:.4rem;padding:.35rem .8rem;flex-shrink:0;"
     "font-size:.68rem;color:#8899aa;background:#1a2230;border-bottom:1px solid #2d3748}"
     ".ad-filter-id{font-family:ui-monospace,monospace;color:#4da6ff;font-size:.64rem}"
@@ -786,11 +793,24 @@ def _source_bar(
     return f'<div class="srcbar">{thumb}{lbl}</div>'
 
 
+_CHANNEL_ICON = {
+    "instagram": ("fa-brands fa-instagram", "#e1306c"),
+    "meta_business": ("fa-brands fa-facebook", "#1877f2"),
+    "whatsapp": ("fa-brands fa-whatsapp", "#25d366"),
+}
+
+
+def _channel_badge(kind: str | None) -> str:
+    icon, color = _CHANNEL_ICON.get(str(kind), ("fa-solid fa-comment", "#8a94a6"))
+    return f'<i class="{icon}" style="color:{color}" title="{_h.escape(str(kind or ""))}"></i>'
+
+
 def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
                  filter_qs: str = "") -> str:
     (tid, name, stage, last_act, phone, product_slug,
      ig_username, avatar_url, follower_count, following_count, agent_enabled,
-     last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h) = row  # type: ignore[misc]
+     last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h,
+     channel_kind) = row  # type: ignore[misc]
     dt = _as_dt(last_act)
     if dt is not None:
         dt += timedelta(hours=int(tz_offset_h or 0))
@@ -829,13 +849,13 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
     _chat_url = f"/ui/chat/{tid}?{filter_qs}" if filter_qs else f"/ui/chat/{tid}"
     _back_url = f"/ui/inbox?{filter_qs}" if filter_qs else "/ui/inbox"
     return (
-        f'<a class="ti{on}" data-search="{search_idx}"'
+        f'<a class="ti{on}" data-search="{search_idx}" data-channel-kind="{_h.escape(str(channel_kind or ""))}"'
         f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="{_h.escape(_chat_url)}"'
         f' onclick="setOn(this);setOpenThread({tid})"'
         f' href="{_h.escape(_back_url)}">'
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
-        f'<div class="ti-t"><span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
+        f'<div class="ti-t">{_channel_badge(channel_kind)} <span class="ti-n">{_h.escape(str(name or "Lead"))}</span>'
         f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_fmt_dt_short(dt)}</span></div>'
         f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge}</div>'
@@ -1578,10 +1598,17 @@ def app_shell(
         "document.body.classList.add('chat-open');document.body.classList.remove('nav-open');}"
         "function backToList(){document.body.classList.remove('chat-open');}"
         "function toggleNav(){document.body.classList.toggle('nav-open');}"
+        "var _tiKindOff={};"
+        "function toggleKind(btn){var k=btn.getAttribute('data-kind');"
+        "if(_tiKindOff[k]){delete _tiKindOff[k];btn.classList.add('on');btn.classList.remove('off');}"
+        "else{_tiKindOff[k]=true;btn.classList.remove('on');btn.classList.add('off');}"
+        "filterTi();}"
         "function filterTi(){var i=document.getElementById('ti-q');var q=i?i.value:'';"
         "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
         "var s=e.getAttribute('data-search')||'';"
-        "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
+        "var k=e.getAttribute('data-channel-kind')||'';"
+        "var kindOk=!_tiKindOff[k];"
+        "e.style.display=(kindOk&&(!q||s.indexOf(q)>=0))?'':'none';});}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
         "function smartScroll(m){if(!m)return;"
         "var near=m.scrollHeight-m.scrollTop-m.clientHeight<150;"
@@ -1837,10 +1864,20 @@ def app_shell(
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
         ) if awaiting else ""
+        _kind_chips = "".join(
+            f'<button type="button" class="chk-kind on" data-kind="{k}"'
+            f' onclick="toggleKind(this)" title="{_h.escape(lbl)}">'
+            f'<i class="{icon}" style="color:{color}"></i></button>'
+            for k, (icon, color, lbl) in (
+                ("instagram", (*_CHANNEL_ICON["instagram"], "Instagram")),
+                ("meta_business", (*_CHANNEL_ICON["meta_business"], "Meta Business")),
+                ("whatsapp", (*_CHANNEL_ICON["whatsapp"], "WhatsApp")),
+            )
+        )
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'
             f' hx-get="/ui/funnel{_qs}" hx-trigger="load, every 60s" hx-swap="innerHTML"></div>'
-            f'<div class="thr-h">{inbox_lbl}</div>'
+            f'<div class="thr-h">{inbox_lbl}<span class="chk-kinds">{_kind_chips}</span></div>'
             f'{_ad_chip}{_seg_chip}{_await_chip}'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
             f' data-help="{_h.escape(t("hint.search"))}"'
