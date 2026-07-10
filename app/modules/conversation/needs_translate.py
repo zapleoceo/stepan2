@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 
+from app.domain.script_guard import wrong_script
 from app.ports.llm import LLMPort
 
 from .needs import NeedsProfile
@@ -116,4 +117,11 @@ async def _translate_batch(llm: LLMPort, items: list[str], lang: str) -> dict[st
         return {}
     if not (isinstance(arr, list) and len(arr) == len(items)):
         return {}
-    return {orig: str(tr).strip() or orig for orig, tr in zip(items, arr, strict=True)}
+    result = {orig: str(tr).strip() or orig for orig, tr in zip(items, arr, strict=True)}
+    # Reject a provider drift to the wrong script (Arabic/CJK, or non-Cyrillic for ru) — don't
+    # cache it; degrade to originals and retry next render. This is why a lead's needs showed
+    # Arabic in the RU admin: the drift was cached as the "translation" (thread 2523).
+    if any(wrong_script(v, lang) for v in result.values()):
+        logger.warning("needs translate drifted to wrong script for lang=%s — dropped", lang)
+        return {}
+    return result
