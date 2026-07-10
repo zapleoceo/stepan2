@@ -244,7 +244,7 @@ async def reports_panel(
     request: Request, date_from: str = "", date_to: str = "",
     range_: str = Query("", alias="range"),
 ) -> HTMLResponse:
-    apply_lang(request)
+    lang = apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     # A quick-range button wins over manually-picked dates — it always sends its own
     # request with no date_from/date_to, but guard anyway so stale query params can't
@@ -338,7 +338,8 @@ async def reports_panel(
         stage_reach = await fetch_stage_reach(session, branch_ids, since=since_dt, until=until_dt)
         from app.modules.needs_cloud import KINDS, cloud_for  # noqa: PLC0415
         needs_cloud = {
-            k: await cloud_for(session, branch_ids, k, since_dt, until_dt) for k in KINDS}
+            k: await cloud_for(session, branch_ids, k, since_dt, until_dt, lang=lang)
+            for k in KINDS}
     segment_stages: dict[str, dict[str, dict[str, int]]] = {}
     for a, seg, st, n in seg_stage:  # {audience: {lead_type: {stage: count}}} — stage boxes
         segment_stages.setdefault(str(a), {}).setdefault(str(seg), {})[str(st)] = int(n)

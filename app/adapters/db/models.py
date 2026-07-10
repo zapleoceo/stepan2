@@ -474,7 +474,9 @@ class NeedEntity(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     branch_id: int = Field(foreign_key="branch.id", index=True)
     kind: str = Field(description="jobs | pains | gains")
-    label: str
+    label: str  # canonical, Russian
+    label_i18n: str | None = Field(
+        default=None, description="кэш переводов лейбла: JSON {en, id} — раз в сутки, не рендер")
     created_at: datetime = Field(default_factory=_utcnow)
 
 
