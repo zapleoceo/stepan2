@@ -94,3 +94,33 @@ async def test_instagram_never_gates_on_window(db_session) -> None:
     row = await OutboxSender(db_session, bid, ch).send_next(tid)
     assert len(ch.sent) == 1                 # IG has no hard 24h cutoff — sends regardless
     assert row is not None and row.status == "sent"
+
+
+async def test_fetch_pending_surfaces_failed_not_skipped(db_session) -> None:
+    """A failed send must reach the manager's feed; a skipped (automated, expected) one must
+    not — so the manager sees delivery problems without noise from window-gated auto-sends."""
+    from app.api._query import fetch_pending
+    b = Branch(name="B", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id)
+    db_session.add(lead)
+    ch = Channel(branch_id=b.id, kind=ChannelKind.META_BUSINESS)
+    db_session.add(ch)
+    await db_session.flush()
+    t = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="x")
+    db_session.add(t)
+    await db_session.flush()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    db_session.add(Outbox(branch_id=b.id, thread_id=t.id, text="queued", source="manager",
+                          status="pending", scheduled_at=now))
+    db_session.add(Outbox(branch_id=b.id, thread_id=t.id, text="lost", source="manager",
+                          status="failed", error="meta_window_closed", scheduled_at=now))
+    db_session.add(Outbox(branch_id=b.id, thread_id=t.id, text="auto", source="followup",
+                          status="skipped", error="meta_window_closed", scheduled_at=now))
+    await db_session.flush()
+
+    rows = await fetch_pending(db_session, t.id)
+    texts = {r[1]: r[5] for r in rows}  # text -> status
+    assert texts == {"queued": "pending", "lost": "failed"}  # skipped auto-send stays hidden
+    assert next(r[6] for r in rows if r[1] == "lost") == "meta_window_closed"  # error carried
