@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Outbox
-from app.modules.settings.service import BranchSettings
+from app.modules.settings.service import BranchSettings, get_channel_settings
 
 from . import guard
 from .engine import DecisionEngine, _fmt_llm_meta
@@ -42,14 +42,13 @@ logger = logging.getLogger(__name__)
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
 # `new` is excluded: an untouched lead gets a live reply, not a nudge).
 _FOLLOWUP_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug, ct.followups_sent"
+    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid"
     "   AND l.stage IN ('nurturing', 'qualifying', 'presenting', 'objection')"
     "   AND l.agent_enabled = :on"
     "   AND ct.next_followup_at IS NOT NULL"
     "   AND ct.next_followup_at <= :now"
-    "   AND ct.followups_sent < :max_steps"
     "   AND ct.last_out_at IS NOT NULL"
     "   AND (ct.last_in_at IS NULL OR ct.last_in_at <= ct.last_out_at)"
     "   AND NOT EXISTS (SELECT 1 FROM outbox o"
@@ -103,24 +102,27 @@ class FollowupService:
     async def due_threads(self, now: datetime) -> list[tuple[int, str | None, int]]:
         """Threads eligible for a follow-up right now — a pure query, no broker/DB writes.
 
-        Quiet hours do NOT filter this list — only the SEND (OutboxSender.send_next) holds
-        a follow-up-sourced row until quiet hours end. Queueing now means it's ready to go
-        out the instant quiet hours lift, instead of losing that whole cron cycle."""
-        cfg = self.settings
-        if not cfg.followup_enabled or not cfg.followup_schedule_h:
-            return []
-        if not cfg.agent_enabled:
-            return []  # global OFF: no generation at all
+        Follow-up enablement and the step-count bound are per-connector: a thread's schedule
+        comes from its channel (Meta's shorter cadence vs Instagram's). The branch agent
+        kill-switch still gates everything. Quiet hours do NOT filter this list — only the
+        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end."""
+        if not self.settings.agent_enabled:
+            return []  # branch global OFF: no generation at all
         rows = (
             await self.session.execute(
                 text(_FOLLOWUP_Q),
-                {
-                    "bid": self.branch_id, "now": now, "on": True,
-                    "max_steps": len(cfg.followup_schedule_h),
-                },
+                {"bid": self.branch_id, "now": now, "on": True},
             )
         ).all()
-        return list(rows)
+        due: list[tuple[int, str | None, int]] = []
+        for tid, product_slug, followups_sent, channel_id in rows:
+            ch = await get_channel_settings(self.session, self.branch_id, channel_id)
+            if not ch.followup_enabled or not ch.followup_schedule_h:
+                continue
+            if followups_sent >= len(ch.followup_schedule_h):
+                continue  # this connector's schedule exhausted for the thread
+            due.append((tid, product_slug, followups_sent))
+        return due
 
     async def queue_one(
         self, thread_id: int, product_slug: str | None, sent_so_far: int,
