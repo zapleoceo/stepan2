@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -42,10 +43,17 @@ _SYSTEM = (
     "'изучение маркетинга соцсетей с нуля' → 'Соцсети'; 'карьера'/'карьерный рост' → 'Карьера'.\n"
     "3. Prefer the BROADEST sensible category — better 10 categories than 40. Avoid vague "
     "catch-alls like 'Услуги'/'Обучение' unless nothing specific fits.\n"
+    "4. LABELS ARE ALWAYS IN RUSSIAN (Cyrillic). Common tech abbreviations may stay Latin "
+    "(AI, IT, SMM, HR). NEVER use Arabic, Chinese, or any other script — a phrase in "
+    "Indonesian/Arabic still gets a RUSSIAN category (e.g. 'coding' → 'Программирование').\n"
     "The input `phrases` is an object of index→phrase. Return a JSON object mapping each "
     "INDEX (same string key) to its category label — do NOT echo the phrase text. Output "
     "ONLY that JSON object."
 )
+
+# A clean category label: Cyrillic/Latin letters, digits and a little punctuation only. Rejects
+# the Arabic/CJK garbage a drifting model sometimes emits ('برمجة', 'كمبيوتر', mixed 'Кمبيوتر').
+_VALID_LABEL = re.compile(r"^[A-Za-zА-Яа-яЁё0-9][A-Za-zА-Яа-яЁё0-9 \-/&.]{0,28}$")
 
 
 @dataclass
@@ -94,11 +102,14 @@ async def _classify_phrases(
             continue
         if isinstance(mapping, dict):
             for j, ph in enumerate(chunk):
-                label = mapping.get(str(j))
-                if isinstance(label, str) and label.strip():
-                    out[ph] = label.strip()
-                    if label.strip() not in labels:
-                        labels.append(label.strip())
+                label = (mapping.get(str(j)) or "").strip() if isinstance(
+                    mapping.get(str(j)), str) else ""
+                # Reject a garbage/wrong-script label (Arabic/CJK drift) — leave the phrase
+                # untagged this run rather than create a junk category; retried when it changes.
+                if label and _VALID_LABEL.match(label):
+                    out[ph] = label
+                    if label not in labels:
+                        labels.append(label)
     return out
 
 
