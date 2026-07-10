@@ -20,7 +20,11 @@ class LLMPort(Protocol):
         branch_id: int | None = None,
     ) -> tuple[str, dict[str, Any]]:
         """Returns (text, meta). meta carries cost_usd / model / tokens for budgeting.
-        workflow/thread_id/branch_id are audit context for broker_log (optional)."""
+        workflow/thread_id/branch_id are audit context for broker_log (optional).
+
+        The broker adapter runs every chat capability over the async job queue (submit +
+        poll) so a slow provider can't 504 a held connection — the caller never sees the
+        polling, just (text, meta)."""
         ...
 
     async def embed(
@@ -40,10 +44,9 @@ class LLMPort(Protocol):
         thread_id: int | None = None,
         branch_id: int | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        """chat:deep — full-context/reasoning capability. The broker made this
-        async-only (submit + poll) on 2026-07-05: nemotron's real latency (up
-        to ~8 min observed) exceeds Cloudflare's and the broker's own nginx
-        proxy timeouts, so a single blocking HTTP call could never carry the
-        result reliably. Same (text, meta) shape as chat() — callers don't
-        need to know it's polling underneath."""
+        """chat:deep — full-context/reasoning capability, same async job queue as chat()
+        (submit /v1/jobs + poll). nemotron's real latency (up to ~8 min) far exceeds
+        Cloudflare's/nginx's proxy timeouts, so a blocking call could never carry the
+        result. Same (text, meta) shape as chat(); falls back to chat:smart when the
+        project key lacks the llm:deep scope."""
         ...

@@ -2,12 +2,20 @@
 
 No provider keys in this app: the broker holds them and returns cost_usd, so per-branch
 budgeting uses the real broker price. Every call (reply/translate/embed/suggest) is logged
-to broker_log — the single write point — for the /settings/log audit page."""
+to broker_log — the single write point — for the /settings/log audit page.
+
+Chat is FULLY ASYNC (2026-07-09): every chat capability goes through the broker's job
+queue — POST /v1/jobs?capability=X returns a job id, then we poll GET /v1/jobs/{id} until
+done. A slow provider no longer holds a synchronous connection open past Cloudflare's /
+nginx's proxy timeout (the 504 class of failure). The public API is unchanged —
+chat()/chat_deep() still return (text, meta); callers don't know it polls underneath.
+embed()/transcribe() stay synchronous (fast, and the broker has no job endpoint for them)."""
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -16,28 +24,28 @@ from app.config import settings
 
 _log = logging.getLogger(__name__)
 
-# chat:smart (lead replies) and chat:edit (Coach) return a large JSON and the broker may
-# fall back across providers — they need a long read timeout. Fast caps fail fast so one
-# stuck call doesn't wedge the worker. Mirrors Stepan-1's broker_client timeouts.
-_DEFAULT_TIMEOUT = httpx.Timeout(
+# Individual submit/poll HTTP calls are quick — a short timeout. The OVERALL wait for a job
+# is bounded by the per-capability poll budget below, not by one request's read timeout.
+_JOB_HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+# Sync-only calls (embed/transcribe) still use a plain read timeout.
+_SYNC_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_s, write=10.0, pool=5.0)
-_SLOW_TIMEOUT = httpx.Timeout(
-    connect=5.0, read=settings().llm_read_timeout_slow_s, write=10.0, pool=5.0)
 _SLOW_CAPS = frozenset({"chat:smart"})
-# chat:deep is submit+poll; a transient poll failure (502/timeout) must not discard the
-# whole multi-minute job — tolerate this many consecutive poll errors before giving up.
-_DEEP_POLL_MAX_ERRORS = 5
-
-# chat:deep is submit+poll now (2026-07-05, see BrokerLLM.chat_deep) — the broker itself
-# made /v1/chat?capability=chat:deep return 400 unconditionally, because a single blocking
-# HTTP call can't reliably carry a result that sometimes takes ~8 minutes (past Cloudflare's
-# and the broker's own nginx proxy timeouts). llm_read_timeout_deep_s is now the total
-# polling budget, not one HTTP request's read timeout — each individual submit/poll call
-# uses the short _DEFAULT_TIMEOUT.
+# A transient poll failure (502/timeout) must not discard a job that's still running —
+# tolerate this many consecutive poll errors before giving up.
+_POLL_MAX_ERRORS = 5
 
 
-def _chat_timeout(capability: str) -> httpx.Timeout:
-    return _SLOW_TIMEOUT if capability in _SLOW_CAPS else _DEFAULT_TIMEOUT
+def _poll_budget_s(capability: str) -> float:
+    """Total time to wait for a job of this capability before giving up (TimeoutError).
+    Not a single-request timeout — the overall submit+poll budget. chat:deep reasons for
+    minutes; chat:smart gets the slow budget; everything else the normal one."""
+    s = settings()
+    if capability == "chat:deep":
+        return s.llm_read_timeout_deep_s
+    if capability in _SLOW_CAPS:
+        return s.llm_read_timeout_slow_s
+    return s.llm_read_timeout_s
 
 
 class BrokerLLM:
@@ -68,39 +76,11 @@ class BrokerLLM:
         }
         if require_json_schema:
             body["response_format"] = {"type": "json_object"}
-        timeout = _chat_timeout(capability)
-        if read_timeout_s is not None:
-            timeout = httpx.Timeout(connect=5.0, read=read_timeout_s, write=10.0, pool=5.0)
-        start = time.perf_counter()
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as c:
-                r = await c.post(
-                    f"{self._url}/v1/chat",
-                    params={"capability": capability},
-                    headers={"X-Project-Key": self._key},
-                    json=body,
-                )
-            r.raise_for_status()
-            # A 200 with a truncated body or missing keys is still a failed call — parse
-            # inside the try so JSONDecodeError/KeyError also write an ok=false audit row.
-            d = r.json()
-            meta = {
-                "model": d["model"],
-                "tokens_in": d["tokens_in"],
-                "tokens_out": d["tokens_out"],
-                "provider": d["provider"],
-                "cost_usd": d["cost_usd"],
-                "elapsed_ms": int((time.perf_counter() - start) * 1000),
-                "request_id": d.get("request_id") or d.get("id") or r.headers.get("x-request-id"),
-            }
-            reply_text = d["text"]
-        except Exception as exc:
-            await _log_call(capability, workflow or "chat", thread_id, branch_id,
-                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
-                            ok=False, error=_err_text(exc))
-            raise
-        await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
-        return reply_text, meta
+        # read_timeout_s (a caller override, e.g. translate) becomes the total poll budget.
+        budget = read_timeout_s if read_timeout_s is not None else _poll_budget_s(capability)
+        return await self._submit_and_poll(
+            body, capability=capability, workflow=workflow,
+            thread_id=thread_id, branch_id=branch_id, budget_s=budget)
 
     async def chat_deep(
         self,
@@ -113,84 +93,71 @@ class BrokerLLM:
         thread_id: int | None = None,
         branch_id: int | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        """chat:deep — submit + poll (see module docstring for why). Falls back to
-        chat:smart on 403 (project key doesn't have the llm:deep scope yet), same as
-        the old inline fallback used to do for chat:deep through chat().
+        """chat:deep — full-context/reasoning capability, same async job flow as chat().
+        Falls back to chat:smart on a 403 (the project key doesn't have the llm:deep scope
+        yet) so Coach keeps working; auto-upgrades the day the scope is granted.
 
-        require_json_schema is accepted for signature parity with chat() but NOT sent
-        to the broker — /v1/deep doesn't take response_format at all (nemotron isn't
-        JSON-reliable). Callers that need JSON out of chat:deep must already tolerate a
-        markdown-fenced or slightly malformed body (propose_edit already does)."""
+        require_json_schema is accepted for signature parity but NOT sent — nemotron isn't
+        JSON-reliable, so callers already tolerate a fenced/loose body (propose_edit does)."""
         body: dict[str, Any] = {
             "messages": messages, "max_tokens": max_tokens, "temperature": temperature,
         }
+
+        async def _fallback_to_smart() -> tuple[str, dict[str, Any]]:
+            return await self.chat(
+                messages, capability="chat:smart",
+                require_json_schema=require_json_schema,
+                max_tokens=min(max_tokens, 2000), temperature=temperature,
+                workflow=workflow, thread_id=thread_id, branch_id=branch_id,
+            )
+
+        return await self._submit_and_poll(
+            body, capability="chat:deep", workflow=workflow,
+            thread_id=thread_id, branch_id=branch_id,
+            budget_s=settings().llm_read_timeout_deep_s, on_403=_fallback_to_smart)
+
+    async def _submit_and_poll(
+        self,
+        body: dict[str, Any],
+        *,
+        capability: str,
+        workflow: str | None,
+        thread_id: int | None,
+        branch_id: int | None,
+        budget_s: float,
+        on_403: Callable[[], Awaitable[tuple[str, dict[str, Any]]]] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        """Submit a chat job and poll it to completion — the single async chat path.
+
+        on_403 lets chat_deep fall back to chat:smart when the key lacks the scope. A
+        transient poll error is tolerated up to _POLL_MAX_ERRORS in a row; the whole wait is
+        bounded by budget_s. Writes exactly one broker_log row (ok on done, error otherwise),
+        same shape as before so the audit page / request_id lookups are unchanged."""
         start = time.perf_counter()
-        capability = "chat:deep"
         try:
-            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
                 r = await c.post(
-                    f"{self._url}/v1/deep",
+                    f"{self._url}/v1/jobs",
+                    params={"capability": capability},
                     headers={"X-Project-Key": self._key},
                     json=body,
                 )
-                if r.status_code == 403:
-                    # llm:deep not granted on this project key yet — fall back to
-                    # chat:smart so Coach keeps working; auto-upgrades the day the
-                    # broker grants the scope.
-                    return await self.chat(
-                        messages, capability="chat:smart",
-                        require_json_schema=require_json_schema,
-                        max_tokens=min(max_tokens, 2000), temperature=temperature,
-                        workflow=workflow, thread_id=thread_id, branch_id=branch_id,
-                    )
+                if r.status_code == 403 and on_403 is not None:
+                    return await on_403()
                 r.raise_for_status()
                 job = r.json()
-                job_id, poll_after_s = job["job_id"], job.get("poll_after_s") or 5
-
-                deadline = start + settings().llm_read_timeout_deep_s
-                poll_errors = 0
-                while True:
-                    await asyncio.sleep(poll_after_s)
-                    try:
-                        pr = await c.get(
-                            f"{self._url}/v1/deep/{job_id}",
-                            headers={"X-Project-Key": self._key},
-                        )
-                        pr.raise_for_status()
-                        d = pr.json()
-                    except (httpx.HTTPError, KeyError, ValueError) as exc:
-                        # A transient poll error (502/timeout) must NOT discard an 8-minute
-                        # job — tolerate a few in a row, only give up on a run of them.
-                        poll_errors += 1
-                        if poll_errors > _DEEP_POLL_MAX_ERRORS:
-                            raise
-                        _log.warning("chat:deep poll error %d/%d job=%s: %s",
-                                       poll_errors, _DEEP_POLL_MAX_ERRORS, job_id, exc)
-                        if time.perf_counter() > deadline:
-                            raise TimeoutError(
-                                f"chat:deep job {job_id} unresolved after "
-                                f"{settings().llm_read_timeout_deep_s:.0f}s") from exc
-                        continue
-                    poll_errors = 0  # a clean poll resets the run
-                    if d["status"] == "done":
-                        break
-                    if d["status"] == "error":
-                        raise RuntimeError(f"chat:deep job {job_id} failed: {d.get('error')}")
-                    if time.perf_counter() > deadline:
-                        raise TimeoutError(
-                            f"chat:deep job {job_id} still pending after "
-                            f"{settings().llm_read_timeout_deep_s:.0f}s"
-                        )
-                    poll_after_s = d.get("poll_after_s") or poll_after_s
+                job_id = job["job_id"]
+                poll_after_s = job.get("poll_after_s") or 2
+                d = await self._poll_job(c, job_id, capability, start + budget_s, poll_after_s)
 
             meta = {
-                "model": d["model"],
-                "tokens_in": d["tokens_in"],
-                "tokens_out": d["tokens_out"],
-                "provider": d["provider"],
-                "cost_usd": d["cost_usd"],
+                "model": d.get("model"),
+                "tokens_in": d.get("tokens_in") or 0,
+                "tokens_out": d.get("tokens_out") or 0,
+                "provider": d.get("provider"),
+                "cost_usd": d.get("cost_usd") or 0,
                 "elapsed_ms": int((time.perf_counter() - start) * 1000),
-                "request_id": d.get("request_id"),
+                "request_id": d.get("request_id") or d.get("id"),
             }
             reply_text = d["text"]
         except Exception as exc:
@@ -201,6 +168,45 @@ class BrokerLLM:
         await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
         return reply_text, meta
 
+    async def _poll_job(
+        self, c: httpx.AsyncClient, job_id: Any, capability: str,
+        deadline: float, poll_after_s: float,
+    ) -> dict[str, Any]:
+        """Poll GET /v1/jobs/{id} until done; raise on error/timeout. Polls IMMEDIATELY
+        first (a fast job may already be done — no needless initial wait), then sleeps
+        poll_after_s between subsequent polls."""
+        poll_errors = 0
+        while True:
+            try:
+                pr = await c.get(
+                    f"{self._url}/v1/jobs/{job_id}",
+                    headers={"X-Project-Key": self._key},
+                )
+                pr.raise_for_status()
+                d = pr.json()
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                # A transient poll error (502/timeout) must NOT discard a running job.
+                poll_errors += 1
+                if poll_errors > _POLL_MAX_ERRORS:
+                    raise
+                _log.warning("%s poll error %d/%d job=%s: %s",
+                             capability, poll_errors, _POLL_MAX_ERRORS, job_id, exc)
+                if time.perf_counter() > deadline:
+                    raise TimeoutError(
+                        f"{capability} job {job_id} unresolved (poll errors)") from exc
+                await asyncio.sleep(poll_after_s)
+                continue
+            poll_errors = 0  # a clean poll resets the run
+            status = d.get("status")
+            if status == "done":
+                return d
+            if status == "error":
+                raise RuntimeError(f"{capability} job {job_id} failed: {d.get('error')}")
+            if time.perf_counter() > deadline:
+                raise TimeoutError(f"{capability} job {job_id} still pending after budget")
+            poll_after_s = d.get("poll_after_s") or poll_after_s
+            await asyncio.sleep(poll_after_s)
+
     async def transcribe(
         self, audio: bytes, *, mime: str = "audio/mp4",
         thread_id: int | None = None, branch_id: int | None = None,
@@ -210,7 +216,7 @@ class BrokerLLM:
         (the caller keeps the placeholder + retries) — needs the project key's llm:audio scope."""
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            async with httpx.AsyncClient(timeout=_SYNC_TIMEOUT) as c:
                 r = await c.post(
                     f"{self._url}/v1/transcribe", params={"workflow": "voice"},
                     headers={"X-Project-Key": self._key},
@@ -244,7 +250,7 @@ class BrokerLLM:
             return []
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as c:
+            async with httpx.AsyncClient(timeout=_SYNC_TIMEOUT) as c:
                 r = await c.post(
                     f"{self._url}/v1/embed",
                     params={"provider": "voyage"},

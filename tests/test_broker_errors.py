@@ -1,4 +1,5 @@
-"""Broker adapter error paths: HTTP errors, bad JSON bodies, timeouts, per-cap timeouts."""
+"""Broker adapter — the fully-async job flow (submit POST /v1/jobs → poll GET /v1/jobs/{id})
+plus error paths: HTTP errors, bad JSON, missing keys, timeouts, deadline, per-cap budget."""
 from __future__ import annotations
 
 import os
@@ -40,23 +41,39 @@ class _BadJsonResp(_FakeResp):
         raise ValueError("Expecting value: line 1 column 1 (char 0)")
 
 
-class _FakeClient:
-    def __init__(self, resp: _FakeResp) -> None:
-        self._resp = resp
+class _JobClient:
+    """Fake broker client for the async job flow: scripted submit (post) + poll (get)
+    responses. post() records the ?capability= it was called with; get() pops the next
+    poll response. Both raise on an exhausted queue so an unexpected extra call is loud."""
 
-    async def __aenter__(self) -> _FakeClient:
+    def __init__(
+        self, submits: list[_FakeResp], polls: list[_FakeResp] | None = None,
+        caps: list[str] | None = None, timeouts: list[Any] | None = None,
+    ) -> None:
+        self._submits = list(submits)
+        self._polls = list(polls or [])
+        self.caps = caps if caps is not None else []
+        self.timeouts = timeouts
+
+    async def __aenter__(self) -> _JobClient:
         return self
 
     async def __aexit__(self, *a: object) -> None:
         return None
 
     async def post(self, *a: object, **k: object) -> _FakeResp:
-        return self._resp
+        params = k.get("params") or {}
+        if isinstance(params, dict) and "capability" in params:
+            self.caps.append(params["capability"])
+        return self._submits.pop(0)
+
+    async def get(self, *a: object, **k: object) -> _FakeResp:
+        return self._polls.pop(0)
 
 
-class _TimeoutClient(_FakeClient):
+class _TimeoutClient(_JobClient):
     def __init__(self) -> None:
-        super().__init__(_FakeResp({}))
+        super().__init__([_FakeResp({})])
 
     async def post(self, *a: object, **k: object) -> _FakeResp:
         raise httpx.ReadTimeout("read timed out")
@@ -76,75 +93,17 @@ def _llm() -> broker_mod.BrokerLLM:
     return broker_mod.BrokerLLM(base_url="http://x", project_key="k")
 
 
-@pytest.mark.parametrize("status", [502, 503])
-async def test_chat_5xx_raises_and_logs_failure(monkeypatch, status: int) -> None:
-    resp = _FakeResp({}, status=status)
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
-    calls = _capture_log(monkeypatch)
-    with pytest.raises(httpx.HTTPStatusError):
-        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply",
-                          thread_id=1, branch_id=2)
-    assert len(calls) == 1
-    assert calls[0]["ok"] is False
-    assert calls[0]["err"].startswith(str(status))
-    assert "upstream unavailable" in calls[0]["err"]
+def _job(job_id: int = 1) -> _FakeResp:
+    return _FakeResp({"job_id": job_id, "poll_after_s": 5}, status=202)
 
 
-async def test_chat_200_with_invalid_json_raises_and_logs_failure(monkeypatch) -> None:
-    # A 200 with a truncated/invalid JSON body must still write an ok=False broker_log row
-    # so the failure is visible on /settings/log (the parse now lives inside the try/except).
-    resp = _BadJsonResp({}, status=200)
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
-    calls = _capture_log(monkeypatch)
-    with pytest.raises(ValueError, match="Expecting value"):
-        await _llm().chat([{"role": "user", "content": "hi"}])
-    assert len(calls) == 1
-    assert calls[0]["ok"] is False
-    assert calls[0]["err"].startswith("ValueError")
+def _done(text: str = "hi") -> _FakeResp:
+    return _FakeResp({"status": "done", "text": text, "model": "m", "tokens_in": 1,
+                      "tokens_out": 1, "provider": "cerebras", "cost_usd": 0.0,
+                      "request_id": "r"})
 
 
-async def test_chat_200_missing_keys_raises_and_logs_failure(monkeypatch) -> None:
-    # A 200 whose body parses but lacks required keys (KeyError on d["model"]) is a failed
-    # call too — it must be logged, not silently propagated.
-    resp = _FakeResp({"text": "hi"}, status=200)  # no model/tokens/provider/cost_usd
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
-    calls = _capture_log(monkeypatch)
-    with pytest.raises(KeyError):
-        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply",
-                          thread_id=1, branch_id=2)
-    assert len(calls) == 1
-    assert calls[0]["ok"] is False
-
-
-class _SeqClient(_FakeClient):
-    """Returns a queued response per post() call and records the capability query param."""
-
-    def __init__(self, resps: list[_FakeResp], caps: list[str]) -> None:
-        self._resps = resps
-        self._caps = caps
-
-    async def post(self, *a: object, **k: object) -> _FakeResp:
-        self._caps.append(k["params"]["capability"])  # type: ignore[index]
-        return self._resps.pop(0)
-
-
-class _DeepClient(_FakeClient):
-    """Fake for chat_deep: queued submit (post) + poll (get) responses."""
-
-    def __init__(self, submit_resp: _FakeResp, poll_resps: list[_FakeResp]) -> None:
-        self._submit_resp = submit_resp
-        self._poll_resps = poll_resps
-
-    async def post(self, *a: object, **k: object) -> _FakeResp:
-        return self._submit_resp
-
-    async def get(self, *a: object, **k: object) -> _FakeResp:
-        return self._poll_resps.pop(0)
-
-
-# chat_deep polls with asyncio.sleep between attempts — no-op it so these tests don't
-# actually wait poll_after_s seconds (real value: 5-20s, see deep_jobs.next_poll_after_s
-# on the broker side).
+# poll loop sleeps poll_after_s between attempts — no-op it so tests don't actually wait.
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch):  # noqa: ANN001, ANN201
     async def _instant(_seconds):  # noqa: ANN001
@@ -152,97 +111,147 @@ def _no_sleep(monkeypatch):  # noqa: ANN001, ANN201
     monkeypatch.setattr(broker_mod.asyncio, "sleep", _instant)
 
 
-async def test_chat_deep_submits_polls_and_returns_done_result(monkeypatch) -> None:
-    submit = _FakeResp({"job_id": 42, "poll_url": "/v1/deep/42", "poll_after_s": 5},
-                        status=202)
-    pending = _FakeResp({"job_id": 42, "status": "pending", "poll_after_s": 5})
-    done = _FakeResp({"job_id": 42, "status": "done", "text": "deep answer",
-                      "model": "m", "tokens_in": 1, "tokens_out": 1,
-                      "provider": "nvidia", "cost_usd": 0.0, "request_id": "r"})
-    client = _DeepClient(submit, [pending, done])
+# ── happy path ──────────────────────────────────────────────────────────────
+
+async def test_chat_submits_a_job_and_polls_to_done(monkeypatch) -> None:
+    client = _JobClient([_job(1)], [_FakeResp({"status": "pending"}), _done("answer")])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    text, meta = await _llm().chat([{"role": "user", "content": "hi"}],
+                                   capability="chat:smart", workflow="reply")
+    assert text == "answer"
+    assert meta["provider"] == "cerebras" and meta["request_id"] == "r"
+    assert client.caps == ["chat:smart"]  # submitted to /v1/jobs?capability=chat:smart
+    assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:smart"
+
+
+# ── error paths ─────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("status", [502, 503])
+async def test_chat_submit_5xx_raises_and_logs_failure(monkeypatch, status: int) -> None:
+    client = _JobClient([_FakeResp({}, status=status)])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(httpx.HTTPStatusError):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply",
+                          thread_id=1, branch_id=2)
+    assert len(calls) == 1 and calls[0]["ok"] is False
+    assert calls[0]["err"].startswith(str(status))
+    assert "upstream unavailable" in calls[0]["err"]
+
+
+async def test_chat_submit_invalid_json_raises_and_logs_failure(monkeypatch) -> None:
+    client = _JobClient([_BadJsonResp({}, status=200)])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(ValueError, match="Expecting value"):
+        await _llm().chat([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1 and calls[0]["ok"] is False
+    assert calls[0]["err"].startswith("ValueError")
+
+
+async def test_chat_submit_missing_job_id_raises_and_logs_failure(monkeypatch) -> None:
+    # A 202 whose body lacks job_id is a failed submit (KeyError) — logged, not swallowed.
+    client = _JobClient([_FakeResp({"poll_after_s": 5}, status=202)])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(KeyError):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+    assert len(calls) == 1 and calls[0]["ok"] is False
+
+
+async def test_chat_poll_error_status_raises_and_logs_failure(monkeypatch) -> None:
+    client = _JobClient([_job(3)], [_FakeResp(
+        {"status": "error", "error": "no provider available"})])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(RuntimeError, match="no provider available"):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+    assert calls[-1]["ok"] is False
+
+
+async def test_chat_submit_read_timeout_raises_and_logs_failure(monkeypatch) -> None:
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _TimeoutClient())
+    calls = _capture_log(monkeypatch)
+    with pytest.raises(httpx.ReadTimeout):
+        await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:smart",
+                          workflow="reply", thread_id=7, branch_id=3)
+    assert len(calls) == 1 and calls[0]["ok"] is False
+    assert calls[0]["err"].startswith("ReadTimeout")
+    assert "elapsed_ms" in calls[0]["meta"]
+
+
+async def test_chat_tolerates_transient_poll_errors_then_succeeds(monkeypatch) -> None:
+    """A 502 on a poll must NOT discard a running job — the poll loop retries."""
+    class _FlakyPollClient(_JobClient):
+        def __init__(self) -> None:
+            super().__init__([_job(5)])
+            self._poll_calls = 0
+
+        async def get(self, *a: object, **k: object) -> _FakeResp:
+            self._poll_calls += 1
+            if self._poll_calls == 1:
+                raise httpx.ConnectError("transient 502")
+            return _done("recovered")
+
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FlakyPollClient())
+    _capture_log(monkeypatch)
+    text, _ = await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+    assert text == "recovered"
+
+
+async def test_chat_gives_up_after_budget(monkeypatch) -> None:
+    """A job stuck in 'pending' must raise TimeoutError once the poll budget elapses."""
+    from app.config import settings
+    monkeypatch.setattr(settings(), "llm_read_timeout_s", 0.0)
+    client = _JobClient([_job(9)], [_FakeResp({"status": "pending"})])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    _capture_log(monkeypatch)
+    with pytest.raises(TimeoutError, match="still pending"):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
+
+
+# ── chat_deep (same job flow + 403→smart fallback) ──────────────────────────
+
+async def test_chat_deep_submits_polls_and_returns_done(monkeypatch) -> None:
+    client = _JobClient([_job(42)], [_FakeResp({"status": "pending"}), _done("deep answer")])
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
     calls = _capture_log(monkeypatch)
     text, meta = await _llm().chat_deep([{"role": "user", "content": "hi"}], workflow="coach")
     assert text == "deep answer"
-    assert meta["provider"] == "nvidia"
+    assert client.caps == ["chat:deep"]
     assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:deep"
 
 
-class _DeepThenChatClient(_FakeClient):
-    """First post() (the /v1/deep submit — no `params` kwarg) returns 403; second post()
-    (the chat:smart fallback via chat() — has `params`) returns `ok`."""
-
-    def __init__(self, ok: _FakeResp, caps: list[str]) -> None:
-        self._ok = ok
-        self._caps = caps
-        self._calls = 0
-
-    async def post(self, *a: object, **k: object) -> _FakeResp:
-        self._calls += 1
-        if self._calls == 1:
-            return _FakeResp({}, status=403)
-        self._caps.append(k["params"]["capability"])  # type: ignore[index]
-        return self._ok
-
-
 async def test_chat_deep_falls_back_to_smart_on_403(monkeypatch) -> None:
-    """Project key doesn't have llm:deep yet — chat_deep() falls back to chat:smart via
-    the ordinary chat() path, same behavior chat() used to inline for capability=chat:deep."""
-    ok = _FakeResp({"text": "hi", "model": "m", "tokens_in": 1, "tokens_out": 1,
-                    "provider": "p", "cost_usd": 0.0, "request_id": "r"})
+    """Key lacks llm:deep → the deep submit 403s and chat_deep re-submits as chat:smart."""
     caps: list[str] = []
-    client = _DeepThenChatClient(ok, caps)
+    # 1st submit (deep) → 403; 2nd submit (smart fallback) → job; then poll → done.
+    client = _JobClient([_FakeResp({}, status=403), _job(2)], [_done("hi")], caps=caps)
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
     calls = _capture_log(monkeypatch)
     text, _ = await _llm().chat_deep([{"role": "user", "content": "hi"}], max_tokens=8000,
                                      workflow="coach")
     assert text == "hi"
-    assert caps == ["chat:smart"]  # the submit (403) doesn't hit /v1/chat, only the fallback does
+    assert caps == ["chat:deep", "chat:smart"]  # deep 403, then the smart resubmit
     assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:smart"
 
 
-async def test_chat_deep_error_status_raises_and_logs_failure(monkeypatch) -> None:
-    submit = _FakeResp({"job_id": 7, "poll_url": "/v1/deep/7", "poll_after_s": 5}, status=202)
-    errored = _FakeResp({"job_id": 7, "status": "error",
-                         "error": "no provider available for capability=chat:deep"})
-    client = _DeepClient(submit, [errored])
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
-    calls = _capture_log(monkeypatch)
-    with pytest.raises(RuntimeError, match="no provider available"):
-        await _llm().chat_deep([{"role": "user", "content": "hi"}], workflow="coach")
-    assert calls[-1]["ok"] is False
-    assert calls[-1]["cap"] == "chat:deep"
-
-
 async def test_chat_deep_gives_up_after_deadline(monkeypatch) -> None:
-    """A job that never leaves 'pending' must eventually raise TimeoutError, not poll
-    forever — llm_read_timeout_deep_s is the total wall-clock budget."""
     from app.config import settings
     monkeypatch.setattr(settings(), "llm_read_timeout_deep_s", 0.0)
-    submit = _FakeResp({"job_id": 9, "poll_url": "/v1/deep/9", "poll_after_s": 5}, status=202)
-    pending = _FakeResp({"job_id": 9, "status": "pending", "poll_after_s": 5})
-    client = _DeepClient(submit, [pending])
+    client = _JobClient([_job(9)], [_FakeResp({"status": "pending"})])
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
     _capture_log(monkeypatch)
     with pytest.raises(TimeoutError, match="still pending"):
         await _llm().chat_deep([{"role": "user", "content": "hi"}], workflow="coach")
 
 
-async def test_chat_read_timeout_raises_and_logs_failure(monkeypatch) -> None:
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _TimeoutClient())
-    calls = _capture_log(monkeypatch)
-    with pytest.raises(httpx.ReadTimeout):
-        await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:smart",
-                          workflow="reply", thread_id=7, branch_id=3)
-    assert len(calls) == 1
-    assert calls[0]["ok"] is False
-    assert calls[0]["err"].startswith("ReadTimeout")
-    assert "elapsed_ms" in calls[0]["meta"]
-
+# ── embed stays synchronous ─────────────────────────────────────────────────
 
 async def test_embed_5xx_raises_and_logs_failure(monkeypatch) -> None:
-    resp = _FakeResp({}, status=503)
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
+    client = _JobClient([_FakeResp({}, status=503)])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
     calls = _capture_log(monkeypatch)
     with pytest.raises(httpx.HTTPStatusError):
         await _llm().embed(["a"], branch_id=1)
@@ -250,24 +259,29 @@ async def test_embed_5xx_raises_and_logs_failure(monkeypatch) -> None:
     assert calls[0]["ok"] is False and calls[0]["cap"] == "embedding"
 
 
-@pytest.mark.parametrize(
-    ("capability", "read_timeout"),
-    [("chat:smart", 90.0), ("chat:fast", 70.0)],
-)
-async def test_per_capability_timeout_passed_to_client(
-    monkeypatch, capability: str, read_timeout: float,
-) -> None:
-    seen: list[httpx.Timeout] = []
-    resp = _FakeResp({"text": "hi", "model": "m", "tokens_in": 1, "tokens_out": 1,
-                      "provider": "p", "cost_usd": 0.0, "request_id": "r"})
+# ── budget selection + client timeout ───────────────────────────────────────
 
-    def _client(**k: Any) -> _FakeClient:
+def test_poll_budget_per_capability() -> None:
+    from app.config import settings
+    s = settings()
+    assert broker_mod._poll_budget_s("chat:deep") == s.llm_read_timeout_deep_s
+    assert broker_mod._poll_budget_s("chat:smart") == s.llm_read_timeout_slow_s
+    assert broker_mod._poll_budget_s("chat:fast") == s.llm_read_timeout_s
+    assert broker_mod._poll_budget_s("translate") == s.llm_read_timeout_s
+
+
+async def test_job_client_uses_short_http_timeout(monkeypatch) -> None:
+    """Individual submit/poll calls use the short _JOB_HTTP_TIMEOUT (read=30) — the
+    per-capability value is the overall poll BUDGET now, not one request's read timeout."""
+    seen: list[httpx.Timeout] = []
+    client = _JobClient([_job(1)], [_done("x")])
+
+    def _client(**k: Any) -> _JobClient:
         seen.append(k["timeout"])
-        return _FakeClient(resp)
+        return client
 
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", _client)
     _capture_log(monkeypatch)
-    await _llm().chat([{"role": "user", "content": "hi"}], capability=capability)
+    await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:smart")
     assert len(seen) == 1
-    assert seen[0].read == read_timeout
-    assert seen[0].connect == 5.0
+    assert seen[0].read == 30.0 and seen[0].connect == 5.0

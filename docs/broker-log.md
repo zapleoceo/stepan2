@@ -11,20 +11,29 @@
 (`suggest`). И успехи, и ошибки (`ok=false` + `error` — текст ответа брокера, полезно
 для разбора `BadRequestError`/`RateLimitError`).
 
-## `chat:deep` (Coach edits) — submit + poll, не блокирующий вызов
+## Все chat-вызовы — async job queue (submit + poll), не блокирующий вызов
 
-`propose_edit()` (Coach, `coach_service.py`) — единственный вызывающий с
-`capability=chat:deep`, через `BrokerLLM.chat_deep()`. С 2026-07-05 брокер сделал
-`chat:deep` асинхронным: `POST /v1/chat?capability=chat:deep` теперь всегда 400 —
-латентность nemotron (до ~8 минут на реальных вызовах) превышает таймауты Cloudflare
-и nginx брокера, так что один блокирующий HTTP-запрос не мог надёжно донести
-результат. `chat_deep()` вместо этого: `POST /v1/deep` (получает `job_id` сразу),
-затем опрашивает `GET /v1/deep/{job_id}` с интервалом из ответа брокера
-(`poll_after_s`), пока статус не станет `done`/`error`, либо не истечёт общий бюджет
-`llm_read_timeout_deep_s` (по умолчанию 600с — теперь это общий бюджет опроса, а не
-таймаут одного HTTP-запроса). Один и тот же `broker_log`-контракт: `_log_call`
-пишет `capability="chat:deep"` независимо от того, был ли это submit+poll или
-(если `llm:deep` ещё не выдан на project key) молчаливый фоллбэк на `chat:smart`.
+С 2026-07-09 **весь** chat идёт через очередь заданий брокера, а не синхронный
+`POST /v1/chat`: `BrokerLLM.chat()`/`chat_deep()` делают `POST /v1/jobs?capability=X`
+(тело — то же, что у синхронного /v1/chat, включая `response_format`) → получают
+`job_id` сразу → опрашивают `GET /v1/jobs/{job_id}` с интервалом `poll_after_s` из
+ответа брокера, пока статус не станет `done`/`error`, либо не истечёт общий бюджет
+(`_poll_budget_s`: `llm_read_timeout_deep_s` для deep, `_slow_s` для smart, `_s` для
+остального — теперь это **бюджет опроса**, а не таймаут одного HTTP-запроса; каждый
+submit/poll использует короткий `_JOB_HTTP_TIMEOUT`, read=30с). Так медленный
+провайдер больше не держит синхронное соединение мимо таймаутов Cloudflare/nginx
+(класс ошибок 504). Опрос терпит до `_POLL_MAX_ERRORS`=5 транзиентных ошибок подряд
+(502/timeout), чтобы не выбросить уже запущенное задание. Первый poll — сразу после
+submit (быстрое задание может быть уже `done`, без лишнего ожидания).
+
+Единая реализация — приватный `_submit_and_poll` (DRY): `chat()` и `chat_deep()` —
+тонкие обёртки над ним. `chat_deep()` дополнительно фоллбэчит на `chat:smart`, если
+`llm:deep` ещё не выдан на project key (submit вернул 403). `embed()`/`transcribe()`
+остаются синхронными (быстрые, у брокера нет job-эндпоинта для них).
+
+`broker_log`-контракт не изменился: `_log_call` пишет одну строку на вызов с тем же
+`capability`/`request_id` (= `usage_log.id` брокера), так что аудит-страница и поиск
+по `request_id` работают как раньше.
 
 ## Поля
 

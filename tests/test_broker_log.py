@@ -55,11 +55,29 @@ class _FakeClient:
         return self._resp
 
 
+class _JobFakeClient(_FakeClient):
+    """Async job flow: post() returns a job submit, get() returns the done result."""
+
+    def __init__(self, submit: _FakeResp, done: _FakeResp) -> None:
+        super().__init__(submit)
+        self._done = done
+
+    async def get(self, *a: object, **k: object) -> _FakeResp:
+        return self._done
+
+
 @pytest.mark.asyncio
 async def test_chat_logs_ok_row(monkeypatch) -> None:
-    resp = _FakeResp({"text": "hi", "model": "x/gpt", "tokens_in": 10, "tokens_out": 4,
-                      "provider": "openai", "cost_usd": 0.0, "request_id": "req-1"})
-    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _FakeClient(resp))
+    submit = _FakeResp({"job_id": 1, "poll_after_s": 1}, status=202)
+    done = _FakeResp({"status": "done", "text": "hi", "model": "x/gpt", "tokens_in": 10,
+                      "tokens_out": 4, "provider": "openai", "cost_usd": 0.0,
+                      "request_id": "req-1"})
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient",
+                        lambda **k: _JobFakeClient(submit, done))
+
+    async def _instant(_s):  # noqa: ANN001, ANN202
+        return None
+    monkeypatch.setattr(broker_mod.asyncio, "sleep", _instant)
     calls: list[dict[str, Any]] = []
 
     async def _capture(cap, wf, tid, bid, meta, *, ok, error=None):  # noqa: ANN001, ANN002
