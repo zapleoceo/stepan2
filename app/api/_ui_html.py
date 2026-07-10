@@ -1540,7 +1540,7 @@ _FAVICON = (
 def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
-    lead_type: str = "", audience: str = "", awaiting: str = "",
+    lead_type: str = "", audience: str = "", awaiting: str = "", kind: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1633,18 +1633,10 @@ def app_shell(
         "document.body.classList.add('chat-open');document.body.classList.remove('nav-open');}"
         "function backToList(){document.body.classList.remove('chat-open');}"
         "function toggleNav(){document.body.classList.toggle('nav-open');}"
-        "var _tiKindOff={};"
-        "function toggleKind(btn){var k=btn.getAttribute('data-kind');"
-        "if(_tiKindOff[k]){delete _tiKindOff[k];"
-        "btn.classList.add('on');btn.classList.remove('off');}"
-        "else{_tiKindOff[k]=true;btn.classList.remove('on');btn.classList.add('off');}"
-        "filterTi();}"
         "function filterTi(){var i=document.getElementById('ti-q');var q=i?i.value:'';"
         "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
         "var s=e.getAttribute('data-search')||'';"
-        "var k=e.getAttribute('data-channel-kind')||'';"
-        "var kindOk=!_tiKindOff[k];"
-        "e.style.display=(kindOk&&(!q||s.indexOf(q)>=0))?'':'none';});}"
+        "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
         "function smartScroll(m){if(!m)return;"
         "var near=m.scrollHeight-m.scrollTop-m.clientHeight<150;"
@@ -1869,7 +1861,7 @@ def app_shell(
             f"{k}={_h.escape(v)}"
             for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
                          ("lead_type", lead_type), ("audience", audience),
-                         ("awaiting", awaiting)) if v)
+                         ("awaiting", awaiting), ("kind", kind)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
         _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
                     "dormant": t("rep.dormant")}.get(grp, "")
@@ -1902,14 +1894,34 @@ def app_shell(
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}"'
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
         ) if awaiting else ""
+        # Connector filter chips — SERVER-SIDE: the thread list is LIMIT-capped by recency, so a
+        # client-side hide would only reveal the connector's chats that made the global top-N
+        # (an older Meta chat stays hidden behind newer Instagram ones). Each chip reloads #tl
+        # from /ui/threads?kind=…; the active one is highlighted and clicking it clears back to all.
+        _base_params = "&".join(
+            f"{k}={_h.escape(v)}"
+            for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
+                         ("lead_type", lead_type), ("audience", audience),
+                         ("awaiting", awaiting)) if v)
+        _base_amp = (_base_params + "&") if _base_params else ""
+
+        def _kind_chip(k: str, icon: str, color: str, lbl: str) -> str:
+            active = (k == kind)
+            thr = f"/ui/threads?{_base_params}" if active else f"/ui/threads?{_base_amp}kind={k}"
+            push = f"/ui/inbox?{_base_params}" if active else f"/ui/inbox?{_base_amp}kind={k}"
+            cls = "chk-kind on" if active else ("chk-kind off" if kind else "chk-kind")
+            return (
+                f'<button type="button" class="{cls}" title="{_h.escape(lbl)}"'
+                f' hx-get="{thr.rstrip("?")}" hx-target="#tl" hx-swap="innerHTML"'
+                f' hx-push-url="{push.rstrip("?")}">'
+                f'<i class="{icon}" style="color:{color}"></i></button>'
+            )
+
         _kind_chips = "".join(
-            f'<button type="button" class="chk-kind on" data-kind="{k}"'
-            f' onclick="toggleKind(this)" title="{_h.escape(lbl)}">'
-            f'<i class="{icon}" style="color:{color}"></i></button>'
-            for k, (icon, color, lbl) in (
-                ("instagram", (*_CHANNEL_ICON["instagram"], "Instagram")),
-                ("meta_business", (*_CHANNEL_ICON["meta_business"], "Meta Business")),
-                ("whatsapp", (*_CHANNEL_ICON["whatsapp"], "WhatsApp")),
+            _kind_chip(k, *_CHANNEL_ICON[k], lbl) for k, lbl in (
+                ("instagram", "Instagram"),
+                ("meta_business", "Meta Business"),
+                ("whatsapp", "WhatsApp"),
             )
         )
         _thr_inner = (
