@@ -47,7 +47,8 @@ async def test_reply_pending_ignores_quiet_hours(db_session, monkeypatch) -> Non
 
     # reply_pending now fans out one reply_pending_branch job per branch; the per-branch job
     # holds the quiet-hours-agnostic reply dispatch.
-    await worker_main.reply_pending_branch({"redis": object()}, b.id)  # no threads → redis untouched
+    # no threads → redis never touched
+    await worker_main.reply_pending_branch({"redis": object()}, b.id)
     assert called == [b.id]  # reached threads_awaiting_reply despite is_quiet_hour()=True
 
 
