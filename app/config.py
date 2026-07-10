@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     ingest_jitter_s: float = Field(
         default=12.0, description="random 0..N s delay before each IG inbox poll so calls don't "
                                   "hit on a machine-regular tick (anti-ban)")
+    meta_live_conversations: int = Field(
+        default=100, description="max Meta Page conversations a live poll pages through via the "
+                                 "after cursor; the default /conversations page is only ~25, so "
+                                 "older-but-active chats were missed")
     reply_batch_cap: int = Field(
         default=5, description="threads decided per reply_pending tick; too high overruns the "
                                "job timeout → retry duplicates. Halved alongside the raised "
