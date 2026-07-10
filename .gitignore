@@ -17,3 +17,8 @@ infra/.env
 *.log
 node_modules/
 scratch_persona.*
+
+# Production DB dumps — NEVER commit (lead PII). Keep on the server only.
+db_dumps/
+*.dump
+*.7z

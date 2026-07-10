@@ -11,6 +11,12 @@ COPY migrations ./migrations
 COPY docs ./docs
 COPY alembic.ini ./
 
+# Run as a non-root user: with docker.sock exposed on this host for the deploy path, an RCE in
+# a dependency parsing untrusted IG payloads must not be root-in-container. App state lives in
+# Postgres, not the filesystem, so no writable app dirs are needed.
+RUN adduser --disabled-password --gecos "" --uid 10001 app && chown -R app /app
+USER app
+
 EXPOSE 8000
 # --timeout-graceful-shutdown: on SIGTERM (deploy recreate) stop accepting new
 # connections but let in-flight requests finish before exiting — cuts the mid-response
