@@ -11,7 +11,7 @@ use-case'ам. Точка входа — [`app/worker/main.py`](../app/worker/ma
 |---|---|---|
 | `ingest_active_channels` | каждые 2 мин (`:00`) | тянет входящие всех активных каналов; джиттер до 12с (анти-бан); каждый канал — своя транзакция |
 | `reply_pending` | каждую минуту (`:00`) | решает и ставит в outbox ответ агента для тредов, ждущих ответа. Раз в минуту (не каждые 20с): медленный тик (деградация брокера / guard-регенерация) мог перерасти `worker_job_timeout_s`, быть убитым ARQ и повторён — а повтор перевыбирал тред, чей advisory-lock уже снят → дубль решения и дубль реальной отправки в IG (инцидент 2026-07-07, треды 2149/2161). 60с даёт полный job_timeout запаса до следующего тика |
-| `process_deletions` | каждую минуту (`:30`) | выполняет запрошенные unsend: сначала отзыв в IG, потом локальное удаление |
+| `process_deletions` | каждую минуту (`:30`) | выполняет запрошенные unsend: отзыв в IG, потом локальное удаление; гейт по kill-switch, каждый тред — своя транзакция, cap `deletion_thread_cap` теперь на весь тик (не на канал) |
 | `send_outbox` | каждые 20с (`:10/:30/:50`) | отправляет по одной due-строке outbox на тред через канал (дёшево, своя advisory-блокировка, не пересекается с reply на том же треде) |
 | `schedule_followups` | каждые 10 мин (`:50`) | взводит таймеры фолоапов и ставит проактивные сообщения в очередь; каждый due-тред — своя транзакция (см. ниже) |
 | `sync_crm` | каждые 5 мин (`:10`) | пушит несинхронизированные manager_alert в CRM-webhook филиала (`crm_enabled`) |
@@ -22,7 +22,16 @@ use-case'ам. Точка входа — [`app/worker/main.py`](../app/worker/ma
 
 Секунды подобраны так, чтобы в пределах минуты шло ingest → reply → send по порядку.
 Платформенный kill-switch: `app_setting` `agent_enabled_platform` (branch_id IS NULL)
-глушит reply/followup для всех филиалов; per-branch — `agent_enabled` в настройках.
+глушит reply/followup/**deletions/refresh_profiles/backfill_media** (всё, что пишет в IG)
+для всех филиалов; per-branch — `agent_enabled` в настройках.
+
+**Изоляция транзакций.** `reply_pending`, `schedule_followups` и (после ревью 2026-07-09)
+`process_deletions` открывают **отдельную транзакцию на каждый тред**, а `sync_crm`,
+`refresh_profiles`, `backfill_media` — **на каждый филиал**. Раньше эти четыре крутили один
+`session_scope()` на весь цикл по всем филиалам: сбой/таймаут-kill посреди списка откатывал
+уже закоммиченную работу других филиалов (и повторно дёргал IG-unsend на ретрае). Пул
+соединений задан в коде (`db_pool_size`/`db_max_overflow`/`db_pool_timeout_s`), чтобы
+`worker_max_jobs` параллельных задач + API не исчерпали дефолтные 5+10.
 
 `schedule_followups` изолирует **каждый due-тред в своей транзакции**
 ([`_queue_one_followup`](../app/worker/main.py), mirrors `reply_pending`/`_reply_thread`).

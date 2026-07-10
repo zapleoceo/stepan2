@@ -37,7 +37,11 @@ class Settings(BaseSettings):
     # Branch staff for the bootstrap script — a JSON list of
     # {"tg": <id>, "name": "...", "role": "branch_admin|branch_viewer"}. Kept in env, not
     # VCS, so employee Telegram ids/names aren't committed. Empty → seed only the owner.
-    bootstrap_staff_json: str = Field(default="")
+    bootstrap_staff_json: str = Field(
+        default="",
+        description='JSON list of branch staff for the bootstrap script: '
+                    '[{"tg": id, "name": "...", "role": "branch_admin|branch_viewer"}]; '
+                    "kept in env not VCS so employee ids/names aren't committed")
 
     # Auth gate — opt-in so the code can ship before the login bot/domain are wired.
     auth_enabled: bool = Field(default=False, description="enforce session auth on /ui + /admin")
