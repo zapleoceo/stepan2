@@ -21,6 +21,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Lead, LeadNeedTag, NeedAggSnapshot, NeedEntity, NeedLeadState
 from app.domain.clock import utc_now
+from app.domain.script_guard import wrong_script
 from app.modules.conversation.needs import parse_needs
 from app.ports.llm import LLMPort
 
@@ -49,6 +50,13 @@ _SYSTEM = (
     "The input `phrases` is an object of index→phrase. Return a JSON object mapping each "
     "INDEX (same string key) to its category label — do NOT echo the phrase text. Output "
     "ONLY that JSON object."
+)
+
+_I18N_SYSTEM = (
+    "You translate short Russian category labels (customer-need topics) to English and "
+    "Indonesian. The input `labels` is an object index→Russian-label. Return STRICT JSON: an "
+    "object mapping each INDEX (same string key) to {\"en\": \"…\", \"id\": \"…\"}. Keep each "
+    "translation short (1-2 words, Title case). Output ONLY that JSON object."
 )
 
 # A clean category label: Cyrillic/Latin letters, digits and a little punctuation only. Rejects
@@ -190,13 +198,24 @@ async def classify_branch(session: AsyncSession, branch_id: int, llm: LLMPort) -
     return processed  # caller owns the transaction (commit)
 
 
+def _localized(label: str, i18n_json: str | None, lang: str) -> str:
+    """The label in the viewer's UI language, or the canonical Russian if there's no cached
+    translation (labels are stored in Russian; label_i18n holds {en, id})."""
+    if lang == "ru" or not i18n_json:
+        return label
+    try:
+        return json.loads(i18n_json).get(lang) or label
+    except (json.JSONDecodeError, AttributeError):
+        return label
+
+
 async def cloud_for(session: AsyncSession, branch_ids: list[int] | None, kind: str,
                     since: datetime | None, until: datetime | None, limit: int = 20,
-                    ) -> list[CloudEntry]:
-    """Top entities for one column over a date range (by lead.created_at), most frequent first.
-    branch_ids None → every branch; a list → those branches, grouped by the canonical label
-    (labels are stable RU strings, so the same concept aggregates across branches)."""
-    sql = ["SELECT e.label, COUNT(DISTINCT t.lead_id) c",
+                    lang: str = "ru") -> list[CloudEntry]:
+    """Top entities for one column over a date range (by lead.created_at), most frequent first,
+    labels localized to `lang` from the cached label_i18n (no LLM at render). branch_ids None →
+    every branch; a list → those, grouped by the canonical (stable RU) label across branches."""
+    sql = ["SELECT e.label, MAX(e.label_i18n) i18n, COUNT(DISTINCT t.lead_id) c",
            "FROM lead_need_tag t",
            "JOIN need_entity e ON e.id = t.entity_id",
            "JOIN lead l ON l.id = t.lead_id",
@@ -214,9 +233,45 @@ async def cloud_for(session: AsyncSession, branch_ids: list[int] | None, kind: s
         params["until"] = until
     sql.append("GROUP BY e.label ORDER BY c DESC, e.label LIMIT :lim")
     rows = (await session.execute(text(" ".join(sql)), params)).all()
-    top = rows[0][1] if rows else 0
-    return [CloudEntry(label=r[0], count=r[1], weight=(r[1] / top if top else 0.0))
-            for r in rows]
+    top = rows[0][2] if rows else 0
+    return [CloudEntry(label=_localized(r[0], r[1], lang), count=r[2],
+                       weight=(r[2] / top if top else 0.0)) for r in rows]
+
+
+async def translate_labels(session: AsyncSession, branch_id: int, llm: LLMPort) -> int:
+    """Translate canonical (RU) entity labels missing label_i18n into {en, id}, cached on the
+    entity — one broker call, script-guarded, nightly. Returns entities updated."""
+    ents = (await session.execute(
+        select(NeedEntity).where(NeedEntity.branch_id == branch_id,
+                                 NeedEntity.label_i18n.is_(None)))).scalars().all()
+    if not ents:
+        return 0
+    numbered = {str(i): e.label for i, e in enumerate(ents)}
+    user = json.dumps({"labels": numbered}, ensure_ascii=False)
+    try:
+        raw, _ = await llm.chat(
+            [{"role": "system", "content": _I18N_SYSTEM}, {"role": "user", "content": user}],
+            capability="chat:fast", temperature=0.0, max_tokens=2000,
+            workflow="needs_cloud", branch_id=branch_id)
+        mapping = json.loads(_strip_json(raw))
+    except Exception:
+        logger.warning("needs_cloud: label i18n failed branch=%d", branch_id, exc_info=True)
+        return 0
+    if not isinstance(mapping, dict):
+        return 0
+    n = 0
+    for i, e in enumerate(ents):
+        item = mapping.get(str(i))
+        if not isinstance(item, dict):
+            continue
+        en, idn = str(item.get("en") or "").strip(), str(item.get("id") or "").strip()
+        # drop a drift to the wrong script; leave label_i18n NULL → retried next run
+        if not en or not idn or wrong_script(en, "en") or wrong_script(idn, "id"):
+            continue
+        e.label_i18n = json.dumps({"en": en, "id": idn}, ensure_ascii=False)
+        session.add(e)
+        n += 1
+    return n
 
 
 async def write_snapshot(session: AsyncSession, branch_id: int,

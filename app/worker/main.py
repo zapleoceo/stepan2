@@ -579,7 +579,11 @@ async def aggregate_needs(ctx: dict[str, Any]) -> int:
     leads whose needs changed onto the branch's stable taxonomy, then snapshot the day's
     aggregates for history. Analytics only (no IG writes) → not kill-switch gated; each branch
     in its own transaction so one branch's LLM/broker hiccup can't roll back another's."""
-    from app.modules.needs_cloud import classify_branch, write_snapshot  # noqa: PLC0415
+    from app.modules.needs_cloud import (  # noqa: PLC0415
+        classify_branch,
+        translate_labels,
+        write_snapshot,
+    )
     llm = BrokerLLM()
     async with session_scope() as session:
         branches = await wiring.active_branches(session)
@@ -589,6 +593,7 @@ async def aggregate_needs(ctx: dict[str, Any]) -> int:
         try:
             async with session_scope() as session:
                 processed += await classify_branch(session, branch.id, llm)
+                await translate_labels(session, branch.id, llm)  # cache en/id label translations
                 await write_snapshot(session, branch.id)
         except Exception:
             logger.exception("aggregate_needs failed branch=%d", branch.id)
