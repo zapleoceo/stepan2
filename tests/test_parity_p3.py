@@ -188,6 +188,48 @@ async def test_dialog_capped_to_recent(db_session) -> None:
     assert dialog[0].text == "msg15"  # oldest 15 dropped
 
 
+async def test_dialog_char_budget_trims_oldest_of_a_wordy_thread(db_session) -> None:
+    """Thread 452's newest 30 messages carried 12.8k chars — the count cap alone doesn't
+    bound a wordy thread. The char budget drops the OLDEST tail; the newest messages stay
+    verbatim (dedup/don't-repeat compare against them), and the single newest message is
+    always kept even if it alone exceeds the budget."""
+    from app.modules.conversation.repository import _DIALOG_CHAR_BUDGET
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-2")
+    db_session.add(thread)
+    await db_session.flush()
+    per_msg = _DIALOG_CHAR_BUDGET // 4 - 20  # 4 fit within the budget, the 5th overflows
+    for i in range(5):
+        db_session.add(Message(
+            branch_id=b.id, thread_id=thread.id, channel_id=ch.id, external_id=f"w{i}",
+            direction="in", sent_by="lead", text=f"m{i}:" + "x" * per_msg,
+            occurred_at=_NOW - timedelta(minutes=(5 - i)),
+        ))
+    await db_session.flush()
+    dialog = await MessageRepo(db_session, b.id).dialog(thread.id)
+    assert len(dialog) == 4                      # oldest of the 5 trimmed by the char budget
+    assert dialog[-1].text.startswith("m4:")     # newest kept
+    assert dialog[0].text.startswith("m1:")      # m0 dropped
+
+    # a single oversized newest message is still returned (never an empty dialog)
+    thread2 = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-3")
+    db_session.add(thread2)
+    await db_session.flush()
+    db_session.add(Message(
+        branch_id=b.id, thread_id=thread2.id, channel_id=ch.id, external_id="big",
+        direction="in", sent_by="lead", text="y" * (_DIALOG_CHAR_BUDGET + 100),
+        occurred_at=_NOW))
+    await db_session.flush()
+    assert len(await MessageRepo(db_session, b.id).dialog(thread2.id)) == 1
+
+
 async def test_decide_appends_user_turn_when_dialog_ends_on_assistant(db_session) -> None:
     """REGRESSION: a re-triggered reply_pending tick can call decide() with a dialog
     whose newest message is the bot's OWN previous reply (threads_awaiting_reply is

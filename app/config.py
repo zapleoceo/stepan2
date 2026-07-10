@@ -180,6 +180,12 @@ class Settings(BaseSettings):
                                "but more tokens/cost (was 12 — the focused product's own "
                                "chunks are now excluded via exclude_slug, so fewer slots are "
                                "needed to cover the OTHER docs/products a query might touch)")
+    dialog_char_budget: int = Field(
+        default=8000, description="char bound on the dialog history fed to the reply LLM, on "
+                                  "top of max_context_msgs — trims the oldest tail of a wordy "
+                                  "thread (the top-10 longest threads carried 5-13k chars in "
+                                  "their newest 30 messages) while the newest turns stay "
+                                  "verbatim for the dedup/don't-repeat checks")
     translate_max_tokens: int = Field(
         default=1500, description="output token budget for a per-bubble translation (Cyrillic "
                                   "is token-heavy)")
