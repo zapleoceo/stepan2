@@ -171,11 +171,15 @@ class Settings(BaseSettings):
                                    "the model may think for minutes); background/batch ONLY, "
                                    "never a live reply handler")
     max_context_msgs: int = Field(
-        default=40, description="dialog messages fed to the reply LLM — the main per-reply "
-                                "token-cost bound")
+        default=30, description="dialog messages fed to the reply LLM — the main per-reply "
+                                "token-cost bound (was 40; a chat rarely needs more than "
+                                "~15 turns back to stay coherent, and the focus+RAG blocks "
+                                "carry the facts, not the raw history depth)")
     rag_top_k: int = Field(
-        default=12, description="knowledge chunks retrieved per reply; higher = better recall "
-                                "but more tokens/cost")
+        default=8, description="knowledge chunks retrieved per reply; higher = better recall "
+                               "but more tokens/cost (was 12 — the focused product's own "
+                               "chunks are now excluded via exclude_slug, so fewer slots are "
+                               "needed to cover the OTHER docs/products a query might touch)")
     translate_max_tokens: int = Field(
         default=1500, description="output token budget for a per-bubble translation (Cyrillic "
                                   "is token-heavy)")

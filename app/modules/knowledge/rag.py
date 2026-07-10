@@ -116,14 +116,22 @@ class RagService:
 
     async def retrieve(
         self, query: str, k: int = _TOP_K, thread_id: int | None = None,
+        exclude_slug: str | None = None,
     ) -> list[tuple[str, str]]:
-        """Top-k (title, text) chunks most similar to `query`; [] if index/query empty."""
+        """Top-k (title, text) chunks most similar to `query`; [] if index/query empty.
+
+        exclude_slug drops chunks from that product — used for the currently-FOCUSED
+        product, whose card is already sent in full via the `[focus product=...]` block.
+        Without this, a query about that exact product ranks its own chunks highest and
+        sends near-duplicate content twice (the full card, then its own top-ranked pieces
+        again) — pure wasted tokens on every turn about the product actually in play."""
         query = (query or "").strip()
         if not query:
             return []
-        chunks = (await self.session.execute(
-            select(KnowledgeChunk).where(KnowledgeChunk.branch_id == self.branch_id)
-        )).scalars().all()
+        stmt = select(KnowledgeChunk).where(KnowledgeChunk.branch_id == self.branch_id)
+        if exclude_slug:
+            stmt = stmt.where(KnowledgeChunk.source_slug != exclude_slug)
+        chunks = (await self.session.execute(stmt)).scalars().all()
         if not chunks:
             return []
         qv = (await self.llm.embed([query[:2000]], branch_id=self.branch_id,
