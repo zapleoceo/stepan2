@@ -157,6 +157,16 @@ def test_premature_manager_handoff_catches_price_question_answered_in_kb() -> No
     assert not guard.premature_manager_handoff("berapa harganya?", "no price figure here")
 
 
+def test_unexplained_manager_handoff_catches_no_stated_reason() -> None:
+    # thread 2398: needs_manager=true fired on "mau kak" + "masih belajar dari nol kak" (the
+    # lead agreeing + answering discovery) with manager_question AND kb_gap both empty
+    assert guard.unexplained_manager_handoff(True, None, None)
+    assert guard.unexplained_manager_handoff(True, "", "")
+    assert not guard.unexplained_manager_handoff(True, "ada trial class gratis?", None)
+    assert not guard.unexplained_manager_handoff(True, None, "нет инфы про trial")
+    assert not guard.unexplained_manager_handoff(False, None, None)
+
+
 # ─── integration through the real reply path (SimService) ───────────────────────
 
 class _ScriptLLM:
@@ -278,6 +288,60 @@ async def test_guard_keeps_needs_manager_if_regen_still_insists(db_session) -> N
         db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
         workflow="reply", bill=False, decision=decision, meta={})
     assert fixed.needs_manager is True
+
+
+async def test_guard_regenerates_an_unexplained_needs_manager(db_session) -> None:
+    """Thread 2398: needs_manager=true fired with manager_question, kb_gap AND stage_reason
+    all left null — the model couldn't say what it was escalating. guard_decision must force
+    a regen instead of handing off blind."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    engine = _FakeEngine(
+        "no price context here",
+        json.dumps({"reply": "Oke Kak, sip! Buat Open House-nya aku bantu daftarin ya 🙌",
+                   "stage": "qualifying", "needs_manager": False}),
+    )
+    ctx = _FakeCtx("masih belajar dari nol kak")
+    decision = parse_decision(json.dumps({
+        "reply": "Untuk yang satu ini aku mau pastikan dulu ke tim ya Kak",
+        "stage": "qualifying", "needs_manager": True,
+    }))
+    fixed, _meta = await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={})
+    assert fixed.needs_manager is False
+    assert "Open House" in fixed.reply
+
+
+async def test_guard_keeps_needs_manager_when_regen_names_a_real_gap(db_session) -> None:
+    """If the regen still escalates but now NAMES the gap, adopt it — a manager finally has
+    something to act on instead of an empty alert."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    engine = _FakeEngine(
+        "no price context here",
+        json.dumps({
+            "reply": "Untuk trial class-nya aku cek dulu ke tim ya Kak",
+            "stage": "qualifying", "needs_manager": True,
+            "manager_question": "ada trial class gratis?",
+            "kb_gap": "trial class tidak ada di KB",
+        }),
+    )
+    ctx = _FakeCtx("ada trial class gratis?")
+    decision = parse_decision(json.dumps({
+        "reply": "Untuk yang satu ini aku mau pastikan dulu ke tim ya Kak",
+        "stage": "qualifying", "needs_manager": True,
+    }))
+    fixed, _meta = await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={})
+    assert fixed.needs_manager is True
+    assert fixed.manager_question == "ada trial class gratis?"
+    assert fixed.kb_gap == "trial class tidak ada di KB"
 
 
 async def test_guard_trims_a_still_doubled_question_instead_of_handing_off(db_session) -> None:
