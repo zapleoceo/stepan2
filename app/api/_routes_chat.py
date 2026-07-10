@@ -46,6 +46,7 @@ from ._ui_html import (
     chat_panel_html,
     messages_html,
     needs_block_html,
+    pending_block_html,
     set_render_tz,
     since_bubbles_html,
     stage_reason_popup_html,
@@ -815,17 +816,38 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
 
 @router.post("/chat/{thread_id}/pending/{oid}/delete", response_class=HTMLResponse)
 async def pending_delete(thread_id: int, oid: int, request: Request) -> HTMLResponse:
-    """Cancel a queued (unsent) reply — mark the outbox row skipped so the sender drops it."""
+    """Cancel a queued reply OR dismiss a failed one — mark the outbox row skipped so the
+    sender drops it and the poll won't re-add it."""
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
         await session.execute(
             text("UPDATE outbox SET status='skipped'"
-                 " WHERE id=:oid AND thread_id=:tid AND status='pending'"),
+                 " WHERE id=:oid AND thread_id=:tid AND status IN ('pending', 'failed')"),
             {"oid": oid, "tid": thread_id},
         )
     return HTMLResponse("")  # bubble removed; OOB refresh won't re-add a skipped row
+
+
+@router.post("/chat/{thread_id}/pending/{oid}/retry", response_class=HTMLResponse)
+async def pending_retry(thread_id: int, oid: int, request: Request) -> HTMLResponse:
+    """Re-queue a failed send: back to 'pending', due now, error cleared. The next send tick
+    re-attempts it (e.g. after the lead replied and re-opened a Meta window). Re-renders the
+    thread's pending block so the bubble flips from failed → queued in place."""
+    apply_lang(request)
+    allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
+    async with session_scope() as session:
+        if await _guarded_branch(session, thread_id, allowed) is None:
+            return HTMLResponse("")
+        await session.execute(
+            text("UPDATE outbox SET status='pending', error=NULL, scheduled_at=:now"
+                 " WHERE id=:oid AND thread_id=:tid AND status='failed'"),
+            {"oid": oid, "tid": thread_id,
+             "now": datetime.now(UTC).replace(tzinfo=None)},
+        )
+        pending = await fetch_pending(session, thread_id)
+    return HTMLResponse(pending_block_html(pending, thread_id))
 
 
 @router.post("/chat/{thread_id}/pending/{oid}/tr", response_class=HTMLResponse)

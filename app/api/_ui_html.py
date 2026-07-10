@@ -1055,8 +1055,35 @@ def poll_sentinel_html(
     )
 
 
+def _failed_bubble(oid: int, tid: int, ptxt: str, error: str) -> str:
+    """A send that never reached the lead — the manager sees WHY (e.g. Meta's 24h window
+    closed) instead of the queued line silently vanishing, and can retry or dismiss it."""
+    err = _h.escape(t("chat.send_failed"))
+    reason = _h.escape(error) if error else ""
+    reason_html = f' · {reason}' if reason else ""
+    retry_btn = (
+        f'<button class="trx" title="{_h.escape(t("chat.retry"))}" tabindex="-1"'
+        f' hx-post="/ui/chat/{tid}/pending/{oid}/retry"'
+        f' hx-target="#pend-{tid}" hx-swap="outerHTML">↻</button>'
+    )
+    dismiss_btn = (
+        f'<button class="delx" title="{_h.escape(t("chat.dismiss"))}" tabindex="-1"'
+        f' hx-post="/ui/chat/{tid}/pending/{oid}/delete"'
+        f' hx-target="#ppb-{oid}" hx-swap="outerHTML" hx-confirm="">×</button>'
+    )
+    return (
+        f'<div class="bb bb-o bb-f" id="ppb-{oid}">'
+        f'<div class="bm" style="color:#ff6b6b">'
+        f'✗ {err}{reason_html} {retry_btn} {dismiss_btn}</div>'
+        f'<div class="bt">{_h.escape(str(ptxt or ""))}</div></div>'
+    )
+
+
 def _pending_bubble(row: object, tid: int, idx: int) -> str:
-    oid, ptxt, sched, llm_info, tr_text = row  # (outbox id, text, scheduled_at, llm_info, tr)
+    # (outbox id, text, scheduled_at, llm_info, tr, status, error)
+    oid, ptxt, sched, llm_info, tr_text, status, error = row
+    if status == "failed":
+        return _failed_bubble(oid, tid, str(ptxt or ""), str(error or ""))
     when = _fmt_time(_as_dt(sched))  # branch-local HH:MM:SS (tolerates str or datetime)
     meta = f'⏳ {_h.escape(t("chat.pending"))} · №{idx + 1}' + (f' · ~{when}' if when else "")
     tr_btn = (
