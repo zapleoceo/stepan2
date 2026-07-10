@@ -21,7 +21,9 @@ from .schema import defaults as _schema_defaults
 _DEFAULTS: dict[str, str] = _schema_defaults()
 
 _TTL = 30.0
-_cache: dict[int, tuple[BranchSettings, float]] = {}
+# Keyed by (branch_id, channel_id) — channel_id None is the branch-scoped view; a concrete
+# channel_id is the connector-resolved view (channel-scope keys overridden per that channel).
+_cache: dict[tuple[int, int | None], tuple[BranchSettings, float]] = {}
 _lock = asyncio.Lock()
 
 
@@ -88,27 +90,50 @@ class BranchSettings:
 
 
 async def get_settings(session: AsyncSession, branch_id: int) -> BranchSettings:
-    """Return cached settings; re-fetches from DB when the 30 s TTL has expired."""
+    """Branch-scoped settings (connector-scope keys fall back to branch → platform).
+
+    Cached with a 30 s TTL; call invalidate(branch_id) after an admin write."""
+    return await _resolve(session, branch_id, None)
+
+
+async def get_channel_settings(
+    session: AsyncSession, branch_id: int, channel_id: int,
+) -> BranchSettings:
+    """Connector-resolved settings for one channel: scope='channel' keys take the per-channel
+    override when present, else the branch value, else the platform/default. Branch-scope keys
+    are identical to get_settings. Same dataclass, same parser — only the merge tier differs."""
+    return await _resolve(session, branch_id, channel_id)
+
+
+async def _resolve(
+    session: AsyncSession, branch_id: int, channel_id: int | None,
+) -> BranchSettings:
     now = time.monotonic()
-    cached = _cache.get(branch_id)
+    key = (branch_id, channel_id)
+    cached = _cache.get(key)
     if cached and now - cached[1] < _TTL:
         return cached[0]
     async with _lock:
-        cached = _cache.get(branch_id)
+        cached = _cache.get(key)
         if cached and now - cached[1] < _TTL:
             return cached[0]
-        raw = await SettingRepo(session).load_all(branch_id)
+        raw = await SettingRepo(session).load_all(branch_id, channel_id)
         parsed = _parse(raw)
         branch = await session.get(Branch, branch_id)
         if branch is not None:  # timezone lives on the branch, not in app_setting
             parsed = replace(parsed, tz_offset_h=branch.tz_offset_h)
-        _cache[branch_id] = (parsed, now)
+        _cache[key] = (parsed, now)
         return parsed
 
 
-def invalidate(branch_id: int) -> None:
-    """Drop the cached settings for a branch (e.g. after an admin write)."""
-    _cache.pop(branch_id, None)
+def invalidate(branch_id: int, channel_id: int | None = None) -> None:
+    """Drop cached settings after an admin write. A branch-level write (channel_id None) also
+    flushes every per-channel view of that branch, since channel resolutions fall back to it."""
+    if channel_id is not None:
+        _cache.pop((branch_id, channel_id), None)
+        return
+    for k in [k for k in _cache if k[0] == branch_id]:
+        _cache.pop(k, None)
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────

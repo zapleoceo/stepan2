@@ -197,14 +197,14 @@ def test_number_inputs_are_right_sized_not_airplanes() -> None:
 
 async def test_tz_comes_from_the_branch_row_not_app_setting(db_session) -> None:
     from app.adapters.db.models import Branch
-    from app.modules.settings.service import _cache, get_settings
+    from app.modules.settings.service import get_settings, invalidate
     b = Branch(name="TZ", lang="id", tz_offset_h=3)  # Moscow
     db_session.add(b)
     await db_session.flush()
-    _cache.pop(b.id, None)
+    invalidate(b.id)  # flush any (b.id, *) entry cached by an earlier test reusing this id
     cfg = await get_settings(db_session, b.id)
     assert cfg.tz_offset_h == 3  # sourced from the branch column, not the app_setting default (7)
-    _cache.pop(b.id, None)
+    invalidate(b.id)
 
 
 def test_smart_stages_renders_checkbox_group() -> None:

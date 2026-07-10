@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, LargeBinary, String, UniqueConstraint
+from sqlalchemy import BigInteger, Index, LargeBinary, String, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
 from app.domain.clock import utc_now as _utcnow
@@ -206,12 +206,26 @@ class AdProductMap(SQLModel, table=True):
 
 
 class AppSetting(SQLModel, table=True):
-    """Настройка. branch_id=NULL → платформенная; иначе настройка филиала."""
+    """Настройка с тремя уровнями видимости, разрешаемыми по возрастанию точности:
+    (NULL, NULL) → платформа, (branch, NULL) → филиал, (branch, channel) → коннектор.
+
+    Уникальность по (branch_id, channel_id, key) через COALESCE-индекс, потому что обычный
+    UNIQUE считает NULL-ы различными и допустил бы дубли платформенных/филиальных строк.
+    """
     __tablename__ = "app_setting"
-    __table_args__ = (UniqueConstraint("branch_id", "key", name="uq_setting_branch_key"),)
+    __table_args__ = (
+        Index(
+            "uq_setting_scope",
+            text("COALESCE(branch_id, 0)"),
+            text("COALESCE(channel_id, 0)"),
+            text("key"),
+            unique=True,
+        ),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     branch_id: int | None = Field(default=None, foreign_key="branch.id", index=True)
+    channel_id: int | None = Field(default=None, foreign_key="channel.id", index=True)
     key: str
     value: str = Field(default="")
 
