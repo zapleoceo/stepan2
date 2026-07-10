@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request, is_super_admin
+from app.domain.enums import ChannelKind
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
@@ -64,6 +65,8 @@ router.include_router(_admin_router)
 router.include_router(_branches_router)
 router.include_router(_mcpadmin_router)
 
+_CHANNEL_KINDS = frozenset(k.value for k in ChannelKind)  # valid inbox connector-filter values
+
 _THREAD_TMPL = (
     "SELECT ct.id, l.display_name, l.stage,"
     " COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) AS last_act,"
@@ -92,14 +95,14 @@ _THREAD_TMPL = (
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "", awaiting: str = "",
+    audience: str = "", awaiting: str = "", kind: str = "",
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
                                   ad_id=ad_id.strip(), grp=grp.strip(),
                                   lead_type=lead_type.strip(), audience=audience.strip(),
-                                  awaiting=awaiting.strip(),
+                                  awaiting=awaiting.strip(), kind=kind.strip(),
                                   is_super=is_super_admin(request)))
 
 
@@ -156,7 +159,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "", awaiting: str = "",
+    audience: str = "", awaiting: str = "", kind: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
@@ -164,6 +167,10 @@ async def threads_partial(
     if branch_ids:
         conditions.append("l.branch_id = ANY(:bids)")
         params["bids"] = branch_ids
+    knd = kind.strip()
+    if knd in _CHANNEL_KINDS:  # connector filter (server-side): the LIMIT is per-kind, so an
+        conditions.append("ch.kind = :kind")  # older Meta chat isn't hidden behind newer IG ones
+        params["kind"] = knd
     s = stage.strip()
     if s == "blocked":  # is_blocked is a flag, not a stage — the funnel's 🚫 chip filters on it
         conditions.append("l.is_blocked = true")
@@ -217,7 +224,8 @@ async def threads_partial(
     # reload of it) keeps the filtered list rather than reverting to the whole inbox.
     filter_qs = urlencode({k: v for k, v in
                            (("stage", s), ("lead_type", lt), ("audience", aud),
-                            ("ad_id", ad), ("grp", grp.strip())) if v})
+                            ("ad_id", ad), ("grp", grp.strip()),
+                            ("kind", knd if knd in _CHANNEL_KINDS else "")) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))
 
