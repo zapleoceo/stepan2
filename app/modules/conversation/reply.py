@@ -243,6 +243,10 @@ async def guard_decision(
         return decision, meta
     context = engine.last_context
     if decision.needs_manager:
+        # Mutually exclusive, most-specific-first: a price question already answered in KB
+        # gets the targeted correction; anything else with no stated reason gets the generic
+        # one. Only ONE extra regen per turn either way — never chain both on the same
+        # decision.
         last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
         if guard.premature_manager_handoff(last_in, context):
             logger.warning(
@@ -259,6 +263,24 @@ async def guard_decision(
             # insists on needs_manager after being told the fact is in context probably has
             # a real reason; better a genuine gap reaches a human than looping on a refusal.
             if fixed is not None and fixed.reply and not fixed.needs_manager:
+                decision, meta = fixed, regen_meta
+        elif guard.unexplained_manager_handoff(
+            decision.needs_manager, decision.manager_question, decision.kb_gap,
+        ):
+            logger.warning(
+                "guard: branch=%d thread=%d needs_manager with no manager_question/kb_gap "
+                "→ regen", branch_id, thread_id)
+            raw, regen_meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+                extra_user_msg=guard.UNEXPLAINED_HANDOFF_CORRECTION)
+            try:
+                fixed = parse_decision(raw)
+            except ValueError:
+                fixed = None
+            # Adopt the regen either way: it either named the gap (still escalating, but now
+            # with something for the manager to act on) or stopped escalating outright — both
+            # are strictly better than the original unexplained hand-off.
+            if fixed is not None and fixed.reply:
                 decision, meta = fixed, regen_meta
     issues = _deterministic_issues(decision.reply, context)
     if mode == "full" and guard.is_risky(decision.reply):

@@ -215,6 +215,30 @@ MANAGER_HANDOFF_CORRECTION = (
 )
 
 
+# Thread 2398: needs_manager=true fired on "mau kak" + "masih belajar dari nol kak" (the
+# lead agreeing + answering a discovery question - nothing unanswerable) with
+# manager_question, kb_gap AND stage_reason ALL left null - the model escalated without
+# being able to say what it was escalating. A real KB gap can always be named; if the model
+# can't name one, that's a strong signal there isn't one.
+def unexplained_manager_handoff(
+    needs_manager: bool, manager_question: str | None, kb_gap: str | None,
+) -> bool:
+    """needs_manager=true with no manager_question AND no kb_gap - the model set the flag
+    but can't say why, which is itself evidence the escalation isn't grounded in a real gap."""
+    return needs_manager and not (manager_question or "").strip() \
+        and not (kb_gap or "").strip()
+
+
+UNEXPLAINED_HANDOFF_CORRECTION = (
+    "[System: you set needs_manager=true but left both manager_question and kb_gap empty - "
+    "a genuine KB gap can always be named. If there really is a fact you can't answer, say "
+    "EXACTLY what the lead asked (manager_question) and what's missing from the KB (kb_gap). "
+    "If there ISN'T a real gap - e.g. the lead just agreed to something or answered your own "
+    "question - set needs_manager=false and continue the conversation naturally instead. "
+    "Return the JSON as usual.]"
+)
+
+
 # Bahasa hand-off when a clean reply can't be produced — never invents, defers to a human.
 SAFE_FALLBACK = (
     "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
