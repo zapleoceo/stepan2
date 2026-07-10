@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -190,6 +191,9 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
     return enqueued
 
 
+_REPLY_INFLIGHT = "reply:inflight"  # redis sorted-set: marker -> start-time, for the slot cap
+
+
 async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int) -> bool:
     """One thread's decide+enqueue, as its OWN ARQ job so it can poll the broker to completion
     on its own timeout (settings.reply_job_timeout_s) without a shared tick budget killing it.
@@ -198,8 +202,18 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
     advisory lock guards concurrent runs, and the NOT-EXISTS pending-outbox guard stops a second
     generation once a reply is queued. Kill-switch re-checked here in case it flipped OFF between
     dispatch and execution."""
-    llm = BrokerLLM()
+    redis = ctx["redis"]
+    now = time.time()
+    marker = f"{thread_id}:{now}"
+    # Cap concurrent SLOW reply jobs below worker_max_jobs so a burst (a 300-thread re-enable
+    # while the broker is slow) can't fill every worker slot and starve ingest/send. A sorted
+    # set keyed by start-time is leak-proof: a crashed job's marker ages out of the count.
+    await redis.zremrangebyscore(_REPLY_INFLIGHT, 0, now - settings().reply_job_timeout_s)
+    await redis.zadd(_REPLY_INFLIGHT, {marker: now})
     try:
+        if await redis.zcard(_REPLY_INFLIGHT) > settings().reply_max_concurrency:
+            return False  # over cap → leave slots for other tasks; re-dispatched next tick
+        llm = BrokerLLM()
         async with session_scope() as session:
             if not await _platform_agent_on(session):
                 return False
@@ -219,6 +233,8 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
     except Exception:
         logger.exception("reply failed branch=%d thread=%d", branch_id, thread_id)
         return False
+    finally:
+        await redis.zrem(_REPLY_INFLIGHT, marker)
 
 
 async def schedule_followups(ctx: dict[str, Any]) -> int:

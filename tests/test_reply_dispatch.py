@@ -18,17 +18,31 @@ from app.worker import wiring  # noqa: E402
 
 
 class _FakeRedis:
-    """Captures enqueue_job calls; returns None for a job_id already 'in flight' (ARQ dedup)."""
+    """Captures enqueue_job calls; returns None for a job_id already 'in flight' (ARQ dedup).
+    Also implements the sorted-set ops generate_one_reply uses for its concurrency cap."""
 
-    def __init__(self, inflight: set[str] | None = None) -> None:
+    def __init__(self, inflight: set[str] | None = None, zcard: int = 1) -> None:
         self.calls: list[tuple] = []
         self._inflight = inflight or set()
+        self._zcard = zcard
 
     async def enqueue_job(self, fn, *args, _job_id=None, **kw):  # noqa: ANN001, ANN002, ANN003
         self.calls.append((fn, args, _job_id))
         if _job_id in self._inflight:
             return None  # a job for this thread is already queued/running
         return object()  # a fresh Job
+
+    async def zremrangebyscore(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 0
+
+    async def zadd(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 1
+
+    async def zcard(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return self._zcard
+
+    async def zrem(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        return 1
 
 
 async def _wire(monkeypatch, b, thread_ids):  # noqa: ANN001
@@ -129,5 +143,19 @@ async def test_generate_one_reply_uses_the_generous_broker_budget(monkeypatch) -
     monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **k: object())
     monkeypatch.setattr(worker_main, "ReplyService", _CaptureReply)
 
-    await worker_main.generate_one_reply({}, 1, 42)
+    await worker_main.generate_one_reply({"redis": _FakeRedis()}, 1, 42)
     assert captured["budget"] == settings().reply_broker_budget_s
+
+
+async def test_generate_one_reply_skips_when_over_concurrency_cap(monkeypatch) -> None:
+    """Over the slow-reply concurrency cap → return without touching the DB/broker (leaves
+    worker slots for ingest/send); the thread is re-dispatched next tick."""
+    from app.config import settings
+
+    async def _must_not_run(*_a, **_k):
+        raise AssertionError("must not reach the lock/broker when over the concurrency cap")
+
+    monkeypatch.setattr(wiring, "try_lock_thread", _must_not_run)
+    over = settings().reply_max_concurrency + 1
+    result = await worker_main.generate_one_reply({"redis": _FakeRedis(zcard=over)}, 1, 42)
+    assert result is False
