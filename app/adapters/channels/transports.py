@@ -358,11 +358,24 @@ class GraphTransportHTTP:
             )
         return out
 
+    async def _resolve_psid(self, thread_id: str, c: Any) -> str:
+        """The Send API needs the lead's PSID, not the conversation id fetch_conversations
+        hands back as thread_id — resolve it via the conversation's participants, picking
+        whichever participant isn't our own Page/IG account."""
+        r = await c.get(f"/{thread_id}", params={"fields": "participants"})
+        r.raise_for_status()
+        participants = ((r.json().get("participants") or {}).get("data")) or []
+        for p in participants:
+            if str(p.get("id", "")) != str(self._account_id):
+                return str(p["id"])
+        raise RuntimeError(f"no non-self participant found for conversation {thread_id}")
+
     async def send_message(self, recipient_id: str, text: str) -> dict[str, Any]:
         async with self._client() as c:
+            psid = await self._resolve_psid(recipient_id, c)
             r = await c.post(
                 f"/{self._account_id}/messages",
-                json={"recipient": {"id": recipient_id}, "message": {"text": text}},
+                json={"recipient": {"id": psid}, "message": {"text": text}},
             )
         # A 4xx/5xx from Graph must raise (like fetch_conversations/token_debug do) so the
         # adapter maps it to SendResult(ok=False) — without this, r.json() on an error
