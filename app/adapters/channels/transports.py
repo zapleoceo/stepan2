@@ -329,9 +329,12 @@ class GraphTransportHTTP:
     def _client(self) -> Any:
         import httpx  # lazy: real transport only, never imported by unit tests
 
+        # Token in the Authorization header, NOT a ?access_token= query param: a query-string
+        # token lands in the request URL and then in the HTTPStatusError message the caller
+        # logs on a 4xx/5xx (a Meta send 400 was printing a live page token to the logs).
         return httpx.AsyncClient(
             base_url=self._base,
-            params={"access_token": self._token},
+            headers={"Authorization": f"Bearer {self._token}"},
             timeout=30,
         )
 
@@ -387,6 +390,10 @@ class GraphTransportHTTP:
     async def token_debug(self) -> dict[str, Any]:
         async with self._client() as c:
             r = await c.get("/debug_token", params={"input_token": self._token})
-        r.raise_for_status()
+        # /debug_token REQUIRES the token as a query param (it's the token being inspected), so
+        # it can't move to a header — raise a sanitized error instead of raise_for_status(),
+        # whose message embeds the URL (and thus the token) into the caller's log.
+        if r.status_code >= 400:
+            raise RuntimeError(f"debug_token failed: HTTP {r.status_code}")
         data = (r.json().get("data") or {})
         return {"is_valid": data.get("is_valid", False), "window_open": True}
