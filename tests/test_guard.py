@@ -11,6 +11,8 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+from sqlmodel import select  # noqa: E402
+
 from app.adapters.db.models import AppSetting, Branch  # noqa: E402
 from app.modules.conversation import guard  # noqa: E402
 from app.modules.conversation.sim import SimService  # noqa: E402
@@ -207,6 +209,21 @@ async def test_guard_regenerates_away_a_fabricated_link(db_session) -> None:
     assert "aku bantu langsung" in out["reply"]                   # the clean regen was used
 
 
+async def test_guard_regen_bumps_the_leads_routing_signal(db_session) -> None:
+    """A regen isn't just fixed in the moment — it's persisted per-lead (Lead.guard_regen_count)
+    so future turns lean toward chat:smart for a lead the cheap model has already stumbled on
+    (see routing.pick_capability)."""
+    from app.adapters.db.models import ChannelThread, Lead
+
+    bid = await _branch(db_session)
+    llm = _ScriptLLM(f"Coba akses lab di {_FAKE_LINK} ya Kak", "Boleh, aku bantu di sini ya 😊")
+    await SimService(db_session, llm).say(bid, "g_regen", "boleh kirim akses lab?")
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.external_thread_id == "sim:g_regen"))).one()
+    lead = await db_session.get(Lead, thread.lead_id)
+    assert lead.guard_regen_count == 1
+
+
 async def test_guard_hands_off_when_fabrication_persists(db_session) -> None:
     bid = await _branch(db_session)
     llm = _ScriptLLM(f"ini linknya {_FAKE_LINK}", f"beneran kok {_FAKE_LINK}")  # both bad
@@ -223,6 +240,7 @@ def _settings_urls_only():  # noqa: ANN201
 class _FakeCtx:
     def __init__(self, last_inbound: str) -> None:
         self.dialog = [SimpleNamespace(direction="in", text=last_inbound)]
+        self.lead = None
 
 
 class _FakeEngine:

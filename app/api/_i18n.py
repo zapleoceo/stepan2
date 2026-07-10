@@ -111,6 +111,12 @@ _TR: dict[str, dict[str, str]] = {
     "needs.jobs":   {"ru": "Цель",    "en": "Jobs",   "id": "Tujuan"},
     "needs.pains":  {"ru": "Боли",    "en": "Pains",  "id": "Masalah"},
     "needs.gains":  {"ru": "Выгоды",  "en": "Gains",  "id": "Manfaat"},
+    "cloud.title":  {"ru": "Облако потребностей лидов",
+                     "en": "Lead needs cloud", "id": "Awan kebutuhan lead"},
+    "cloud.empty":  {"ru": "пока нет данных", "en": "no data yet", "id": "belum ada data"},
+    "cloud.pains":  {"ru": "Боли",   "en": "Pains", "id": "Masalah"},
+    "cloud.jobs":   {"ru": "Цели",   "en": "Goals", "id": "Tujuan"},
+    "cloud.gains":  {"ru": "Выгоды", "en": "Gains", "id": "Manfaat"},
     # knowledge-base tree / editor / history / reindex
     "kb.tab_persona": {"ru": "Персона",   "en": "Persona",     "id": "Persona"},
     "kb.reindex":   {"ru": "Переиндексировать RAG", "en": "Reindex RAG", "id": "Reindex RAG"},

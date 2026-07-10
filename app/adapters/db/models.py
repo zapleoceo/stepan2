@@ -95,6 +95,10 @@ class Lead(SQLModel, table=True):
                                   "филиал), это per-lead override")
     manager_note_by: str | None = Field(default=None, description="кто оставил manager_note")
     manager_note_at: datetime | None = Field(default=None)
+    guard_regen_count: int = Field(
+        default=0, description="сколько раз guard заставлял модель перегенерировать ответ "
+                               "этому лиду — сигнал 'дешёвая модель тут спотыкается', "
+                               "используется роутингом chat:fast/chat:smart per-lead")
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -457,3 +461,56 @@ class KnowledgeRevision(SQLModel, table=True):
     new_len: int = Field(default=0)
     actor: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
+class NeedEntity(SQLModel, table=True):
+    """Каноническая сущность потребности (боль/цель/выгода), стабильная во времени —
+    новые фразы лидов маппятся на неё, а не плодят новые категории каждую ночь."""
+    __tablename__ = "need_entity"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "kind", "label", name="uq_need_entity_branch_kind_label"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    kind: str = Field(description="jobs | pains | gains")
+    label: str
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class LeadNeedTag(SQLModel, table=True):
+    """Лид ↔ каноническая сущность. Материализовано для быстрого счёта облака по диапазону
+    (без ИИ на рендере) — COUNT(DISTINCT lead) с фильтром по lead.created_at."""
+    __tablename__ = "lead_need_tag"
+
+    lead_id: int = Field(foreign_key="lead.id", primary_key=True)
+    kind: str = Field(primary_key=True)
+    entity_id: int = Field(foreign_key="need_entity.id", primary_key=True, index=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+
+
+class NeedLeadState(SQLModel, table=True):
+    """Инкрементальная классификация: sha профиля needs лида на момент последней обработки,
+    чтобы ночью переклассифицировать только изменившихся лидов."""
+    __tablename__ = "need_lead_state"
+
+    lead_id: int = Field(foreign_key="lead.id", primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id")
+    needs_sha: str
+    classified_at: datetime = Field(default_factory=_utcnow)
+
+
+class NeedAggSnapshot(SQLModel, table=True):
+    """Ежедневный снапшот агрегата (частота сущности) — история эволюции облака во времени
+    и база для сверки день-к-дню (защита от резких скачков)."""
+    __tablename__ = "need_agg_snapshot"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "kind", "entity_id", "snap_date", name="uq_need_snap"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    kind: str
+    entity_id: int = Field(foreign_key="need_entity.id")
+    snap_date: date
+    lead_count: int = Field(default=0)
