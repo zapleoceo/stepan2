@@ -377,9 +377,17 @@ async def process_deletions(ctx: dict[str, Any]) -> int:
             async with session_scope() as session:
                 work: list[tuple[Channel, str]] = []
                 for channel in await wiring.active_channels(session, branch.id):
-                    pending = await DeletionService(session, branch.id).pending(channel.id)
+                    if len(work) >= budget:
+                        break  # only `budget` threads act this tick — don't scan/resolve more
+                    # cap the discovery scan and stop resolving once we have enough threads;
+                    # a large unsent backlog used to scan every row + do an N+1 by_id per thread
+                    # just to act on a handful (the rest drain over the next ticks).
+                    pending = await DeletionService(session, branch.id).pending(
+                        channel.id, limit=budget * 4)
                     seen: dict[int, str] = {}
                     for msg in pending:
+                        if len(seen) >= budget:
+                            break
                         if msg.thread_id not in seen:
                             thread = await ThreadRepo(session, branch.id).by_id(msg.thread_id)
                             if thread is not None:

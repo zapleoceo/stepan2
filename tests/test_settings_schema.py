@@ -24,7 +24,7 @@ _LANGS = ("ru", "en", "id")
 _BRANCH_KEYS = (
     "agent_enabled_global", "hourly_cap", "daily_cap", "quiet_start", "quiet_end",
     "reply_delay_min_s", "reply_delay_max_s", "tg_group_id",
-    "followup_enabled", "followup_schedule_h", "knowledge_backend",
+    "followup_enabled", "followup_schedule_h",
     "tech_search_enabled", "tech_usecase_enabled",
 )
 
@@ -182,14 +182,6 @@ def test_settings_save_by_key_route(client: TestClient) -> None:
 def test_settings_save_unknown_key_rejected(client: TestClient) -> None:
     resp = client.post("/ui/settings/save", data={"key": "nope", "value": "x"})
     assert resp.status_code in (400, 500)
-
-
-def test_knowledge_backend_is_a_dropdown_not_free_text() -> None:
-    html = field_html(S.field_for("knowledge_backend"), "rag", "en")
-    assert "<select" in html                       # a real dropdown, not a text box
-    assert 'value="rag" selected' in html
-    assert 'value="direct"' in html
-    assert "canary" not in html                    # advanced A/B dropped from the operator UI
 
 
 def test_settings_has_no_timezone_field() -> None:

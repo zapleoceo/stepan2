@@ -72,7 +72,7 @@ def _control(f: S.SettingField, value: str, lang: str, width: str | None = None)
             f'<div class="multi-grp" style="display:flex;flex-wrap:wrap;gap:.4rem .8rem;'
             f'justify-content:flex-start">{boxes}{hidden}</div>'
         )
-    if f.choices:  # fixed-option dropdown (e.g. knowledge_backend)
+    if f.choices:  # fixed-option dropdown (e.g. reply_routing)
         opts = "".join(
             f'<option value="{_h.escape(v)}" {"selected" if v == value else ""}>'
             f'{_h.escape(S.tr(lbl, lang))}</option>'
