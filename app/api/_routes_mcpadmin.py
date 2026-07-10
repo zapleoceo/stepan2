@@ -15,6 +15,7 @@ from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request, is_super_admin, writable_branch_ids
 from app.config import settings
 from app.modules.mcp.tokens import McpTokenService
+from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import invalidate
 
 from ._i18n import apply_lang
@@ -125,16 +126,7 @@ async def mcp_outgoing_save(
 
 
 async def _set(session, branch_id: int, key: str, value: str) -> None:
-    row = (await session.execute(
-        text("SELECT id FROM app_setting WHERE branch_id = :b AND key = :k"),
-        {"b": branch_id, "k": key})).first()
-    if row is None:
-        await session.execute(
-            text("INSERT INTO app_setting (branch_id, key, value) VALUES (:b, :k, :v)"),
-            {"b": branch_id, "k": key, "v": value})
-    else:
-        await session.execute(
-            text("UPDATE app_setting SET value = :v WHERE id = :i"), {"v": value, "i": row[0]})
+    await SettingRepo(session).upsert(key, value, branch_id=branch_id)
 
 
 def _load_docs_md() -> str:

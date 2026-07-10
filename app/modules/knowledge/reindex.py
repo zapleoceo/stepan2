@@ -56,13 +56,9 @@ async def _indexed_at(session: AsyncSession, branch_id: int) -> datetime | None:
 
 
 async def _set_watermark(session: AsyncSession, branch_id: int, when: datetime) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO app_setting (branch_id, key, value) VALUES (:b, :k, :v)"
-            " ON CONFLICT (branch_id, key) DO UPDATE SET value = excluded.value"
-        ),
-        {"b": branch_id, "k": _WATERMARK_KEY, "v": when.isoformat()},
-    )
+    from app.modules.settings.repository import SettingRepo  # noqa: PLC0415 (avoid cycle)
+
+    await SettingRepo(session).upsert(_WATERMARK_KEY, when.isoformat(), branch_id=branch_id)
 
 
 async def branch_needs_reindex(session: AsyncSession, branch_id: int) -> bool:

@@ -20,6 +20,7 @@ from app.domain.clock import branch_day_start_utc, utc_now
 from app.modules.ads import AdMappingService
 from app.modules.knowledge.repository import ProductRepo
 from app.modules.settings import schema as settings_schema
+from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import get_settings, invalidate
 
 from ._i18n import apply_lang, t
@@ -244,7 +245,7 @@ async def reports_panel(
     request: Request, date_from: str = "", date_to: str = "",
     range_: str = Query("", alias="range"),
 ) -> HTMLResponse:
-    apply_lang(request)
+    lang = apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     # A quick-range button wins over manually-picked dates — it always sends its own
     # request with no date_from/date_to, but guard anyway so stale query params can't
@@ -338,7 +339,8 @@ async def reports_panel(
         stage_reach = await fetch_stage_reach(session, branch_ids, since=since_dt, until=until_dt)
         from app.modules.needs_cloud import KINDS, cloud_for  # noqa: PLC0415
         needs_cloud = {
-            k: await cloud_for(session, branch_ids, k, since_dt, until_dt) for k in KINDS}
+            k: await cloud_for(session, branch_ids, k, since_dt, until_dt, lang=lang)
+            for k in KINDS}
     segment_stages: dict[str, dict[str, dict[str, int]]] = {}
     for a, seg, st, n in seg_stage:  # {audience: {lead_type: {stage: count}}} — stage boxes
         segment_stages.setdefault(str(a), {}).setdefault(str(seg), {})[str(st)] = int(n)
@@ -431,13 +433,7 @@ async def settings_save_by_key(
                 )
             ).first()
             return HTMLResponse(field_html(field, cur[0] if cur else "", lang))
-        await session.execute(
-            text(
-                "INSERT INTO app_setting (branch_id, key, value) VALUES (:b, :k, :v)"
-                " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"
-            ),
-            {"b": bid, "k": key, "v": val},
-        )
+        await SettingRepo(session).upsert(key, val, branch_id=bid)
     invalidate(bid)
     return HTMLResponse(field_html(field, val, lang, saved=True))
 
@@ -459,20 +455,9 @@ async def _read_flag(session, branch_id: int | None, key: str) -> bool:
 
 
 async def _write_flag(session, branch_id: int | None, key: str, on: bool) -> None:
-    if branch_id is not None:
-        await session.execute(
-            text("INSERT INTO app_setting (branch_id, key, value) VALUES (:bid, :k, :v)"
-                 " ON CONFLICT (branch_id, key) DO UPDATE SET value=:v"),
-            {"bid": branch_id, "k": key, "v": "true" if on else "false"})
-    else:
-        # branch_id NULL can't use the (branch_id,key) unique-constraint upsert cleanly
-        upd = await session.execute(
-            text("UPDATE app_setting SET value=:v WHERE branch_id IS NULL AND key=:k"),
-            {"k": key, "v": "true" if on else "false"})
-        if not upd.rowcount:
-            await session.execute(
-                text("INSERT INTO app_setting (branch_id, key, value) VALUES (NULL, :k, :v)"),
-                {"k": key, "v": "true" if on else "false"})
+    # The COALESCE upsert handles the platform (branch_id NULL) tier uniformly too.
+    await SettingRepo(session).upsert(
+        key, "true" if on else "false", branch_id=branch_id)
 
 
 async def _single_selected_branch(request: Request) -> int | None:
