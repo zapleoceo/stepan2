@@ -326,3 +326,31 @@ async def test_poll_gives_up_after_too_many_transient_errors(monkeypatch) -> Non
     with pytest.raises(httpx.ConnectError):
         await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
     assert calls[-1]["ok"] is False
+
+
+# ── transcribe (voice STT — single POST /v1/transcribe, no job poll) ──────────
+
+async def test_transcribe_success_returns_text_and_logs_ok(monkeypatch) -> None:
+    calls = _capture_log(monkeypatch)
+    client = _JobClient([_FakeResp({"text": "halo dunia", "model": "w", "provider": "p",
+                                    "cost_usd": 0.0, "request_id": "r"})])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    out = await _llm().transcribe(b"audiobytes", mime="audio/mp4")
+    assert out == "halo dunia"
+    assert calls[-1]["ok"] is True and calls[-1]["cap"] == "audio"
+
+
+async def test_transcribe_falls_back_to_transcript_key(monkeypatch) -> None:
+    _capture_log(monkeypatch)
+    client = _JobClient([_FakeResp({"transcript": " hi there ", "request_id": "r"})])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    assert await _llm().transcribe(b"x", mime="audio/mp4") == "hi there"
+
+
+async def test_transcribe_5xx_raises_and_logs_failure(monkeypatch) -> None:
+    calls = _capture_log(monkeypatch)
+    client = _JobClient([_FakeResp({}, status=503)])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    with pytest.raises(httpx.HTTPStatusError):
+        await _llm().transcribe(b"x", mime="audio/mp4")
+    assert calls[-1]["ok"] is False and calls[-1]["cap"] == "audio"

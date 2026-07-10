@@ -261,13 +261,14 @@ async def test_ready_without_phone_keeps_selling(db_session) -> None:
     assert lead.agent_enabled is True
 
 
-def test_normalize_phone() -> None:
-    from app.modules.conversation.reply import _normalize_phone
-    assert _normalize_phone("0812 3456 7890") == "+6281234567890"   # ID local trunk → +62
-    assert _normalize_phone("+62 812-3456-7890") == "+6281234567890"
-    assert _normalize_phone("81234567890") == "+81234567890"        # bare digits keep as-is
-    assert _normalize_phone("call me") is None                      # no digits
-    assert _normalize_phone("123") is None                          # too short to be a number
+def test_to_e164_canonicalizes_a_typed_phone() -> None:
+    from app.modules.leads.phone import to_e164
+    assert to_e164("0812 3456 7890", "62") == "+6281234567890"   # ID local trunk → +62
+    assert to_e164("+62 812-3456-7890") == "+6281234567890"      # explicit international kept
+    assert to_e164("0123-456-789", "60") == "+60123456789"       # MY branch stamps +60, not +62
+    assert to_e164("0917 123 4567", "63") == "+639171234567"     # PH branch → +63
+    assert to_e164("call me") is None                            # no digits
+    assert to_e164("123") is None                                # too short to be a number
 
 
 async def test_stage_ready_without_phone_is_gated(db_session) -> None:
