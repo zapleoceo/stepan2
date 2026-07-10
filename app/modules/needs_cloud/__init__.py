@@ -4,6 +4,6 @@ Two layers: nightly incremental CLASSIFICATION maps each lead's free-text needs 
 STABLE canonical taxonomy (so labels don't churn day-to-day); the widget then just COUNTS
 tags over the selected date range — no LLM at render, any range instant. A daily snapshot
 preserves history."""
-from .service import KINDS, classify_branch, cloud_for, write_snapshot
+from .service import KINDS, classify_branch, cloud_for, translate_labels, write_snapshot
 
-__all__ = ["KINDS", "classify_branch", "cloud_for", "write_snapshot"]
+__all__ = ["KINDS", "classify_branch", "cloud_for", "translate_labels", "write_snapshot"]
