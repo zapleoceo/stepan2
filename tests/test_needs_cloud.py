@@ -22,7 +22,8 @@ class _FakeLLM:
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
         self.calls += 1
         payload = json.loads(messages[-1]["content"])
-        out = {p: self.rules.get(p, p) for p in payload["phrases"]}
+        # phrases is index→phrase; return index→label (mirrors the real prompt contract)
+        out = {idx: self.rules.get(p, p) for idx, p in payload["phrases"].items()}
         return json.dumps(out, ensure_ascii=False), {"cost_usd": 0.0}
 
     async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201

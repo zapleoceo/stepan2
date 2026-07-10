@@ -42,7 +42,9 @@ _SYSTEM = (
     "'изучение маркетинга соцсетей с нуля' → 'Соцсети'; 'карьера'/'карьерный рост' → 'Карьера'.\n"
     "3. Prefer the BROADEST sensible category — better 10 categories than 40. Avoid vague "
     "catch-alls like 'Услуги'/'Обучение' unless nothing specific fits.\n"
-    "Never output anything but the JSON object."
+    "The input `phrases` is an object of index→phrase. Return a JSON object mapping each "
+    "INDEX (same string key) to its category label — do NOT echo the phrase text. Output "
+    "ONLY that JSON object."
 )
 
 
@@ -75,12 +77,15 @@ async def _classify_phrases(
     labels = list(existing)  # grows as batches coin new labels, so LATER batches reuse EARLIER
     for i in range(0, len(phrases), _BATCH):        # ones instead of coining a near-duplicate
         chunk = phrases[i:i + _BATCH]
-        user = json.dumps({"existing_categories": labels, "phrases": chunk},
+        # index→phrase in, index→label out: the model never echoes the (possibly long) phrase
+        # text, so the response can't blow past max_tokens and truncate into invalid JSON.
+        numbered = {str(j): p for j, p in enumerate(chunk)}
+        user = json.dumps({"existing_categories": labels, "phrases": numbered},
                           ensure_ascii=False)
         try:
             raw, _ = await llm.chat(
                 [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
-                capability="chat:smart", temperature=0.0, max_tokens=1500,
+                capability="chat:smart", temperature=0.0, max_tokens=2000,
                 workflow="needs_cloud", branch_id=branch_id)
             mapping = json.loads(_strip_json(raw))
         except Exception:
@@ -88,8 +93,8 @@ async def _classify_phrases(
                            exc_info=True)
             continue
         if isinstance(mapping, dict):
-            for ph in chunk:
-                label = mapping.get(ph)
+            for j, ph in enumerate(chunk):
+                label = mapping.get(str(j))
                 if isinstance(label, str) and label.strip():
                     out[ph] = label.strip()
                     if label.strip() not in labels:
