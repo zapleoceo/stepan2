@@ -100,14 +100,23 @@ async def test_worker_reply_thread_returns_false_when_llm_raises(monkeypatch) ->
         async def decide(self, thread_id: int):  # noqa: ANN201
             raise RuntimeError("broker down")
 
+    async def _platform_on(_session) -> bool:
+        return True
+
+    async def _kb(_session, branch_id):  # noqa: ANN202
+        return branch_id
+
     monkeypatch.setattr(worker_main, "session_scope", _fake_scope)
+    monkeypatch.setattr(worker_main, "_platform_agent_on", _platform_on)
+    monkeypatch.setattr(worker_main, "BrokerLLM", _RaisingLLM)
     monkeypatch.setattr(wiring, "try_lock_thread", _locked)
     monkeypatch.setattr(worker_main, "get_settings", _fake_settings)
+    monkeypatch.setattr(worker_main, "effective_kb_branch", _kb)
     monkeypatch.setattr(worker_main, "_build_notifier", lambda _cfg: None)
     monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **kw: object())
     monkeypatch.setattr(worker_main, "ReplyService", _RaisingReply)
 
-    result = await worker_main._reply_thread(1, 42, _RaisingLLM())
+    result = await worker_main.generate_one_reply({}, 1, 42)
     assert result is False
 
 

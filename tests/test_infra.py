@@ -55,6 +55,8 @@ def test_kb_structure_migration_downgrades_cleanly(tmp_path, monkeypatch):
 
 
 def test_worker_settings_exposes_tasks():
+    from arq.worker import Function
+
     from app.worker.main import (
         WorkerSettings,
         ingest_active_channels,
@@ -62,6 +64,9 @@ def test_worker_settings_exposes_tasks():
         send_outbox,
     )
 
-    assert WorkerSettings.functions
-    assert {ingest_active_channels, reply_pending, send_outbox} <= set(WorkerSettings.functions)
-    assert all(callable(fn) for fn in WorkerSettings.functions)
+    fns = WorkerSettings.functions
+    assert fns
+    # plain coroutine tasks are registered directly (membership via ==, not hashing — the list
+    # now also holds arq Function wrappers for per-job config like generate_one_reply)
+    assert ingest_active_channels in fns and reply_pending in fns and send_outbox in fns
+    assert all(callable(fn) or isinstance(fn, Function) for fn in fns)

@@ -327,6 +327,7 @@ class ReplyService:
         knowledge: KnowledgeService,
         branch_settings: BranchSettings | None = None,
         notifier: NotifierPort | None = None,
+        broker_budget_s: float | None = None,
     ) -> None:
         self.session = session
         self.branch_id = branch_id
@@ -334,6 +335,7 @@ class ReplyService:
         self.knowledge = knowledge
         self.settings = branch_settings
         self._notifier = notifier
+        self._broker_budget_s = broker_budget_s  # per-reply broker poll budget (None = default)
         self.threads = ThreadRepo(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
         self.outbox = OutboxRepo(session, branch_id)
@@ -348,7 +350,8 @@ class ReplyService:
         daily LLM budget."""
         bill = workflow != "sim"
         route_wf = "reply" if workflow == "sim" else workflow  # sim mirrors reply routing
-        engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
+        engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge,
+                                broker_budget_s=self._broker_budget_s)
         ctx = await engine.prepare(thread_id, workflow=workflow)
         if ctx is None:
             return None
