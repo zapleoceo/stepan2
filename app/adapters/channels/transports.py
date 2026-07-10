@@ -394,12 +394,23 @@ class GraphTransportHTTP:
             psid = await self._resolve_psid(recipient_id, c)
             r = await c.post(
                 f"/{self._account_id}/messages",
-                json={"recipient": {"id": psid}, "message": {"text": text}},
+                # messaging_type=RESPONSE is REQUIRED by the Send API for a reply inside the
+                # standard 24h window — omitting it is a 400 ("param messaging_type must be
+                # one of {RESPONSE, UPDATE, MESSAGE_TAG}"), which is exactly the error that
+                # piled up on the Meta channel (2026-07-10). RESPONSE is the correct type for
+                # answering a user message; an out-of-window send needs a MESSAGE_TAG and is
+                # skipped upstream (OutboxSender's window check) rather than sent here.
+                json={
+                    "messaging_type": "RESPONSE",
+                    "recipient": {"id": psid},
+                    "message": {"text": text},
+                },
             )
-        # A 4xx/5xx from Graph must raise (like fetch_conversations/token_debug do) so the
-        # adapter maps it to SendResult(ok=False) — without this, r.json() on an error
-        # envelope returned a message_id=None "success", silently dropping the send.
-        r.raise_for_status()
+        # A 4xx/5xx from Graph must map to SendResult(ok=False) — but raise_for_status() drops
+        # Graph's error BODY (subcode + message), leaving only "400 Bad Request" in the log,
+        # undiagnosable. Surface the body instead (the URL carries no token — auth is a header).
+        if r.status_code >= 400:
+            raise RuntimeError(f"Graph send {r.status_code}: {r.text[:300]}")
         data = r.json()
         return {"message_id": data.get("message_id"), "error": data.get("error")}
 

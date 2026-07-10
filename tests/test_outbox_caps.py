@@ -181,30 +181,49 @@ async def test_hard_error_marks_failed(db_session) -> None:
     assert row is not None and row.status == "failed"
 
 
-async def test_permanently_failed_followup_rearms_next_followup_at(db_session) -> None:
-    """A follow-up nudge whose send fails permanently must re-arm next_followup_at, or the
-    thread falls out of the follow-up query forever (deadlock). followups_sent isn't bumped
-    (the step wasn't consumed), so the SAME step is retried later."""
-    from sqlalchemy import text as _text
+async def test_permanent_send_failure_pauses_lead_dormant(db_session) -> None:
+    """A send that permanently fails (400, unrecoverable) must NOT leave the thread
+    "awaiting" — otherwise the dispatcher regenerates a fresh (equally undeliverable) reply
+    every tick, burning tokens and piling up failed rows (the Meta 400 loop, 2026-07-10).
+    The lead goes dormant with a journal entry + the follow-up timer cleared; a fresh inbound
+    revives it (ingest._revive_bot)."""
+    from sqlmodel import select as _select
+
+    from app.adapters.db.models import StageEvent
+    from app.domain.enums import Stage
     bid, tid = await _setup(
         db_session, hourly_cap=999, daily_cap=999, sent_now=0, pending_source="followup")
-    db_session.add(AppSetting(branch_id=bid, key="followup_enabled", value="true"))
-    db_session.add(AppSetting(branch_id=bid, key="followup_schedule_h", value="1,4,24"))
-    # Pin outside quiet hours — is_quiet_hour() reads the real wall clock, and this test's
-    # send_next() call for a "followup" row is a no-op during quiet hours (outbox.py:73-74).
     db_session.add(AppSetting(branch_id=bid, key="quiet_start", value="0"))
     db_session.add(AppSetting(branch_id=bid, key="quiet_end", value="0"))
-    await db_session.execute(
-        _text("UPDATE channel_thread SET next_followup_at=NULL, followups_sent=0"
-              " WHERE id=:t"), {"t": tid})
     await db_session.flush()
     invalidate(bid)
 
-    ch = FakeChannel(ok=False, error="permanent failure")
+    ch = FakeChannel(ok=False, error="400 Bad Request")
     row = await OutboxSender(db_session, bid, ch).send_next(tid)
     assert row is not None and row.status == "failed"
-    rearmed = (await db_session.execute(
-        _text("SELECT next_followup_at, followups_sent FROM channel_thread WHERE id=:t"),
-        {"t": tid})).first()
-    assert rearmed[0] is not None   # re-armed → not deadlocked
-    assert rearmed[1] == 0          # step NOT consumed by the failed send
+
+    lead = (await db_session.exec(_select(Lead).where(Lead.branch_id == bid))).first()
+    assert lead.stage == Stage.DORMANT  # paused → drops out of threads_awaiting_reply
+    thread = (await db_session.exec(
+        _select(ChannelThread).where(ChannelThread.id == tid))).first()
+    assert thread.next_followup_at is None  # timer cleared — no more nudges either
+    ev = (await db_session.exec(
+        _select(StageEvent).where(StageEvent.to_stage == "dormant"))).first()
+    assert ev is not None and "undeliverable" in ev.reason  # journalled with a clear reason
+
+
+async def test_manager_send_failure_does_not_pause_the_lead(db_session) -> None:
+    """A MANAGER send failing is a human's action — the failed-send bubble surfaces to them;
+    it must NOT auto-dormant the lead the manager is actively working."""
+    from sqlmodel import select as _select
+
+    from app.domain.enums import Stage
+    bid, tid = await _setup(
+        db_session, hourly_cap=999, daily_cap=999, sent_now=0, pending_source="manager")
+    await db_session.flush()
+    invalidate(bid)
+    ch = FakeChannel(ok=False, error="400 Bad Request")
+    row = await OutboxSender(db_session, bid, ch).send_next(tid)
+    assert row is not None and row.status == "failed"
+    lead = (await db_session.exec(_select(Lead).where(Lead.branch_id == bid))).first()
+    assert lead.stage != Stage.DORMANT  # manager owns it — left alone

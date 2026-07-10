@@ -105,3 +105,55 @@ async def test_fetch_conversations_skips_empty_threads(monkeypatch) -> None:
     out = await t.fetch_conversations()
 
     assert [c["thread_id"] for c in out] == ["1", "3"]  # the message-less convo is dropped
+
+
+class _SendClient:
+    """Records the POST body; the GET (participant resolve) returns a fixed PSID; the POST
+    returns a configurable status/body so both the happy path and a 400 can be exercised."""
+
+    def __init__(self, status: int = 200, body: dict | None = None, text: str = "") -> None:
+        self.status = status
+        self.body = body if body is not None else {"message_id": "mid_1"}
+        self.text = text
+        self.posted: dict[str, Any] = {}
+
+    async def __aenter__(self) -> _SendClient:
+        return self
+
+    async def __aexit__(self, *_exc) -> bool:
+        return False
+
+    async def get(self, _url: str, params: dict[str, Any] | None = None):  # noqa: ANN202
+        return _FakeResp({"participants": {"data": [
+            {"id": "447"}, {"id": "PSID_LEAD"}]}})  # 447 = our account → picks PSID_LEAD
+
+    async def post(self, _url: str, json: dict | None = None):  # noqa: ANN202, A002
+        self.posted = json or {}
+        resp = _FakeResp(self.body)
+        resp.status_code = self.status  # type: ignore[attr-defined]
+        resp.text = self.text  # type: ignore[attr-defined]
+        return resp
+
+
+async def test_send_message_includes_messaging_type_response(monkeypatch) -> None:
+    """The Send API requires messaging_type for an in-window reply — omitting it is the 400
+    that piled up on the Meta channel (2026-07-10)."""
+    fake = _SendClient(status=200, body={"message_id": "mid_1"})
+    t = _transport()
+    monkeypatch.setattr(t, "_client", lambda: fake)
+    out = await t.send_message("t_123", "halo kak")
+    assert out["message_id"] == "mid_1"
+    assert fake.posted["messaging_type"] == "RESPONSE"
+    assert fake.posted["recipient"] == {"id": "PSID_LEAD"}  # resolved from participants
+    assert fake.posted["message"] == {"text": "halo kak"}
+
+
+async def test_send_message_surfaces_the_graph_error_body_on_4xx(monkeypatch) -> None:
+    """A 4xx must raise with Graph's error BODY (subcode + message), not a bare status line —
+    otherwise a 400 is undiagnosable in the log."""
+    import pytest
+    fake = _SendClient(status=400, body={}, text='{"error":{"code":100,"message":"bad param"}}')
+    t = _transport()
+    monkeypatch.setattr(t, "_client", lambda: fake)
+    with pytest.raises(RuntimeError, match="bad param"):
+        await t.send_message("t_123", "halo")
