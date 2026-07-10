@@ -4,10 +4,14 @@ Secrets (DB, broker key, Fernet key) come from env only; never hardcoded, never 
 """
 from __future__ import annotations
 
+import json
+import logging
 from functools import lru_cache
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_log = logging.getLogger("stepan2.config")
 
 
 class Settings(BaseSettings):
@@ -166,7 +170,35 @@ class Settings(BaseSettings):
 
     debug: bool = Field(default=False)
 
+    def validate_runtime(self) -> None:
+        """Fail-fast at boot on config that would otherwise break silently at first use.
+
+        Raises for hard invariants (a misconfig that guarantees a broken request later);
+        logs a WARNING for soft ones (a disabled-but-shippable feature). Called once on
+        both the API app and the worker startup."""
+        if self.auth_enabled and not (self.session_secret or self.secret_key):
+            raise ValueError(
+                "STEPAN2_AUTH_ENABLED=true but neither STEPAN2_SESSION_SECRET nor "
+                "STEPAN2_SECRET_KEY is set — session cookies cannot be signed")
+        if self.bootstrap_staff_json.strip():
+            try:
+                staff = json.loads(self.bootstrap_staff_json)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"STEPAN2_BOOTSTRAP_STAFF_JSON is not valid JSON: {e}") from e
+            if not isinstance(staff, list):
+                raise ValueError("STEPAN2_BOOTSTRAP_STAFF_JSON must be a JSON list of staff")
+        if not self.broker_url:
+            _log.warning("STEPAN2_BROKER_URL is empty — all LLM calls will fail; "
+                         "no replies/translations/embeddings until set")
+        if not self.secret_key:
+            _log.warning("STEPAN2_SECRET_KEY is empty — channel session secrets cannot be "
+                         "encrypted/decrypted; adding a channel with a secret will fail")
+
 
 @lru_cache
 def settings() -> Settings:
+    """Process-wide singleton: env is read ONCE, at first call, and frozen for the life of
+    the process. Changing an environment variable requires a restart of the API/worker to
+    take effect — these are deploy-time knobs, not runtime-tunable. Per-branch settings that
+    DO change at runtime live in the DB (BranchSettings), not here."""
     return Settings()  # type: ignore[call-arg]

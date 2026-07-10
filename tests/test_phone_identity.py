@@ -27,10 +27,19 @@ def test_extract_phone_ignores_prices_and_prose() -> None:
 
 
 def test_extract_phone_honours_branch_country_code() -> None:
-    """A non-Indonesian branch's local 0-number gets ITS trunk code, not a hardcoded +62.
-    "0812-3456-7890" → digits "081234567890"; cc=60 drops the 0 → +6081234567890."""
-    assert extract_phone("0812-3456-7890", country_code="60") == "+6081234567890"
-    assert extract_phone("0812-3456-7890") == "+6281234567890"  # default stays Indonesia
+    """Each branch matches ITS OWN country's mobile shape and stamps its own +cc.
+    A foreign-shaped number is NOT mined for the wrong country (never mis-prefixed)."""
+    # Indonesia (default) — proven, unchanged
+    assert extract_phone("0812-3456-7890") == "+6281234567890"
+    # Malaysia: local 01x mobile → +60
+    assert extract_phone("nomor saya 0123-456-789", country_code="60") == "+60123456789"
+    assert extract_phone("+60 12-345 6789", country_code="60") == "+60123456789"
+    # Philippines: local 09xx mobile → +63
+    assert extract_phone("0917 123 4567", country_code="63") == "+639171234567"
+    # an Indonesian-shaped number on a Malaysian branch does NOT match → no mis-stamp
+    assert extract_phone("0812-3456-7890", country_code="60") is None
+    # unknown country code → don't guess a number out of free text
+    assert extract_phone("0812-3456-7890", country_code="99") is None
 
 
 async def test_existing_thread_not_repointed_by_a_typed_number(db_session) -> None:

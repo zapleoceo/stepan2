@@ -25,6 +25,7 @@ from app.api.mcp_remote import connector_app
 from app.api.mcp_remote import mcp as mcp_connector
 from app.api.ui import router as ui_router
 from app.api.webhooks import router as webhooks_router
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Build the HTTP app: health probe, webhook router, admin dashboard."""
+    settings().validate_runtime()  # fail-fast on broken config before serving a request
     app = FastAPI(title="stepan2", lifespan=_lifespan)
     app.add_middleware(_PartialShellMiddleware)
     app.add_middleware(WriteGuardMiddleware)  # branch_viewer = read-only (no /ui writes)

@@ -24,6 +24,12 @@ from app.config import settings
 
 _log = logging.getLogger(__name__)
 
+# A fresh AsyncClient per public call (submit_and_poll / transcribe / embed) is deliberate,
+# not an oversight: the connection IS reused across the many polls of one job (they share the
+# same `c`), which is where keep-alive matters. A single long-lived shared client would save
+# only one TLS handshake per multi-second LLM job while adding real risk — its pool binds to
+# the event loop that created it, and this runs across per-job ARQ worker loops that come and
+# go. Per-call keeps lifecycle trivial and correct; the saving isn't worth the shared state.
 # Individual submit/poll HTTP calls are quick — a short timeout. The OVERALL wait for a job
 # is bounded by the per-capability poll budget below, not by one request's read timeout.
 _JOB_HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)

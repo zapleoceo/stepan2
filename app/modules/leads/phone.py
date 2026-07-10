@@ -7,9 +7,19 @@ _MIN_DIGITS = 9
 _NON_DIGIT = re.compile(r"\D+")
 _RUN = re.compile(r"[\d ()\-+.]{9,}")
 
-# Indonesian mobile shape in free text: +62/62/0 prefix (optional separator), 8x mobile,
-# long digit tail. Prices (Rp 1.200.000) never start with this prefix → no false matches.
-_SHAPED = re.compile(r"(?:\+?62|0)[\s.\-]?8[1-9][\d ()\-.]{6,}")
+# Per-country mobile shape in free text: (+cc | cc | 0) prefix, the national mobile lead
+# digit(s), then a long digit tail. A local price (Rp 1.200.000) never matches these →
+# no false positives. The mobile lead digit differs per country, so the wrong-country
+# shape simply doesn't match (returns None — never a mis-prefixed number).
+#   62 Indonesia  → 8[1-9]…  (unchanged, proven on the live branch)
+#   60 Malaysia   → 1[0-9]…  (01x-xxxx-xxxx)
+#   63 Philippines→ 9…        (09xx-xxx-xxxx)
+_SHAPE_BY_CC: dict[str, re.Pattern[str]] = {
+    "62": re.compile(r"(?:\+?62|0)[\s.\-]?8[1-9][\d ()\-.]{6,}"),
+    "60": re.compile(r"(?:\+?60|0)[\s.\-]?1[0-9][\d ()\-.]{6,}"),
+    "63": re.compile(r"(?:\+?63|0)[\s.\-]?9[\d ()\-.]{8,}"),
+}
+_DEFAULT_CC = "62"
 
 
 def normalize_phone(raw: str) -> str | None:
@@ -33,20 +43,23 @@ def extract_phone(text: str | None, country_code: str = "62") -> str | None:
     merges into one lead across channels. The canonical form is both stored on the lead
     and used for lookup — the only writer/reader of phone_e164.
 
-    `country_code` (the branch's own, default Indonesia "62") is the trunk prefix applied to
-    a local `0…` number, so a non-Indonesian branch no longer stamps its leads as +62. The
-    shape detector is tuned for Indonesian mobiles; a number that doesn't match it returns
-    None — never mis-prefixed — which keeps the cross-branch merge safe until per-country
-    shapes are added."""
+    `country_code` (the branch's own, default Indonesia "62") picks the mobile SHAPE to
+    look for and the trunk prefix applied to a local `0…` number, so a Malaysian/Philippine
+    branch matches its own numbers and stamps them +60/+63, not +62. A country without a
+    known shape (or a number that doesn't fit its shape) returns None — never mis-prefixed —
+    keeping the cross-branch merge safe."""
     if not text:
         return None
-    cc = (country_code or "62").strip() or "62"
-    match = _SHAPED.search(text)
+    cc = (country_code or _DEFAULT_CC).strip() or _DEFAULT_CC
+    shape = _SHAPE_BY_CC.get(cc)
+    if shape is None:
+        return None  # unknown country — don't guess a number out of free text
+    match = shape.search(text)
     digits = normalize_phone(match.group(0)) if match else None
     if not digits:
         return None
     if digits.startswith("0"):
         digits = cc + digits[1:]
-    elif digits.startswith("8"):
-        digits = cc + digits
+    elif not digits.startswith(cc):
+        digits = cc + digits  # a bare local number (no trunk 0, no country code)
     return "+" + digits if digits.startswith(cc) else None

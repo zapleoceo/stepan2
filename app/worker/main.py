@@ -539,6 +539,11 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings().redis_url)
 
 
+async def _on_startup(ctx: dict) -> None:
+    """Fail-fast on broken config before the worker starts pulling jobs off the queue."""
+    settings().validate_runtime()
+
+
 class WorkerSettings:
     """ARQ worker config. Cron drives the three orchestration tasks on a steady cadence;
     they are staggered so each minute ingests, then replies, then sends in order."""
@@ -581,6 +586,7 @@ class WorkerSettings:
         cron(reindex_knowledge, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
              second=45, run_at_startup=False),
     ]
+    on_startup = _on_startup
     redis_settings = _redis_settings()
     max_jobs = settings().worker_max_jobs
     job_timeout = settings().worker_job_timeout_s
