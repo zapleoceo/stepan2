@@ -99,6 +99,9 @@ class OutboxSender:
             row.status = "skipped"
             row.error = "meta_window_closed"
             self.session.add(row)
+            # Pause the thread — the window won't reopen until the lead writes again, so
+            # regenerating a reply every tick is pure token burn (see _pause_dormant).
+            await self._pause_dormant(thread, "Meta 24h window closed — paused until lead writes")
             await self.session.flush()
             logger.info("outbox skip branch=%d thread=%d: Meta 24h window closed",
                         self.branch_id, thread_id)
@@ -143,13 +146,16 @@ class OutboxSender:
             logger.warning(
                 "send failed branch=%d thread=%d: %s", self.branch_id, thread_id, result.error
             )
-            # A follow-up nudge cleared next_followup_at at queue time and only bumps the
-            # step on a SUCCESSFUL send — so a permanently-failed nudge would leave the
-            # thread with next_followup_at=NULL forever, dropping it out of the follow-up
-            # query (deadlock). Re-arm the SAME (unconsumed) step so the cycle resumes.
-            if row.source == "followup":
-                self._rearm_followup_after_failure(thread, cfg, now)
-                self.session.add(thread)
+            if row.source == "manager":
+                pass  # a human is driving; the failed-send bubble surfaces to them, don't pause
+            else:
+                # A live reply / nudge that permanently failed (400, unrecoverable) must NOT
+                # leave the thread "awaiting" — otherwise the dispatcher regenerates a fresh
+                # (equally undeliverable) reply every tick, burning tokens and piling up
+                # failed rows (the Meta 400 loop). Pause to dormant; a fresh inbound revives
+                # it. This supersedes the follow-up re-arm: a paused thread has no timer.
+                await self._pause_dormant(
+                    thread, f"send failed (undeliverable): {(result.error or '')[:120]}")
         self.session.add(row)
         await self.session.flush()
         return row
@@ -175,6 +181,32 @@ class OutboxSender:
                     self.branch_id, thread.id, reason)
         return row
 
+    async def _pause_dormant(self, thread, reason: str) -> None:
+        """A live reply/nudge could NOT be delivered (Meta 24h window closed, or a permanent
+        send error like a Graph 400) — move the lead to DORMANT with a journal entry and clear
+        the follow-up timer. Without this the thread's last_out_at never advances, so it stays
+        "awaiting reply", the dispatcher re-picks it every tick, and Stepan burns tokens
+        generating a fresh draft that ALSO can't be sent — the exact loop that piled up 400s
+        on the Meta channel (2026-07-10). Dormant drops it out of threads_awaiting_reply; a
+        fresh inbound revives it (ingest._revive_bot → qualifying) and, for Meta, re-opens the
+        window so the next send goes through. A human-led / already-silent stage is left
+        alone — a delivery hiccup must not yank a lead a manager owns."""
+        from app.domain.enums import HUMAN_LED_STAGES  # noqa: PLC0415
+        lead = await self.session.get(Lead, thread.lead_id)
+        if lead is None or lead.stage == Stage.DORMANT or lead.stage in HUMAN_LED_STAGES:
+            return
+        self.session.add(StageEvent(
+            branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+            from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
+            actor="system", reason=reason,
+        ))
+        lead.stage = Stage.DORMANT
+        thread.next_followup_at = None
+        self.session.add(lead)
+        self.session.add(thread)
+        logger.info("branch=%d thread=%d → dormant (undeliverable): %s",
+                    self.branch_id, thread.id, reason)
+
     async def _humanize(self, external_thread_id: str) -> None:
         """Read the chat, then pause like a human before replying (anti-ban).
 
@@ -186,17 +218,6 @@ class OutboxSender:
             return
         await seen(external_thread_id)
         await asyncio.sleep(random.uniform(*_SEEN_DELAY_S))  # noqa: S311 — timing, not crypto
-
-    def _rearm_followup_after_failure(self, thread, cfg, now: datetime) -> None:
-        """A follow-up whose send failed permanently: re-arm next_followup_at for the SAME
-        step (followups_sent was never bumped) so the thread doesn't fall out of the
-        follow-up cycle forever. A safe upper bound (max schedule hour, or 24h) keeps it
-        from retrying too fast."""
-        schedule = cfg.followup_schedule_h
-        if not (cfg.followup_enabled and schedule and thread.followups_sent < len(schedule)):
-            return
-        retry_h = schedule[thread.followups_sent] or 24
-        thread.next_followup_at = now + timedelta(hours=max(1, retry_h))
 
     async def _plan_followup(self, thread, row: Outbox, cfg, now: datetime) -> None:
         """After a bot send: arm the next follow-up step, or close the cycle.
