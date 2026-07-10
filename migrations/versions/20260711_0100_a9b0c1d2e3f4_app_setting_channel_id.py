@@ -6,8 +6,12 @@ The old UNIQUE(branch_id, key) is replaced by a COALESCE-based unique index, bec
 plain UNIQUE treats NULLs as distinct and would allow duplicate platform/branch rows.
 
 Revision ID: a9b0c1d2e3f4
-Revises: f8a9b0c1d2e3
+Revises: b0c1d2e3f4a5
 Create Date: 2026-07-11 01:00:00
+
+NOTE: chained AFTER b0c1d2e3f4a5 (need_entity.label_i18n) even though its timestamp is
+earlier — that migration was merged and deployed to prod first (prod is already at b0), so
+this one must come next in the graph to actually run on the next deploy.
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "a9b0c1d2e3f4"
-down_revision = "f8a9b0c1d2e3"
+down_revision = "b0c1d2e3f4a5"
 branch_labels = None
 depends_on = None
 
