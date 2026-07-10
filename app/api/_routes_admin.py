@@ -26,7 +26,10 @@ from app.modules.settings.service import get_settings, invalidate
 from ._i18n import apply_lang, t
 from ._ig_preview import fetch_creative_bytes
 from ._query import (
+    AWAITING_BASE,
+    IN_QUEUE_EXTRA,
     _branch_where,
+    awaiting_cutoff,
     fetch_ad_funnel,
     fetch_audience_segment_stage_dist,
     fetch_branch_tz,
@@ -40,6 +43,7 @@ from ._routes_chat import _actor_name
 from ._ui_panels import (
     admap_cell_inner,
     broker_log_panel_html,
+    inbox_awaiting_badge_html,
     leads_panel_html,
     outbox_count_html,
     outbox_panel_html,
@@ -86,18 +90,21 @@ async def outbox_count(request: Request) -> HTMLResponse:
 
 @router.get("/inbox/awaiting-count", response_class=HTMLResponse)
 async def inbox_awaiting_count(request: Request) -> HTMLResponse:
-    """Polled by the Inbox nav badge — chats where the lead spoke last and Stepan hasn't
-    replied yet (the queue). Clicking the badge opens /ui/inbox?awaiting=1 (same filter)."""
+    """Polled by the Inbox nav badge. Splits the unanswered chats into two numbers that sum to
+    the total: IN the generation queue (Stepan will reply) and NOT in it (bot off / silent
+    stage / older than the age cap / reply already queued). Each number opens its filtered list."""
     branch_ids = branch_ids_from_request(request)
     where, params = _branch_where(branch_ids, col="l.branch_id")
     cond = ("AND" if where else "WHERE")
+    params["awaiting_cutoff"] = awaiting_cutoff()
     async with session_scope() as session:
-        n = (await session.execute(text(
-            "SELECT count(*) FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"  # noqa: S608
-            f" {where} {cond} ct.last_in_at IS NOT NULL"
-            " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
-            " AND l.is_blocked = false"), params)).scalar() or 0
-    return HTMLResponse(outbox_count_html(int(n)))
+        row = (await session.execute(text(
+            f"SELECT count(*) FILTER (WHERE {IN_QUEUE_EXTRA}) AS in_queue, count(*) AS total"  # noqa: S608
+            " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+            f" {where} {cond} {AWAITING_BASE}"), params)).first()
+    in_queue = int(row[0] or 0)
+    total = int(row[1] or 0)
+    return HTMLResponse(inbox_awaiting_badge_html(in_queue, total - in_queue))
 
 
 @router.get("/outbox/panel", response_class=HTMLResponse)

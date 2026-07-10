@@ -147,22 +147,31 @@ def test_inbox_segment_filter_renders_chip_and_scoped_thread_load() -> None:
     assert "/ui/threads?lead_type=warm" in resp.text      # thread list loads scoped to segment
 
 
-def test_inbox_nav_has_awaiting_badge_that_opens_the_queue() -> None:
-    # The Inbox nav carries a polled badge; clicking the NUMBER opens the awaiting-only view.
+def test_inbox_nav_has_polled_awaiting_badge() -> None:
+    # The Inbox nav carries a badge polled from /ui/inbox/awaiting-count; the two clickable
+    # numbers come from that endpoint, so only the container + poll URL are in the shell.
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.get("/ui/inbox")
     assert resp.status_code == 200
-    assert 'id="inbox-badge"' in resp.text                 # the count badge on the nav
-    assert "/ui/inbox/awaiting-count" in resp.text         # polled endpoint
-    assert "/ui/inbox?awaiting=1" in resp.text             # badge click → awaiting queue
+    assert 'id="inbox-badge"' in resp.text
+    assert "/ui/inbox/awaiting-count" in resp.text
 
 
-def test_inbox_awaiting_filter_renders_chip_and_scoped_thread_load() -> None:
+def test_inbox_awaiting_badge_splits_into_two_clickable_numbers() -> None:
+    from app.api._ui_panels import inbox_awaiting_badge_html
+    html = inbox_awaiting_badge_html(7, 97)
+    assert ">7<" in html and ">97<" in html                 # both numbers rendered
+    assert "awaiting=queue" in html and "awaiting=off" in html  # each opens its own filter
+    assert inbox_awaiting_badge_html(0, 0) == ""            # empty when nothing awaits → hidden
+
+
+def test_inbox_awaiting_queue_and_off_render_chip_and_scoped_load() -> None:
     client = TestClient(app, raise_server_exceptions=False)
-    resp = client.get("/ui/inbox?awaiting=1")
-    assert resp.status_code == 200
-    assert "ad-filter" in resp.text                        # dismissable chip
-    assert "/ui/threads?awaiting=1" in resp.text           # thread list scoped to the queue
+    for val in ("queue", "off"):
+        resp = client.get(f"/ui/inbox?awaiting={val}")
+        assert resp.status_code == 200
+        assert "ad-filter" in resp.text                     # dismissable chip
+        assert f"/ui/threads?awaiting={val}" in resp.text   # thread list scoped to that split
 
 
 def test_ad_product_map_rejects_without_single_branch() -> None:

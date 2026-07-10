@@ -91,6 +91,22 @@ def outbox_count_html(n: int) -> str:
     return str(n) if n > 0 else ""
 
 
+def inbox_awaiting_badge_html(in_queue: int, off: int) -> str:
+    """Inbox nav badge, split into two clickable numbers that sum to the total unanswered:
+    IN the generation queue (Stepan will reply, orange) and NOT in it (bot off / silent stage /
+    too old / reply already queued — Stepan won't, grey). Empty when nothing awaits (hidden)."""
+    if in_queue + off <= 0:
+        return ""
+
+    def _num(cls: str, n: int, val: str, tip: str) -> str:
+        js = ("event.stopPropagation();event.preventDefault();"
+              f"location.href='/ui/inbox?awaiting={val}';return false")
+        return f'<span class="{cls}" title="{_h.escape(t(tip))}" onclick="{js}">{n}</span>'
+
+    return (_num("iaw iaw-q", in_queue, "queue", "inbox.await_queue")
+            + _num("iaw iaw-off", off, "off", "inbox.await_off"))
+
+
 def outbox_panel_html(
     rows: list, tz_by_branch: dict[int, int] | None = None,
     quiet_by_branch: dict[int, tuple[int, int]] | None = None,

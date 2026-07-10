@@ -1,15 +1,41 @@
 """Shared SQL query helpers for UI route handlers."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import case, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, ChannelThread, Lead, StageEvent
+from app.config import settings
+from app.domain.clock import utc_now
 
 _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
+
+# Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked
+# (the total badge). IN_QUEUE = the EXACT worker threads_awaiting_reply predicate on top, so
+# "in generation queue" matches what Stepan will actually reply to; the complement (base AND
+# NOT in-queue) is "Stepan won't reply" (bot off / silent stage / older than the age cap / a
+# reply already queued). The two partition AWAITING_BASE, so they sum to the total.
+# BOT_SILENT_STAGES = {ready, handed_off, dormant}; needs a bound :awaiting_cutoff param.
+AWAITING_BASE = (
+    "ct.last_in_at IS NOT NULL"
+    " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
+    " AND l.is_blocked = false"
+)
+IN_QUEUE_EXTRA = (
+    "l.agent_enabled = true"
+    " AND l.stage NOT IN ('ready', 'handed_off', 'dormant')"
+    " AND ct.last_in_at >= :awaiting_cutoff"
+    " AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.thread_id = ct.id AND o.status = 'pending')"
+)
+
+
+def awaiting_cutoff() -> datetime:
+    """The age floor for the reply queue — a thread whose last inbound is older than this the
+    worker does NOT auto-reply (awaiting_reply_max_age_days), so it counts as 'won't reply'."""
+    return utc_now() - timedelta(days=settings().awaiting_reply_max_age_days)
 
 # Ad-funnel count columns → the exact stage set each number counts, so the chat-list
 # links behind those numbers match the counts shown (see _ad_funnel_html / threads_partial).
