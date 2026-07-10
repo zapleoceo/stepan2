@@ -16,7 +16,19 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 def engine() -> AsyncEngine:
     global _engine, _sessionmaker
     if _engine is None:
-        _engine = create_async_engine(settings().database_url, pool_pre_ping=True)
+        cfg = settings()
+        # SQLite (tests) uses a StaticPool-style default and rejects pool_size kwargs — only
+        # pass pool sizing to a real server engine (Postgres). The worker runs many
+        # concurrent jobs, each nesting session_scope opens, so the pool must clear
+        # worker_max_jobs + API load or checkout blocks then TimeoutErrors under load.
+        kwargs: dict = {"pool_pre_ping": True}
+        if not cfg.database_url.startswith("sqlite"):
+            kwargs |= {
+                "pool_size": cfg.db_pool_size,
+                "max_overflow": cfg.db_max_overflow,
+                "pool_timeout": cfg.db_pool_timeout_s,
+            }
+        _engine = create_async_engine(cfg.database_url, **kwargs)
         _sessionmaker = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
     return _engine
 

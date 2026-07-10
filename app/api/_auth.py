@@ -24,13 +24,22 @@ logger = logging.getLogger(__name__)
 SESSION_COOKIE = "stepan2_session"
 SESSION_MAX_AGE_S = 60 * 60 * 24 * 30  # 30 days
 
-# Reachable without a session (exact path or prefix).
+# Reachable without a session (exact path or prefix). Trailing slashes on the mount
+# prefixes so "/connector" can't be widened to "/connectorevil" by a startswith match.
 _PUBLIC_PREFIXES = ("/healthz", "/login", "/api/tg_login", "/logout", "/webhooks/",
-                    "/mcp/", "/connector", "/reader", "/demo/")
+                    "/mcp/", "/connector/", "/reader/", "/demo/")
 
 
 def _secret() -> str:
-    return settings().session_secret or settings().secret_key
+    """The HMAC key for session cookies. When auth is enforced it MUST be non-empty — an
+    empty key signs everything to the same value, making a session cookie forgeable, so we
+    fail fast rather than run wide open."""
+    secret = settings().session_secret or settings().secret_key
+    if settings().auth_enabled and not secret:
+        raise RuntimeError(
+            "auth_enabled=true but no session secret set — set STEPAN2_SESSION_SECRET "
+            "(or STEPAN2_SECRET_KEY); refusing to sign sessions with an empty key")
+    return secret
 
 
 def verify_telegram_login(

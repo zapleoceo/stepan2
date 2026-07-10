@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     worker_max_jobs: int = Field(
         default=10, description="max concurrent ARQ jobs (higher = more parallel IG sessions "
                                 "and DB load)")
+    # DB connection pool — sized above worker_max_jobs (each job nests several session_scope
+    # opens) plus API concurrency, so a busy tick can't exhaust the pool and raise
+    # TimeoutError on checkout. SQLAlchemy defaults (5 + 10 overflow) were too tight.
+    db_pool_size: int = Field(
+        default=20, description="SQLAlchemy pool_size (persistent connections)")
+    db_max_overflow: int = Field(
+        default=20, description="SQLAlchemy max_overflow (burst connections above pool_size)")
+    db_pool_timeout_s: float = Field(
+        default=30.0, description="seconds to wait for a pooled connection before TimeoutError")
     worker_job_timeout_s: int = Field(
         default=240, description="per-job kill deadline; every batch cap below is sized to "
                                  "finish inside this. Must comfortably clear a single thread's "

@@ -571,3 +571,29 @@ def test_webhook_verify_handshake(monkeypatch) -> None:
         "hub.verify_token": "wrong", "hub.challenge": "42",
     })
     assert bad.status_code == 403
+
+
+def test_public_prefix_cannot_be_widened_by_startswith() -> None:
+    """/connector must not open /connectorevil — the mount prefixes carry a trailing slash."""
+    from app.api._auth import _is_public
+    assert _is_public("/connector/mcp") is True
+    assert _is_public("/reader/mcp") is True
+    assert _is_public("/connectorevil") is False
+    assert _is_public("/readerevil") is False
+    assert _is_public("/ui/inbox") is False
+
+
+def test_secret_fails_fast_when_auth_enabled_without_secret(monkeypatch) -> None:
+    """auth_enabled=true + empty session secret = forgeable cookies → refuse (RuntimeError),
+    never sign sessions with an empty key."""
+    import pytest
+
+    from app.api._auth import _secret
+    from app.config import settings
+    monkeypatch.setattr(settings(), "auth_enabled", True)
+    monkeypatch.setattr(settings(), "session_secret", "")
+    monkeypatch.setattr(settings(), "secret_key", "")
+    with pytest.raises(RuntimeError):
+        _secret()
+    monkeypatch.setattr(settings(), "session_secret", "a-real-secret")
+    assert _secret() == "a-real-secret"  # non-empty → fine

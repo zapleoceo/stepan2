@@ -338,40 +338,74 @@ _DELETION_THREAD_CAP = settings().deletion_thread_cap
 
 
 async def process_deletions(ctx: dict[str, Any]) -> int:
-    """Carry out requested IG unsends: revoke in IG first, delete locally on success."""
+    """Carry out requested IG unsends: revoke in IG first, delete locally on success.
+
+    Gated by the platform kill-switch (an unsend is a real outbound IG write). Each thread
+    runs in its OWN transaction (like reply_pending/_reply_thread): before, the whole
+    nested loop shared one transaction across all branches doing 40-90s IG revokes each — a
+    kill mid-loop (job-timeout) rolled back every already-committed local deletion and
+    re-revoked on retry. The thread cap is now a per-TICK budget, not per-channel."""
     from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
-    done = 0
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            channels = {c.id: c for c in await wiring.active_channels(session, branch.id)}
-            svc = DeletionService(session, branch.id)
-            for channel_id, channel in channels.items():
-                pending = await svc.pending(channel_id)
-                if not pending:
-                    continue
-                try:
-                    port = await wiring.build_channel_port(session, channel)
-                except (NotImplementedError, KeyError, RuntimeError) as exc:
-                    logger.warning("skip unsend channel=%s: %s", channel_id, exc)
-                    continue
-                if not hasattr(port, "revoke"):
-                    continue  # channel doesn't support unsend
-                by_thread: dict[int, str] = {}
-                for msg in pending:
-                    if msg.thread_id not in by_thread:
-                        thread = await ThreadRepo(session, branch.id).by_id(msg.thread_id)
-                        if thread is not None:
-                            by_thread[msg.thread_id] = thread.external_thread_id
-                threads_this_tick = list(set(by_thread.values()))[:_DELETION_THREAD_CAP]
-                for ext_thread in threads_this_tick:
-                    done += await svc.process(channel_id, ext_thread, port)  # type: ignore[arg-type]
+        if not await _platform_agent_on(session):
+            return 0
+        branches = await wiring.active_branches(session)
+    done = 0
+    budget = _DELETION_THREAD_CAP  # threads unsent per tick, across ALL branches/channels
+    for branch in branches:
+        if budget <= 0:
+            break
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
+                work: list[tuple[Channel, str]] = []
+                for channel in await wiring.active_channels(session, branch.id):
+                    pending = await DeletionService(session, branch.id).pending(channel.id)
+                    seen: dict[int, str] = {}
+                    for msg in pending:
+                        if msg.thread_id not in seen:
+                            thread = await ThreadRepo(session, branch.id).by_id(msg.thread_id)
+                            if thread is not None:
+                                seen[msg.thread_id] = thread.external_thread_id
+                    for ext in dict.fromkeys(seen.values()):
+                        work.append((channel, ext))
+        except Exception:
+            logger.exception("process_deletions: branch=%s bookkeeping failed", branch.id)
+            continue
+        for channel, ext_thread in work:
+            if budget <= 0:
+                break
+            done += await _process_one_deletion(branch.id, channel, ext_thread)
+            budget -= 1
     return done
+
+
+async def _process_one_deletion(branch_id: int, channel: Channel, ext_thread: str) -> int:
+    """One thread's unsend in its own transaction — a failure or job-timeout kill can't
+    roll back unsends already committed for other threads this tick."""
+    from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
+    try:
+        async with session_scope() as session:
+            port = await wiring.build_channel_port(session, channel)
+            if not hasattr(port, "revoke"):
+                return 0  # channel doesn't support unsend
+            return await DeletionService(session, branch_id).process(
+                channel.id, ext_thread, port)  # type: ignore[arg-type]
+    except (NotImplementedError, KeyError, RuntimeError) as exc:
+        logger.warning("skip unsend channel=%s: %s", channel.id, exc)
+        return 0
+    except Exception:
+        logger.exception(
+            "unsend failed branch=%d channel=%s thread=%s", branch_id, channel.id, ext_thread)
+        return 0
 
 
 async def sync_crm(ctx: dict[str, Any]) -> int:
     """CRM sync, both directions: push unsynced manager alerts out (crm_enabled), and
-    pull lead state in to stand down leads a manager already owns (crm_read_enabled)."""
+    pull lead state in to stand down leads a manager already owns (crm_read_enabled).
+
+    Each branch runs in its OWN transaction so one branch's DB error can't roll back
+    another branch's already-flushed CRM push rows."""
     from app.adapters.crm import CrmReader, CrmWebhook  # noqa: PLC0415
     from app.modules.crm import CrmSyncService  # noqa: PLC0415
     from app.modules.crm.pull import CrmPullService  # noqa: PLC0415
@@ -379,66 +413,85 @@ async def sync_crm(ctx: dict[str, Any]) -> int:
     transport = CrmWebhook()
     reader = CrmReader()
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            try:
+        branches = await wiring.active_branches(session)
+    for branch in branches:
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
                 synced += await CrmSyncService(session, branch.id, transport).sync_pending()
-            except Exception:
-                logger.exception("crm push failed branch=%d", branch.id)
-            try:
+        except Exception:
+            logger.exception("crm push failed branch=%d", branch.id)
+        try:
+            async with session_scope() as session:
                 await CrmPullService(session, branch.id, reader).sync_active()
-            except Exception:
-                logger.exception("crm pull failed branch=%d", branch.id)
+        except Exception:
+            logger.exception("crm pull failed branch=%d", branch.id)
     return synced
 
 
 async def refresh_profiles(ctx: dict[str, Any]) -> int:
     """Refresh IG follower/following stats for stale active-funnel leads (TTL ~6h).
 
-    Heavy private-API call, so capped per tick per branch to respect rate limits. Runs
-    every 30 minutes. A per-lead fetch failure leaves that lead untouched."""
+    Heavy private-API call (ban surface) — gated by the platform kill-switch, capped per
+    branch, and each branch runs in its OWN transaction so one branch's failure can't roll
+    back another's refreshed profiles. Runs every 30 minutes."""
     from app.modules.leads.profiles import ProfileService  # noqa: PLC0415
-    refreshed = 0
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            svc = ProfileService(session, branch.id)
-            for channel in await wiring.active_channels(session, branch.id):
-                try:
-                    port = await wiring.build_channel_port(session, channel)
-                except (NotImplementedError, KeyError, RuntimeError) as exc:
-                    logger.warning("skip profiles channel %s: %s", channel.id, exc)
-                    continue
-                if not hasattr(port, "fetch_profile"):
-                    continue  # channel kind has no profile stats
-                refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
+        if not await _platform_agent_on(session):
+            return 0
+        branches = await wiring.active_branches(session)
+    refreshed = 0
+    for branch in branches:
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
+                svc = ProfileService(session, branch.id)
+                for channel in await wiring.active_channels(session, branch.id):
+                    try:
+                        port = await wiring.build_channel_port(session, channel)
+                    except (NotImplementedError, KeyError, RuntimeError) as exc:
+                        logger.warning("skip profiles channel %s: %s", channel.id, exc)
+                        continue
+                    if not hasattr(port, "fetch_profile"):
+                        continue  # channel kind has no profile stats
+                    refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
+        except Exception:
+            logger.exception("refresh_profiles: branch=%s failed", branch.id)
     return refreshed
 
 
 async def backfill_media(ctx: dict[str, Any]) -> int:
     """Download media flagged pending at ingest and attach a MediaAsset (capped batch).
 
-    Runs every few minutes; a download failure keeps the flag set so the next tick
-    retries. Safe no-op when nothing is flagged."""
+    Gated by the platform kill-switch (hits the IG private API). Each branch runs in its
+    OWN transaction so one branch's failure can't roll back another's downloads. Runs every
+    few minutes; a download failure keeps the flag set so the next tick retries."""
     from app.modules.media.service import MediaService  # noqa: PLC0415
-    done = 0
     async with session_scope() as session:
-        for branch in await wiring.active_branches(session):
-            assert branch.id is not None
-            svc = MediaService(session, branch.id)
-            for channel in await wiring.active_channels(session, branch.id):
-                assert channel.id is not None
-                if not await svc.pending(channel.id, limit=1):
-                    continue  # nothing flagged — skip building the port
-                try:
-                    port = await wiring.build_channel_port(session, channel)
-                except (NotImplementedError, KeyError, RuntimeError) as exc:
-                    logger.warning("skip media channel %s: %s", channel.id, exc)
-                    continue
-                if not hasattr(port, "download_media"):
-                    continue  # channel kind can't download media
-                done += await svc.backfill(
-                    channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
+        if not await _platform_agent_on(session):
+            return 0
+        branches = await wiring.active_branches(session)
+    done = 0
+    for branch in branches:
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
+                svc = MediaService(session, branch.id)
+                for channel in await wiring.active_channels(session, branch.id):
+                    assert channel.id is not None
+                    if not await svc.pending(channel.id, limit=1):
+                        continue  # nothing flagged — skip building the port
+                    try:
+                        port = await wiring.build_channel_port(session, channel)
+                    except (NotImplementedError, KeyError, RuntimeError) as exc:
+                        logger.warning("skip media channel %s: %s", channel.id, exc)
+                        continue
+                    if not hasattr(port, "download_media"):
+                        continue  # channel kind can't download media
+                    done += await svc.backfill(
+                        channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
+        except Exception:
+            logger.exception("backfill_media: branch=%s failed", branch.id)
     return done
 
 
