@@ -6,6 +6,7 @@ from cryptography.fernet import Fernet
 os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
@@ -13,6 +14,17 @@ from sqlmodel import SQLModel  # noqa: E402
 from sqlmodel.ext.asyncio.session import AsyncSession  # noqa: E402
 
 import app.adapters.db.models  # noqa: E402,F401 — register tables on metadata
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    # The settings resolver caches by (branch_id, channel_id) for 30 s. Every test builds a
+    # fresh in-memory DB where branch ids restart at 1, so without a reset a value cached by one
+    # test (e.g. sending_enabled=false) leaks into the next test reusing branch 1 within the TTL.
+    from app.modules.settings.service import _cache
+    _cache.clear()
+    yield
+    _cache.clear()
 
 
 @pytest_asyncio.fixture

@@ -47,9 +47,12 @@ class IngestService:
         self, channel_id: int, messages: list[InboundMessage]
     ) -> list[Message]:
         """Persist each new inbound; skip duplicates. Returns the rows it created."""
-        from app.modules.settings.service import get_settings  # noqa: PLC0415
+        from app.modules.settings.service import get_channel_settings  # noqa: PLC0415
         created: list[Message] = []
-        cc = (await get_settings(self.session, self.branch_id)).phone_country_code
+        # Phone country code is per-connector — a lead's local number is parsed with THIS
+        # channel's region (a Malaysia IG account vs an Indonesia one stamp different codes).
+        cc = (await get_channel_settings(
+            self.session, self.branch_id, channel_id)).phone_country_code
         await self._advance_read_receipts(channel_id, messages)
         for inbound in messages:
             external_id = inbound.external_id or _external_id(inbound)

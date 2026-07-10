@@ -12,7 +12,11 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.api._ui_settings import field_html, settings_form_html  # noqa: E402
+from app.api._ui_settings import (  # noqa: E402
+    channel_settings_html,
+    field_html,
+    settings_form_html,
+)
 from app.api.main import app  # noqa: E402
 from app.modules.settings import schema as S  # noqa: E402
 
@@ -82,14 +86,25 @@ def test_form_posts_to_save_and_has_sections() -> None:
     html = settings_form_html({}, "en")
     assert 'hx-post="/ui/settings/save"' in html
     assert "Bot" in html
-    assert "Messages / hour" in html
+    assert "Bot auto-replies" in html  # a branch-scope field
+    assert "Messages / hour" not in html  # anti-ban cap is connector-scope now
 
 
 def test_form_localized_ru_and_id() -> None:
     ru = settings_form_html({}, "ru")
-    assert "Бюджет" in ru and "Сообщений в час" in ru
+    assert "Бюджет" in ru and "Дневной лимит LLM" in ru  # branch-scope Budget section
     id_ = settings_form_html({}, "id")
     assert "Anggaran" in id_
+
+
+def test_connector_editor_has_caps_and_hides_meta_on_instagram() -> None:
+    ig = channel_settings_html("instagram", {}, "en", 5)
+    assert "Messages / hour" in ig                 # anti-ban cap is connector-scoped
+    assert 'App ID' not in ig                       # Meta field hidden on a non-Meta channel
+    assert 'hx-post="/ui/settings/save"' in ig
+    assert '"channel_id": "5"' in ig                # autosaves to the connector tier
+    meta = channel_settings_html("meta_business", {}, "en", 9)
+    assert "App ID" in meta                          # Meta fields show on a Meta connector
 
 
 def test_form_layout_fills_wide_screens_not_a_narrow_column() -> None:
@@ -151,15 +166,15 @@ def test_unconsumed_tech_toggles_hidden_but_still_seeded() -> None:
 
 
 def test_current_value_overrides_default() -> None:
-    html = settings_form_html({"hourly_cap": "7"}, "en")
+    html = settings_form_html({"daily_budget_usd": "7"}, "en")  # a branch-scope field
     assert 'value="7"' in html
 
 
 def test_cap_usage_badge_shown_when_provided() -> None:
-    """Live usage under hourly_cap/daily_cap — never hardcoded, only rendered when the
-    route computed it and passed it in."""
-    html = settings_form_html(
-        {"hourly_cap": "150", "daily_cap": "800"}, "en",
+    """Live usage under the per-connector hourly_cap/daily_cap — never hardcoded, only rendered
+    when the channel editor computed it and passed it in."""
+    html = channel_settings_html(
+        "instagram", {"hourly_cap": "150", "daily_cap": "800"}, "en", 5,
         cap_usage={"hourly_cap": (150, 150), "daily_cap": (310, 800)})
     assert "150/150 (100%)" in html
     assert "cap reached" in html.lower()
@@ -168,7 +183,7 @@ def test_cap_usage_badge_shown_when_provided() -> None:
 
 
 def test_cap_usage_badge_absent_without_data() -> None:
-    html = settings_form_html({"hourly_cap": "150"}, "en")
+    html = channel_settings_html("instagram", {"hourly_cap": "150"}, "en", 5)
     assert "/150 (" not in html
 
 
@@ -197,14 +212,14 @@ def test_number_inputs_are_right_sized_not_airplanes() -> None:
 
 async def test_tz_comes_from_the_branch_row_not_app_setting(db_session) -> None:
     from app.adapters.db.models import Branch
-    from app.modules.settings.service import _cache, get_settings
+    from app.modules.settings.service import get_settings, invalidate
     b = Branch(name="TZ", lang="id", tz_offset_h=3)  # Moscow
     db_session.add(b)
     await db_session.flush()
-    _cache.pop(b.id, None)
+    invalidate(b.id)  # flush any (b.id, *) entry cached by an earlier test reusing this id
     cfg = await get_settings(db_session, b.id)
     assert cfg.tz_offset_h == 3  # sourced from the branch column, not the app_setting default (7)
-    _cache.pop(b.id, None)
+    invalidate(b.id)
 
 
 def test_smart_stages_renders_checkbox_group() -> None:

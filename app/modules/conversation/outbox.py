@@ -18,7 +18,7 @@ from app.adapters.db.models import Lead, Message, Outbox, StageEvent
 from app.config import settings
 from app.domain.clock import branch_day_start_utc
 from app.domain.enums import Stage
-from app.modules.settings.service import get_settings
+from app.modules.settings.service import get_channel_settings
 from app.ports.channel import ChannelPort
 
 from .repository import MessageRepo, OutboxRepo, ThreadRepo
@@ -69,17 +69,23 @@ class OutboxSender:
         now = datetime.now(UTC).replace(tzinfo=None)
         if row.scheduled_at > now:
             return None  # not due yet — respect reply delay
-        cfg = await get_settings(self.session, self.branch_id)
+        thread = await self.threads.by_id(thread_id)
+        if thread is None:
+            return None
+        # Resolve settings for THIS thread's connector: anti-ban caps, sending toggle and the
+        # follow-up schedule are per-channel (Meta's official API needs no anti-ban throttle
+        # and closes its window in ~24h, so its cadence differs from Instagram's). Branch-scope
+        # keys (quiet hours, tz) come through unchanged.
+        cfg = await get_channel_settings(self.session, self.branch_id, thread.channel_id)
+        if not cfg.sending_enabled:
+            return None  # connector sending paused (soft-block) — queue keeps building
         if row.source == "followup" and cfg.is_quiet_hour():
             return None  # follow-ups hold at night; live replies still go out (S1)
-        if row.source != "manager" and await self._cap_reached(now, cfg):
+        if row.source != "manager" and await self._cap_reached(now, cfg, thread.channel_id):
             logger.info(
                 "outbox hold branch=%d thread=%d: send cap reached", self.branch_id, thread_id
             )
             return None  # hourly/daily send cap hit — leave queued for a later tick
-        thread = await self.threads.by_id(thread_id)
-        if thread is None:
-            return None
 
         if cfg.crm_read_enabled and row.source != "manager":
             skipped = await self._crm_gate(thread, row)
@@ -214,14 +220,16 @@ class OutboxSender:
         logger.info("branch=%d lead=%d → dormant (followups exhausted)",
                     self.branch_id, lead.id)
 
-    async def _cap_reached(self, now: datetime, s) -> bool:
-        """True when the branch already hit its hourly or daily send cap (cap ≤ 0 = off)."""
+    async def _cap_reached(self, now: datetime, s, channel_id: int) -> bool:
+        """True when THIS connector already hit its hourly or daily send cap (cap ≤ 0 = off).
+        Counts are per-channel so one connector's volume never throttles another's."""
         if s.hourly_cap > 0:
-            if await self.outbox.count_sent_since(now - timedelta(hours=1)) >= s.hourly_cap:
+            if await self.outbox.count_sent_since(
+                    now - timedelta(hours=1), channel_id) >= s.hourly_cap:
                 return True
         if s.daily_cap > 0:
             day_start = branch_day_start_utc(now, s.tz_offset_h)
-            if await self.outbox.count_sent_since(day_start) >= s.daily_cap:
+            if await self.outbox.count_sent_since(day_start, channel_id) >= s.daily_cap:
                 return True
         return False
 

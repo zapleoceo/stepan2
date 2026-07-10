@@ -22,6 +22,9 @@ class SettingField:
     width: str = "120px"
     hidden: bool = False  # in defaults() but never rendered (vestigial/internal keys)
     choices: list[tuple[str, I18n]] | None = None  # text field → dropdown of fixed options
+    # "branch" renders in the branch panel and applies to the whole branch; "channel" renders
+    # in the per-connector editor and resolves per channel (falling back to branch → platform).
+    scope: str = "branch"
 
 
 @dataclass(frozen=True)
@@ -39,8 +42,9 @@ def _f(
     key: str, kind: str, default: str, label: I18n, *,
     ph: I18n | None = None, help: I18n | None = None, width: str = "120px",
     hidden: bool = False, choices: list[tuple[str, I18n]] | None = None,
+    scope: str = "branch",
 ) -> SettingField:
-    return SettingField(key, kind, default, label, ph, help, width, hidden, choices)
+    return SettingField(key, kind, default, label, ph, help, width, hidden, choices, scope)
 
 
 _UNLIMITED = _l("0 = без лимита", "0 = unlimited", "0 = tanpa batas")
@@ -53,10 +57,10 @@ SCHEMA: list[SettingSection] = [
            width="130px"),
         _f("reply_delay_min_s", "int", "5",
            _l("Задержка ответа, мин (с)", "Reply delay, min (s)", "Jeda min (dtk)"),
-           ph=_l("5", "5", "5"), width="64px"),
+           ph=_l("5", "5", "5"), width="64px", scope="channel"),
         _f("reply_delay_max_s", "int", "30",
            _l("Задержка ответа, макс (с)", "Reply delay, max (s)", "Jeda maks (dtk)"),
-           ph=_l("30", "30", "30"), width="64px"),
+           ph=_l("30", "30", "30"), width="64px", scope="channel"),
         _f("quiet_start", "int", "22",
            _l("Тихие часы с (0–23)", "Quiet from (0–23)", "Tenang dari (0–23)"),
            ph=_l("22", "22", "22"), width="64px"),
@@ -69,7 +73,7 @@ SCHEMA: list[SettingSection] = [
            help=_l("Для номеров из текста лида (62=Индонезия, 60=Малайзия, 63=Филиппины)",
                    "For phones in a lead's text (62=Indonesia, 60=Malaysia, 63=Philippines)",
                    "Untuk nomor dari teks lead (62=Indonesia, 60=Malaysia, 63=Filipina)"),
-           width="64px"),
+           width="64px", scope="channel"),
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [
@@ -84,10 +88,10 @@ SCHEMA: list[SettingSection] = [
         # (which never actually triggered).
         _f("hourly_cap", "int", "150",
            _l("Сообщений в час", "Messages / hour", "Pesan / jam"),
-           ph=_l("150", "150", "150"), help=_UNLIMITED, width="76px"),
+           ph=_l("150", "150", "150"), help=_UNLIMITED, width="76px", scope="channel"),
         _f("daily_cap", "int", "800",
            _l("Сообщений в день", "Messages / day", "Pesan / hari"),
-           ph=_l("800", "800", "800"), help=_UNLIMITED, width="76px"),
+           ph=_l("800", "800", "800"), help=_UNLIMITED, width="76px", scope="channel"),
         # Independent from the main bot switch: that one gates scanning incoming + queueing a
         # reply; this one gates the SEND worker draining the queue. Off = keep capturing
         # incoming and queueing replies, but nothing actually goes out — the lever for "the
@@ -98,17 +102,20 @@ SCHEMA: list[SettingSection] = [
                "Выкл — очередь копится, но ничего не отправляется (для бана/чекпоинта)",
                "Off — the queue keeps building but nothing sends (for a ban/checkpoint)",
                "Nonaktif — antrean menumpuk tapi tidak terkirim (saat kena banned/checkpoint)"),
-           width="90px"),
+           width="90px", scope="channel"),
     ]),
     SettingSection("fa-solid fa-clock-rotate-left",
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [
         _f("followup_enabled", "bool", "false",
-           _l("Включить фолоап", "Enable follow-up", "Aktifkan"), width="130px"),
+           _l("Включить фолоап", "Enable follow-up", "Aktifkan"), width="130px",
+           scope="channel"),
         _f("followup_schedule_h", "text", "1,4,24,120",
            _l("Расписание (часы)", "Schedule (hours)", "Jadwal (jam)"),
            ph=_l("1,4,24,120", "1,4,24,120", "1,4,24,120"),
-           help=_l("Часы после ответа, через запятую",
-                   "Hours after reply, comma-separated", "Jam, pisah koma"), width="170px"),
+           help=_l("Часы после ответа, через запятую. У Meta окно ~24ч — ставьте короче",
+                   "Hours after reply, comma-separated. Meta's window is ~24h — use shorter",
+                   "Jam setelah balasan, pisah koma. Jendela Meta ~24 jam — pakai lebih pendek"),
+           width="170px", scope="channel"),
     ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
@@ -164,13 +171,16 @@ SCHEMA: list[SettingSection] = [
     SettingSection("fa-solid fa-bullseye",
                    _l("Коннектор Meta", "Meta connector", "Konektor Meta"), [
         _f("meta_app_id", "text", "", _l("App ID", "App ID", "App ID"),
-           ph=_l("1068545755735887", "1068545755735887", "1068545755735887"), width="220px"),
+           ph=_l("1068545755735887", "1068545755735887", "1068545755735887"), width="220px",
+           scope="channel"),
         _f("fb_business_id", "text", "", _l("Business ID", "Business ID", "Business ID"),
-           ph=_l("1234567890", "1234567890", "1234567890"), width="220px"),
+           ph=_l("1234567890", "1234567890", "1234567890"), width="220px", scope="channel"),
         _f("fb_account_id", "text", "", _l("Ad Account ID", "Ad Account ID", "Ad Account ID"),
-           ph=_l("act_1234567890", "act_1234567890", "act_1234567890"), width="220px"),
+           ph=_l("act_1234567890", "act_1234567890", "act_1234567890"), width="220px",
+           scope="channel"),
         _f("meta_page_id", "text", "", _l("Page ID", "Page ID", "Page ID"),
-           ph=_l("447466948457973", "447466948457973", "447466948457973"), width="220px"),
+           ph=_l("447466948457973", "447466948457973", "447466948457973"), width="220px",
+           scope="channel"),
         _f("meta_system_user_token", "secret", "",
            _l("System User токен (реклама + пиксель + сообщения)",
               "System User token (ads + pixel + messaging)",
@@ -185,14 +195,14 @@ SCHEMA: list[SettingSection] = [
                    "Token tunggal dengan scope ads_management, ads_read, business_management, "
                    "pages_messaging, pages_read_engagement, pages_show_list, "
                    "instagram_manage_messages. Kosong = tetap"),
-           width="340px"),
+           width="340px", scope="channel"),
         _f("meta_capi_token", "secret", "", _l("CAPI токен (устар.)", "CAPI token (legacy)",
                                                 "Token CAPI (lama)"),
            ph=_l("EAAB…", "EAAB…", "EAAB…"),
            help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
                    "Legacy field — use the System User token above. Blank = keep current",
                    "Field lama — gunakan token System User di atas. Kosong = tetap"),
-           width="340px", hidden=True),
+           width="340px", hidden=True, scope="channel"),
         _f("meta_ads_token", "secret", "",
            _l("Marketing API токен (устар.)", "Marketing API token (legacy)",
               "Token Marketing API (lama)"),
@@ -200,7 +210,7 @@ SCHEMA: list[SettingSection] = [
            help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
                    "Legacy field — use the System User token above. Blank = keep current",
                    "Field lama — gunakan token System User di atas. Kosong = tetap"),
-           width="340px", hidden=True),
+           width="340px", hidden=True, scope="channel"),
     ]),
     SettingSection("fa-solid fa-chart-line",
                    _l("Meta — доп. опция: пиксель (CAPI)", "Meta — add-on: pixel (CAPI)",
@@ -216,9 +226,9 @@ SCHEMA: list[SettingSection] = [
                    "Opsi tambahan di atas konektor Meta — perlu token System User dan Pixel ID "
                    "di atas. Nonaktif secara default: aktifkan hanya setelah pixel diatur dan "
                    "diverifikasi."),
-           width="130px"),
+           width="130px", scope="channel"),
         _f("meta_pixel_id", "text", "", _l("Pixel ID", "Pixel ID", "Pixel ID"),
-           ph=_l("1234567890", "1234567890", "1234567890"), width="220px"),
+           ph=_l("1234567890", "1234567890", "1234567890"), width="220px", scope="channel"),
     ]),
     SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [
         _f("crm_enabled", "bool", "false",
@@ -248,3 +258,19 @@ def defaults() -> dict[str, str]:
 
 def field_for(key: str) -> SettingField | None:
     return next((f for f in all_fields() if f.key == key), None)
+
+
+def channel_keys() -> frozenset[str]:
+    """Keys that resolve per connector (scope='channel') — everything else is branch-scoped."""
+    return frozenset(f.key for f in all_fields() if f.scope == "channel")
+
+
+def sections_for_scope(scope: str) -> list[SettingSection]:
+    """Sections keeping only the fields of the given scope, dropping now-empty sections —
+    lets the branch panel and the per-connector editor render from the same SCHEMA."""
+    out: list[SettingSection] = []
+    for sec in SCHEMA:
+        kept = [f for f in sec.fields if f.scope == scope]
+        if kept:
+            out.append(SettingSection(sec.icon, sec.title, kept))
+    return out
