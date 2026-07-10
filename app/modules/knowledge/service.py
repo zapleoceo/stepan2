@@ -6,6 +6,8 @@ stories are NOT dumped in full — they reach the model only through retrieval. 
 filtering lives here; all reads go through the BranchScoped repos."""
 from __future__ import annotations
 
+import logging
+
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Product
@@ -13,6 +15,8 @@ from app.ports.llm import LLMPort
 
 from .rag import PERSONA_SLUGS, RagService
 from .repository import KnowledgeRepo, ProductRepo
+
+logger = logging.getLogger(__name__)
 
 PERSONA_SLUG = "persona"
 # Persona identity is injected directly, persona_core first when present.
@@ -72,9 +76,17 @@ class KnowledgeService:
             blocks.append(_focus_block(focused, resolved_lang))
         blocks.append(_catalog_block(await self.products.active(), resolved_lang))
         if self.llm is not None and query:
-            chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
-                query, thread_id=thread_id)
-            blocks.append(_rag_block(chunks))
+            try:
+                chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
+                    query, thread_id=thread_id)
+            except Exception:
+                # A transient broker embed failure must degrade to persona+catalog, NOT abort
+                # the whole reply — otherwise one dead embed endpoint knocks out every thread's
+                # reply that tick. RAG chunks are additive; losing them is a soft downgrade.
+                logger.warning("RAG retrieve failed branch=%d — replying without chunks",
+                               self.branch_id, exc_info=True)
+            else:
+                blocks.append(_rag_block(chunks))
         return "\n\n".join(b for b in blocks if b)
 
     async def _focused(self, product_slug: str | None) -> Product | None:

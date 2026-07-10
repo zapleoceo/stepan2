@@ -18,6 +18,7 @@ from app.admin._branch import (
     allowed_branch_ids,
     branch_ids_from_request,
     is_branch_forbidden,
+    is_branch_write_forbidden,
     writable_branch_ids,
 )
 from app.domain.clock import utc_now
@@ -69,11 +70,23 @@ def _spawn_coach_generation(branch_id: int, edit_id: int) -> None:
     task.add_done_callback(_COACH_TASKS.discard)
 
 
+def _coach_branch(request: Request) -> int:
+    """The branch the operator is VIEWING (same source as the coach panel), constrained to
+    one they may WRITE. Fixes the mismatch where the panel showed branch N via the view
+    cookie but every write fell back to writable[0] (branch 1 for a super_admin) — a
+    super/multi-branch admin coaching branch 3's panel silently edited branch 1's KB."""
+    view = branch_ids_from_request(request)          # what the panel shows (view-filter cookie)
+    writable = writable_branch_ids(request)          # None = write-anywhere (super/auth off)
+    target = view[0] if view else None
+    if target is not None and not is_branch_write_forbidden(target, writable):
+        return target
+    return writable[0] if writable else (target or 1)
+
+
 @router.get("/coach/panel", response_class=HTMLResponse)
 async def coach_panel_partial(request: Request) -> HTMLResponse:
     apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    branch_id = branch_ids[0] if branch_ids else 1
+    branch_id = _coach_branch(request)  # same branch the write routes use → panel and writes agree
     async with session_scope() as session:
         edits, notes = await fetch_coach_data(session, branch_id)
     return HTMLResponse(coach_chat_html(branch_id, edits, notes))
@@ -88,8 +101,7 @@ async def coach_say(
     # hidden branch_id field is never trusted (a client could submit any branch it likes).
     # Scoped by WRITE right (viewer can't coach); middleware already blocks a pure viewer.
     apply_lang(request)
-    writable = writable_branch_ids(request)
-    branch_id = writable[0] if writable else 1
+    branch_id = _coach_branch(request)
     text_val = request_text.strip()
     # Persist the question FIRST (status 'thinking') and commit, then generate the answer in
     # the background — so leaving the page mid-generation loses neither the question nor the
@@ -155,8 +167,7 @@ async def coach_analyze(thread_id: int, request: Request) -> HTMLResponse:
 
 @router.post("/coach/apply/{edit_id}")
 async def coach_apply(edit_id: int, request: Request) -> RedirectResponse:
-    writable = writable_branch_ids(request)  # WRITE right (viewer can't); middleware blocks []
-    branch_id = writable[0] if writable else 1
+    branch_id = _coach_branch(request)  # viewed branch, constrained to writable
     async with session_scope() as session:
         await apply_edit(session, branch_id, edit_id)
     return RedirectResponse("/ui/coach", status_code=303)
@@ -164,8 +175,7 @@ async def coach_apply(edit_id: int, request: Request) -> RedirectResponse:
 
 @router.post("/coach/cancel/{edit_id}")
 async def coach_cancel(edit_id: int, request: Request) -> RedirectResponse:
-    writable = writable_branch_ids(request)  # WRITE right (viewer can't); middleware blocks []
-    branch_id = writable[0] if writable else 1
+    branch_id = _coach_branch(request)  # viewed branch, constrained to writable
     async with session_scope() as session:
         await cancel_edit(session, branch_id, edit_id)
     return RedirectResponse("/ui/coach", status_code=303)
@@ -173,8 +183,7 @@ async def coach_cancel(edit_id: int, request: Request) -> RedirectResponse:
 
 @router.post("/coach/revert/{edit_id}")
 async def coach_revert(edit_id: int, request: Request) -> RedirectResponse:
-    writable = writable_branch_ids(request)  # WRITE right (viewer can't); middleware blocks []
-    branch_id = writable[0] if writable else 1
+    branch_id = _coach_branch(request)  # viewed branch, constrained to writable
     async with session_scope() as session:
         await revert_edit(session, branch_id, edit_id)
     return RedirectResponse("/ui/coach", status_code=303)

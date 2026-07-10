@@ -187,6 +187,10 @@ class Settings(BaseSettings):
                 raise ValueError(f"STEPAN2_BOOTSTRAP_STAFF_JSON is not valid JSON: {e}") from e
             if not isinstance(staff, list):
                 raise ValueError("STEPAN2_BOOTSTRAP_STAFF_JSON must be a JSON list of staff")
+        if not self.auth_enabled:
+            _log.warning("STEPAN2_AUTH_ENABLED is not true — the /ui admin surface and every "
+                         "state-changing POST are served with NO authentication. Fine for local "
+                         "dev; NEVER run a public deployment this way.")
         if not self.broker_url:
             _log.warning("STEPAN2_BROKER_URL is empty — all LLM calls will fail; "
                          "no replies/translations/embeddings until set")

@@ -94,7 +94,10 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
             return clean
         # The cheap pool's chat:fast provider has been caught silently not-translating (see
         # _looks_translated) — one retry on the strong model before giving up.
-    return clean or None
+    # Neither attempt passed the _looks_translated gate: return None rather than the last
+    # (likely untranslated) output, so the caller shows a fallback instead of passing the
+    # original text off as a translation.
+    return None
 
 
 async def translate_message(
