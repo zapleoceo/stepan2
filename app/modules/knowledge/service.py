@@ -11,9 +11,10 @@ import logging
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Product
+from app.config import settings
 from app.ports.llm import LLMPort
 
-from .rag import PERSONA_SLUGS, RagService
+from .rag import _TOP_K, PERSONA_SLUGS, RagService
 from .repository import KnowledgeRepo, ProductRepo
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 PERSONA_SLUG = "persona"
 # Persona identity is injected directly, persona_core first when present.
 _PERSONA_ORDER = ("persona_core", "persona")
+# Hard ceiling on the assembled context (chars) — see knowledge_context's docstring.
+_CTX_CHAR_BUDGET = settings().knowledge_context_char_budget
+# A follow-up nudge retrieves fewer chunks — it leans on the focus card, not broad recall.
+_FOLLOWUP_RAG_K = 4
 
 
 class KnowledgeService:
@@ -65,10 +70,17 @@ class KnowledgeService:
 
     async def knowledge_context(
         self, product_slug: str | None, lang: str | None = None, query: str | None = None,
-        thread_id: int | None = None,
+        thread_id: int | None = None, light: bool = False,
     ) -> str:
         """Persona (direct) + catalog + focused card + RAG-retrieved chunks for `query`.
-        Chunks are added only when an llm is available and a query is given."""
+        Chunks are added only when an llm is available and a query is given.
+
+        light=True (follow-up nudges) retrieves fewer chunks — a re-engagement message
+        leans on the focus card + persona, not broad KB recall. Either way the assembled
+        context is capped at _CTX_CHAR_BUDGET by dropping the LOWEST-RANKED chunks first
+        (never persona/focus/catalog): past ~30k chars the cheap JSON-mode providers stop
+        returning valid JSON at all, so an oversized context doesn't buy recall — it buys
+        empty responses and broker retries."""
         resolved_lang = await self._lang(lang)
         blocks = [_persona_block(await self._persona_text(), resolved_lang)]
         focused = await self._focused(product_slug)
@@ -78,7 +90,8 @@ class KnowledgeService:
         if self.llm is not None and query:
             try:
                 chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
-                    query, thread_id=thread_id, exclude_slug=product_slug if focused else None)
+                    query, k=_FOLLOWUP_RAG_K if light else _TOP_K,
+                    thread_id=thread_id, exclude_slug=product_slug if focused else None)
             except Exception:
                 # A transient broker embed failure must degrade to persona+catalog, NOT abort
                 # the whole reply — otherwise one dead embed endpoint knocks out every thread's
@@ -86,7 +99,14 @@ class KnowledgeService:
                 logger.warning("RAG retrieve failed branch=%d — replying without chunks",
                                self.branch_id, exc_info=True)
             else:
-                blocks.append(_rag_block(chunks))
+                base_len = sum(len(b) + 2 for b in blocks if b)
+                kept = _fit_chunks(chunks, _CTX_CHAR_BUDGET - base_len)
+                if len(kept) < len(chunks):
+                    logger.info(
+                        "knowledge_context branch=%d: trimmed RAG %d→%d chunks to fit the "
+                        "%d-char budget", self.branch_id, len(chunks), len(kept),
+                        _CTX_CHAR_BUDGET)
+                blocks.append(_rag_block(kept))
         return "\n\n".join(b for b in blocks if b)
 
     async def _focused(self, product_slug: str | None) -> Product | None:
@@ -111,6 +131,21 @@ def _catalog_block(products: list[Product], lang: str) -> str:
         return ""
     lines = [f"- {p.slug}: {p.title}" for p in products]
     return f"[catalog lang={lang}]\n" + "\n".join(lines)
+
+
+def _fit_chunks(chunks: list[tuple[str, str]], budget: int) -> list[tuple[str, str]]:
+    """The highest-ranked prefix of `chunks` whose rendered size fits `budget` chars.
+    retrieve() returns them best-first, so dropping from the tail sheds the least-relevant
+    material first. A non-positive budget (persona+focus already past the cap) keeps zero
+    chunks — the focus card and persona still carry the product facts."""
+    kept: list[tuple[str, str]] = []
+    used = 0
+    for title, text in chunks:
+        used += len(title) + len(text) + 12  # the "--- … ---\n" framing per chunk
+        if used > budget:
+            break
+        kept.append((title, text))
+    return kept
 
 
 def _rag_block(chunks: list[tuple[str, str]]) -> str:
