@@ -38,7 +38,6 @@ class BranchSettings:
     tg_group_id: str
     followup_enabled: bool
     followup_schedule_h: list[int]
-    knowledge_backend: str
     tech_search_enabled: bool
     tech_usecase_enabled: bool
     daily_budget_usd: float
@@ -69,6 +68,13 @@ class BranchSettings:
     # lever to pull when the channel/account is soft-blocked but you still want to keep
     # capturing incoming while sending is paused. See worker.main.send_outbox.
     sending_enabled: bool = True
+    # Single Meta connector (App ID, Business ID, Ad Account ID, Page ID, Pixel ID) plus one
+    # System User token scoped for ads + pixel + page/IG messaging — replaces the older split
+    # meta_capi_token/meta_ads_token pair, kept above for backward compatibility.
+    meta_app_id: str = ""
+    fb_account_id: str = ""
+    meta_page_id: str = ""
+    meta_system_user_token: str = ""
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -151,7 +157,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         tg_group_id=raw.get("tg_group_id", _DEFAULTS.get("tg_group_id", "")),
         followup_enabled=_b(raw, "followup_enabled"),
         followup_schedule_h=_parse_schedule(raw),
-        knowledge_backend=raw.get("knowledge_backend", "direct"),
         tech_search_enabled=_b(raw, "tech_search_enabled"),
         tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),
@@ -167,4 +172,8 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         reply_guard=raw.get("reply_guard", "full"),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
+        meta_app_id=raw.get("meta_app_id", ""),
+        fb_account_id=raw.get("fb_account_id", ""),
+        meta_page_id=raw.get("meta_page_id", ""),
+        meta_system_user_token=raw.get("meta_system_user_token", ""),
     )

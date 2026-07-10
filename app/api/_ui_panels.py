@@ -472,11 +472,6 @@ _SETTING_DOCS: dict[str, dict[str, str]] = {
         "en": "Enable bot responses: true / false",
         "id": "Aktifkan bot: true / false",
     },
-    "knowledge_backend": {
-        "ru": "Движок знаний: direct (текстовый) | rag (векторный поиск) | canary:N (A/B тест)",
-        "en": "Knowledge backend: direct (text) | rag (vector search) | canary:N (A/B test)",
-        "id": "Backend pengetahuan: direct | rag | canary:N",
-    },
     "greeting_enabled": {
         "ru": "Авто-приветствие нового лида при первом сообщении: true / false",
         "en": "Auto-greet new lead on first message: true / false",
