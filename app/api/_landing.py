@@ -178,6 +178,7 @@ h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;
 .pill .ic{color:var(--mut)}
 .pill.soon{opacity:.62}
 .pill .tag{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;color:var(--acc);border:1px solid var(--acc-soft);background:var(--acc-soft);padding:.1rem .4rem;border-radius:5px;text-transform:uppercase}
+.pill .tag.custom{color:var(--mut);border-color:var(--line2);background:transparent}
 /* final */
 .final{border:1px solid var(--line2);border-radius:22px;padding:3.6rem 1.5rem;text-align:center;background:var(--panel2);position:relative;overflow:hidden}
 .final::before{content:"";position:absolute;inset:0;background-image:radial-gradient(circle at 1px 1px,rgba(255,255,255,.05) 1px,transparent 0);background-size:24px 24px;-webkit-mask-image:radial-gradient(60% 80% at 50% 0%,#000,transparent);mask-image:radial-gradient(60% 80% at 50% 0%,#000,transparent);pointer-events:none}
@@ -308,6 +309,8 @@ _IC = {
     "wa": '<path d="M21 11.5a8.5 8.5 0 0 1-12.6 7.4L3 21l2.2-5.3A8.5 8.5 0 1 1 21 11.5Z"/><path d="M8.5 9c0 4 2.5 6.5 6.5 6.5"/>',
     "msgr": '<path d="M12 3C6.5 3 2 7.1 2 12c0 2.7 1.3 5.1 3.4 6.7V22l3.1-1.7c1.1.3 2.3.5 3.5.5 5.5 0 10-4.1 10-9s-4.5-9-10-9Z"/><path d="m7 13 3-3 2.5 2L16 11l-3 3-2.5-2Z"/>',
     "tiktok": '<path d="M16 3c.3 2 1.7 3.6 4 4v3c-1.6 0-3-.4-4-1v6.5A5.5 5.5 0 1 1 10.5 10v3a2.5 2.5 0 1 0 2.5 2.5V3z"/>',
+    "telegram": '<path d="M22 3 2 11l7 2.5M22 3l-4 18-8-6.5M22 3 9.5 13.5l-1 6"/>',
+    "plug": '<path d="M9 2v4M15 2v4M7 10h10v3a5 5 0 0 1-10 0z"/><path d="M12 17v5"/>',
     "check": '<path d="M20 6 9 17l-5-5"/>',
     "layers": '<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
     "building": '<rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/>'
@@ -394,7 +397,9 @@ def _meta_compare_section() -> str:
          "Pulls ad spend/CPL, maps every lead to its exact ad, merges identity across ads"),
         ("Multi-brand / multi-location", "Not documented for franchise-style management",
          "Native multi-branch with role-based access per team"),
-        ("Channels", "WhatsApp, Instagram, Messenger", "Instagram, WhatsApp, Messenger, TikTok soon"),
+        ("Channels", "WhatsApp, Instagram, Messenger",
+         "Instagram, WhatsApp, Messenger, TikTok soon — plus Telegram or any messenger with "
+         "an API, built to order"),
     ]
     body = "".join(
         f'<tr><th scope="row">{k}</th><td>{m}</td><td class="win">{s}</td></tr>'
@@ -694,7 +699,13 @@ def landing_html() -> str:
         f"<span class=\"pill\">{_svg(_IC['msgr'], 18)}Messenger</span>"
         f"<span class=\"pill soon\">{_svg(_IC['tiktok'], 18)}TikTok"
         "<span class=\"tag\">soon</span></span>"
-        "</div></div></section>"
+        f"<span class=\"pill\">{_svg(_IC['telegram'], 18)}Telegram"
+        "<span class=\"tag custom\">on request</span></span>"
+        "</div>"
+        "<p class=\"mnote\" style=\"margin-top:1rem\">"
+        f"{_svg(_IC['plug'], 14)} Any messenger with an API can be wired in — Telegram is "
+        "the same connector pattern as the channels above.</p>"
+        "</div></section>"
         # pricing
         + _pricing_section() +
         # final CTA
