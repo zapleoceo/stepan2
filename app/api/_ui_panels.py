@@ -1672,6 +1672,44 @@ def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> 
     )
 
 
+_CLOUD_COLS = (
+    ("pains", "cloud.pains", "#ff8787"),   # Боли
+    ("jobs", "cloud.jobs", "#74c0fc"),     # Цели
+    ("gains", "cloud.gains", "#69db7c"),   # Выгоды
+)
+
+
+def _needs_cloud_html(clouds: dict | None) -> str:
+    """Three-column need cloud (Боли · Цели · Выгоды), AI-grouped, most frequent first, each
+    entity with a weight bar. Empty until the nightly aggregation has run for the branch."""
+    if not clouds:
+        return ""
+    cols = ""
+    for kind, title_key, color in _CLOUD_COLS:
+        entries = clouds.get(kind) or []
+        rows = ""
+        for e in entries:
+            pct = max(6, round(e.weight * 100))  # keep a sliver visible even for the rarest
+            rows += (
+                f'<div class="ncl-row" title="{_h.escape(e.label)} · {e.count}">'
+                f'<div class="ncl-bar" style="width:{pct}%;background:{color}"></div>'
+                f'<span class="ncl-lbl">{_h.escape(e.label)}</span>'
+                f'<span class="ncl-n">{e.count}</span></div>'
+            )
+        if not rows:
+            rows = f'<div class="ncl-empty">{_h.escape(t("cloud.empty"))}</div>'
+        cols += (
+            f'<div class="ncl-col">'
+            f'<div class="ncl-hd" style="color:{color}">{_h.escape(t(title_key))}</div>'
+            f'{rows}</div>'
+        )
+    return (
+        f'<div class="ncl-wrap">'
+        f'<h3 class="ncl-title">{_h.escape(t("cloud.title"))}</h3>'
+        f'<div class="ncl-cols">{cols}</div></div>'
+    )
+
+
 def reports_panel_html(
     stage_counts: dict[str, int],
     hour_in: dict[int, int],
@@ -1691,6 +1729,7 @@ def reports_panel_html(
     stage_flow: list | None = None,
     stage_reach: dict[str, int] | None = None,
     total_leads: int = 0,
+    needs_cloud: dict | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1772,7 +1811,10 @@ def reports_panel_html(
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
         f'{_segment_tree_html(segments or [], segment_stages)}'
-        f'{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}'  # noqa: E501
+        f'<div class="rep-fc">'
+        f'<div class="rep-fc-funnel">{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}</div>'  # noqa: E501
+        f'{_needs_cloud_html(needs_cloud)}'
+        f'</div>'
         f'{mini_act}'
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'

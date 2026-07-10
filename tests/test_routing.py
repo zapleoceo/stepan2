@@ -60,6 +60,22 @@ def test_parse_smart_stages() -> None:
         {"presenting", "objection", "ready"})  # all-invalid → default, never all-fast by typo
 
 
+def test_deep_conversation_forces_smart_regardless_of_stage() -> None:
+    # A lead 6+ turns deep represents real invested effort, even stuck in 'qualifying'
+    # with no smart_stage/lead_type/buy-signal to trigger the older rules.
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=5) == FAST
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=6) == SMART
+    assert _pick(stage=Stage.NEW, inbound_count=10) == SMART
+
+
+def test_guard_regen_history_stays_on_smart_for_this_lead() -> None:
+    # Once guard has already had to regenerate a reply for this lead, keep it on smart —
+    # a per-LEAD signal, not something a stage or this turn's text could ever show.
+    assert _pick(stage=Stage.NEW, guard_regen_count=0) == FAST
+    assert _pick(stage=Stage.NEW, guard_regen_count=1) == SMART
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", guard_regen_count=2) == SMART
+
+
 def test_smart_stages_is_tunable() -> None:
     # Operator narrows the strong-model stages to objection only → presenting now routes fast.
     only_obj = frozenset({"objection"})

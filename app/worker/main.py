@@ -548,6 +548,27 @@ async def reindex_knowledge(ctx: dict[str, Any]) -> int:
     return done
 
 
+async def aggregate_needs(ctx: dict[str, Any]) -> int:
+    """Nightly (midnight Jakarta) needs-cloud pass for ALL branches: incrementally classify
+    leads whose needs changed onto the branch's stable taxonomy, then snapshot the day's
+    aggregates for history. Analytics only (no IG writes) → not kill-switch gated; each branch
+    in its own transaction so one branch's LLM/broker hiccup can't roll back another's."""
+    from app.modules.needs_cloud import classify_branch, write_snapshot  # noqa: PLC0415
+    llm = BrokerLLM()
+    async with session_scope() as session:
+        branches = await wiring.active_branches(session)
+    processed = 0
+    for branch in branches:
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
+                processed += await classify_branch(session, branch.id, llm)
+                await write_snapshot(session, branch.id)
+        except Exception:
+            logger.exception("aggregate_needs failed branch=%d", branch.id)
+    return processed
+
+
 def _redis_settings() -> RedisSettings:
     """ARQ broker connection from the app's redis_url (parsed, never reconstructed)."""
     return RedisSettings.from_dsn(settings().redis_url)
@@ -565,7 +586,7 @@ class WorkerSettings:
     functions = [
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
-        reindex_knowledge,
+        reindex_knowledge, aggregate_needs,
     ]
     cron_jobs = [
         # Ingest every 2 min: an IG poll costs several private-API calls each with a
@@ -606,6 +627,9 @@ class WorkerSettings:
         # RAG reindex watcher every 5 min: rebuilds only branches whose KB changed
         cron(reindex_knowledge, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
              second=45, run_at_startup=False),
+        # Needs-cloud aggregation once a day at 17:00 UTC = 00:00 WIB (midnight Jakarta), all
+        # branches. Incremental + analytics-only, so it's cheap and safe to run platform-wide.
+        cron(aggregate_needs, hour={17}, minute={0}, second=0, run_at_startup=False),
     ]
     on_startup = _on_startup
     redis_settings = _redis_settings()

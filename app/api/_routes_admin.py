@@ -320,6 +320,9 @@ async def reports_panel(
             session, branch_ids, since=since_dt, until=until_dt)
         stage_flow = await fetch_stage_flow(session, branch_ids, since=since_dt, until=until_dt)
         stage_reach = await fetch_stage_reach(session, branch_ids, since=since_dt, until=until_dt)
+        from app.modules.needs_cloud import KINDS, cloud_for  # noqa: PLC0415
+        needs_cloud = {
+            k: await cloud_for(session, branch_ids, k, since_dt, until_dt) for k in KINDS}
     segment_stages: dict[str, dict[str, dict[str, int]]] = {}
     for a, seg, st, n in seg_stage:  # {audience: {lead_type: {stage: count}}} — stage boxes
         segment_stages.setdefault(str(a), {}).setdefault(str(seg), {})[str(st)] = int(n)
@@ -333,7 +336,7 @@ async def reports_panel(
                            ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
                            products=products, segments=segments,
                            segment_stages=segment_stages, stage_flow=stage_flow,
-                           stage_reach=stage_reach,
+                           stage_reach=stage_reach, needs_cloud=needs_cloud,
                            total_leads=sum(int(s[2]) for s in segments)))  # (aud, seg, total, won)
 
 

@@ -29,6 +29,15 @@ _BUY_RE = re.compile(
 )
 _PHONE_RE = re.compile(r"\d[\d\s\-]{7,}\d")  # a phone-length digit run = ready-to-hand-off signal
 
+# A lead this deep into a conversation represents real invested effort — losing a near-closed
+# deal to a cheap-model slip costs more than it would have earlier. Not stage-gated: a lead can
+# sit in 'qualifying' for many turns of genuine back-and-forth without ever hitting a smart_stage.
+_DEEP_CONVERSATION_TURNS = 6
+# Once guard has already had to regenerate a reply for THIS lead, that's direct evidence the
+# cheap model struggles with this specific conversation — a per-lead signal no stage or regex
+# can see, since it comes from the LEAD's own history, not this turn's text.
+_GUARD_REGEN_STICKY_THRESHOLD = 1
+
 
 def parse_smart_stages(raw: str | None) -> frozenset[str]:
     """Comma-list setting → validated set of stage names. Unknown tokens are dropped; an empty
@@ -43,11 +52,19 @@ def pick_capability(
     last_inbound: str, mode: str,
     smart_stages: frozenset[str] = _DEFAULT_SMART_STAGES,
     followup_attempt: int = 0,
+    inbound_count: int = 0,
+    guard_regen_count: int = 0,
 ) -> str:
     """`SMART` or `FAST` for this turn. mode != 'hybrid' → always SMART (feature off).
 
     smart_stages = the operator-tunable set of stages that keep the strong model.
-    followup_attempt = how many nudges already sent in this thread (0 = first nudge)."""
+    followup_attempt = how many nudges already sent in this thread (0 = first nudge).
+    inbound_count = how many lead messages so far in this thread — a per-lead depth signal
+    independent of funnel stage (a long 'qualifying' back-and-forth is still real investment).
+    guard_regen_count = how many times guard has ALREADY had to regenerate a reply for this
+    LEAD (across their whole history, not just this thread) — a per-lead reliability signal:
+    once the cheap model has stumbled on this specific lead, keep it on smart going forward
+    rather than re-rolling the same risk every turn."""
     if mode != "hybrid":
         return SMART
     if workflow == "followup":
@@ -59,6 +76,10 @@ def pick_capability(
     stage_val = stage.value if isinstance(stage, Stage) else str(stage or "").lower()
     if stage_val in smart_stages or lead_type == "hot":
         return SMART
+    if guard_regen_count >= _GUARD_REGEN_STICKY_THRESHOLD:
+        return SMART  # this lead has already burned a regen once — don't gamble again
+    if inbound_count >= _DEEP_CONVERSATION_TURNS:
+        return SMART  # deep conversation, real effort invested, regardless of the stage label
     text = last_inbound or ""
     if _BUY_RE.search(text) or _PHONE_RE.search(text):
         return SMART  # buying signal arrived early — don't gamble the close on the cheap model

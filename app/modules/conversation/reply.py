@@ -209,6 +209,13 @@ def _deterministic_issues(reply: str, context: str) -> list[str]:
     ]
 
 
+def _bump_guard_regen_count(lead: Lead) -> None:
+    """A regen fired for this lead — persist it as a per-lead routing signal (see
+    routing.pick_capability's guard_regen_count) so future turns lean toward chat:smart
+    for a lead the cheap model has already stumbled on, not just this one turn."""
+    lead.guard_regen_count += 1
+
+
 async def guard_decision(
     session: AsyncSession, branch_id: int, branch_settings: BranchSettings | None,
     llm: LLMPort, engine: DecisionEngine, ctx, thread_id: int, lang: str, workflow: str,
@@ -227,6 +234,7 @@ async def guard_decision(
     if mode == "off" or not decision.reply:
         return decision, meta
     context = engine.last_context
+    regenerated = False
     if decision.needs_manager:
         # Mutually exclusive, most-specific-first: a price question already answered in KB
         # gets the targeted correction; anything else with no stated reason gets the generic
@@ -237,6 +245,7 @@ async def guard_decision(
             logger.warning(
                 "guard: branch=%d thread=%d premature needs_manager on a price question "
                 "already answered in KB → regen", branch_id, thread_id)
+            regenerated = True
             raw, regen_meta = await engine.complete(
                 ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
                 extra_user_msg=guard.MANAGER_HANDOFF_CORRECTION)
@@ -255,6 +264,7 @@ async def guard_decision(
             logger.warning(
                 "guard: branch=%d thread=%d needs_manager with no manager_question/kb_gap "
                 "→ regen", branch_id, thread_id)
+            regenerated = True
             raw, regen_meta = await engine.complete(
                 ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
                 extra_user_msg=guard.UNEXPLAINED_HANDOFF_CORRECTION)
@@ -273,6 +283,8 @@ async def guard_decision(
             llm, decision.reply, context, branch_id=branch_id,
             thread_id=thread_id, bill=bill, system=await guard_prompt(session, branch_id))
     if not issues:
+        if regenerated and ctx.lead is not None:
+            _bump_guard_regen_count(ctx.lead)
         return decision, meta
     logger.warning("guard: branch=%d thread=%d fabrication → regen: %s",
                    branch_id, thread_id, issues[:3])
@@ -283,6 +295,8 @@ async def guard_decision(
         fixed = parse_decision(raw)
     except ValueError:
         fixed = decision
+    if ctx.lead is not None:
+        _bump_guard_regen_count(ctx.lead)
     # Only the deterministic checks are re-verified (an LLM re-verify would double cost);
     # a still-broken draft means we can't trust it → hand off.
     from dataclasses import replace  # noqa: PLC0415
@@ -355,11 +369,13 @@ class ReplyService:
         mode = self.settings.reply_routing if self.settings is not None else "hybrid"
         smart_stages = parse_smart_stages(
             self.settings.smart_stages if self.settings is not None else None)
+        inbound_count = await self.messages.inbound_count(thread_id)
         cap = pick_capability(
             workflow=route_wf, stage=lead.stage if lead is not None else None,
             lead_type=lead.lead_type if lead is not None else None,
             last_inbound=last_in.text if last_in is not None else "", mode=mode,
-            smart_stages=smart_stages)
+            smart_stages=smart_stages, inbound_count=inbound_count,
+            guard_regen_count=lead.guard_regen_count if lead is not None else 0)
         extra_user_msg = None
         if lead is not None and lead.lead_type == "non_target":
             # lead.lead_type reflects the PRIOR turn's classification (persisted in
@@ -368,10 +384,8 @@ class ReplyService:
             extra_user_msg = _NON_TARGET_NUDGE
         else:
             needs_captured = ctx.stored_needs.discovery_complete or ctx.stored_needs.has_needs()
-            if not needs_captured:
-                inbound_count = await self.messages.inbound_count(thread_id)
-                if inbound_count > _DISCOVERY_TURN_CAP:
-                    extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
+            if not needs_captured and inbound_count > _DISCOVERY_TURN_CAP:
+                extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
             extra_user_msg=extra_user_msg)
