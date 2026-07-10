@@ -280,6 +280,12 @@ async def send_outbox(ctx: dict[str, Any]) -> int:
     thread runs, so a later failure can never roll back a 'sent' row into a re-send."""
     attempted = 0
     async with session_scope() as session:
+        if not await _platform_agent_on(session):
+            # The emergency kill-switch must stop the ACTUAL IG writes, not just generation —
+            # otherwise an operator flipping it OFF mid-incident still drains the whole outbox
+            # to Instagram. Mirrors process_deletions (the other real-IG-write task).
+            logger.info("platform agent OFF — skip send_outbox for all branches")
+            return 0
         branches = await wiring.active_branches(session)
     for branch in branches:
         assert branch.id is not None

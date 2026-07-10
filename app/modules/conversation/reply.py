@@ -19,6 +19,7 @@ from app.adapters.meta_capi import MetaCapi
 from app.config import settings
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.knowledge.service import KnowledgeService
+from app.modules.leads.phone import to_e164
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import BranchSettings
 from app.ports.llm import LLMPort
@@ -132,22 +133,6 @@ def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: AN
         if ratio > best_ratio:
             best_text, best_ratio = prior, ratio
     return best_text, best_ratio
-
-
-def _normalize_phone(raw: str) -> str | None:
-    """Best-effort E.164 for a phone the lead typed. Indonesian local '08…' → '+628…';
-    a leading '+' is kept; bare digits get a '+'. Returns None if the digit count is
-    implausible (so a stray number in a message doesn't get mistaken for a phone)."""
-    s = raw.strip()
-    plus = s.startswith("+")
-    digits = re.sub(r"\D", "", s)
-    if not digits:
-        return None
-    if not plus and digits.startswith("0"):  # Indonesian local trunk prefix → country code
-        digits = "62" + digits[1:]
-    if not 8 <= len(digits) <= 15:  # E.164 allows up to 15 digits; below 8 isn't a real number
-        return None
-    return "+" + digits
 
 
 def _script_lang(text: str) -> str | None:
@@ -545,7 +530,8 @@ class ReplyService:
         # must land BEFORE _stage_for so the same turn the lead sends their number can pass the
         # hand-off gate — a manager can't work a deal without a contact.
         if decision.phone and not lead.phone_e164:
-            normalized = _normalize_phone(decision.phone)
+            cc = self.settings.phone_country_code if self.settings else "62"
+            normalized = to_e164(decision.phone, cc)
             if normalized:
                 lead.phone_e164 = normalized
                 self.session.add(lead)

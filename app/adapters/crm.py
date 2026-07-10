@@ -47,7 +47,10 @@ class CrmReader:
             data = response.json()
             return data if isinstance(data, dict) else None
         except Exception as exc:  # noqa: BLE001 — treat as 'no opinion', retry next tick
-            logger.warning("crm read failed (phone=%s): %s", phone, exc)
+            # Log neither the raw phone (PII) nor `exc` (its URL embeds the phone query param);
+            # a masked tail + the exception type is enough to diagnose a flaky CRM endpoint.
+            masked = "…" + phone[-4:] if phone and len(phone) >= 4 else "?"
+            logger.warning("crm read failed (phone=%s): %s", masked, type(exc).__name__)
             return None
 
     @staticmethod
