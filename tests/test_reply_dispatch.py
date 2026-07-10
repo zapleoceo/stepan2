@@ -71,7 +71,7 @@ async def test_dispatches_one_job_per_awaiting_thread(db_session, monkeypatch) -
     await _wire(monkeypatch, b, [10, 11])
     redis = _FakeRedis()
 
-    n = await worker_main.reply_pending({"redis": redis})
+    n = await worker_main.reply_pending_branch({"redis": redis}, b.id)
 
     assert n == 2
     assert redis.calls == [
@@ -87,7 +87,7 @@ async def test_deduped_thread_is_not_counted(db_session, monkeypatch) -> None:
     await _wire(monkeypatch, b, [10, 11])
     redis = _FakeRedis(inflight={"reply:10"})  # thread 10 already has a job in flight
 
-    n = await worker_main.reply_pending({"redis": redis})
+    n = await worker_main.reply_pending_branch({"redis": redis}, b.id)
 
     assert n == 1  # only thread 11 was newly enqueued; 10 was deduped
     assert len(redis.calls) == 2  # both attempted, one returned None

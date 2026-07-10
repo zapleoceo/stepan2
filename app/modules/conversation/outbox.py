@@ -77,6 +77,8 @@ class OutboxSender:
         # and closes its window in ~24h, so its cadence differs from Instagram's). Branch-scope
         # keys (quiet hours, tz) come through unchanged.
         cfg = await get_channel_settings(self.session, self.branch_id, thread.channel_id)
+        if not cfg.sending_enabled:
+            return None  # connector sending paused (soft-block) — queue keeps building
         if row.source == "followup" and cfg.is_quiet_hour():
             return None  # follow-ups hold at night; live replies still go out (S1)
         if row.source != "manager" and await self._cap_reached(now, cfg, thread.channel_id):

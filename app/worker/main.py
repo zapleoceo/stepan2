@@ -44,7 +44,13 @@ _INGEST_JITTER_S = settings().ingest_jitter_s
 
 
 async def ingest_active_channels(ctx: dict[str, Any]) -> int:
-    """Pull new inbound for every active channel of every active branch. Returns rows stored.
+    """Dispatcher: fan out one ingest job per branch so a slow poll on one branch never
+    stalls the others (see _fan_out_per_branch)."""
+    return await _fan_out_per_branch(ctx, "ingest_branch")
+
+
+async def ingest_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Pull new inbound for every active channel of ONE branch. Returns rows stored.
 
     Each channel ingests in its OWN transaction: a slow poll that overruns the cron can
     overlap the next run, and two runs racing past the dedup check would hit the
@@ -53,14 +59,10 @@ async def ingest_active_channels(ctx: dict[str, Any]) -> int:
     concurrent insert harmless."""
     await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
     async with session_scope() as session:
-        work = [
-            (branch.id, channel.id)
-            for branch in await wiring.active_branches(session)
-            for channel in await wiring.active_channels(session, branch.id)
-        ]
+        channels = await wiring.active_channels(session, branch_id)
     stored = 0
-    for branch_id, channel_id in work:
-        stored += await _ingest_channel(branch_id, channel_id)
+    for channel in channels:
+        stored += await _ingest_channel(branch_id, channel.id)
     return stored
 
 
@@ -151,8 +153,42 @@ async def _platform_agent_on(session: AsyncSession) -> bool:
     return (row[0] or "true").strip().lower() in ("true", "1", "yes") if row else True
 
 
+async def _fan_out_per_branch(
+    ctx: dict[str, Any], job_name: str, *, gate_platform: bool = False,
+) -> int:
+    """Dispatch one arq job per active branch, so branches run CONCURRENTLY (bounded by
+    worker_max_jobs) and INDEPENDENTLY — a slow or failing branch holds a single job slot
+    and times out on its own without delaying or aborting the tick for other branches. This
+    generalises the reply_pending→generate_one_reply fan-out to every cron task.
+
+    The `{job_name}:{branch_id}` job id dedups: a branch whose previous job is still running
+    when the next tick fires does not stack a second job (same idempotency trick as the
+    reply:{thread_id} id). gate_platform short-circuits the whole fan-out when the kill switch
+    is OFF, so an operator flipping it mid-incident stops new work immediately."""
+    async with session_scope() as session:
+        if gate_platform and not await _platform_agent_on(session):
+            logger.info("platform agent OFF — skip %s for all branches", job_name)
+            return 0
+        branches = await wiring.active_branches(session)
+    redis = ctx["redis"]
+    enqueued = 0
+    for branch in branches:
+        assert branch.id is not None
+        job = await redis.enqueue_job(job_name, branch.id, _job_id=f"{job_name}:{branch.id}")
+        if job is not None:  # None → this branch's job is already in flight; skip
+            enqueued += 1
+    return enqueued
+
+
 async def reply_pending(ctx: dict[str, Any]) -> int:
-    """DISPATCHER: enqueue one generate_one_reply job per awaiting thread. Returns enqueued.
+    """Top dispatcher: fan out one reply_pending_branch job per branch (branch-independent),
+    gated by the platform kill switch."""
+    return await _fan_out_per_branch(ctx, "reply_pending_branch", gate_platform=True)
+
+
+async def reply_pending_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Per-branch dispatcher: enqueue one generate_one_reply job per awaiting thread of THIS
+    branch. Returns enqueued.
 
     Does NO broker work itself — it just finds threads (lead spoke last, bot-owned, no pending
     reply) and hands each to its own ARQ job. Deduped by _job_id=reply:{thread_id}, so a thread
@@ -162,32 +198,25 @@ async def reply_pending(ctx: dict[str, Any]) -> int:
 
     Quiet hours do NOT apply here — they throttle proactive follow-ups, never a reply to
     something the lead already said. A lead who writes at 3am still gets answered."""
-    enqueued = 0
     redis = ctx["redis"]
     cap = settings().reply_dispatch_cap
-    async with session_scope() as session:
-        if not await _platform_agent_on(session):
-            logger.info("platform agent OFF — skip reply_pending for all branches")
-            return 0
-        branches = await wiring.active_branches(session)
-    for branch in branches:
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                cfg = await get_settings(session, branch.id)
-                if not cfg.agent_enabled:
-                    logger.info("branch %s: agent disabled — skip reply_pending", branch.id)
-                    continue
-                thread_ids = await wiring.threads_awaiting_reply(session, branch.id, limit=cap)
-        except Exception:
-            logger.exception("reply_pending: branch=%s dispatch failed, skipping", branch.id)
-            continue
-        for thread_id in thread_ids:
-            job = await redis.enqueue_job(
-                "generate_one_reply", branch.id, thread_id,
-                _job_id=f"reply:{thread_id}")  # None → a job for this thread is already in flight
-            if job is not None:
-                enqueued += 1
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            if not cfg.agent_enabled:
+                logger.info("branch %s: agent disabled — skip reply_pending", branch_id)
+                return 0
+            thread_ids = await wiring.threads_awaiting_reply(session, branch_id, limit=cap)
+    except Exception:
+        logger.exception("reply_pending: branch=%s dispatch failed, skipping", branch_id)
+        return 0
+    enqueued = 0
+    for thread_id in thread_ids:
+        job = await redis.enqueue_job(
+            "generate_one_reply", branch_id, thread_id,
+            _job_id=f"reply:{thread_id}")  # None → a job for this thread is already in flight
+        if job is not None:
+            enqueued += 1
     return enqueued
 
 
@@ -251,31 +280,30 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
     due-thread loop shared one open transaction that only committed at the very end, so a
     timeout kill silently discarded every follow-up already generated earlier in that same
     cycle — broker calls could log ok=True and still never reach the outbox (2026-07-07)."""
+    return await _fan_out_per_branch(ctx, "schedule_followups_branch", gate_platform=True)
+
+
+async def schedule_followups_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's follow-up harvest. followup_enabled and the schedule are per-connector
+    now (resolved inside FollowupService.due_threads), so the branch-level enabled check is
+    gone — a branch runs if ANY of its channels wants follow-ups."""
     queued = 0
     llm = BrokerLLM()
-    async with session_scope() as session:
-        if not await _platform_agent_on(session):
-            return 0
-        branches = await wiring.active_branches(session)
-    for branch in branches:
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                branch_cfg = await get_settings(session, branch.id)
-                if not branch_cfg.followup_enabled:
-                    continue
-                kb = await effective_kb_branch(session, branch.id)
-                knowledge = KnowledgeService(session, kb, llm)
-                svc = FollowupService(session, branch.id, llm, knowledge, branch_cfg,
-                                      notifier=_build_notifier(branch_cfg))
-                due = await svc.due_threads(datetime.now(UTC).replace(tzinfo=None))
-        except Exception:
-            logger.exception(
-                "schedule_followups: branch=%s bookkeeping failed, skipping", branch.id)
-            continue
-        for thread_id, product_slug, sent_so_far in due:
-            if await _queue_one_followup(branch.id, thread_id, product_slug, sent_so_far, llm):
-                queued += 1  # timers are armed by OutboxSender after bot sends
+    try:
+        async with session_scope() as session:
+            branch_cfg = await get_settings(session, branch_id)
+            kb = await effective_kb_branch(session, branch_id)
+            knowledge = KnowledgeService(session, kb, llm)
+            svc = FollowupService(session, branch_id, llm, knowledge, branch_cfg,
+                                  notifier=_build_notifier(branch_cfg))
+            due = await svc.due_threads(datetime.now(UTC).replace(tzinfo=None))
+    except Exception:
+        logger.exception(
+            "schedule_followups: branch=%s bookkeeping failed, skipping", branch_id)
+        return 0
+    for thread_id, product_slug, sent_so_far in due:
+        if await _queue_one_followup(branch_id, thread_id, product_slug, sent_so_far, llm):
+            queued += 1  # timers are armed by OutboxSender after bot sends
     return queued
 
 
@@ -304,29 +332,26 @@ async def send_outbox(ctx: dict[str, Any]) -> int:
 
     Per-thread transaction: an already-delivered IG send is committed before the next
     thread runs, so a later failure can never roll back a 'sent' row into a re-send."""
+    # The emergency kill-switch must stop the ACTUAL IG writes, not just generation — gate the
+    # fan-out so an operator flipping it OFF mid-incident stops draining the outbox everywhere.
+    return await _fan_out_per_branch(ctx, "send_outbox_branch", gate_platform=True)
+
+
+async def send_outbox_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Drain pending outbox lines for ONE branch, each thread in its own transaction so an
+    already-delivered send is committed before the next runs (a later failure can't roll a
+    'sent' row back into a re-send). sending_enabled is per-connector, but is read here as a
+    branch cap first — the per-thread OutboxSender re-resolves it per channel."""
     attempted = 0
     async with session_scope() as session:
-        if not await _platform_agent_on(session):
-            # The emergency kill-switch must stop the ACTUAL IG writes, not just generation —
-            # otherwise an operator flipping it OFF mid-incident still drains the whole outbox
-            # to Instagram. Mirrors process_deletions (the other real-IG-write task).
-            logger.info("platform agent OFF — skip send_outbox for all branches")
-            return 0
-        branches = await wiring.active_branches(session)
-    for branch in branches:
-        assert branch.id is not None
-        async with session_scope() as session:
-            cfg = await get_settings(session, branch.id)
-            if not cfg.sending_enabled:  # queue keeps accumulating, nothing goes out
-                continue
-            channels = {c.id: c for c in await wiring.active_channels(session, branch.id)}
-            thread_ids = await wiring.threads_with_pending_outbox(session, branch.id)
-        for thread_id in thread_ids:
-            try:
-                async with session_scope() as session:
-                    attempted += await _send_thread(session, branch.id, thread_id, channels)
-            except Exception:
-                logger.exception("send failed branch=%d thread=%d", branch.id, thread_id)
+        channels = {c.id: c for c in await wiring.active_channels(session, branch_id)}
+        thread_ids = await wiring.threads_with_pending_outbox(session, branch_id)
+    for thread_id in thread_ids:
+        try:
+            async with session_scope() as session:
+                attempted += await _send_thread(session, branch_id, thread_id, channels)
+        except Exception:
+            logger.exception("send failed branch=%d thread=%d", branch_id, thread_id)
     return attempted
 
 
@@ -388,46 +413,47 @@ async def process_deletions(ctx: dict[str, Any]) -> int:
     nested loop shared one transaction across all branches doing 40-90s IG revokes each — a
     kill mid-loop (job-timeout) rolled back every already-committed local deletion and
     re-revoked on retry. The thread cap is now a per-TICK budget, not per-channel."""
+    # Real IG writes → gate the fan-out on the kill switch (mirrors send_outbox).
+    return await _fan_out_per_branch(ctx, "process_deletions_branch", gate_platform=True)
+
+
+async def process_deletions_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Carry out requested IG unsends for ONE branch: revoke in IG first, delete locally on
+    success. Each thread runs in its OWN transaction; the thread cap is now a PER-BRANCH
+    per-tick budget (was shared across all branches, which coupled them — a busy branch could
+    starve another's unsends)."""
     from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
-    async with session_scope() as session:
-        if not await _platform_agent_on(session):
-            return 0
-        branches = await wiring.active_branches(session)
     done = 0
-    budget = _DELETION_THREAD_CAP  # threads unsent per tick, across ALL branches/channels
-    for branch in branches:
+    budget = _DELETION_THREAD_CAP  # threads unsent per tick for THIS branch
+    try:
+        async with session_scope() as session:
+            work: list[tuple[Channel, str]] = []
+            for channel in await wiring.active_channels(session, branch_id):
+                if len(work) >= budget:
+                    break  # only `budget` threads act this tick — don't scan/resolve more
+                # cap the discovery scan and stop resolving once we have enough threads;
+                # a large unsent backlog used to scan every row + do an N+1 by_id per thread
+                # just to act on a handful (the rest drain over the next ticks).
+                pending = await DeletionService(session, branch_id).pending(
+                    channel.id, limit=budget * 4)
+                seen: dict[int, str] = {}
+                for msg in pending:
+                    if len(seen) >= budget:
+                        break
+                    if msg.thread_id not in seen:
+                        thread = await ThreadRepo(session, branch_id).by_id(msg.thread_id)
+                        if thread is not None:
+                            seen[msg.thread_id] = thread.external_thread_id
+                for ext in dict.fromkeys(seen.values()):
+                    work.append((channel, ext))
+    except Exception:
+        logger.exception("process_deletions: branch=%s bookkeeping failed", branch_id)
+        return 0
+    for channel, ext_thread in work:
         if budget <= 0:
             break
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                work: list[tuple[Channel, str]] = []
-                for channel in await wiring.active_channels(session, branch.id):
-                    if len(work) >= budget:
-                        break  # only `budget` threads act this tick — don't scan/resolve more
-                    # cap the discovery scan and stop resolving once we have enough threads;
-                    # a large unsent backlog used to scan every row + do an N+1 by_id per thread
-                    # just to act on a handful (the rest drain over the next ticks).
-                    pending = await DeletionService(session, branch.id).pending(
-                        channel.id, limit=budget * 4)
-                    seen: dict[int, str] = {}
-                    for msg in pending:
-                        if len(seen) >= budget:
-                            break
-                        if msg.thread_id not in seen:
-                            thread = await ThreadRepo(session, branch.id).by_id(msg.thread_id)
-                            if thread is not None:
-                                seen[msg.thread_id] = thread.external_thread_id
-                    for ext in dict.fromkeys(seen.values()):
-                        work.append((channel, ext))
-        except Exception:
-            logger.exception("process_deletions: branch=%s bookkeeping failed", branch.id)
-            continue
-        for channel, ext_thread in work:
-            if budget <= 0:
-                break
-            done += await _process_one_deletion(branch.id, channel, ext_thread)
-            budget -= 1
+        done += await _process_one_deletion(branch_id, channel, ext_thread)
+        budget -= 1
     return done
 
 
@@ -454,26 +480,27 @@ async def sync_crm(ctx: dict[str, Any]) -> int:
 
     Each branch runs in its OWN transaction so one branch's DB error can't roll back
     another branch's already-flushed CRM push rows."""
+    return await _fan_out_per_branch(ctx, "sync_crm_branch")
+
+
+async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's CRM sync, both directions: push unsynced manager alerts out (crm_enabled),
+    and pull lead state in to stand down leads a manager already owns (crm_read_enabled). Push
+    and pull are separately try-wrapped so one direction's error can't lose the other."""
     from app.adapters.crm import CrmReader, CrmWebhook  # noqa: PLC0415
     from app.modules.crm import CrmSyncService  # noqa: PLC0415
     from app.modules.crm.pull import CrmPullService  # noqa: PLC0415
     synced = 0
-    transport = CrmWebhook()
-    reader = CrmReader()
-    async with session_scope() as session:
-        branches = await wiring.active_branches(session)
-    for branch in branches:
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                synced += await CrmSyncService(session, branch.id, transport).sync_pending()
-        except Exception:
-            logger.exception("crm push failed branch=%d", branch.id)
-        try:
-            async with session_scope() as session:
-                await CrmPullService(session, branch.id, reader).sync_active()
-        except Exception:
-            logger.exception("crm pull failed branch=%d", branch.id)
+    try:
+        async with session_scope() as session:
+            synced += await CrmSyncService(session, branch_id, CrmWebhook()).sync_pending()
+    except Exception:
+        logger.exception("crm push failed branch=%d", branch_id)
+    try:
+        async with session_scope() as session:
+            await CrmPullService(session, branch_id, CrmReader()).sync_active()
+    except Exception:
+        logger.exception("crm pull failed branch=%d", branch_id)
     return synced
 
 
@@ -483,24 +510,24 @@ async def refresh_profiles(ctx: dict[str, Any]) -> int:
     Heavy private-API call (ban surface) — gated by the platform kill-switch, capped per
     branch, and each branch runs in its OWN transaction so one branch's failure can't roll
     back another's refreshed profiles. Runs every 30 minutes."""
+    return await _fan_out_per_branch(ctx, "refresh_profiles_branch", gate_platform=True)
+
+
+async def refresh_profiles_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's IG follower/following refresh for stale active-funnel leads (TTL ~6h).
+    Heavy private-API call (ban surface); capped per branch, its own transaction."""
     from app.modules.leads.profiles import ProfileService  # noqa: PLC0415
-    async with session_scope() as session:
-        if not await _platform_agent_on(session):
-            return 0
-        branches = await wiring.active_branches(session)
     refreshed = 0
-    for branch in branches:
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                svc = ProfileService(session, branch.id)
-                for channel in await wiring.active_channels(session, branch.id):
-                    port = await _try_build_port(session, channel, "fetch_profile")
-                    if port is None:
-                        continue  # can't build / channel kind has no profile stats
-                    refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
-        except Exception:
-            logger.exception("refresh_profiles: branch=%s failed", branch.id)
+    try:
+        async with session_scope() as session:
+            svc = ProfileService(session, branch_id)
+            for channel in await wiring.active_channels(session, branch_id):
+                port = await _try_build_port(session, channel, "fetch_profile")
+                if port is None:
+                    continue  # can't build / channel kind has no profile stats
+                refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
+    except Exception:
+        logger.exception("refresh_profiles: branch=%s failed", branch_id)
     return refreshed
 
 
@@ -510,28 +537,29 @@ async def backfill_media(ctx: dict[str, Any]) -> int:
     Gated by the platform kill-switch (hits the IG private API). Each branch runs in its
     OWN transaction so one branch's failure can't roll back another's downloads. Runs every
     few minutes; a download failure keeps the flag set so the next tick retries."""
+    return await _fan_out_per_branch(ctx, "backfill_media_branch", gate_platform=True)
+
+
+async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's media backfill: download items flagged pending at ingest and attach a
+    MediaAsset (capped batch). Hits the IG private API; a download failure keeps the flag set
+    so the next tick retries."""
     from app.modules.media.service import MediaService  # noqa: PLC0415
-    async with session_scope() as session:
-        if not await _platform_agent_on(session):
-            return 0
-        branches = await wiring.active_branches(session)
     done = 0
-    for branch in branches:
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                svc = MediaService(session, branch.id)
-                for channel in await wiring.active_channels(session, branch.id):
-                    assert channel.id is not None
-                    if not await svc.pending(channel.id, limit=1):
-                        continue  # nothing flagged — skip building the port
-                    port = await _try_build_port(session, channel, "download_media")
-                    if port is None:
-                        continue  # can't build / channel kind can't download media
-                    done += await svc.backfill(
-                        channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
-        except Exception:
-            logger.exception("backfill_media: branch=%s failed", branch.id)
+    try:
+        async with session_scope() as session:
+            svc = MediaService(session, branch_id)
+            for channel in await wiring.active_channels(session, branch_id):
+                assert channel.id is not None
+                if not await svc.pending(channel.id, limit=1):
+                    continue  # nothing flagged — skip building the port
+                port = await _try_build_port(session, channel, "download_media")
+                if port is None:
+                    continue  # can't build / channel kind can't download media
+                done += await svc.backfill(
+                    channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
+    except Exception:
+        logger.exception("backfill_media: branch=%s failed", branch_id)
     return done
 
 
@@ -556,22 +584,23 @@ async def reindex_knowledge(ctx: dict[str, Any]) -> int:
 
     Each branch reindexes in its own transaction so one embedding failure doesn't drop the
     others. Returns the number of branches reindexed this tick."""
-    from app.modules.knowledge.reindex import branch_needs_reindex, reindex_branch  # noqa: PLC0415
+    return await _fan_out_per_branch(ctx, "reindex_knowledge_branch")
 
+
+async def reindex_knowledge_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Reindex ONE branch's RAG store if its KB changed since the last index — its own
+    transaction so a slow embedding run on one branch never blocks another's."""
+    from app.modules.knowledge.reindex import branch_needs_reindex, reindex_branch  # noqa: PLC0415
     llm = BrokerLLM()
-    async with session_scope() as session:
-        branch_ids = [b.id for b in await wiring.active_branches(session)]
-    done = 0
-    for branch_id in branch_ids:
-        try:
-            async with session_scope() as session:
-                if not await branch_needs_reindex(session, branch_id):
-                    continue
-                await reindex_branch(session, branch_id, llm)
-                done += 1
-        except Exception:
-            logger.exception("reindex failed branch=%d", branch_id)
-    return done
+    try:
+        async with session_scope() as session:
+            if not await branch_needs_reindex(session, branch_id):
+                return 0
+            await reindex_branch(session, branch_id, llm)
+            return 1
+    except Exception:
+        logger.exception("reindex failed branch=%d", branch_id)
+        return 0
 
 
 async def aggregate_needs(ctx: dict[str, Any]) -> int:
@@ -579,25 +608,28 @@ async def aggregate_needs(ctx: dict[str, Any]) -> int:
     leads whose needs changed onto the branch's stable taxonomy, then snapshot the day's
     aggregates for history. Analytics only (no IG writes) → not kill-switch gated; each branch
     in its own transaction so one branch's LLM/broker hiccup can't roll back another's."""
+    return await _fan_out_per_branch(ctx, "aggregate_needs_branch")
+
+
+async def aggregate_needs_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's nightly needs-cloud pass: incrementally classify leads whose needs changed
+    onto the branch's stable taxonomy, cache label translations, then snapshot the day's
+    aggregates. Analytics only; its own transaction so one branch's broker hiccup is isolated."""
     from app.modules.needs_cloud import (  # noqa: PLC0415
         classify_branch,
         translate_labels,
         write_snapshot,
     )
     llm = BrokerLLM()
-    async with session_scope() as session:
-        branches = await wiring.active_branches(session)
-    processed = 0
-    for branch in branches:
-        assert branch.id is not None
-        try:
-            async with session_scope() as session:
-                processed += await classify_branch(session, branch.id, llm)
-                await translate_labels(session, branch.id, llm)  # cache en/id label translations
-                await write_snapshot(session, branch.id)
-        except Exception:
-            logger.exception("aggregate_needs failed branch=%d", branch.id)
-    return processed
+    try:
+        async with session_scope() as session:
+            processed = await classify_branch(session, branch_id, llm)
+            await translate_labels(session, branch_id, llm)  # cache en/id label translations
+            await write_snapshot(session, branch_id)
+            return processed
+    except Exception:
+        logger.exception("aggregate_needs failed branch=%d", branch_id)
+        return 0
 
 
 def _redis_settings() -> RedisSettings:
@@ -615,9 +647,15 @@ class WorkerSettings:
     they are staggered so each minute ingests, then replies, then sends in order."""
 
     functions = [
+        # Cron dispatchers: each fans out one per-branch job so branches run concurrently and
+        # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         reindex_knowledge, aggregate_needs,
+        # Per-branch jobs the dispatchers enqueue — the actual work, one branch each.
+        ingest_branch, reply_pending_branch, send_outbox_branch, schedule_followups_branch,
+        process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
+        backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no result kept so the
         # reply:{thread_id} dedup frees the instant it finishes → the thread can be re-dispatched
         # for its NEXT message; no ARQ retry (a broker timeout re-dispatches next tick instead of
