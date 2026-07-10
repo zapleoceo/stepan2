@@ -72,11 +72,22 @@ async def test_og_image_none_when_no_meta(monkeypatch) -> None:
 
 async def test_fetch_creative_bytes_returns_image(monkeypatch) -> None:
     igp._CACHE.clear()
-    html = '<meta property="og:image" content="https://cdn.example/y.jpg">'
+    html = '<meta property="og:image" content="https://scontent.cdninstagram.com/y.jpg">'
     seq = [_FakeResp(200, text=html), _FakeResp(200, content=b"JPGDATA", ctype="image/png")]
     _patch_client(monkeypatch, lambda url: seq.pop(0))
     got = await igp.fetch_creative_bytes(_MID)
     assert got == (b"JPGDATA", "image/png")
+
+
+async def test_fetch_creative_bytes_rejects_non_cdn_host(monkeypatch) -> None:
+    # SSRF guard: an og:image that doesn't resolve to an Instagram/Facebook CDN is never
+    # fetched (a doctored post can't turn this same-origin proxy into an internal probe).
+    igp._CACHE.clear()
+    html = '<meta property="og:image" content="http://169.254.169.254/latest/meta-data/">'
+    calls = _patch_client(monkeypatch, lambda url: _FakeResp(200, text=html))
+    got = await igp.fetch_creative_bytes(_MID)
+    assert got is None
+    assert len(calls) == 1  # only the permalink scrape; the image fetch was NOT attempted
 
 
 def test_ig_preview_route_rejects_non_numeric() -> None:

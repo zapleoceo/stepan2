@@ -406,14 +406,15 @@ class ReplyService:
                 logger.warning(
                     "%s: branch=%d thread=%d near-duplicate reply (ratio=%.2f) → regen",
                     workflow, self.branch_id, thread_id, ratio)
-                raw, meta = await engine.complete(
+                raw, regen_meta = await engine.complete(
                     ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
                     extra_user_msg=_REPEAT_CORRECTION.format(
                         prior=prior, last_in=last_in.text if last_in is not None else ""))
                 try:
                     decision = parse_decision(raw)
+                    meta = regen_meta  # adopt the regen's broker line only when its reply is used
                 except ValueError:
-                    pass  # keep the original draft — a duplicate is better than dropping it here
+                    pass  # keep the original draft AND its meta — the regen is discarded
         decision, meta = await guard_decision(
             self.session, self.branch_id, self.settings, self.llm,
             engine, ctx, thread_id, lang, workflow, bill, decision, meta)
