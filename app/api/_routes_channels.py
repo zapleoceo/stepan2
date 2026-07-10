@@ -24,6 +24,7 @@ from app.config import settings
 from app.domain.enums import ChannelKind
 from app.modules.channels.service import ChannelService
 from app.modules.meta.tokens import page_access_token
+from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import get_settings
 
 from ._i18n import apply_lang
@@ -37,6 +38,7 @@ from ._ui_panels import (
     channel_list_partial_html,
     channel_new_form_html,
 )
+from ._ui_settings import channel_settings_html
 
 router = APIRouter()
 
@@ -128,20 +130,46 @@ async def channel_create(
 
 @router.get("/channels/{ch_id}/edit", response_class=HTMLResponse)
 async def channel_edit(ch_id: int, request: Request) -> HTMLResponse:
-    apply_lang(request)
+    lang = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, allowed) is None:
+        branch_id = await _channel_branch(session, ch_id, allowed)
+        if branch_id is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         row = (await session.execute(
             text("SELECT id, kind, handle, account_id, is_active FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
-    if not row:
-        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-    return HTMLResponse(
-        channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
-    )
+        if not row:
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        values = await SettingRepo(session).load_all(branch_id, ch_id)
+        cap_usage = await _channel_cap_usage(session, branch_id, ch_id)
+    body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
+    return HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id, cap_usage))
+
+
+async def _channel_cap_usage(
+    session: Any, branch_id: int, channel_id: int,
+) -> dict[str, tuple[int, int]]:
+    """Live per-connector anti-ban usage (sent this hour/day vs the channel's cap), computed
+    fresh from real sent counts — the badge shown under hourly_cap/daily_cap in the editor."""
+    from datetime import timedelta  # noqa: PLC0415
+
+    from app.domain.clock import branch_day_start_utc, utc_now  # noqa: PLC0415
+    from app.modules.conversation.repository import OutboxRepo  # noqa: PLC0415
+    from app.modules.settings.service import get_channel_settings  # noqa: PLC0415
+    cfg = await get_channel_settings(session, branch_id, channel_id)
+    repo = OutboxRepo(session, branch_id)
+    now = utc_now()
+    usage: dict[str, tuple[int, int]] = {}
+    if cfg.hourly_cap > 0:
+        usage["hourly_cap"] = (
+            await repo.count_sent_since(now - timedelta(hours=1), channel_id), cfg.hourly_cap)
+    if cfg.daily_cap > 0:
+        day_start = branch_day_start_utc(now, cfg.tz_offset_h)
+        usage["daily_cap"] = (
+            await repo.count_sent_since(day_start, channel_id), cfg.daily_cap)
+    return usage
 
 
 @router.post("/channels/{ch_id}/save", response_class=HTMLResponse)
@@ -152,10 +180,11 @@ async def channel_save(
     account_id: str = Form(default=""),
     is_active: str = Form(default=""),
 ) -> HTMLResponse:
-    apply_lang(request)
+    lang = apply_lang(request)
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
-        if await _channel_branch(session, ch_id, allowed) is None:
+        branch_id = await _channel_branch(session, ch_id, allowed)
+        if branch_id is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         await session.execute(
             text(
@@ -172,11 +201,11 @@ async def channel_save(
             text("SELECT id, kind, handle, account_id, is_active FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
-    if not row:
-        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-    return HTMLResponse(
-        channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
-    )
+        if not row:
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        values = await SettingRepo(session).load_all(branch_id, ch_id)
+    body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
+    return HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id))
 
 
 # ─── delete ───────────────────────────────────────────────────────────────────
