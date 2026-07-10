@@ -17,7 +17,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Lead, Message, Outbox, StageEvent
 from app.config import settings
 from app.domain.clock import branch_day_start_utc
-from app.domain.enums import Stage
+from app.domain.enums import ChannelKind, Stage
 from app.modules.settings.service import get_channel_settings
 from app.ports.channel import ChannelPort
 
@@ -86,6 +86,23 @@ class OutboxSender:
                 "outbox hold branch=%d thread=%d: send cap reached", self.branch_id, thread_id
             )
             return None  # hourly/daily send cap hit — leave queued for a later tick
+
+        # Meta closes the standard messaging window ~24h after the lead's last message; an
+        # AUTOMATED send into a closed window is rejected by Graph, so skip the doomed API call
+        # and mark it skipped (not failed — it's expected, not a manager-facing error; the
+        # follow-up cycle resumes when the lead writes again and ingest re-opens the window).
+        # A MANAGER send still attempts: a human agent may deliver via the 7-day human_agent tag,
+        # and the real result surfaces to them (see the failed-send bubble).
+        if (getattr(self.channel, "kind", None) == ChannelKind.META_BUSINESS
+                and row.source != "manager"
+                and thread.window_until is not None and thread.window_until < now):
+            row.status = "skipped"
+            row.error = "meta_window_closed"
+            self.session.add(row)
+            await self.session.flush()
+            logger.info("outbox skip branch=%d thread=%d: Meta 24h window closed",
+                        self.branch_id, thread_id)
+            return row
 
         if cfg.crm_read_enabled and row.source != "manager":
             skipped = await self._crm_gate(thread, row)
