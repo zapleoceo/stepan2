@@ -45,7 +45,7 @@ def test_operational_knobs_are_present_with_sane_defaults() -> None:
     assert s.bubble_gap_s == 6 and s.max_bubbles == 3
     assert s.seen_delay_min_s < s.seen_delay_max_s
     # llm cost knobs
-    assert s.max_context_msgs == 40 and s.rag_top_k == 12 and s.translate_max_tokens == 1500
+    assert s.max_context_msgs == 30 and s.rag_top_k == 8 and s.translate_max_tokens == 1500
     # slow LLM timeout must stay under the worker job timeout or a chat call gets killed
     assert s.llm_read_timeout_slow_s < s.worker_job_timeout_s
 

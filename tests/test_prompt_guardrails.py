@@ -116,3 +116,31 @@ def test_undecipherable_slang_is_non_target_not_needs_manager() -> None:
 
 def test_stage_reason_required_not_optional() -> None:
     assert "REQUIRED (not optional)" in _DECISION_CONTRACT
+
+
+def test_followup_contract_is_lighter_but_keeps_the_same_json_schema() -> None:
+    """A follow-up nudge doesn't need the full sales-methodology teaching — only the
+    JSON schema (so parse_decision/_apply_decision behave identically) and the
+    anti-fabrication/escalation guardrails that still apply regardless of workflow."""
+    from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT, _JSON_SCHEMA_BLOCK
+
+    assert len(_FOLLOWUP_CONTRACT) < len(_DECISION_CONTRACT) / 2
+    assert _JSON_SCHEMA_BLOCK in _FOLLOWUP_CONTRACT
+    assert _JSON_SCHEMA_BLOCK in _DECISION_CONTRACT
+    # the essential guardrails still carry over
+    assert "NEVER FABRICATE" in _FOLLOWUP_CONTRACT
+    assert "ANY POSITIVE, AGREEING OR READY SIGNAL" in _FOLLOWUP_CONTRACT
+    assert "PHONE BEFORE HAND-OFF" in _FOLLOWUP_CONTRACT
+    assert '"stage_reason"' in _FOLLOWUP_CONTRACT
+
+
+def test_build_messages_uses_the_light_contract_for_followup_workflow() -> None:
+    from app.modules.conversation.prompt import (
+        _FOLLOWUP_CONTRACT,
+        build_messages,
+    )
+
+    live = build_messages("kb", [], "id", workflow="reply")
+    nudge = build_messages("kb", [], "id", workflow="followup")
+    assert _FOLLOWUP_CONTRACT.format(lang="id") in nudge[0]["content"]
+    assert _FOLLOWUP_CONTRACT.format(lang="id") not in live[0]["content"]

@@ -123,6 +123,22 @@ async def test_incomplete_reindex_keeps_watermark_for_retry(db_session) -> None:
     assert await branch_needs_reindex(db_session, bid) is True  # not marked done → retries
 
 
+async def test_retrieve_excludes_the_focused_products_own_chunks(db_session) -> None:
+    """The focused product's card already goes out in full via the `[focus product=...]`
+    block — its own chunks ranking again in the RAG results is pure duplicate content on
+    every turn about the product actually in play. exclude_slug drops them so the k slots
+    go to genuinely OTHER material instead."""
+    bid = await _seed(db_session)
+    await RagService(db_session, bid, _BagLLM()).reindex()
+    hits_unfiltered = await RagService(db_session, bid, _BagLLM()).retrieve(
+        "python career", k=5)
+    assert any("py" in title.lower() or "python" in text.lower()
+               for title, text in hits_unfiltered)  # the product's own chunk ranks in
+    hits_filtered = await RagService(db_session, bid, _BagLLM()).retrieve(
+        "python career", k=5, exclude_slug="py")
+    assert all("python" not in text.lower() for _title, text in hits_filtered)
+
+
 async def test_retrieve_empty_when_no_index(db_session) -> None:
     bid = await _seed(db_session)
     assert await RagService(db_session, bid, _BagLLM()).retrieve("price") == []

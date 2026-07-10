@@ -78,7 +78,7 @@ class KnowledgeService:
         if self.llm is not None and query:
             try:
                 chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
-                    query, thread_id=thread_id)
+                    query, thread_id=thread_id, exclude_slug=product_slug if focused else None)
             except Exception:
                 # A transient broker embed failure must degrade to persona+catalog, NOT abort
                 # the whole reply — otherwise one dead embed endpoint knocks out every thread's
