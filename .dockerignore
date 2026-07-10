@@ -1,0 +1,27 @@
+# Keep the build context (and the resulting image) lean — none of this belongs in prod.
+.git
+.github
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+tests
+db_dumps
+*.dump
+*.7z
+*.db
+*.sqlite
+*.session
+session.json
+.env
+infra/.env
+*.log
+scratch_persona.*
+node_modules
+.DS_Store
