@@ -179,3 +179,28 @@ async def test_hard_error_marks_failed(db_session) -> None:
     channel = FakeChannel(ok=False, error="recipient not found")
     row = await OutboxSender(db_session, bid, channel).send_next(tid)
     assert row is not None and row.status == "failed"
+
+
+async def test_permanently_failed_followup_rearms_next_followup_at(db_session) -> None:
+    """A follow-up nudge whose send fails permanently must re-arm next_followup_at, or the
+    thread falls out of the follow-up query forever (deadlock). followups_sent isn't bumped
+    (the step wasn't consumed), so the SAME step is retried later."""
+    from sqlalchemy import text as _text
+    bid, tid = await _setup(
+        db_session, hourly_cap=999, daily_cap=999, sent_now=0, pending_source="followup")
+    db_session.add(AppSetting(branch_id=bid, key="followup_enabled", value="true"))
+    db_session.add(AppSetting(branch_id=bid, key="followup_schedule_h", value="1,4,24"))
+    await db_session.execute(
+        _text("UPDATE channel_thread SET next_followup_at=NULL, followups_sent=0"
+              " WHERE id=:t"), {"t": tid})
+    await db_session.flush()
+    invalidate(bid)
+
+    ch = FakeChannel(ok=False, error="permanent failure")
+    row = await OutboxSender(db_session, bid, ch).send_next(tid)
+    assert row is not None and row.status == "failed"
+    rearmed = (await db_session.execute(
+        _text("SELECT next_followup_at, followups_sent FROM channel_thread WHERE id=:t"),
+        {"t": tid})).first()
+    assert rearmed[0] is not None   # re-armed → not deadlocked
+    assert rearmed[1] == 0          # step NOT consumed by the failed send

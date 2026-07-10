@@ -120,6 +120,13 @@ class OutboxSender:
             logger.warning(
                 "send failed branch=%d thread=%d: %s", self.branch_id, thread_id, result.error
             )
+            # A follow-up nudge cleared next_followup_at at queue time and only bumps the
+            # step on a SUCCESSFUL send — so a permanently-failed nudge would leave the
+            # thread with next_followup_at=NULL forever, dropping it out of the follow-up
+            # query (deadlock). Re-arm the SAME (unconsumed) step so the cycle resumes.
+            if row.source == "followup":
+                self._rearm_followup_after_failure(thread, cfg, now)
+                self.session.add(thread)
         self.session.add(row)
         await self.session.flush()
         return row
@@ -156,6 +163,17 @@ class OutboxSender:
             return
         await seen(external_thread_id)
         await asyncio.sleep(random.uniform(*_SEEN_DELAY_S))  # noqa: S311 — timing, not crypto
+
+    def _rearm_followup_after_failure(self, thread, cfg, now: datetime) -> None:
+        """A follow-up whose send failed permanently: re-arm next_followup_at for the SAME
+        step (followups_sent was never bumped) so the thread doesn't fall out of the
+        follow-up cycle forever. A safe upper bound (max schedule hour, or 24h) keeps it
+        from retrying too fast."""
+        schedule = cfg.followup_schedule_h
+        if not (cfg.followup_enabled and schedule and thread.followups_sent < len(schedule)):
+            return
+        retry_h = schedule[thread.followups_sent] or 24
+        thread.next_followup_at = now + timedelta(hours=max(1, retry_h))
 
     async def _plan_followup(self, thread, row: Outbox, cfg, now: datetime) -> None:
         """After a bot send: arm the next follow-up step, or close the cycle.

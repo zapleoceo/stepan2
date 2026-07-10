@@ -377,9 +377,22 @@ class ReplyService:
                     workflow, self.branch_id, thread_id)
                 raw, meta = await engine.complete(
                     ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill)
-                decision = parse_decision(raw)
+                try:
+                    decision = parse_decision(raw)
+                except ValueError:
+                    # Both the fast AND the smart decision were unparseable — degrade the
+                    # whole tick to None (the caller skips this thread and retries next tick)
+                    # instead of letting the ValueError abort the reply job (asymmetric with
+                    # followup.py, which already swallows this).
+                    logger.warning(
+                        "%s: unparseable smart decision too branch=%d thread=%d — skip",
+                        workflow, self.branch_id, thread_id)
+                    return None
             else:
-                raise
+                logger.warning(
+                    "%s: unparseable smart decision branch=%d thread=%d — skip",
+                    workflow, self.branch_id, thread_id)
+                return None
         if decision.reply:
             prior, ratio = _most_similar_prior(decision.reply, ctx.dialog)
             if ratio >= _DUPLICATE_RATIO:
@@ -685,8 +698,17 @@ class ReplyService:
     async def _handoff_openhouse(self, lead: Lead, thread) -> None:
         """Lead RSVP'd to an event (open house / demo day): notify the team with a
         callback-hours note, keep the bot ON. Unlike _handoff (a course deal), this is
-        a seat sale, not a hand-off — no agent_enabled/stage change, no CAPI event."""
+        a seat sale, not a hand-off — no agent_enabled/stage change, no CAPI event.
+
+        Fires the alert at most ONCE per lead: this path has no stage/mute gate (the bot
+        stays on and the model keeps `ready=true`), so without a dedup an RSVP'd lead who
+        keeps chatting re-pinged the team every single turn. ready_subtype='openhouse' is
+        the 'already notified' marker."""
+        already_notified = lead.ready_subtype == "openhouse"
         lead.ready_subtype = lead.ready_subtype or "openhouse"
+        if already_notified:
+            self.session.add(lead)
+            return
         contact = lead.phone_e164 or (f"IG @{lead.ig_username}" if lead.ig_username else None) \
             or "no contact yet"
         alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)
