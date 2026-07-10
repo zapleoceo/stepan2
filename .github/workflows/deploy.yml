@@ -8,6 +8,7 @@ on:
       - "migrations/**"
       - "infra/**"
       - "Dockerfile"
+      - "alembic.ini"
       - "pyproject.toml"
       - ".github/workflows/deploy.yml"
   workflow_dispatch:
@@ -67,20 +68,35 @@ jobs:
             --exclude '__pycache__' \
             --exclude '.env' \
             --exclude 'infra/.env' \
+            --exclude 'db_dumps' \
+            --exclude 'tests' \
+            --exclude '.pytest_cache' \
+            --exclude '.ruff_cache' \
+            --exclude '.coverage' \
             ./ "root@${HOST}:${REMOTE_DIR}/"
 
-      - name: Build and start core services (worker stays off)
+      - name: Build image and bring up datastores
         run: |
           ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
             "set -e; cd ${REMOTE_DIR}/infra \
              && docker compose build api \
-             && docker compose up -d postgres redis api"
+             && docker compose up -d postgres redis"
 
-      - name: Apply migrations
+      - name: Apply migrations (before the new API serves)
         run: |
+          # Migrate with the NEW image via a one-off container while the OLD api container is
+          # still serving. This avoids the window where a freshly-recreated new-code api runs
+          # against the not-yet-migrated old schema (500s during the migration). Rollback on a
+          # bad release: revert the commit and re-deploy (images aren't registry-tagged here).
           ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
             "set -e; cd ${REMOTE_DIR}/infra \
              && docker compose run --rm api alembic upgrade head"
+
+      - name: Recreate API on the new code (schema already migrated)
+        run: |
+          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
+            "set -e; cd ${REMOTE_DIR}/infra \
+             && docker compose up -d api"
 
       - name: Refresh worker (only if already running)
         run: |

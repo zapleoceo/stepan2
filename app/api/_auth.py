@@ -26,8 +26,10 @@ SESSION_MAX_AGE_S = 60 * 60 * 24 * 30  # 30 days
 
 # Reachable without a session (exact path or prefix). Trailing slashes on the mount
 # prefixes so "/connector" can't be widened to "/connectorevil" by a startswith match.
-_PUBLIC_PREFIXES = ("/healthz", "/login", "/api/tg_login", "/logout", "/webhooks/",
-                    "/mcp/", "/connector/", "/reader/", "/demo/")
+# Exact-match public paths (no trailing slash → must NOT be prefix-matched, or a future
+# "/loginhistory" route would be silently public). Subpath surfaces stay as prefixes below.
+_PUBLIC_EXACT = ("/healthz", "/login", "/api/tg_login", "/logout")
+_PUBLIC_PREFIXES = ("/webhooks/", "/mcp/", "/connector/", "/reader/", "/demo/")
 
 
 def _secret() -> str:
@@ -89,7 +91,7 @@ def _is_public(path: str) -> bool:
     # "/" is the public marketing landing (exact match only — a prefix would open everything).
     if path == "/":
         return True
-    return any(path == p or path.startswith(p) for p in _PUBLIC_PREFIXES)
+    return path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

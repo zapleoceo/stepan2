@@ -44,7 +44,7 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
             user = await UserRepo(s).create(tg_id, request.query_params.get("first_name"))
             s.add(Membership(user_id=user.id, branch_id=None, role=Role.SUPER_ADMIN))
             await s.flush()
-            log.info("self-provisioned platform owner tg=%d", tg_id)
+            log.debug("self-provisioned platform owner tg=%d", tg_id)
         if user is None:
             return HTMLResponse(_msg_html("Not authorized."), status_code=403)
         memberships = await MembershipRepo(s).memberships_for_user(user.id)

@@ -12,7 +12,14 @@ from typing import Protocol
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.adapters.channels.ig_parse import VOICE_PENDING_PH
 from app.adapters.db.models import MediaAsset, Message
+
+# When a voice note can NEVER be fetched/transcribed (dead url or a permanent download reject),
+# we must move its text OFF the "🎤 voice" pending placeholder — ReplyService.decide holds the
+# reply forever while the newest inbound still equals VOICE_PENDING_PH, so leaving it would make
+# an un-fetchable voice note silently freeze the whole thread with no answer and no alert.
+_VOICE_UNAVAILABLE = "🎤 (voice — no transcript)"
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +85,7 @@ class MediaService:
             stub = await self._pending_stub(msg.id)
             if stub is None or not stub.url:
                 msg.media_pending = False  # nothing to fetch — don't retry forever
+                self._release_voice_hold(msg)
                 self.session.add(msg)
                 await self.session.flush()
                 continue
@@ -90,6 +98,7 @@ class MediaService:
                     "media permanently skipped branch=%d msg=%d: %s",
                     self.branch_id, msg.id, exc)
                 msg.media_pending = False
+                self._release_voice_hold(msg)
                 self.session.add(msg)
                 await self.session.flush()
                 continue
@@ -109,6 +118,13 @@ class MediaService:
             logger.info("media backfill branch=%d channel=%d: %d assets",
                         self.branch_id, channel_id, done)
         return done
+
+    def _release_voice_hold(self, msg: Message) -> None:
+        """A voice note we've permanently given up on must not keep its '🎤 voice' placeholder,
+        or decide() holds the reply forever (see _VOICE_UNAVAILABLE). Swap in a non-placeholder
+        so the bot answers — it will ask the lead to type the message instead."""
+        if (msg.text or "").strip() == VOICE_PENDING_PH:
+            msg.text = _VOICE_UNAVAILABLE
 
     async def _transcribe_voice(self, msg: Message, audio: bytes, transcriber: Transcriber) -> None:
         """Replace a voice message's '🎤 voice' placeholder with its transcript, so the bot

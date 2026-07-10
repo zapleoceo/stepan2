@@ -112,15 +112,6 @@ SCHEMA: list[SettingSection] = [
     ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
-        _f("knowledge_backend", "text", "direct",
-           _l("Движок знаний", "Knowledge backend", "Backend pengetahuan"),
-           help=_l("Как бот ищет по базе знаний",
-                   "How the bot searches the knowledge base", "Cara bot mencari"),
-           width="150px",
-           choices=[
-               ("direct", _l("Прямой (весь текст)", "Direct (full text)", "Langsung")),
-               ("rag", _l("RAG (векторный поиск)", "RAG (vector search)", "RAG (vektor)")),
-           ]),
         _f("reply_routing", "text", "hybrid",
            _l("Маршрутизация модели", "Model routing", "Routing model"),
            help=_l("Гибрид: дешёвая модель на простых ходах, сильная — на закрытии сделки",
@@ -171,27 +162,47 @@ SCHEMA: list[SettingSection] = [
            ph=_l("10", "10", "10"), help=_UNLIMITED, width="76px"),
     ]),
     SettingSection("fa-solid fa-bullseye",
-                   _l("Meta Ads и CAPI", "Meta Ads & CAPI", "Meta Ads & CAPI"), [
-        _f("fb_account_id", "text", "", _l("Ad Account ID", "Ad Account ID", "Ad Account ID"),
-           ph=_l("act_1234567890", "act_1234567890", "act_1234567890"), width="220px"),
+                   _l("Meta (реклама, пиксель, сообщения)", "Meta (ads, pixel, messaging)",
+                      "Meta (iklan, pixel, pesan)"), [
+        _f("meta_app_id", "text", "", _l("App ID", "App ID", "App ID"),
+           ph=_l("1068545755735887", "1068545755735887", "1068545755735887"), width="220px"),
         _f("fb_business_id", "text", "", _l("Business ID", "Business ID", "Business ID"),
            ph=_l("1234567890", "1234567890", "1234567890"), width="220px"),
+        _f("fb_account_id", "text", "", _l("Ad Account ID", "Ad Account ID", "Ad Account ID"),
+           ph=_l("act_1234567890", "act_1234567890", "act_1234567890"), width="220px"),
+        _f("meta_page_id", "text", "", _l("Page ID", "Page ID", "Page ID"),
+           ph=_l("447466948457973", "447466948457973", "447466948457973"), width="220px"),
         _f("meta_pixel_id", "text", "", _l("Pixel ID", "Pixel ID", "Pixel ID"),
            ph=_l("1234567890", "1234567890", "1234567890"), width="220px"),
-        _f("meta_capi_token", "secret", "", _l("CAPI токен", "CAPI token", "Token CAPI"),
+        _f("meta_system_user_token", "secret", "",
+           _l("System User токен (реклама + пиксель + сообщения)",
+              "System User token (ads + pixel + messaging)",
+              "Token System User (iklan + pixel + pesan)"),
+           ph=_l("EAAPL…", "EAAPL…", "EAAPL…"),
+           help=_l("Единый токен со scope ads_management, ads_read, business_management, "
+                   "pages_messaging, pages_read_engagement, pages_show_list, "
+                   "instagram_manage_messages. Пусто = не менять",
+                   "Single token covering ads_management, ads_read, business_management, "
+                   "pages_messaging, pages_read_engagement, pages_show_list, "
+                   "instagram_manage_messages. Blank = keep current",
+                   "Token tunggal dengan scope ads_management, ads_read, business_management, "
+                   "pages_messaging, pages_read_engagement, pages_show_list, "
+                   "instagram_manage_messages. Kosong = tetap"),
+           width="340px"),
+        _f("meta_capi_token", "secret", "", _l("CAPI токен (устар.)", "CAPI token (legacy)",
+                                                "Token CAPI (lama)"),
            ph=_l("EAAB…", "EAAB…", "EAAB…"),
-           help=_l("Пусто = не менять", "Blank = keep current", "Kosong = tetap"),
+           help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
+                   "Legacy field — use the System User token above. Blank = keep current",
+                   "Field lama — gunakan token System User di atas. Kosong = tetap"),
            width="340px"),
         _f("meta_ads_token", "secret", "",
-           _l("Marketing API токен (ads_read)", "Marketing API token (ads_read)",
-              "Token Marketing API (ads_read)"),
+           _l("Marketing API токен (устар.)", "Marketing API token (legacy)",
+              "Token Marketing API (lama)"),
            ph=_l("EAAG…", "EAAG…", "EAAG…"),
-           help=_l("System User токен с ads_read — статистика по рекламе (не для сообщений). "
-                   "Пусто = не менять",
-                   "System User token with ads_read scope — ad performance data only, no "
-                   "messaging access. Blank = keep current",
-                   "Token System User dengan ads_read — hanya data performa iklan. "
-                   "Kosong = tetap"),
+           help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
+                   "Legacy field — use the System User token above. Blank = keep current",
+                   "Field lama — gunakan token System User di atas. Kosong = tetap"),
            width="340px"),
     ]),
     SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [

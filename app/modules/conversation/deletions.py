@@ -39,13 +39,21 @@ class DeletionService:
         self.session = session
         self.branch_id = branch_id
 
-    async def pending(self, channel_id: int) -> list[Message]:
-        q = select(Message).where(
-            Message.branch_id == self.branch_id,
-            Message.channel_id == channel_id,
-            Message.delete_requested.is_(True),  # type: ignore[union-attr]
-            Message.direction == "out",
+    async def pending(self, channel_id: int, limit: int | None = None) -> list[Message]:
+        # limit is for the worker's thread-discovery scan (it only acts on a few threads/tick);
+        # process() calls it WITHOUT a limit because it must revoke every pending msg of a thread.
+        q = (
+            select(Message)
+            .where(
+                Message.branch_id == self.branch_id,
+                Message.channel_id == channel_id,
+                Message.delete_requested.is_(True),  # type: ignore[union-attr]
+                Message.direction == "out",
+            )
+            .order_by(Message.occurred_at.asc())  # type: ignore[union-attr]
         )
+        if limit is not None:
+            q = q.limit(limit)
         return list((await self.session.exec(q)).all())
 
     async def process(self, channel_id: int, external_thread_id: str, revoker: Revoker) -> int:
