@@ -559,7 +559,7 @@ async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
                 broker = BrokerLLM()
                 done += await svc.backfill(
                     channel.id, port, limit=20,
-                    transcriber=broker, describer=broker)  # type: ignore[arg-type]
+                    transcriber=broker, describer=broker, translator=broker)
     except Exception:
         logger.exception("backfill_media: branch=%s failed", branch_id)
     return done

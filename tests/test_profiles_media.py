@@ -217,6 +217,50 @@ async def test_voice_backfill_transcribes_into_message_text(db_session) -> None:
     assert refreshed.text == "🎤 berapa harga kursusnya"  # placeholder replaced with content
 
 
+class FakeTranslator:
+    """A minimal LLMPort.chat that returns a fixed Cyrillic string, so translate_text's
+    _looks_translated gate passes (it requires Cyrillic for a Russian target)."""
+
+    def __init__(self, ru: str = "перевод сообщения") -> None:
+        self.ru = ru
+        self.calls = 0
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+        self.calls += 1
+        return self.ru, {"cost_usd": 0.0}
+
+
+async def test_voice_backfill_caches_russian_translation(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
+    trn = FakeTranslator(ru="сколько стоит курс")
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20,
+        transcriber=FakeTranscriber(text="berapa harga kursusnya"), translator=trn) == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🎤 berapa harga kursusnya"
+    assert refreshed.tr_text == "сколько стоит курс"  # log shows the RU translation too
+    assert trn.calls == 1
+
+
+async def test_backfill_invalidates_stale_placeholder_translation(db_session) -> None:
+    """If an operator viewed the bubble before backfill, tr_text cached a translation of the
+    '🎤 voice' placeholder — rewriting the text must drop that stale cache (here no translator,
+    so it clears to NULL and the on-view path re-translates the real content)."""
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
+    msg.tr_text = "🎤 голос"  # stale placeholder translation
+    db_session.add(msg)
+    await db_session.flush()
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20,
+        transcriber=FakeTranscriber(text="halo kak")) == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🎤 halo kak" and refreshed.tr_text is None  # stale cache dropped
+
+
 async def test_voice_transcribe_failure_releases_hold(db_session) -> None:
     """A missing llm:audio scope must not freeze the thread: bytes stored, flag cleared, and
     the '🎤 voice' placeholder swapped for a non-pending fallback so decide() stops holding."""
