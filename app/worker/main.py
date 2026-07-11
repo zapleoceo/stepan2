@@ -556,8 +556,10 @@ async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
                 port = await _try_build_port(session, channel, "download_media")
                 if port is None:
                     continue  # can't build / channel kind can't download media
+                broker = BrokerLLM()
                 done += await svc.backfill(
-                    channel.id, port, limit=20, transcriber=BrokerLLM())  # type: ignore[arg-type]
+                    channel.id, port, limit=20,
+                    transcriber=broker, describer=broker)  # type: ignore[arg-type]
     except Exception:
         logger.exception("backfill_media: branch=%s failed", branch_id)
     return done
