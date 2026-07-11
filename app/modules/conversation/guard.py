@@ -264,6 +264,13 @@ SAFE_FALLBACK = (
     "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
     "Nanti aku kabari secepatnya. Sementara itu, ada hal lain yang bisa aku bantu?")
 
+# Used when the model wants a manager hand-off but we have no phone/WhatsApp for the lead:
+# ask for the contact first (a manager can't follow up on a contact-less lead), keeping the
+# bot on. Only a later turn WITH a phone actually mutes the bot and escalates.
+ASK_PHONE_BEFORE_HANDOFF = (
+    "Biar tim kami bisa bantu Kakak lebih lanjut, boleh aku minta nomor WhatsApp Kakak "
+    "dulu ya? 🙏")
+
 # Used when a live reply keeps converging onto a near-duplicate after a guard regen. That's
 # a style dead-end (the model can't rephrase), NOT a knowledge gap — summoning a manager here
 # wastes a human on an answerable thread (threads 2541/2566, false SMM escalations). Ask the

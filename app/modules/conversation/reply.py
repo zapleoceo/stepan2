@@ -461,6 +461,20 @@ class ReplyService:
                     post_guard_ratio)
                 from dataclasses import replace  # noqa: PLC0415
                 decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
+        # PHONE BEFORE HAND-OFF (hard gate): never mute the bot and hand a contact-less lead to
+        # a manager who then has no way to reach them (lead 2757 went to MANAGER with a NULL
+        # phone; the SAFE_FALLBACK path sets needs_manager, bypassing the prompt's soft rule).
+        # If the model wants a manager but we have no phone — and the lead didn't just give one
+        # — suppress the escalation, keep the bot on, and ask for a WhatsApp number first. A
+        # later turn WITH a phone escalates for real (a manual UI move to MANAGER is unaffected).
+        if decision.needs_manager and lead is not None \
+                and not lead.phone_e164 and not (decision.phone or "").strip():
+            from dataclasses import replace  # noqa: PLC0415
+            logger.info(
+                "guard: branch=%d thread=%d needs_manager without a phone → ask for contact",
+                self.branch_id, thread_id)
+            decision = replace(decision, needs_manager=False, manager_question=None,
+                               kb_gap=None, reply=guard.ASK_PHONE_BEFORE_HANDOFF)
         self._last_llm_meta = meta
         if lead is not None:
             merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
