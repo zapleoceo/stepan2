@@ -272,6 +272,14 @@ CLARIFY_FALLBACK = (
     "Biar aku bisa kasih info yang paling pas, boleh Kakak sebutkan lebih spesifik "
     "yang mau Kakak tahu? 🙏")
 
+# Reason stamped onto a GUARD-forced hand-off (not the model's own needs_manager). Without
+# it the alert falsely reads "лид запросил менеджера" and the chat log falls back to the
+# model's stage_reason for a DIFFERENT stage (thread 2541: a presenting-reason logged next
+# to a manager escalation). Flows into both the alert body and the ThreadLog reason.
+GUARD_HANDOFF_REASON = (
+    "Степан не смог составить корректный ответ (сработала защита от выдумок) — "
+    "нужен ручной ответ менеджера")
+
 _VERIFY_SYSTEM = (
     "You check a sales bot's draft reply for fabrication. You get the KNOWLEDGE BASE the "
     "bot may use, then the DRAFT. List every CONCRETE factual claim in the draft that is "
