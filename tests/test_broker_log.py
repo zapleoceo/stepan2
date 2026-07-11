@@ -207,8 +207,9 @@ async def test_turn_histogram_sums_end_to_end_per_bucket(db_session) -> None:
         ok=True, latency_ms=9000, created_at=now - timedelta(hours=3)))
     await db_session.flush()
 
-    buckets, turns, _since = await fetch_turn_histogram(db_session, [7], "1h")
+    buckets, turns, _since, span_s = await fetch_turn_histogram(db_session, [7], "1h")
     assert turns == 2                       # A and B; the 3h-old call is outside the window
     # A span = 8s start + 2s latency = 10s; B span = 3s → total 13s
     assert round(sum(buckets)) == 13
+    assert span_s == 3600 / 24              # 1h window / 24 buckets = 150s per bucket
     assert "1h" in log_window_keys() and "7d" in log_window_keys()
