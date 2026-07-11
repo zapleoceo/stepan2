@@ -219,6 +219,20 @@ async def test_forced_manager_override_never_leaves_the_chronology_blank(db_sess
     assert log is not None and log.detail
 
 
+async def test_forced_manager_override_never_logs_the_models_stage_reason(db_session) -> None:
+    """A guard-forced hand-off (thread 2541): kb_gap/manager_question empty but the model set
+    a stage_reason for a DIFFERENT stage. That reason must NOT leak into the MANAGER row —
+    the generic fallback is logged instead (the guard itself stamps kb_gap in production)."""
+    from app.adapters.db.models import ThreadLog
+
+    bid, tid, lead = await _world(db_session)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(
+        needs_manager=True, stage_reason="лид назвал цель — переход в presenting"))
+    assert lead.stage == Stage.MANAGER
+    log = (await db_session.exec(select(ThreadLog))).first()
+    assert log is not None and "presenting" not in log.detail
+
+
 async def test_same_stage_writes_no_event(db_session) -> None:
     bid, tid, _ = await _world(db_session, stage=Stage.QUALIFYING)
     await _svc(db_session, bid).enqueue_reply(tid, _decision())

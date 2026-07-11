@@ -175,10 +175,15 @@ async def raise_manager_alert(
     that silently sets needs_manager with no alert was the pre-2026-07-07 followup gap)."""
     q = decision.manager_question or ""
     gap = decision.kb_gap or ""
-    summary_en = q or "Lead requests human handoff"
-    summary_ru = f"Вопрос: {q}" if q else "Лид запросил менеджера"
-    if gap:
-        summary_ru += f"\nПробел в KB: {gap}"
+    summary_en = q or gap or "Thread handed to a human"
+    if q:
+        summary_ru = f"Вопрос: {q}"
+        if gap:
+            summary_ru += f"\nПробел в KB: {gap}"
+    elif gap:
+        summary_ru = gap  # a guard-forced or model-named reason — never claim the lead asked
+    else:
+        summary_ru = "Лид запросил менеджера"
     alerts = AlertService(session, branch_id, notifier, llm=llm)
     try:
         await alerts.raise_alert(
@@ -313,7 +318,11 @@ async def guard_decision(
             return replace(fixed, reply=trimmed), regen_meta
     logger.error("guard: branch=%d thread=%d unfixable violation → hand-off",
                  branch_id, thread_id)
-    return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True), regen_meta
+    # Guard-origin escalation: stamp its own reason so the alert and chat log don't
+    # misattribute it to the lead or to the model's stage_reason (keep a real model-named
+    # gap if it happened to set one).
+    return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True,
+                   kb_gap=fixed.kb_gap or guard.GUARD_HANDOFF_REASON), regen_meta
 
 
 class ReplyService:
@@ -599,9 +608,12 @@ class ReplyService:
         # non-compliance (the field left null despite being "required") also gets a fallback
         # here rather than a silent gap in the chronology.
         if new_stage == Stage.MANAGER and decision.needs_manager:
+            # stage_reason is deliberately NOT in this chain — it describes the stage the
+            # model asked for (e.g. presenting), which reads as a mismatch next to a MANAGER
+            # row. A guard-forced hand-off stamps kb_gap, so this fallback is a last resort.
             reason_text = (
-                decision.kb_gap or decision.manager_question or decision.stage_reason
-                or "эскалация на менеджера без указанной моделью причины"
+                decision.kb_gap or decision.manager_question
+                or "эскалация на менеджера без указанной причины"
             )
         else:
             reason_text = decision.stage_reason
