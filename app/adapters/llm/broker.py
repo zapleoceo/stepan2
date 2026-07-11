@@ -72,6 +72,7 @@ class BrokerLLM:
         s = settings()
         self._url = (base_url or s.broker_url).rstrip("/")
         self._key = project_key or s.broker_project_key
+        self.calls = 0  # broker requests made by THIS instance (one per reply job) — retries incl.
 
     async def chat(
         self,
@@ -150,6 +151,7 @@ class BrokerLLM:
         transient poll error is tolerated up to _POLL_MAX_ERRORS in a row; the whole wait is
         bounded by budget_s. Writes exactly one broker_log row (ok on done, error otherwise),
         same shape as before so the audit page / request_id lookups are unchanged."""
+        self.calls += 1
         start = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
@@ -234,6 +236,7 @@ class BrokerLLM:
         """Speech-to-text for a voice message via the broker's /v1/transcribe. Returns the
         transcript text ('' if the broker returns none). Raises on transport/scope errors
         (the caller keeps the placeholder + retries) — needs the project key's llm:audio scope."""
+        self.calls += 1
         start = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=_SYNC_TIMEOUT) as c:
@@ -287,6 +290,7 @@ class BrokerLLM:
     ) -> list[list[float]]:
         if not texts:
             return []
+        self.calls += 1
         start = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=_SYNC_TIMEOUT) as c:
