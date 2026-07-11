@@ -125,6 +125,27 @@ async def test_chat_submits_a_job_and_polls_to_done(monkeypatch) -> None:
     assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:smart"
 
 
+async def test_describe_image_submits_vision_job_with_multimodal_content(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _CaptureClient(_JobClient):
+        async def post(self, *a: object, **k: object) -> _FakeResp:
+            captured["body"] = k.get("json")
+            return await super().post(*a, **k)
+
+    client = _CaptureClient([_job(1)], [_done("screenshot harga 1jt")])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    calls = _capture_log(monkeypatch)
+    text = await _llm().describe_image(b"\xff\xd8jpegbytes", mime="image/png", branch_id=2)
+    assert text == "screenshot harga 1jt"
+    assert client.caps == ["vision"]  # submitted to /v1/jobs?capability=vision
+    assert calls[-1]["ok"] is True
+    content = captured["body"]["messages"][0]["content"]
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
 # ── error paths ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("status", [502, 503])

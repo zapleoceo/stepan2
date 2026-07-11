@@ -125,8 +125,9 @@ async def _channel(s, bid) -> int:
 
 async def _media_msg(s, bid, cid, *, ext, url="https://cdn/x.jpg", kind="image",
                      pending=True, stub=True) -> Message:
+    ph = "🎤 voice" if kind == "audio" else "🖼 media"
     m = Message(branch_id=bid, thread_id=1, channel_id=cid, external_id=ext,
-                direction="in", sent_by="lead", text="🖼 media", media_pending=pending)
+                direction="in", sent_by="lead", text=ph, media_pending=pending)
     s.add(m)
     await s.flush()
     if stub:  # ingest attaches a not-yet-downloaded MediaAsset (url set, data NULL)
@@ -216,15 +217,55 @@ async def test_voice_backfill_transcribes_into_message_text(db_session) -> None:
     assert refreshed.text == "🎤 berapa harga kursusnya"  # placeholder replaced with content
 
 
-async def test_voice_transcribe_failure_keeps_placeholder(db_session) -> None:
-    """A missing llm:audio scope must not block the backfill — bytes still stored, text stays."""
+async def test_voice_transcribe_failure_releases_hold(db_session) -> None:
+    """A missing llm:audio scope must not freeze the thread: bytes stored, flag cleared, and
+    the '🎤 voice' placeholder swapped for a non-pending fallback so decide() stops holding."""
+    from app.modules.media.service import _VOICE_UNAVAILABLE
+
     bid = await _branch(db_session)
     cid = await _channel(db_session, bid)
     msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
     assert await MediaService(db_session, bid).backfill(
         cid, FakeDownloader(), limit=20, transcriber=FakeTranscriber(fail=True)) == 1
     refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
-    assert refreshed.text == "🖼 media" and refreshed.media_pending is False  # kept, not retried
+    assert refreshed.text == _VOICE_UNAVAILABLE and refreshed.media_pending is False
+
+
+class FakeDescriber:
+    def __init__(self, *, text: str = "screenshot harga kursus", fail: bool = False) -> None:
+        self.text = text
+        self.fail = fail
+        self.calls = 0
+
+    async def describe_image(self, image, *, mime="image/jpeg", thread_id=None, branch_id=None):  # noqa: ANN001, ANN003
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("project lacks scope: llm:vision")
+        return self.text
+
+
+async def test_image_backfill_describes_into_message_text(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
+    desc = FakeDescriber(text="jadwal kelas SMM")
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20, describer=desc) == 1
+    assert desc.calls == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🖼 jadwal kelas SMM"  # placeholder replaced with description
+
+
+async def test_image_describe_failure_releases_hold(db_session) -> None:
+    from app.modules.media.service import _IMAGE_UNAVAILABLE
+
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20, describer=FakeDescriber(fail=True)) == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == _IMAGE_UNAVAILABLE and refreshed.media_pending is False
 
 
 async def test_image_backfill_does_not_transcribe(db_session) -> None:

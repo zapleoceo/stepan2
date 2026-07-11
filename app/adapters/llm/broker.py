@@ -13,6 +13,7 @@ embed()/transcribe() stay synchronous (fast, and the broker has no job endpoint 
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -23,6 +24,14 @@ import httpx
 from app.config import settings
 
 _log = logging.getLogger(__name__)
+
+# Vision prompt for a lead's image (screenshot of a price/schedule, a payment proof, a
+# product photo, a competitor's offer, …). Read any text verbatim and describe the rest
+# concisely — this becomes the lead's message the reply model then answers.
+_VISION_PROMPT = (
+    "Deskripsikan gambar ini secara ringkas dalam Bahasa Indonesia. Jika ada teks di "
+    "dalamnya (harga, jadwal, tangkapan layar, bukti transfer), tuliskan teksnya apa "
+    "adanya. Jangan menebak yang tidak terlihat.")
 
 # A fresh AsyncClient per public call (submit_and_poll / transcribe / embed) is deliberate,
 # not an oversight: the connection IS reused across the many polls of one job (they share the
@@ -246,6 +255,25 @@ class BrokerLLM:
             raise
         await _log_call("audio", "transcribe", thread_id, branch_id, meta, ok=True)
         return (d.get("text") or d.get("transcript") or "").strip()
+
+    async def describe_image(
+        self, image: bytes, *, mime: str = "image/jpeg", prompt: str | None = None,
+        thread_id: int | None = None, branch_id: int | None = None,
+    ) -> str:
+        """Vision caption for a lead's image via the 'vision' capability (async job queue,
+        multimodal content). Returns a short description ('' if none). Raises on
+        transport/scope errors (caller keeps the placeholder) — needs the llm:vision scope."""
+        data_uri = f"data:{mime};base64,{base64.b64encode(image).decode()}"
+        content = [
+            {"type": "text", "text": prompt or _VISION_PROMPT},
+            {"type": "image_url", "image_url": {"url": data_uri}},
+        ]
+        text, _meta = await self._submit_and_poll(
+            {"messages": [{"role": "user", "content": content}],
+             "max_tokens": 300, "temperature": 0.2},
+            capability="vision", workflow="vision",
+            thread_id=thread_id, branch_id=branch_id, budget_s=_poll_budget_s("vision"))
+        return (text or "").strip()
 
     async def embed(
         self,

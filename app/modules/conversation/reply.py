@@ -13,7 +13,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.channels.ig_parse import VOICE_PENDING_PH
+from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent, ThreadLog
 from app.adapters.meta_capi import MetaCapi
 from app.config import settings
@@ -366,10 +366,11 @@ class ReplyService:
             return None
         newest = ctx.dialog[-1] if ctx.dialog else None
         if newest is not None and newest.direction == "in" \
-                and (newest.text or "").strip() == VOICE_PENDING_PH:
-            # A voice note the broker hasn't transcribed yet — hold the reply so Stepan
-            # answers the CONTENT, not the placeholder. Releases when backfill writes the
-            # transcript ("🎤 <words>"), waits indefinitely if transcription is unavailable.
+                and (newest.text or "").strip() in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
+            # Voice/image the broker hasn't transcribed/captioned yet — hold the reply so
+            # Stepan answers the CONTENT, not the placeholder. Releases when backfill writes
+            # the transcript ("🎤 <words>") / caption ("🖼 <desc>"), or a fallback on failure
+            # (media/service._release_*_hold) so a broken media item never freezes the thread.
             return None
         lead = ctx.lead
         last_in = next((m for m in reversed(ctx.dialog) if m.direction == "in"), None)
