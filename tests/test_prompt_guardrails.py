@@ -114,6 +114,14 @@ def test_undecipherable_slang_is_non_target_not_needs_manager() -> None:
     assert "non_target, NOT needs_manager" in _DECISION_CONTRACT
 
 
+def test_lead_auto_reply_is_not_escalated() -> None:
+    # thread 2058, 2026-07-11: the lead's OWN business auto-responder ("terima kasih telah
+    # menghubungi kami, akan segera kami balas") got escalated to a manager — it's a robot,
+    # not the lead talking
+    assert "AUTO-REPLY / AWAY MESSAGE" in _DECISION_CONTRACT
+    assert "it's their account's robot" in _DECISION_CONTRACT
+
+
 def test_stage_reason_required_not_optional() -> None:
     assert "REQUIRED (not optional)" in _DECISION_CONTRACT
 

@@ -155,8 +155,21 @@ def test_premature_manager_handoff_catches_price_question_answered_in_kb() -> No
     # Booster price (Rp 700.000/600.000) was right there in the retrieved KB context
     context = "> Quick facts — Cybersecurity Skill Booster: Harga Rp 700.000 offline..."
     assert guard.premature_manager_handoff("ini gratis ga kak?", context)
-    assert not guard.premature_manager_handoff("gimana cara daftarnya?", context)  # not a price q
     assert not guard.premature_manager_handoff("berapa harganya?", "no price figure here")
+    # a price context alone doesn't make an enrol question answerable (no payment facts)
+    assert not guard.premature_manager_handoff("gimana cara daftarnya?", context)
+
+
+def test_premature_manager_handoff_catches_payment_question_answered_in_kb() -> None:
+    # thread 2664: a HOT lead "saya bayar sekarang atau nunggu?" escalated even though the
+    # BCA account + DP + methods are in the FAQ that's in context — losing a lead at payment
+    pay_ctx = ("Bank BCA, PT. ITSTEP ACADEMY IND, No. Rek. 5245550101. DP 500rb untuk "
+               "amankan seat; transfer, QR, atau kartu.")
+    assert guard.premature_manager_handoff("saya bayar sekarang atau nunggu?", pay_ctx)
+    assert guard.premature_manager_handoff("gimana cara daftarnya kak?", pay_ctx)
+    assert guard.premature_manager_handoff("mau daftar, transfer ke mana?", pay_ctx)
+    # a payment question with NO payment facts in context is a genuine gap → still escalate
+    assert not guard.premature_manager_handoff("cara bayar gimana?", "just a course description")
 
 
 def test_unexplained_manager_handoff_catches_no_stated_reason() -> None:

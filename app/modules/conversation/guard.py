@@ -195,23 +195,43 @@ _PRICE_QUESTION_RE = re.compile(
     r"\b(gratis|free|berapa|harga|biaya|tarif|cicilan|angsuran|murah|mahal)\b",
     re.IGNORECASE)
 
+# Thread 2664 (2026-07-11): a HOT lead ("saya bayar sekarang atau nunggu?") — ready to pay —
+# was escalated instead of given the payment details, even though the BCA account + methods
+# (QR/transfer/card, the 500k DP) are in the FAQ that's in context. Losing a lead at the
+# payment moment is the most expensive false escalation. Same shape as the price case: an
+# answerable how-to-pay / how-to-enrol question with the answer already in context.
+# No trailing \b — Indonesian suffixes (daftar→daftarnya, bayar→bayarnya) would break it.
+_ENROLL_PAY_RE = re.compile(
+    r"\b(bayar|pembayaran|transfer|rekening|dp\b|booking|daftar|register|enroll|"
+    r"mau (?:ikut|gabung))",
+    re.IGNORECASE)
+# Payment facts present in the KB context — a bank account number, transfer/QR/DP methods.
+_PAY_FACT_RE = re.compile(
+    r"\b(rekening|bca|no\.?\s*rek|transfer|qris?|\bdp\b|cicilan|paylater|"
+    r"kartu (?:kredit|debit))\b", re.IGNORECASE)
+
 
 def premature_manager_handoff(last_inbound: str, context: str) -> bool:
-    """True when the lead's last message is a price/availability question AND the KB
-    context already contains a price figure — a needs_manager decision on THIS turn would
-    be escalating something the model already had the answer for."""
-    if not _PRICE_QUESTION_RE.search(last_inbound or ""):
-        return False
-    return bool(_PRICE_RE.search(context or ""))
+    """True when the lead's last message asks something ANSWERABLE from context but the model
+    escalated anyway: a price/availability question with a price figure in context, OR a
+    how-to-pay / how-to-enrol question with payment facts (bank account / methods / DP) in
+    context. Either way the model already had the answer — escalating loses the lead."""
+    q = last_inbound or ""
+    if _PRICE_QUESTION_RE.search(q) and _PRICE_RE.search(context or ""):
+        return True
+    return bool(_ENROLL_PAY_RE.search(q) and _PAY_FACT_RE.search(context or ""))
 
 
 MANAGER_HANDOFF_CORRECTION = (
-    "[System: you set needs_manager=true for a price/availability question, but a price "
-    "figure for this product is already in the knowledge base context above - this is NOT a "
-    "real KB gap, do not hand it off to a human. Either answer the price directly, or if "
-    "discovery genuinely isn't done yet, acknowledge and defer with ONE discovery question "
-    "per your own early-price rule - never silently escalate a fact you already have. Set "
-    "needs_manager=false. Return the JSON as usual.]"
+    "[System: you set needs_manager=true for a price OR payment/enrolment question, but the "
+    "answer is ALREADY in the knowledge base context above (the price figure, and/or the "
+    "payment methods + bank account + DP to reserve a seat) - this is NOT a real KB gap, do "
+    "NOT hand it off to a human. A lead asking HOW to pay or whether to pay now is a HOT "
+    "buying signal: give the concrete payment facts from context and the next step "
+    "immediately (take name + WhatsApp, give the DP/account) - never stall a ready-to-pay "
+    "lead behind a hand-off. If it's a price question and discovery genuinely isn't done, "
+    "answer the price then weave in ONE discovery question. Set needs_manager=false. Return "
+    "the JSON as usual.]"
 )
 
 
