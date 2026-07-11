@@ -657,6 +657,10 @@ async def _on_startup(ctx: dict) -> None:
     logging.getLogger("app").setLevel(logging.INFO)
     if not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # basicConfig turned the ROOT logger to INFO, which also unmuted httpx's per-poll "GET
+    # /v1/jobs/{id}" spam — silence the noisy transport loggers back to WARNING.
+    for noisy in ("httpx", "httpcore", "sqlalchemy.engine"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     settings().validate_runtime()
 
 
