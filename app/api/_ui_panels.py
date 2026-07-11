@@ -1964,9 +1964,11 @@ def _log_pager(page: int, size: int, total: int) -> str:
 
 def _log_histogram_html(
     buckets: list[float], turns: int, window: str, windows: list[str],
+    since: object = None, bucket_span_s: float = 0.0, tz_off_h: int = 0,
 ) -> str:
-    """Micro period-buttons (1h/4h/12h/24h/7d) + a mini bar histogram of total end-to-end
-    seconds per time bucket over the chosen window — a load/slowness sparkline for the log."""
+    """Micro period-buttons (1h/4h/12h/24h/7d) + a COMPACT mini bar histogram of total
+    end-to-end seconds per time bucket — a load/slowness sparkline. Each bar tooltips its
+    time range + value; the axis is labelled at both ends (oldest → now)."""
     btns = "".join(
         (f'<span class="btn-sm" style="background:#3a4657;color:#fff;cursor:default">{w}</span>'
          if w == window else
@@ -1974,31 +1976,47 @@ def _log_histogram_html(
          f' hx-target="#main">{w}</button>')
         for w in windows
     )
+    start_dt = _as_dt(since)
+    tz = timedelta(hours=tz_off_h)
+    fmt = "%H:%M" if window in ("1h", "4h", "12h", "24h") else "%m-%d %H:%M"
+
+    def _label(i: int) -> str:
+        if start_dt is None:
+            return "—"
+        return (start_dt + tz + timedelta(seconds=bucket_span_s * i)).strftime(fmt)
+
     peak = max(buckets) if buckets else 0.0
     total = sum(buckets)
     if peak <= 0:
-        bars = '<span style="color:#6b7685;font-size:.72rem">нет данных за период</span>'
+        chart = '<span style="color:#6b7685;font-size:.72rem">нет данных за период</span>'
     else:
-        def _bar(v: float) -> str:
+        def _bar(i: int, v: float) -> str:
             h = max(2, v / peak * 34)
             color = "#c0563a" if v >= peak * 0.66 else "#5b7fa6" if v >= peak * 0.33 else "#8aa0b8"
-            return (f'<div title="{v:.0f}s" style="flex:1;min-width:2px;height:{h:.0f}px'
+            tip = f"{_label(i)}–{_label(i + 1)} · {v:.0f}s"
+            return (f'<div title="{_h.escape(tip)}" style="width:5px;height:{h:.0f}px'
                     f';background:{color};border-radius:1px 1px 0 0"></div>')
-        bars = (f'<div style="display:flex;align-items:flex-end;gap:1px;height:38px;flex:1">'
-                f'{"".join(_bar(v) for v in buckets)}</div>')
+        bars = "".join(_bar(i, v) for i, v in enumerate(buckets))
+        axis = (f'<div style="display:flex;justify-content:space-between;font-size:.6rem'
+                f';color:#8899aa;margin-top:1px"><span>{_h.escape(_label(0))}</span>'
+                f'<span>сейчас</span></div>')
+        chart = (f'<div style="width:fit-content">'
+                 f'<div style="display:flex;align-items:flex-end;gap:1px;height:38px">{bars}</div>'
+                 f'{axis}</div>')
     summary = (f'<span style="color:#6b7685;font-size:.72rem;white-space:nowrap">'
                f'Σ end-to-end <b style="color:#3a4657">{total:.0f}s</b> · {turns} ходов · '
                f'пик {peak:.0f}s</span>')
     return (
-        f'<div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 .7rem">'
+        f'<div style="display:flex;align-items:flex-end;gap:.7rem;margin:.4rem 0 .7rem'
+        f';flex-wrap:wrap">'
         f'<div style="display:flex;gap:.25rem">{btns}</div>'
-        f'{bars}{summary}</div>'
+        f'{chart}{summary}</div>'
     )
 
 
 def broker_log_panel_html(
     rows: list, page: int, size: int, total: int, tz_by_branch: dict[int, int] | None = None,
-    hist: tuple[list[float], int, str, list[str]] | None = None,
+    hist: tuple | None = None,
 ) -> str:
     title = _h.escape(t("log.title"))
     intro = _h.escape(t("log.intro"))

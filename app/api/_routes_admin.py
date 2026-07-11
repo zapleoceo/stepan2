@@ -397,8 +397,12 @@ async def broker_log_page(request: Request, page: int = 0, window: str = "24h") 
         rows, total = await fetch_broker_log(session, branch_ids, page, _LOG_PAGE_SIZE)
         seen_ids = {r.branch_id for r in rows if r.branch_id is not None}
         tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
-        buckets, turns, _since = await fetch_turn_histogram(session, branch_ids, window)
-    hist = (buckets, turns, window, windows)
+        buckets, turns, since, span_s = await fetch_turn_histogram(session, branch_ids, window)
+        # single-branch view → label the axis in that branch's local time; owner (all) → UTC
+        tz_off = 0
+        if branch_ids and len(branch_ids) == 1:
+            tz_off = (await fetch_branch_tz(session, branch_ids)).get(branch_ids[0], 0)
+    hist = (buckets, turns, window, windows, since, span_s, tz_off)
     return HTMLResponse(
         broker_log_panel_html(rows, page, _LOG_PAGE_SIZE, total, tz_by_branch, hist))
 

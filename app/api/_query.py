@@ -427,12 +427,12 @@ def log_window_keys() -> list[str]:
 
 async def fetch_turn_histogram(
     session: AsyncSession, branch_ids: list[int] | None, window_key: str,
-) -> tuple[list[float], int, datetime]:
+) -> tuple[list[float], int, datetime, float]:
     """End-to-end seconds per time bucket over the window, for the log-header histogram.
 
     Broker calls are grouped into per-thread TURNS (a same-thread gap over _TURN_GAP starts a
     new turn); each turn's wall-clock (last finish − first start) lands in the bucket of its
-    start. Returns (bucket_totals_seconds, turn_count, since)."""
+    start. Returns (bucket_totals_seconds, turn_count, since, bucket_span_seconds)."""
     from app.adapters.db.models import BrokerLog  # noqa: PLC0415 (avoid import cycle)
     span = _LOG_WINDOWS.get(window_key, _LOG_WINDOWS["24h"])
     since = utc_now() - span
@@ -470,7 +470,7 @@ async def fetch_turn_histogram(
             t_end = max(t_end, end) if t_end is not None else end
         prev = created
     flush()
-    return buckets, turns, since
+    return buckets, turns, since, bucket_span.total_seconds()
 
 
 async def fetch_branch_tz(session: AsyncSession, branch_ids: list[int]) -> dict[int, int]:
