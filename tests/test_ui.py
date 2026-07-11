@@ -1121,6 +1121,34 @@ def test_demo_chat_retries_once_on_broker_failure(monkeypatch) -> None:
     assert resp.json()["reply"] == "Back with you — what do you sell?"
 
 
+def test_demo_chat_runs_owner_notify_as_background_task(monkeypatch) -> None:
+    """Regression: the owner-notify was a bare asyncio.create_task that the GC dropped before
+    it ran, so no lead ever pinged. It must run as a Starlette BackgroundTask (fires after the
+    response), with the assistant reply appended so the extractor sees the full turn."""
+    import app.api._routes_demo as demo
+
+    class _Broker:
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            return "Got it — I'll ping you on WhatsApp.", {}
+
+    seen: dict = {"n": 0, "hist": None}
+
+    async def _fake_notify(history):  # noqa: ANN001
+        seen["n"] += 1
+        seen["hist"] = history
+
+    monkeypatch.setattr(demo, "BrokerLLM", _Broker)
+    monkeypatch.setattr(demo, "maybe_notify", _fake_notify)
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post(
+        "/demo/chat",
+        json={"messages": [{"role": "user", "content": "buy it — my whatsapp +380994811889"}]},
+    )
+    assert resp.status_code == 200
+    assert seen["n"] == 1                               # background notify actually ran
+    assert seen["hist"][-1]["role"] == "assistant"      # reply appended for the extractor
+
+
 # ─── lang switch: stay on the current view (path-only redirect) ────────────────
 
 def test_lang_switch_from_full_page_preserves_referer() -> None:
