@@ -513,13 +513,6 @@ _CSS = (
     "border:1px solid #3a5578;border-radius:8px;padding:.5rem .7rem;font-size:.78rem;"
     "color:#cfe0f4;line-height:1.5;box-shadow:0 6px 24px rgba(0,0,0,.55);display:none;"
     "pointer-events:none}"
-    # help mode also paints EVERY visible tip at once (not just the hovered one): one
-    # fixed-position label per [data-help] element, re-laid-out on scroll/resize/htmx swap.
-    "#help-labels{position:fixed;inset:0;z-index:895;pointer-events:none}"
-    ".help-lbl{position:fixed;max-width:210px;background:#e2b33d;color:#1a1f2e;"
-    "border-radius:5px;padding:.1rem .38rem;font-size:.64rem;font-weight:600;"
-    "line-height:1.35;box-shadow:0 2px 10px rgba(0,0,0,.5);pointer-events:none;"
-    "white-space:normal}"
     # chat actions
     ".ch-acts{display:flex;align-items:center;gap:.4rem;margin-left:auto}"
     ".act-sel{background:#1a1f2e;border:1px solid #2d3748;border-radius:5px;"
@@ -1716,32 +1709,7 @@ def app_shell(
         # every htmx re-render); the tip is measured after being filled, then flips below
         # the element when there is no room above and clamps to the viewport width.
         "function toggleHelp(){document.body.classList.toggle('help-mode');"
-        "var tp=document.getElementById('help-tip');if(tp)tp.style.display='none';"
-        "paintHelp();}"
-        # paintHelp lays a persistent label over every VISIBLE [data-help] at once — the
-        # 'show all hints' mode. Re-runs on scroll/resize/htmx swap/click so a freshly
-        # opened menu section (its panel htmx-swaps into #main) gets its hints too.
-        "function paintHelp(){"
-        "var host=document.getElementById('help-labels');"
-        "if(!document.body.classList.contains('help-mode')){if(host)host.innerHTML='';return;}"
-        "if(!host){host=document.createElement('div');host.id='help-labels';"
-        "document.body.appendChild(host);}"
-        "host.innerHTML='';"
-        "document.querySelectorAll('[data-help]').forEach(function(el){"
-        "var txt=el.getAttribute('data-help');if(!txt)return;"
-        "var r=el.getBoundingClientRect();"
-        "if((r.width===0&&r.height===0)||r.bottom<0||r.top>window.innerHeight"
-        "||r.right<0||r.left>window.innerWidth)return;"
-        "var l=document.createElement('div');l.className='help-lbl';l.textContent=txt;"
-        "host.appendChild(l);"
-        "var top=r.top-l.offsetHeight-3;if(top<2)top=r.bottom+3;"
-        "var left=Math.max(2,Math.min(r.left,window.innerWidth-l.offsetWidth-2));"
-        "l.style.top=top+'px';l.style.left=left+'px';});}"
-        "window.addEventListener('scroll',paintHelp,true);"
-        "window.addEventListener('resize',paintHelp);"
-        "document.body.addEventListener('htmx:afterSettle',paintHelp);"
-        "document.addEventListener('click',function(){"
-        "if(document.body.classList.contains('help-mode'))setTimeout(paintHelp,60);});"
+        "var tp=document.getElementById('help-tip');if(tp)tp.style.display='none';}"
         "document.addEventListener('mouseover',function(e){"
         "if(!document.body.classList.contains('help-mode'))return;"
         "var tp=document.getElementById('help-tip');if(!tp)return;"
