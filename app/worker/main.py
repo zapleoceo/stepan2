@@ -651,6 +651,12 @@ def _redis_settings() -> RedisSettings:
 
 async def _on_startup(ctx: dict) -> None:
     """Fail-fast on broken config before the worker starts pulling jobs off the queue."""
+    # ARQ configures its own logger but leaves the app logger at the default WARNING, so every
+    # logger.info() in the domain (reply timing, media backfill, stage moves) was invisible in
+    # the worker. Surface app.* at INFO (third-party stays at WARNING — no httpx/sqlalchemy spam).
+    logging.getLogger("app").setLevel(logging.INFO)
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings().validate_runtime()
 
 
