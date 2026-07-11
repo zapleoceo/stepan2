@@ -7,6 +7,7 @@ filtering lives here; all reads go through the BranchScoped repos."""
 from __future__ import annotations
 
 import logging
+import re
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -89,9 +90,13 @@ class KnowledgeService:
         blocks.append(_catalog_block(await self.products.active(), resolved_lang))
         if self.llm is not None and query:
             try:
+                # NOTE: the focus product is NO LONGER excluded from RAG. Its bulky sections
+                # (curriculum, success cases) were dropped from the slim focus block above, so
+                # RAG must be free to pull them back in when the lead asks about them. The core
+                # sections that stay in the focus block may occasionally re-rank here — a small,
+                # char-budget-bounded overlap, far cheaper than shipping the whole card always.
                 chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
-                    query, k=_FOLLOWUP_RAG_K if light else _TOP_K,
-                    thread_id=thread_id, exclude_slug=product_slug if focused else None)
+                    query, k=_FOLLOWUP_RAG_K if light else _TOP_K, thread_id=thread_id)
             except Exception:
                 # A transient broker embed failure must degrade to persona+catalog, NOT abort
                 # the whole reply — otherwise one dead embed endpoint knocks out every thread's
@@ -121,9 +126,32 @@ def _persona_block(content: str, lang: str) -> str:
     return f"[persona lang={lang}]\n{content}"
 
 
+# Focus-card sections kept ALWAYS (the facts almost every turn needs): identity, price,
+# schedule, format, the headline outcome. Everything else on the card — the full curriculum
+# module list, success cases, who-it's-for, links — is BULK the model rarely needs verbatim
+# each turn; it reaches the model via RAG (the product IS indexed) exactly when the lead asks
+# about it. Keeps the always-sent focus block ~2-3k instead of up to ~7.3k, no fact lost —
+# just deferred to on-demand retrieval. Matched on the ## heading, case-insensitive.
+_CORE_SECTION_RE = re.compile(
+    r"(essence|essensi|price|harga|biaya|invest|schedule|jadwal|durasi|duration|"
+    r"format|lokasi|location|outcome|hasil|quick facts)", re.IGNORECASE)
+
+
+def _core_card(content: str) -> str:
+    """The focus card trimmed to its CORE sections. The pre-heading preamble (title + quick
+    facts) is always kept; each `## section` is kept only if its heading is a core one."""
+    parts = re.split(r"(?m)^(?=##\s)", content or "")
+    kept: list[str] = []
+    for i, sec in enumerate(parts):
+        head = sec.splitlines()[0] if sec.strip() else ""
+        if i == 0 or not head.startswith("##") or _CORE_SECTION_RE.search(head):
+            kept.append(sec.rstrip())
+    return "\n".join(k for k in kept if k.strip())
+
+
 def _focus_block(product: Product, lang: str) -> str:
     header = f"[focus product={product.slug} lang={lang}]"
-    return f"{header}\n{product.title}\n{product.content}".rstrip()
+    return f"{header}\n{product.title}\n{_core_card(product.content)}".rstrip()
 
 
 def _catalog_block(products: list[Product], lang: str) -> str:
