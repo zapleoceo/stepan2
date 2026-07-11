@@ -117,9 +117,11 @@ def test_threads_partial_honors_open_thread_cookie(client: TestClient) -> None:
 # ─── bubble translate button: only when there is text to translate ────────────
 
 def _msg_row(mid: int, text: str, media_id=None) -> tuple:
-    # (id, direction, sent_by, text, ts, llm_info, link_url, preview_url, media_id, media_kind)
+    # (id, direction, sent_by, text, ts, llm_info, link_url, preview_url, media_id,
+    #  media_kind, media_ready, media_pending)
     return (mid, "in", "lead", text, datetime.now(UTC).replace(tzinfo=None),
-            None, None, None, media_id, "image" if media_id else None)
+            None, None, None, media_id, "image" if media_id else None,
+            bool(media_id), False)
 
 
 def test_bubble_shows_translate_button_for_text() -> None:
@@ -281,7 +283,7 @@ def test_merge_feed_orders_stage_line_after_its_reply() -> None:
     decided_at = datetime(2026, 7, 7, 11, 25, 44)
     sent_at = datetime(2026, 7, 7, 11, 26, 33)
     msg = (24376, "out", "agent", "Oke Kak, jadwalnya...", sent_at, None,
-           None, None, None, None, False)
+           None, None, None, None, None, False, False)
     event = (5575, "stage", "manager", "presenting", "bot", decided_at)
     html = _merge_feed([msg], [event], tid=1, lead_seen_at=None)
     assert html.index("Oke Kak") < html.index("sys-log")  # reply bubble renders first
@@ -377,6 +379,15 @@ def test_chat_header_includes_bot_pill() -> None:
     html = chat_header_html(8, "Bob", "new", agent_enabled=False)
     assert "OFF" in html
     assert 'hx-post="/ui/chat/8/bot-toggle"' in html
+
+
+def test_chat_header_shows_source_channel_chip() -> None:
+    from app.api._ui_html import chat_header_html
+    _set_lang("en")
+    html = chat_header_html(8, "Bob", "new", channel_kind="meta_business")
+    assert "ch-src" in html
+    assert "fa-facebook" in html                # meta_business → facebook icon
+    assert "ch-src" not in chat_header_html(8, "Bob", "new")  # no kind → no chip
 
 
 def test_bot_toggle_route_flips_flag(client: TestClient) -> None:
@@ -632,7 +643,7 @@ def test_messages_html_embeds_poll_sentinel() -> None:
     from app.api._ui_html import messages_html
     _set_lang("en")
     row = (5, "in", "lead", "Hello", datetime.now(UTC).replace(tzinfo=None),
-           None, None, None, None, None)
+           None, None, None, None, None, None, False)
     html = messages_html([row], [], 4)
     assert 'id="poll-4"' in html
     assert 'hx-get="/ui/chat/4/since/5/0/0"' in html  # cursor at last id (msg/stage/log)
@@ -643,8 +654,8 @@ def test_since_bubbles_only_render_given_rows_plus_sentinel() -> None:
     _set_lang("en")
     now = datetime.now(UTC).replace(tzinfo=None)
     rows = [
-        (10, "in", "lead", "New one", now, None, None, None, None, None),
-        (11, "out", "agent", "Reply", now, None, None, None, None, None),
+        (10, "in", "lead", "New one", now, None, None, None, None, None, None, False),
+        (11, "out", "agent", "Reply", now, None, None, None, None, None, None, False),
     ]
     html = since_bubbles_html(rows, 4, after_id=9)
     assert "New one" in html
@@ -658,10 +669,10 @@ def test_bubble_renders_media_link_preview_and_receipt() -> None:
     now = datetime.now(UTC).replace(tzinfo=None)
     rows = [
         # out image message, lead has read it → ✓✓; placeholder caption suppressed
-        (20, "out", "agent", "🖼 media", now, None, None, None, 77, "image"),
+        (20, "out", "agent", "🖼 media", now, None, None, None, 77, "image", True, False),
         # inbound shared link with preview + a bare url to linkify
         (21, "in", "lead", "see https://x.com/p", now, None,
-         "https://x.com/p", "https://cdn/prev.jpg", None, None),
+         "https://x.com/p", "https://cdn/prev.jpg", None, None, None, False),
     ]
     html = messages_html(rows, [], 4, lead_seen_at=now)
     assert 'src="/ui/media/77"' in html          # image served from media route
@@ -829,7 +840,7 @@ async def test_clear_filters_display(db_session) -> None:
     await db_session.flush()
 
     rows = await fetch_messages(db_session, th.id)
-    shown = [(r[3], bool(r[10])) for r in rows]  # (text, excluded)
+    shown = [(r[3], bool(r[12])) for r in rows]  # (text, excluded)
     # both stay visible; the pre-clear one is greyed (excluded), the post-clear one is live
     assert shown == [("msg0", True), ("msg1", False)]
 
@@ -864,7 +875,7 @@ async def test_clear_boundary_matches_llm_dialog_cutoff(db_session) -> None:
 
     rows = await fetch_messages(db_session, th.id)
     dialog = await MessageRepo(db_session, b.id).dialog(th.id, since=cutoff)
-    assert len(rows) == 1 and bool(rows[0][10]) is True  # shown but greyed (excluded)
+    assert len(rows) == 1 and bool(rows[0][12]) is True  # shown but greyed (excluded)
     assert dialog == []  # … and dropped from the LLM prompt, same boundary
 
 
@@ -947,7 +958,7 @@ def test_merge_feed_interleaves_messages_and_events_by_time() -> None:
 
     _set_lang("en")
     t0 = datetime.now(UTC).replace(tzinfo=None)
-    msg = (5, "in", "lead", "hi", t0, None, None, None, None, None)
+    msg = (5, "in", "lead", "hi", t0, None, None, None, None, None, None, False)
     evt = (1, "log", "context_cleared", None, "Dima", t0 + timedelta(seconds=1))
     html = _merge_feed([msg], [evt], 4, None)
     assert html.index("hi") < html.index("Context cleared")  # chronological order preserved

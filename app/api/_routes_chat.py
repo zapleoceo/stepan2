@@ -33,12 +33,14 @@ from app.modules.settings.service import get_settings
 
 from ._i18n import apply_lang, current_lang, t
 from ._query import (
+    fetch_message,
     fetch_messages,
     fetch_messages_since,
     fetch_pending,
     fetch_thread_events,
 )
 from ._ui_html import (
+    _bubble,
     app_shell,
     chat_block_pill_html,
     chat_bot_pill_html,
@@ -138,9 +140,11 @@ async def _build_chat_panel(
                 " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                 " l.agent_enabled, l.is_blocked,"
                 " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                " b.tz_offset_h, l.needs, l.id, l.needs_tr, l.manager_note"
+                " b.tz_offset_h, l.needs, l.id, l.needs_tr, l.manager_note,"
+                " ch.kind AS channel_kind"
                 " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                 " JOIN branch b ON b.id = l.branch_id"
+                " LEFT JOIN channel ch ON ch.id = ct.channel_id"
                 " WHERE ct.id = :tid"
             ),
             {"tid": thread_id},
@@ -158,7 +162,7 @@ async def _build_chat_panel(
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
      follower_count, following_count, last_active_at, lead_seen_at, _tz, needs,
-     lead_id, needs_tr, manager_note) = info
+     lead_id, needs_tr, manager_note, channel_kind) = info
     needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return chat_panel_html(
         thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -171,7 +175,7 @@ async def _build_chat_panel(
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs_profile,
         needs_pending=needs_pending, events=events, products=products,
-        manager_note=manager_note,
+        manager_note=manager_note, channel_kind=channel_kind,
     )
 
 
@@ -241,6 +245,20 @@ async def chat_needs_lazy(thread_id: int, request: Request) -> HTMLResponse:
 
 
 _MIME_FOR_KIND = {"image": "image/jpeg", "video": "video/mp4", "audio": "audio/mp4"}
+
+
+@router.get("/chat/bubble/{mid}", response_class=HTMLResponse)
+async def chat_bubble(mid: int, request: Request) -> HTMLResponse:
+    """Re-render one bubble in place — the pending-media placeholder polls this until the
+    attachment's bytes land (see _media_pending_html). 404 (empty) once the message is gone
+    or outside the caller's branches, which harmlessly stops the poll."""
+    allowed = allowed_branch_ids(request)
+    async with session_scope() as session:
+        row = await fetch_message(session, mid)
+    if row is None or is_branch_forbidden(row.branch_id, allowed):
+        return HTMLResponse("", status_code=404)
+    set_render_tz(row.tz_offset_h)
+    return HTMLResponse(_bubble(row, row.thread_id, row.lead_seen_at))
 
 
 @router.get("/media/{asset_id}")
@@ -448,9 +466,10 @@ async def chat_stage(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.needs, l.needs_tr, l.manager_note"
+                    " l.needs, l.needs_tr, l.manager_note, ch.kind AS channel_kind"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"
+                    " LEFT JOIN channel ch ON ch.id = ct.channel_id"
                     " WHERE ct.id = :tid"
                 ),
                 {"tid": thread_id},
@@ -463,7 +482,7 @@ async def chat_stage(
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _tz, needs, needs_tr,
-         manager_note) = info
+         manager_note, channel_kind) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         changed = stage != str(old_stage)
@@ -504,7 +523,7 @@ async def chat_stage(
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, needs=needs_profile,
         needs_pending=needs_pending, products=products,
-        manager_note=manager_note,
+        manager_note=manager_note, channel_kind=channel_kind,
     )
     # A manual stage move (this route is manager-UI-only; Stepan's own transitions never
     # render HTML) prompts for a reason, saved as the per-lead manager_note Stepan reads
@@ -537,9 +556,10 @@ async def chat_product(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.needs, l.id, l.needs_tr, l.manager_note"
+                    " l.needs, l.id, l.needs_tr, l.manager_note, ch.kind AS channel_kind"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-                    " JOIN branch b ON b.id = l.branch_id WHERE ct.id = :tid"
+                    " JOIN branch b ON b.id = l.branch_id"
+                    " LEFT JOIN channel ch ON ch.id = ct.channel_id WHERE ct.id = :tid"
                 ),
                 {"tid": thread_id},
             )
@@ -551,7 +571,7 @@ async def chat_product(
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _tz, needs,
-         lead_id, needs_tr, manager_note) = info
+         lead_id, needs_tr, manager_note, channel_kind) = info
         set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if new_slug is not None and new_slug not in {sl for sl, _ in products}:
@@ -580,7 +600,7 @@ async def chat_product(
                          follower_count=follower_count, following_count=following_count,
                          last_active_at=last_active_at, needs=needs_profile,
                          needs_pending=needs_pending, products=products,
-                         manager_note=manager_note)
+                         manager_note=manager_note, channel_kind=channel_kind)
     )
 
 
