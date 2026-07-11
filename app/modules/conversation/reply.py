@@ -47,6 +47,14 @@ _MANAGER_HANDOFF_CLOSING = (
     "Terima kasih ya Kak! Untuk ini tim kami yang akan bantu langsung - nanti dihubungi via "
     "telepon atau WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) ya 🙏"
 )
+# The sale/READY exit muted the bot like MANAGER but never guaranteed the lead a closing —
+# it relied on the model's own reply confirming next steps, which isn't guaranteed. Append
+# this on the fresh READY flip so a won lead always knows what happens next (same shape as
+# the manager closing, but about the enrollment: registration → payment during work hours).
+_READY_HANDOFF_CLOSING = (
+    "Siap Kak! Pendaftaran Kakak aku teruskan ke tim ya - nanti dihubungi via telepon atau "
+    "WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) untuk langkah pembayaran & jadwal 🙏"
+)
 # After this many lead turns the discovery gate stops forcing more questions — a lead who
 # hasn't yielded a real need by now won't from a third question; present on what we have.
 _DISCOVERY_TURN_CAP = 2
@@ -523,18 +531,21 @@ class ReplyService:
                 )
             )
         lead = await self.session.get(Lead, thread.lead_id)
-        just_muted = False
+        exit_kind: str | None = None
         if lead is not None:
-            just_muted = await self._apply_decision(lead, thread, decision)
-        if just_muted:
-            # The lead just got handed to a human — say so, instead of going silent with no
-            # explanation (thread 1023: a lead who sent a follow-up phone number 2 days after
-            # a needs_manager mute got zero acknowledgment of any kind).
+            exit_kind = await self._apply_decision(lead, thread, decision)
+        if exit_kind is not None:
+            # The lead just exited the funnel (manager hand-off or a won deal) — say what
+            # happens next instead of going silent (thread 1023: a lead who sent a follow-up
+            # phone number 2 days after a needs_manager mute got zero acknowledgment). READY
+            # relied on the model's reply confirming next steps; now it's guaranteed too.
+            closing = (_MANAGER_HANDOFF_CLOSING if exit_kind == "manager"
+                       else _READY_HANDOFF_CLOSING)
             outbox = await self.outbox.add(
                 Outbox(
                     branch_id=self.branch_id,
                     thread_id=thread_id,
-                    text=_MANAGER_HANDOFF_CLOSING,
+                    text=closing,
                     scheduled_at=base + timedelta(seconds=len(bubbles) * _BUBBLE_GAP_S),
                     llm_info=meta_line,
                 )
@@ -581,17 +592,28 @@ class ReplyService:
                 lead.phone_e164 = normalized
                 self.session.add(lead)
 
-    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> bool:
+    async def _apply_decision(self, lead: Lead, thread, decision: Decision) -> str | None:
         """Move the funnel: stage priority ready+contact → READY, needs_manager →
         MANAGER, ready w/o contact → PRESENTING, else the model's stage. An openhouse RSVP
         is a side-channel notification, not a stage transition — see _stage_for.
 
-        Returns True when the stage just flipped to MANAGER this turn (a fresh mute, not an
-        already-muted lead) — the caller appends the hand-off closing line for that case."""
+        Returns "manager" / "ready" when the stage just flipped to that exit this turn (a
+        fresh mute, not an already-exited lead) so the caller appends the matching closing
+        line; None otherwise."""
+        was_non_target = lead.lead_type == "non_target"
         self._sync_lead_fields(lead, thread, decision)
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
-            return False
+            return None
+        # Non-target terminal state: a lead already classified non_target on an EARLIER turn
+        # and STILL off-topic now (the same condition that fed _NON_TARGET_NUDGE) has had its
+        # one polite closing line — wind it down to DORMANT so a wrong-audience lead doesn't
+        # linger in the active list burning a reply every inbound. A fresh inbound with real
+        # interest still revives it (ingest._revive_bot), and the model can re-classify it.
+        if was_non_target and lead.lead_type == "non_target" \
+                and lead.stage not in HUMAN_LED_STAGES:
+            await self._soft_close_dormant(lead, thread)
+            return None
         # The bound product's kind decides deal-vs-RSVP: an event product is ALWAYS an
         # openhouse-style RSVP (notify team, bot stays on), regardless of what the model
         # guessed — the model only picks the subtype for non-event products.
@@ -605,7 +627,7 @@ class ReplyService:
         inbound = await self.messages.inbound_count(thread.id)
         new_stage = self._stage_for(decision, lead, inbound, eff_subtype)
         if new_stage == lead.stage:
-            return False
+            return None
         self.session.add(StageEvent(
             branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
             from_stage=str(lead.stage), to_stage=str(new_stage), actor="bot",
@@ -644,7 +666,11 @@ class ReplyService:
             await self._handoff(lead, thread, eff_subtype)
         self.session.add(lead)
         logger.info("branch=%d lead=%d stage → %s", self.branch_id, lead.id, new_stage)
-        return new_stage == Stage.MANAGER
+        if new_stage == Stage.MANAGER:
+            return "manager"
+        if new_stage == Stage.READY:
+            return "ready"
+        return None
 
     async def _product_kind(self, slug: str) -> str:
         row = (await self.session.execute(
@@ -669,6 +695,24 @@ class ReplyService:
         lead.agent_enabled = False
         self.session.add(lead)
         logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
+
+    async def _soft_close_dormant(self, lead: Lead, thread) -> None:
+        """A repeatedly-off-topic non_target lead: the model's polite closing line is already
+        queued this turn — now wind the funnel down to DORMANT (bot off, follow-up timer
+        cleared) so a wrong-audience lead stops occupying the active queue. Softer than
+        _hard_stop (no explicit stop demand); a fresh inbound with real interest revives it."""
+        thread.next_followup_at = None
+        self.session.add(thread)
+        if lead.stage != Stage.DORMANT:
+            self.session.add(StageEvent(
+                branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+                from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
+                actor="bot", reason="non_target",
+            ))
+            lead.stage = Stage.DORMANT
+        lead.agent_enabled = False
+        self.session.add(lead)
+        logger.info("branch=%d lead=%d non_target → dormant, bot off", self.branch_id, lead.id)
 
     @staticmethod
     def _is_ready(decision: Decision) -> bool:

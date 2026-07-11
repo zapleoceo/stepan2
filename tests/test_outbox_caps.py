@@ -204,6 +204,7 @@ async def test_permanent_send_failure_pauses_lead_dormant(db_session) -> None:
 
     lead = (await db_session.exec(_select(Lead).where(Lead.branch_id == bid))).first()
     assert lead.stage == Stage.DORMANT  # paused → drops out of threads_awaiting_reply
+    assert lead.agent_enabled is False  # bot-on/off flag consistent with the dormant stage
     thread = (await db_session.exec(
         _select(ChannelThread).where(ChannelThread.id == tid))).first()
     assert thread.next_followup_at is None  # timer cleared — no more nudges either

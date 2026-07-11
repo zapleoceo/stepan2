@@ -201,6 +201,7 @@ class OutboxSender:
             actor="system", reason=reason,
         ))
         lead.stage = Stage.DORMANT
+        lead.agent_enabled = False  # keep the bot-on/off flag consistent with the dormant stage
         thread.next_followup_at = None
         self.session.add(lead)
         self.session.add(thread)
@@ -254,6 +255,7 @@ class OutboxSender:
             actor="system", reason="followup schedule exhausted", created_at=now,
         ))
         lead.stage = Stage.DORMANT
+        lead.agent_enabled = False  # keep the bot-on/off flag consistent with the dormant stage
         self.session.add(lead)
         logger.info("branch=%d lead=%d → dormant (followups exhausted)",
                     self.branch_id, lead.id)
