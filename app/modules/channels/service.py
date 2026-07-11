@@ -69,10 +69,15 @@ class ChannelService:
             " (SELECT id FROM channel_thread WHERE channel_id = :c)", p)
         await self._exec("DELETE FROM channel_thread WHERE channel_id = :c", p)
 
-        # 2) leads now orphaned (threads on this channel were their only ones) + their refs
+        # 2) leads now orphaned (threads on this channel were their only ones) + their refs.
+        # Every table that FK-references lead.id must be cleared BEFORE the lead, or the delete
+        # aborts on a ForeignKeyViolation (this used to silently 500 the whole purge once the
+        # needs-cloud + CRM features added new lead references — the "can't delete connector"
+        # bug). Keep this list in sync with FKs to lead.id (see models.py).
         n_leads = await self._count(f"({_ORPHAN}) AS orphan", p)  # noqa: S608
-        await self._exec(f"DELETE FROM manager_alert WHERE lead_id IN ({_ORPHAN})", p)  # noqa: S608
-        await self._exec(f"DELETE FROM stage_event WHERE lead_id IN ({_ORPHAN})", p)  # noqa: S608
+        for tbl in ("manager_alert", "stage_event", "crm_lead_state",
+                    "lead_need_tag", "need_lead_state"):
+            await self._exec(f"DELETE FROM {tbl} WHERE lead_id IN ({_ORPHAN})", p)  # noqa: S608
         await self._exec(f"DELETE FROM lead WHERE id IN ({_ORPHAN})", p)  # noqa: S608
 
         # 3) the channel itself
