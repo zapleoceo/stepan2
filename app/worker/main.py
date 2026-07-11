@@ -239,10 +239,10 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
     # set keyed by start-time is leak-proof: a crashed job's marker ages out of the count.
     await redis.zremrangebyscore(_REPLY_INFLIGHT, 0, now - settings().reply_job_timeout_s)
     await redis.zadd(_REPLY_INFLIGHT, {marker: now})
+    llm = BrokerLLM()  # created up front so the failure log can always report its call count
     try:
         if await redis.zcard(_REPLY_INFLIGHT) > settings().reply_max_concurrency:
             return False  # over cap → leave slots for other tasks; re-dispatched next tick
-        llm = BrokerLLM()
         async with session_scope() as session:
             if not await _platform_agent_on(session):
                 return False
@@ -255,12 +255,22 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                 branch_settings=cfg, notifier=_build_notifier(cfg),
                 broker_budget_s=settings().reply_broker_budget_s,
             )
+            started = time.time()
             decision = await reply.decide(thread_id)
             if decision is None:
+                logger.info(
+                    "reply branch=%d thread=%d held in %.1fs (%d broker calls, no reply)",
+                    branch_id, thread_id, time.time() - started, getattr(llm, "calls", 0))
                 return False
-            return await reply.enqueue_reply(thread_id, decision) is not None
+            queued = await reply.enqueue_reply(thread_id, decision) is not None
+            logger.info(
+                "reply branch=%d thread=%d %s in %.1fs (%d broker calls incl. retries)",
+                branch_id, thread_id, "queued" if queued else "skipped",
+                time.time() - started, getattr(llm, "calls", 0))
+            return queued
     except Exception:
-        logger.exception("reply failed branch=%d thread=%d", branch_id, thread_id)
+        logger.exception("reply failed branch=%d thread=%d after %d broker calls",
+                         branch_id, thread_id, getattr(llm, "calls", 0))
         return False
     finally:
         await redis.zrem(_REPLY_INFLIGHT, marker)
