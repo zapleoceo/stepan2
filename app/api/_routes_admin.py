@@ -38,6 +38,8 @@ from ._query import (
     fetch_segment_dist,
     fetch_stage_flow,
     fetch_stage_reach,
+    fetch_turn_histogram,
+    log_window_keys,
 )
 from ._routes_chat import _actor_name
 from ._ui_panels import (
@@ -384,15 +386,21 @@ _LOG_PAGE_SIZE = 50
 
 
 @router.get("/settings/log", response_class=HTMLResponse)
-async def broker_log_page(request: Request, page: int = 0) -> HTMLResponse:
+async def broker_log_page(request: Request, page: int = 0, window: str = "24h") -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
     page = max(0, page)
+    windows = log_window_keys()
+    if window not in windows:
+        window = "24h"
     async with session_scope() as session:
         rows, total = await fetch_broker_log(session, branch_ids, page, _LOG_PAGE_SIZE)
         seen_ids = {r.branch_id for r in rows if r.branch_id is not None}
         tz_by_branch = await fetch_branch_tz(session, list(seen_ids))
-    return HTMLResponse(broker_log_panel_html(rows, page, _LOG_PAGE_SIZE, total, tz_by_branch))
+        buckets, turns, _since = await fetch_turn_histogram(session, branch_ids, window)
+    hist = (buckets, turns, window, windows)
+    return HTMLResponse(
+        broker_log_panel_html(rows, page, _LOG_PAGE_SIZE, total, tz_by_branch, hist))
 
 
 @router.post("/settings/save", response_class=HTMLResponse)

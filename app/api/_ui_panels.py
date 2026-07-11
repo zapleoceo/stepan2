@@ -1962,8 +1962,43 @@ def _log_pager(page: int, size: int, total: int) -> str:
     )
 
 
+def _log_histogram_html(
+    buckets: list[float], turns: int, window: str, windows: list[str],
+) -> str:
+    """Micro period-buttons (1h/4h/12h/24h/7d) + a mini bar histogram of total end-to-end
+    seconds per time bucket over the chosen window — a load/slowness sparkline for the log."""
+    btns = "".join(
+        (f'<span class="btn-sm" style="background:#3a4657;color:#fff;cursor:default">{w}</span>'
+         if w == window else
+         f'<button class="btn-sm" hx-get="/ui/settings/log?page=0&window={w}"'
+         f' hx-target="#main">{w}</button>')
+        for w in windows
+    )
+    peak = max(buckets) if buckets else 0.0
+    total = sum(buckets)
+    if peak <= 0:
+        bars = '<span style="color:#6b7685;font-size:.72rem">нет данных за период</span>'
+    else:
+        def _bar(v: float) -> str:
+            h = max(2, v / peak * 34)
+            color = "#c0563a" if v >= peak * 0.66 else "#5b7fa6" if v >= peak * 0.33 else "#8aa0b8"
+            return (f'<div title="{v:.0f}s" style="flex:1;min-width:2px;height:{h:.0f}px'
+                    f';background:{color};border-radius:1px 1px 0 0"></div>')
+        bars = (f'<div style="display:flex;align-items:flex-end;gap:1px;height:38px;flex:1">'
+                f'{"".join(_bar(v) for v in buckets)}</div>')
+    summary = (f'<span style="color:#6b7685;font-size:.72rem;white-space:nowrap">'
+               f'Σ end-to-end <b style="color:#3a4657">{total:.0f}s</b> · {turns} ходов · '
+               f'пик {peak:.0f}s</span>')
+    return (
+        f'<div style="display:flex;align-items:center;gap:.5rem;margin:.4rem 0 .7rem">'
+        f'<div style="display:flex;gap:.25rem">{btns}</div>'
+        f'{bars}{summary}</div>'
+    )
+
+
 def broker_log_panel_html(
     rows: list, page: int, size: int, total: int, tz_by_branch: dict[int, int] | None = None,
+    hist: tuple[list[float], int, str, list[str]] | None = None,
 ) -> str:
     title = _h.escape(t("log.title"))
     intro = _h.escape(t("log.intro"))
@@ -1985,10 +2020,12 @@ def broker_log_panel_html(
         f'<th style="text-align:right">{_h.escape(t("log.cost"))}</th>'
         f'<th style="text-align:right">{_h.escape(t("log.dur"))}</th></tr>'
     )
+    hist_html = _log_histogram_html(*hist) if hist is not None else ""
     return (
         f'<div class="ch"><span class="ch-n">{title}</span></div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{intro}</div>'
+        f'{hist_html}'
         f'{_log_pager(page, size, total)}'
         f'<table class="tbl"><thead>{head}</thead><tbody>{body}</tbody></table>'
         f'{_log_pager(page, size, total)}'
