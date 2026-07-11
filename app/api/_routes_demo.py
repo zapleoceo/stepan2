@@ -5,6 +5,7 @@ demo persona and returns Stepan's reply. Deliberately decoupled from the branch 
 pipeline (whose prompt is EdTech-specific) so this can't touch real sales."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict, deque
@@ -13,6 +14,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.adapters.llm.broker import BrokerLLM
+from app.api._demo_lead import maybe_notify
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -119,8 +121,10 @@ _SYSTEM = (
     "the humans close the hot ones. Handoff, not replacement.\n"
     "- 'Is my data safe?' -> Yes; you work only from their approved facts and hand control to "
     "their team. Honest and brief; defer specifics to a call.\n"
-    "- 'How do I get you / start?' -> Delighted — quickest path is a short call or drop a contact "
-    "here and the team reaches out. (This is the moment to gently close.)\n"
+    "- 'How do I get you / start?' -> Delighted — this is the moment to gently close: ask for "
+    "the best way to reach them — WhatsApp, Telegram, or email — and confirm the team will "
+    "message them there shortly. Once they give a contact AND want to move forward, thank them "
+    "and tell them they're all set; don't keep re-asking.\n"
     "\n"
     "== WHEN THE LEAD ISN'T A REAL FIT (or is clearly joking / trolling) ==\n"
     "Don't loop discovery forever. If after a couple of exchanges they have no business, no way "
@@ -188,4 +192,8 @@ async def demo_chat(request: Request) -> JSONResponse:
                              attempt + 1, _ATTEMPTS, type(exc).__name__)
     finally:
         _inflight -= 1
+    if reply:
+        # Background (don't delay the reply): if this turn tipped the visitor into ready-to-buy
+        # with a contact, DM the owner. maybe_notify self-gates + never raises.
+        asyncio.create_task(maybe_notify([*history, {"role": "assistant", "content": reply}]))
     return JSONResponse({"reply": reply or _FALLBACK})
