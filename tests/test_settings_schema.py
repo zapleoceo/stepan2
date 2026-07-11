@@ -173,6 +173,8 @@ def test_current_value_overrides_default() -> None:
 def test_cap_usage_badge_shown_when_provided() -> None:
     """Live usage under the per-connector hourly_cap/daily_cap — never hardcoded, only rendered
     when the channel editor computed it and passed it in."""
+    from app.api._i18n import _lang
+    _lang.set("en")  # the "cap reached" label reads the lang contextvar, not the arg — pin it
     html = channel_settings_html(
         "instagram", {"hourly_cap": "150", "daily_cap": "800"}, "en", 5,
         cap_usage={"hourly_cap": (150, 150), "daily_cap": (310, 800)})
