@@ -179,3 +179,15 @@ def test_ad_product_map_rejects_without_single_branch() -> None:
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.post("/ui/ads/AD1/product", data={"product": "vibe_coding"})
     assert resp.status_code == 400
+
+
+def test_connector_chips_flip_strikethrough_on_click() -> None:
+    # Regression: switching the connector filter to server-side (#tl-only swap) stopped the
+    # chip bar from re-rendering, so the struck-through 'off' state only showed after F5.
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.get("/ui/inbox?kind=meta_business")
+    assert resp.status_code == 200
+    assert "function kindChip" in resp.text        # client-side flip helper is defined
+    assert "kindChip(this)" in resp.text           # each chip flips its state on click
+    assert "chk-kind on" in resp.text              # the selected source is highlighted
+    assert "chk-kind off" in resp.text             # the others are struck through

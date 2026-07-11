@@ -107,9 +107,12 @@ _CSS = (
     ".chk-kind{background:none;border:1px solid #2d3748;border-radius:5px;padding:.15rem .4rem;"
     "cursor:pointer;font-size:.82rem;line-height:1}"
     ".chk-kind.on{border-color:#3a4759}"
-    ".chk-kind.off{opacity:.35;position:relative}"
-    ".chk-kind.off::after{content:'';position:absolute;left:10%;right:10%;top:50%;"
-    "border-top:1.5px solid #e8eef4}"
+    # 'off' = this source is filtered out: dim ONLY the icon (opacity on the button would fade
+    # the strike line too) and draw a crisp centred strikethrough over it.
+    ".chk-kind.off{position:relative}"
+    ".chk-kind.off i{opacity:.4}"
+    ".chk-kind.off::after{content:'';position:absolute;left:8%;right:8%;top:50%;"
+    "border-top:2px solid #c9d3de;transform:translateY(-50%)}"
     ".ad-filter{display:flex;align-items:center;gap:.4rem;padding:.35rem .8rem;flex-shrink:0;"
     "font-size:.68rem;color:#8899aa;background:#1a2230;border-bottom:1px solid #2d3748}"
     ".ad-filter-id{font-family:ui-monospace,monospace;color:#4da6ff;font-size:.64rem}"
@@ -1637,6 +1640,14 @@ def app_shell(
         "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
         "var s=e.getAttribute('data-search')||'';"
         "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
+        # Instant connector-chip state: clicking the active chip clears the filter (all neutral);
+        # clicking another makes it 'on' and struck-through 'off' on the rest. The hx-get still
+        # reloads #tl server-side; this only fixes the chip bar's visual state, which #tl won't.
+        "function kindChip(btn){var was=btn.classList.contains('on');"
+        "var all=btn.parentNode.querySelectorAll('.chk-kind');"
+        "all.forEach(function(b){b.classList.remove('on');b.classList.remove('off');});"
+        "if(!was){btn.classList.add('on');"
+        "all.forEach(function(b){if(b!==btn)b.classList.add('off');});}}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
         "function smartScroll(m){if(!m)return;"
         "var near=m.scrollHeight-m.scrollTop-m.clientHeight<150;"
@@ -1910,8 +1921,12 @@ def app_shell(
             thr = f"/ui/threads?{_base_params}" if active else f"/ui/threads?{_base_amp}kind={k}"
             push = f"/ui/inbox?{_base_params}" if active else f"/ui/inbox?{_base_amp}kind={k}"
             cls = "chk-kind on" if active else ("chk-kind off" if kind else "chk-kind")
+            # onclick flips the on/off (strikethrough) state instantly; the hx-get reloads only
+            # #tl (server-side filter), which does NOT re-render this chip bar, so without the
+            # client-side flip the struck-through state only appeared after a full reload.
             return (
                 f'<button type="button" class="{cls}" title="{_h.escape(lbl)}"'
+                f' onclick="kindChip(this)"'
                 f' hx-get="{thr.rstrip("?")}" hx-target="#tl" hx-swap="innerHTML"'
                 f' hx-push-url="{push.rstrip("?")}">'
                 f'<i class="{icon}" style="color:{color}"></i></button>'
