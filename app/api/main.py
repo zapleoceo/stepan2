@@ -128,6 +128,12 @@ def create_app() -> FastAPI:
         from app.api._landing import landing_html  # noqa: PLC0415
         return HTMLResponse(landing_html())
 
+    @app.get("/privacy", include_in_schema=False, response_class=HTMLResponse)
+    async def privacy() -> HTMLResponse:
+        # Public privacy policy (required by Meta App Review; must be reachable without auth).
+        from app.api._privacy import privacy_html  # noqa: PLC0415
+        return HTMLResponse(privacy_html())
+
     @app.get("/admin", include_in_schema=False)
     async def admin_root() -> RedirectResponse:
         return RedirectResponse(url="/ui/inbox", status_code=302)
