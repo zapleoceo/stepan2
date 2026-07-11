@@ -156,3 +156,27 @@ async def test_log_renders_each_branch_in_its_own_local_time(db_session) -> None
     html = broker_log_panel_html(list(rows), 0, 50, total, tz_by_branch)
     assert "07-03 17:00:00" in html  # Jakarta: 10:00 UTC + 7h
     assert "07-03 10:00:00" in html  # UTC branch: unshifted
+
+
+async def test_log_groups_one_threads_calls_into_a_turn_with_end_to_end(db_session) -> None:
+    """The calls of one reply (embed + chat + guard verify + a regen) all share a thread and
+    happen within seconds — they render as ONE turn block with an end-to-end wall-clock."""
+    base = _NOW
+    # one turn on thread 500: 4 calls spanning ~12s (0s..10s start + 2s last latency)
+    for i, (off, lat) in enumerate([(0, 300), (3, 5000), (8, 200), (10, 2000)]):
+        db_session.add(BrokerLog(
+            request_id=f"t{i}", branch_id=7, thread_id=500, kind="reply",
+            capability="chat:smart", model="v/m", tokens_in=100, tokens_out=20,
+            cost_usd=0.0, latency_ms=lat, ok=True, created_at=base + timedelta(seconds=off)))
+    # a SEPARATE turn on the same thread, an hour later → its own group
+    db_session.add(BrokerLog(
+        request_id="later", branch_id=7, thread_id=500, kind="reply", capability="chat:fast",
+        model="v/m", ok=True, latency_ms=800, created_at=base + timedelta(hours=1)))
+    await db_session.flush()
+
+    rows, total = await fetch_broker_log(db_session, [7], page=0, size=50)
+    html = broker_log_panel_html(list(rows), 0, 50, total)
+    assert "4 calls" in html            # the burst grouped as one turn
+    assert "end-to-end" in html         # aggregated wall-clock shown
+    assert "12.0s" in html              # 10s last-start + 2s latency − 0s first-start
+    assert html.count("🧵") == 1        # only the multi-call turn gets a header, not the singleton

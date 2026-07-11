@@ -1861,7 +1861,53 @@ def _log_kind_label(kind: str | None) -> str:
     return row.get(current_lang(), row.get("en", kind)) if row else kind
 
 
-def _log_row(r: object, tz_by_branch: dict[int, int]) -> str:
+def _group_broker_rows(rows: list) -> list[list]:
+    """Cluster consecutive broker calls of the SAME thread within a short window into one
+    'turn' (one reply/followup = an embed + the chat + guard verify + any regens). Rows are
+    newest-first; a same-thread gap over the window (or a rows-without-thread call) starts a
+    new cluster. Threads interleave in time, so a cluster pulls its calls together visually."""
+    clusters: list[list] = []
+    seen: dict[int, tuple[int, object]] = {}  # thread_id -> (cluster index, its last dt)
+    window = timedelta(seconds=300)
+    for r in rows:
+        tid, dt = r.thread_id, _as_dt(r.created_at)
+        prev = seen.get(tid) if tid is not None else None
+        if prev is not None and dt is not None and prev[1] is not None \
+                and timedelta() <= (prev[1] - dt) <= window:
+            clusters[prev[0]].append(r)
+        else:
+            clusters.append([r])
+            prev = (len(clusters) - 1, dt)
+        if tid is not None:
+            seen[tid] = (prev[0], dt)
+    return clusters
+
+
+def _log_group_header(cluster: list, tz_by_branch: dict[int, int]) -> str:
+    """Summary band above a multi-call turn: thread, call count, END-TO-END wall-clock across
+    all the calls, total tokens/cost, and a fail count — the per-reply view the flat rows lack."""
+    tid = cluster[0].thread_id
+    dts = [d for d in (_as_dt(r.created_at) for r in cluster) if d is not None]
+    ends = [d + timedelta(milliseconds=int(r.latency_ms or 0))
+            for r, d in zip(cluster, dts, strict=False)]
+    span = (max(ends) - min(dts)).total_seconds() if dts else 0.0
+    tok = sum(int(r.tokens_in or 0) + int(r.tokens_out or 0) for r in cluster)
+    cost = sum(float(r.cost_usd or 0) for r in cluster)
+    fails = sum(1 for r in cluster if not r.ok)
+    cost_s = "free" if not cost else f"${cost:.4f}"
+    fail_s = (f' · <span class="st-pill s-fail">{fails} fail</span>') if fails else ""
+    chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="true"'
+            f' href="/ui/inbox" onclick="setOpenThread({tid})">#{tid}</a>')
+    return (
+        f'<tr style="background:rgba(120,140,170,.10)">'
+        f'<td colspan="9" style="font-size:.72rem;color:#6b7685;padding:.25rem .5rem">'
+        f'🧵 {chat} · {len(cluster)} calls · end-to-end '
+        f'<b style="color:#3a4657">{span:.1f}s</b> · {tok} tok · {_h.escape(cost_s)}{fail_s}'
+        f'</td></tr>'
+    )
+
+
+def _log_row(r: object, tz_by_branch: dict[int, int], grouped: bool = False) -> str:
     req, tid, kind, cap = r.request_id, r.thread_id, r.kind, r.capability
     model, ti, to, cost = r.model, r.tokens_in, r.tokens_out, r.cost_usd
     lat, ok, err, created = r.latency_ms, r.ok, r.error, r.created_at
@@ -1879,7 +1925,11 @@ def _log_row(r: object, tz_by_branch: dict[int, int]) -> str:
     model_s = _h.escape((model or "—").split("/")[-1])
     fail = "" if ok else ' <span class="st-pill s-fail">fail</span>'
     title = f' title="{_h.escape(str(err)[:300])}"' if err else ""
-    dim = "" if ok else ' style="opacity:.6"'
+    styles = "" if ok else "opacity:.6;"
+    # a member of a multi-call turn gets a left accent so the group reads as one block
+    if grouped:
+        styles += "border-left:3px solid rgba(120,140,170,.5);"
+    dim = f' style="{styles}"' if styles else ""
     return (
         f'<tr{dim}{title}>'
         f'<td style="font-family:ui-monospace,monospace;font-size:.68rem">{rid}</td>'
@@ -1918,7 +1968,14 @@ def broker_log_panel_html(
     title = _h.escape(t("log.title"))
     intro = _h.escape(t("log.intro"))
     tz = tz_by_branch or {}
-    body = "".join(_log_row(r, tz) for r in rows) or (
+    parts: list[str] = []
+    for cluster in _group_broker_rows(rows):
+        if len(cluster) > 1:
+            parts.append(_log_group_header(cluster, tz))
+            parts.extend(_log_row(r, tz, grouped=True) for r in cluster)
+        else:
+            parts.append(_log_row(cluster[0], tz))
+    body = "".join(parts) or (
         f'<tr><td colspan="9" style="color:#4a5568">{_h.escape(t("log.empty"))}</td></tr>')
     head = (
         f'<tr><th>ID</th><th>{_h.escape(t("log.when"))}</th>'
