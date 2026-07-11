@@ -127,10 +127,11 @@ async def test_live_reply_regenerates_a_near_duplicate_question(db_session) -> N
     assert decision.reply == "Kalau boleh tau, budget-nya kira-kira berapa ya Kak?"
 
 
-async def test_live_reply_hands_off_if_still_duplicate_after_guard_regen(db_session) -> None:
+async def test_live_reply_clarifies_if_still_duplicate_after_guard_regen(db_session) -> None:
     """Same precedent as followup.py's post-guard re-check, but a live reply can't just drop
-    the send like a nudge can — fall back to a safe hand-off instead of resending a
-    duplicate."""
+    the send like a nudge can. A repeat is a STYLE dead-end, not a knowledge gap — ask the
+    lead to narrow down WITHOUT summoning a manager (threads 2541/2566, false SMM
+    escalations); needs_manager stays whatever the model itself decided."""
     from app.modules.conversation import guard
 
     bid, tid = await _thread_with_turns(db_session, 1)
@@ -161,5 +162,5 @@ async def test_live_reply_hands_off_if_still_duplicate_after_guard_regen(db_sess
     llm = _ScriptLLM()
     decision = await ReplyService(
         db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
-    assert decision.reply == guard.SAFE_FALLBACK
-    assert decision.needs_manager is True
+    assert decision.reply == guard.CLARIFY_FALLBACK
+    assert decision.needs_manager is False

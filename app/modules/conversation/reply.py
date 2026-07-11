@@ -438,16 +438,19 @@ class ReplyService:
         # guard_decision's own regen (for an UNRELATED violation) is never re-checked against
         # dialog history, so it can silently reintroduce the exact duplicate rejected above —
         # same precedent as followup.py. A live reply can't just drop the send like a nudge
-        # can, so fall back to the SAFE_FALLBACK + hand-off instead of resending a duplicate.
+        # can, so ask the lead to narrow down instead of resending a duplicate. A repeat is a
+        # STYLE dead-end, not a knowledge gap — don't summon a manager for it (that was the
+        # top false-escalation driver on terse SMM threads 2541/2566); leave needs_manager to
+        # the model's own decision.
         if decision.reply:
             _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
             if post_guard_ratio >= _DUPLICATE_RATIO:
                 logger.warning(
                     "%s: branch=%d thread=%d still near-duplicate after guard regen "
-                    "(ratio=%.2f) → hand-off", workflow, self.branch_id, thread_id,
+                    "(ratio=%.2f) → clarify", workflow, self.branch_id, thread_id,
                     post_guard_ratio)
                 from dataclasses import replace  # noqa: PLC0415
-                decision = replace(decision, reply=guard.SAFE_FALLBACK, needs_manager=True)
+                decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
         self._last_llm_meta = meta
         if lead is not None:
             merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,

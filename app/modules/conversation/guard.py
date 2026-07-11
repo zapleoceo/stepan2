@@ -264,6 +264,14 @@ SAFE_FALLBACK = (
     "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
     "Nanti aku kabari secepatnya. Sementara itu, ada hal lain yang bisa aku bantu?")
 
+# Used when a live reply keeps converging onto a near-duplicate after a guard regen. That's
+# a style dead-end (the model can't rephrase), NOT a knowledge gap — summoning a manager here
+# wastes a human on an answerable thread (threads 2541/2566, false SMM escalations). Ask the
+# lead to narrow down instead, and leave needs_manager to the model's own call.
+CLARIFY_FALLBACK = (
+    "Biar aku bisa kasih info yang paling pas, boleh Kakak sebutkan lebih spesifik "
+    "yang mau Kakak tahu? 🙏")
+
 _VERIFY_SYSTEM = (
     "You check a sales bot's draft reply for fabrication. You get the KNOWLEDGE BASE the "
     "bot may use, then the DRAFT. List every CONCRETE factual claim in the draft that is "
