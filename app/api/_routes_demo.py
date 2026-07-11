@@ -5,13 +5,13 @@ demo persona and returns Stepan's reply. Deliberately decoupled from the branch 
 pipeline (whose prompt is EdTech-specific) so this can't touch real sales."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from collections import defaultdict, deque
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.background import BackgroundTask
 
 from app.adapters.llm.broker import BrokerLLM
 from app.api._demo_lead import maybe_notify
@@ -192,8 +192,12 @@ async def demo_chat(request: Request) -> JSONResponse:
                              attempt + 1, _ATTEMPTS, type(exc).__name__)
     finally:
         _inflight -= 1
-    if reply:
-        # Background (don't delay the reply): if this turn tipped the visitor into ready-to-buy
-        # with a contact, DM the owner. maybe_notify self-gates + never raises.
-        asyncio.create_task(maybe_notify([*history, {"role": "assistant", "content": reply}]))
-    return JSONResponse({"reply": reply or _FALLBACK})
+    # Background (don't delay the reply): if this turn tipped the visitor into ready-to-buy with
+    # a contact, DM the owner. Starlette's BackgroundTask runs AFTER the response is sent and
+    # keeps a strong reference — unlike a bare asyncio.create_task, which the GC can drop before
+    # it runs. maybe_notify self-gates + never raises.
+    bg = (
+        BackgroundTask(maybe_notify, [*history, {"role": "assistant", "content": reply}])
+        if reply else None
+    )
+    return JSONResponse({"reply": reply or _FALLBACK}, background=bg)
