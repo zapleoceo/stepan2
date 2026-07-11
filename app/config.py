@@ -38,6 +38,11 @@ class Settings(BaseSettings):
 
     # Admin/super-admin bootstrap (Telegram id of the first super_admin)
     bootstrap_super_admin: int = Field(default=0)
+    demo_notify_tg_id: int = Field(
+        default=0,
+        description="Telegram id the landing demo-chat DMs when a visitor is ready to buy and "
+                    "leaves a contact; 0 → fall back to bootstrap_super_admin. Kept in env, "
+                    "never VCS.")
     # Branch staff for the bootstrap script — a JSON list of
     # {"tg": <id>, "name": "...", "role": "branch_admin|branch_viewer"}. Kept in env, not
     # VCS, so employee Telegram ids/names aren't committed. Empty → seed only the owner.
