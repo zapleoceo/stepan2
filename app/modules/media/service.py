@@ -14,6 +14,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.adapters.db.models import MediaAsset, Message
+from app.modules.conversation.translate import translate_text
+from app.ports.llm import LLMPort
 
 # When media can NEVER be understood (dead url, permanent download reject, or a failed
 # transcription/vision call), we must move its text OFF the pending placeholder —
@@ -80,6 +82,7 @@ class MediaService:
         self, channel_id: int, downloader: MediaDownloader, limit: int,
         transcriber: Transcriber | None = None,
         describer: ImageDescriber | None = None,
+        translator: LLMPort | None = None,
     ) -> int:
         """Download bytes for the media stub ingest attached to each pending message.
 
@@ -121,11 +124,17 @@ class MediaService:
             # so decide()'s media hold releases and the thread never freezes (the bot answers
             # and asks the lead to type). The bytes are saved either way — no re-download.
             if stub.kind == "audio" and transcriber is not None:
-                if not await self._transcribe_voice(msg, data, transcriber):
+                if await self._transcribe_voice(msg, data, transcriber):
+                    await self._recache_translation(msg, translator)
+                else:
                     self._release_voice_hold(msg)
+                    msg.tr_text = None
             elif stub.kind == "image" and describer is not None:
-                if not await self._describe_image(msg, data, stub.mime, describer):
+                if await self._describe_image(msg, data, stub.mime, describer):
+                    await self._recache_translation(msg, translator)
+                else:
                     self._release_image_hold(msg)
+                    msg.tr_text = None
             self.session.add_all([stub, msg])
             await self.session.flush()
             done += 1
@@ -133,6 +142,28 @@ class MediaService:
             logger.info("media backfill branch=%d channel=%d: %d assets",
                         self.branch_id, channel_id, done)
         return done
+
+    async def _recache_translation(self, msg: Message, translator: LLMPort | None) -> None:
+        """The transcript/caption just replaced the placeholder, so any cached tr_text is a
+        translation of the OLD placeholder — drop it. Then translate the real content into the
+        cache (Russian, the operator base) so the chat log shows it without a lazy round-trip.
+        On failure leave tr_text NULL — the on-view translate path retries."""
+        msg.tr_text = None
+        if translator is None:
+            return
+        body = (msg.text or "").strip()
+        for mark in ("🎤 ", "🖼 "):  # translate the words, not the media marker
+            if body.startswith(mark):
+                body = body[len(mark):]
+                break
+        try:
+            tr = await translate_text(translator, body)
+        except Exception as exc:  # noqa: BLE001 — translation is best-effort, never block backfill
+            logger.warning("media translate failed branch=%d msg=%d: %s",
+                           self.branch_id, msg.id, exc)
+            return
+        if tr:
+            msg.tr_text = tr
 
     def _release_voice_hold(self, msg: Message) -> None:
         """A voice note we've given up on must not keep its '🎤 voice' placeholder, or decide()
