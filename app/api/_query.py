@@ -413,6 +413,66 @@ async def fetch_broker_log(
     return list(rows), int(total)
 
 
+_LOG_WINDOWS: dict[str, timedelta] = {
+    "1h": timedelta(hours=1), "4h": timedelta(hours=4), "12h": timedelta(hours=12),
+    "24h": timedelta(days=1), "7d": timedelta(days=7),
+}
+_TURN_GAP = timedelta(seconds=300)  # same-thread calls within this = one turn (UI grouping)
+_HIST_BUCKETS = 24
+
+
+def log_window_keys() -> list[str]:
+    return list(_LOG_WINDOWS)
+
+
+async def fetch_turn_histogram(
+    session: AsyncSession, branch_ids: list[int] | None, window_key: str,
+) -> tuple[list[float], int, datetime]:
+    """End-to-end seconds per time bucket over the window, for the log-header histogram.
+
+    Broker calls are grouped into per-thread TURNS (a same-thread gap over _TURN_GAP starts a
+    new turn); each turn's wall-clock (last finish − first start) lands in the bucket of its
+    start. Returns (bucket_totals_seconds, turn_count, since)."""
+    from app.adapters.db.models import BrokerLog  # noqa: PLC0415 (avoid import cycle)
+    span = _LOG_WINDOWS.get(window_key, _LOG_WINDOWS["24h"])
+    since = utc_now() - span
+    q = select(BrokerLog.thread_id, BrokerLog.created_at, BrokerLog.latency_ms).where(
+        BrokerLog.created_at >= since,
+        BrokerLog.thread_id.is_not(None),  # type: ignore[union-attr]
+    )
+    if branch_ids:
+        q = q.where(BrokerLog.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    q = q.order_by(BrokerLog.thread_id, BrokerLog.created_at)  # type: ignore[attr-defined]
+    rows = (await session.execute(q)).all()
+
+    buckets = [0.0] * _HIST_BUCKETS
+    bucket_span = span / _HIST_BUCKETS
+    turns = 0
+    cur_tid: int | None = None
+    t_start: datetime | None = None
+    t_end: datetime | None = None
+    prev: datetime | None = None
+
+    def flush() -> None:
+        nonlocal turns
+        if t_start is None or t_end is None:
+            return
+        idx = min(max(int((t_start - since) / bucket_span), 0), _HIST_BUCKETS - 1)
+        buckets[idx] += (t_end - t_start).total_seconds()
+        turns += 1
+
+    for tid, created, lat in rows:
+        end = created + timedelta(milliseconds=int(lat or 0))
+        if tid != cur_tid or (prev is not None and created - prev > _TURN_GAP):
+            flush()
+            cur_tid, t_start, t_end = tid, created, end
+        else:
+            t_end = max(t_end, end) if t_end is not None else end
+        prev = created
+    flush()
+    return buckets, turns, since
+
+
 async def fetch_branch_tz(session: AsyncSession, branch_ids: list[int]) -> dict[int, int]:
     """tz_offset_h per branch id — lets a multi-branch view (e.g. the broker log, which
     spans every branch for the owner) render each row in ITS OWN branch-local time."""

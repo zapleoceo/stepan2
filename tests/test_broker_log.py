@@ -16,7 +16,12 @@ import pytest  # noqa: E402
 
 from app.adapters.db.models import Branch, BrokerLog  # noqa: E402
 from app.adapters.llm import broker as broker_mod  # noqa: E402
-from app.api._query import fetch_branch_tz, fetch_broker_log  # noqa: E402
+from app.api._query import (  # noqa: E402
+    fetch_branch_tz,
+    fetch_broker_log,
+    fetch_turn_histogram,
+    log_window_keys,
+)
 from app.api._ui_panels import broker_log_panel_html  # noqa: E402
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
@@ -180,3 +185,30 @@ async def test_log_groups_one_threads_calls_into_a_turn_with_end_to_end(db_sessi
     assert "end-to-end" in html         # aggregated wall-clock shown
     assert "12.0s" in html              # 10s last-start + 2s latency − 0s first-start
     assert html.count("🧵") == 1        # only the multi-call turn gets a header, not the singleton
+
+
+async def test_turn_histogram_sums_end_to_end_per_bucket(db_session) -> None:
+    """The header histogram buckets each turn's end-to-end wall-clock. Two turns in-window on
+    one thread → their spans sum into the total; an out-of-window call is excluded."""
+    now = _NOW
+    # turn A: 2 calls spanning 10s, ~30 min ago
+    a_base = now - timedelta(minutes=30)
+    for i, off in enumerate([0, 8]):
+        db_session.add(BrokerLog(
+            request_id=f"a{i}", branch_id=7, thread_id=800, kind="reply", capability="chat:smart",
+            ok=True, latency_ms=2000, created_at=a_base + timedelta(seconds=off)))
+    # turn B: 1 call, ~5 min ago (its own turn — far from A)
+    db_session.add(BrokerLog(
+        request_id="b0", branch_id=7, thread_id=800, kind="reply", capability="chat:fast",
+        ok=True, latency_ms=3000, created_at=now - timedelta(minutes=5)))
+    # out of the 1h window — excluded
+    db_session.add(BrokerLog(
+        request_id="old", branch_id=7, thread_id=800, kind="reply", capability="chat:fast",
+        ok=True, latency_ms=9000, created_at=now - timedelta(hours=3)))
+    await db_session.flush()
+
+    buckets, turns, _since = await fetch_turn_histogram(db_session, [7], "1h")
+    assert turns == 2                       # A and B; the 3h-old call is outside the window
+    # A span = 8s start + 2s latency = 10s; B span = 3s → total 13s
+    assert round(sum(buckets)) == 13
+    assert "1h" in log_window_keys() and "7d" in log_window_keys()
