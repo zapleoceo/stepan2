@@ -301,6 +301,7 @@ _CSS = (
     ".ch{padding:.56rem .9rem;border-bottom:1px solid #2d3748;background:#141925;"
     "display:flex;align-items:center;gap:.55rem;flex-shrink:0;flex-wrap:wrap}"
     ".ch-n{font-weight:600;color:#e8eef4;font-size:.9rem}"
+    ".ch-src{font-size:.82rem;margin-left:.15rem}"
     ".ch-sub{font-size:.67rem;color:#4a5568;font-family:monospace}"
     ".msgs{flex:1;overflow-y:auto;padding:.72rem .95rem;display:flex;"
     "flex-direction:column;gap:.3rem}"
@@ -424,6 +425,9 @@ _CSS = (
     ".htmx-indicator{display:none}"
     ".htmx-request .htmx-indicator,.htmx-request.htmx-indicator{display:inline-block}"
     ".msg-prev{max-width:220px;max-height:280px;border-radius:8px;display:block;margin-top:.25rem}"
+    ".media-load{width:120px;height:90px;margin-top:.25rem;border-radius:8px;"
+    "background:#222a38;display:flex;align-items:center;justify-content:center;"
+    "color:#6b7685;font-size:1rem}"
     ".rcpt{opacity:.55;font-size:.7rem}.rcpt.seen{color:#4da3ff;opacity:.95}"
     ".pres.on{color:#51cf66}.ti-fl{color:#6b7685;font-size:.62rem}"
     ".ti-br{color:#8b98a5;font-size:.6rem;margin-left:.3rem;"
@@ -910,6 +914,18 @@ def _media_html(media_id: int, media_kind: str | None) -> str:
     )
 
 
+def _media_pending_html(mid: int) -> str:
+    """Placeholder for an attachment whose bytes are still backfilling. It polls its own
+    bubble (/ui/chat/bubble/{mid}) every few seconds and swaps itself for the real media
+    once ready — the append-only message poll never revisits an already-rendered bubble, so
+    without this a late download stays invisible until a manual reload."""
+    return (
+        f'<div class="media-load" hx-get="/ui/chat/bubble/{mid}"'
+        f' hx-trigger="load delay:4s" hx-target="#bb-{mid}" hx-swap="outerHTML"'
+        f' hx-push-url="false"><i class="fa-solid fa-spinner fa-spin"></i></div>'
+    )
+
+
 def _link_preview_html(link_url: str | None, preview_url: str | None) -> str:
     """Preview thumbnail for a shared post/link (fbcdn URL degrades gracefully)."""
     if not (preview_url and preview_url.lower().startswith(("http://", "https://"))):
@@ -931,17 +947,20 @@ def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str
 
 
 def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
-    mid, direction, sent_by, text, ts, llm_info, link_url, preview_url, media_id, media_kind = \
-        row[:10]  # type: ignore[misc]
-    excluded = bool(row[10]) if len(row) > 10 else False  # greyed, out of Stepan's context
+    (mid, direction, sent_by, text, ts, llm_info, link_url, preview_url,
+     media_id, media_kind, media_ready, media_pending) = row[:12]  # type: ignore[misc]
+    excluded = bool(row[12]) if len(row) > 12 else False  # greyed, out of Stepan's context
     ex = " bb-ex" if excluded else ""
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
     time_str = _fmt_time(ts)
-    caption = "" if (media_id and str(text or "").strip() in _MEDIA_PH) else _linkify(text)
+    ready = bool(media_id and media_ready)
+    caption = "" if (ready and str(text or "").strip() in _MEDIA_PH) else _linkify(text)
     att = ""
-    if media_id:
+    if ready:
         att += _media_html(int(media_id), media_kind)
+    elif media_id and media_pending:
+        att += _media_pending_html(int(mid))
     att += _link_preview_html(link_url, preview_url)
     body = (
         f'<div class="bt" id="bt-{mid}">{caption}</div>' if caption else ""
@@ -1239,6 +1258,7 @@ def chat_header_html(
     needs_pending: bool = False,
     products: list | None = None,
     manager_note: str | None = None,
+    channel_kind: str | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -1319,6 +1339,10 @@ def chat_header_html(
         f'<div class="ch-meta">{"  ·  ".join(meta_parts)}</div>'
         if meta_parts else ""
     )
+    src_chip = (
+        f'<span class="ch-src">{_channel_badge(channel_kind)}</span>'
+        if channel_kind else ""
+    )
     src_bar = _source_bar(lead_source, ad_id, ad_media_id, ad_preview_url)
     bot_pill = chat_bot_pill_html(tid, agent_enabled)
     block_pill = chat_block_pill_html(tid, is_blocked)
@@ -1328,7 +1352,7 @@ def chat_header_html(
         f'<div class="ch">'
         f'{av_html}'
         f'<span class="ch-n">{name_html}{handle_html}</span>'
-        f'{product_badge}{ig_chip}'
+        f'{src_chip}{product_badge}{ig_chip}'
         f'<div class="ch-acts">{bot_pill}{block_pill}{clear_btn}{stage_sel}</div>'
         f'{meta_row}'
         f'</div>'
@@ -1435,6 +1459,7 @@ def chat_panel_html(
     events: list | None = None,
     products: list | None = None,
     manager_note: str | None = None,
+    channel_kind: str | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -1450,7 +1475,7 @@ def chat_panel_html(
         agent_enabled=agent_enabled, is_blocked=is_blocked,
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, needs=needs, needs_pending=needs_pending,
-        products=products, manager_note=manager_note,
+        products=products, manager_note=manager_note, channel_kind=channel_kind,
     )
     return (
         f'{header}'

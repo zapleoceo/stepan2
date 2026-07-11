@@ -14,7 +14,7 @@ from app.adapters.db.models import (
     MediaAsset,
     Message,
 )
-from app.api._query import fetch_messages, fetch_messages_since
+from app.api._query import fetch_message, fetch_messages, fetch_messages_since
 from app.domain.enums import ChannelKind
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
@@ -84,3 +84,41 @@ async def test_fetch_messages_since_also_resolves_media(db_session) -> None:
     assert len(rows) == 1
     assert rows[0].media_id == asset.id
     assert rows[0].media_kind == "image"
+
+
+async def test_pending_media_row_exposes_not_ready(db_session) -> None:
+    # A media_asset whose bytes haven't been backfilled yet must still be surfaced (media_id
+    # set, media_ready falsy) so the bubble can render a self-refreshing placeholder instead
+    # of dropping the attachment until a manual reload.
+    branch_id, thread_id = await _setup(db_session)
+    m = Message(branch_id=branch_id, thread_id=thread_id, channel_id=1, external_id="m1",
+                direction="in", sent_by="lead", text="🖼 media", occurred_at=_NOW,
+                media_pending=True)
+    db_session.add(m)
+    await db_session.flush()
+    stub = MediaAsset(branch_id=branch_id, message_id=m.id, kind="image", data=None)
+    db_session.add(stub)
+    await db_session.flush()
+
+    rows = await fetch_messages(db_session, thread_id)
+    assert rows[0].media_id == stub.id
+    assert not rows[0].media_ready
+    assert rows[0].media_pending
+
+
+async def test_fetch_message_returns_single_row_with_thread_context(db_session) -> None:
+    branch_id, thread_id = await _setup(db_session)
+    m = Message(branch_id=branch_id, thread_id=thread_id, channel_id=1, external_id="m1",
+                direction="in", sent_by="lead", text="[img]", occurred_at=_NOW)
+    db_session.add(m)
+    await db_session.flush()
+    asset = MediaAsset(branch_id=branch_id, message_id=m.id, kind="image", data=b"z")
+    db_session.add(asset)
+    await db_session.flush()
+
+    row = await fetch_message(db_session, m.id)
+    assert row is not None
+    assert row.media_id == asset.id
+    assert row.thread_id == thread_id
+    assert row.branch_id == branch_id
+    assert await fetch_message(db_session, 999999) is None

@@ -274,18 +274,23 @@ def _branch_where(
 
 _MSG_COLS = (
     "m.id, m.direction, m.sent_by, m.text, m.occurred_at, m.llm_info,"
-    " m.link_url, m.preview_url, mm.media_id, mm.media_kind"
+    " m.link_url, m.preview_url, mm.media_id, mm.media_kind, mm.media_ready,"
+    " m.media_pending"
 )
 
-# One media_asset row per message (the first with data), joined once for the whole thread
-# instead of two correlated subqueries re-run per message row — same result, O(1) query
-# instead of O(2N) for an N-message thread. ROW_NUMBER() works on both Postgres and the
-# SQLite used in tests (3.25+), so no dialect branching needed.
+# One media_asset row per message, joined once for the whole thread instead of two
+# correlated subqueries re-run per message row. A data=NULL stub (bytes not backfilled yet)
+# is no longer filtered out — it's surfaced with media_ready=0 so the bubble can render a
+# self-refreshing placeholder; a ready asset still wins (CASE orders data-present first),
+# then lowest id. ROW_NUMBER()/CASE work on both Postgres and the SQLite used in tests
+# (3.25+), so no dialect branching needed.
 _MEDIA_JOIN = (
     " LEFT JOIN ("
     " SELECT message_id, id AS media_id, kind AS media_kind,"
-    " ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY id) AS rn"
-    " FROM media_asset WHERE data IS NOT NULL"
+    " (data IS NOT NULL) AS media_ready,"
+    " ROW_NUMBER() OVER (PARTITION BY message_id"
+    "   ORDER BY (CASE WHEN data IS NOT NULL THEN 0 ELSE 1 END), id) AS rn"
+    " FROM media_asset"
     " ) mm ON mm.message_id = m.id AND mm.rn = 1"
 )
 
@@ -326,6 +331,27 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
             {"tid": thread_id, "after": after_id},
         )
     ).all()
+
+
+async def fetch_message(session: AsyncSession, mid: int):
+    """One message row shaped exactly like fetch_messages' rows plus the thread context a
+    single-bubble re-render needs (thread id, lead_seen_at, branch guard, tz). Backs the
+    self-refreshing pending-media bubble — None if the message is gone."""
+    return (
+        await session.execute(
+            text(
+                f"SELECT {_MSG_COLS}{_EXCLUDED_COL},"  # noqa: S608
+                " ct.id AS thread_id, ct.lead_seen_at, l.branch_id, b.tz_offset_h"
+                " FROM message m"
+                " JOIN channel_thread ct ON ct.id = m.thread_id"
+                " JOIN lead l ON l.id = ct.lead_id"
+                " JOIN branch b ON b.id = l.branch_id"
+                f"{_MEDIA_JOIN}"
+                " WHERE m.id = :mid"
+            ),
+            {"mid": mid},
+        )
+    ).first()
 
 
 _EVENT_UNION = (  # noqa: S608 — no user-controlled values, thread_id is a bound param
