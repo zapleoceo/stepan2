@@ -98,6 +98,12 @@ class DecisionEngine:
         self.messages = MessageRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
         self.last_context = ""  # KB context of the most recent complete() — for the guard
+        # A DecisionEngine lives for ONE lead-turn (built fresh per decide()/queue_one). Every
+        # regen (fast→smart escalation, dedup, guard corrections) calls complete() again with
+        # the SAME dialog, so knowledge_context — a broker embed + a full-table vector scan +
+        # assembly — was recomputed identically 2-4× per turn. Memoize it per turn so only the
+        # first complete() of a turn pays for retrieval; the regens reuse it.
+        self._ctx_cache: dict[tuple[str | None, str, bool], str] = {}
 
     async def prepare(self, thread_id: int, workflow: str) -> DecisionContext | None:
         """None if the thread is foreign, has no dialog, or the branch is over budget."""
@@ -131,9 +137,14 @@ class DecisionEngine:
 
         capability picks the model tier (see routing.pick_capability) — default stays smart
         so any caller that doesn't route keeps the strong model."""
-        context = await self.knowledge.knowledge_context(
-            ctx.thread.product_slug, query=_retrieval_query(ctx.dialog), thread_id=thread_id,
-            light=workflow == "followup")
+        light = workflow == "followup"
+        cache_key = (ctx.thread.product_slug, _retrieval_query(ctx.dialog), light)
+        context = self._ctx_cache.get(cache_key)
+        if context is None:
+            context = await self.knowledge.knowledge_context(
+                ctx.thread.product_slug, query=_retrieval_query(ctx.dialog),
+                thread_id=thread_id, light=light)
+            self._ctx_cache[cache_key] = context
         self.last_context = context  # reply-guard checks the draft against exactly this
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(
