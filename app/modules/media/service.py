@@ -7,6 +7,7 @@ the next tick retries — nothing is lost and the loop never crashes."""
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Protocol
 
 from sqlmodel import select
@@ -14,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.adapters.db.models import MediaAsset, Message
+from app.domain.clock import utc_now
 from app.modules.conversation.translate import translate_text
 from app.ports.llm import LLMPort
 
@@ -24,6 +26,14 @@ from app.ports.llm import LLMPort
 # fallback text is non-placeholder, so the bot answers (and asks the lead to type instead).
 _VOICE_UNAVAILABLE = "🎤 (voice — no transcript)"
 _IMAGE_UNAVAILABLE = "🖼 (image — tidak bisa dibaca)"
+
+# The bytes are downloaded once, but recognition (broker transcribe/vision) can fail for a
+# while — the broker may be briefly down or its provider key not yet configured. Keep
+# media_pending set on a failed recognition so the backfill cron retries it every tick, but
+# only for this long after the message arrived; past it, give up and release the hold so the
+# thread isn't frozen indefinitely. Covers "the voice hangs unanswered until the broker is
+# fixed" without hammering a permanently-broken provider forever.
+_MEDIA_RETRY_WINDOW = timedelta(hours=6)
 
 logger = logging.getLogger(__name__)
 
@@ -93,48 +103,43 @@ class MediaService:
         the message text, so the bot answers what was SAID/SHOWN, not '🎤 voice' / '🖼 media'."""
         done = 0
         for msg in await self.pending(channel_id, limit):
-            stub = await self._pending_stub(msg.id)
+            stub = await self._media_stub(msg.id)
             if stub is None or not stub.url:
                 msg.media_pending = False  # nothing to fetch — don't retry forever
-                self._release_voice_hold(msg)
+                self._release_media_hold(msg)
                 self.session.add(msg)
                 await self.session.flush()
                 continue
-            try:
-                data = await downloader.download_media(stub.url)
-            except ValueError as exc:
-                # A permanent reject (e.g. the transport's size cap — a video too big to
-                # buffer): clear the flag so we don't re-stream it every tick forever.
-                logger.warning(
-                    "media permanently skipped branch=%d msg=%d: %s",
-                    self.branch_id, msg.id, exc)
+            if stub.data is None:  # first pass — fetch the bytes (a retry already has them)
+                try:
+                    stub.data = await downloader.download_media(stub.url)
+                except ValueError as exc:
+                    # A permanent reject (e.g. the transport's size cap — a video too big to
+                    # buffer): clear the flag so we don't re-stream it every tick forever.
+                    logger.warning("media permanently skipped branch=%d msg=%d: %s",
+                                   self.branch_id, msg.id, exc)
+                    msg.media_pending = False
+                    self._release_media_hold(msg)
+                    self.session.add(msg)
+                    await self.session.flush()
+                    continue
+                except Exception as exc:  # noqa: BLE001 — transient: keep flag, retry next tick
+                    logger.warning("media download failed branch=%d msg=%d: %s",
+                                   self.branch_id, msg.id, exc)
+                    continue
+            recognized = await self._recognize(msg, stub, transcriber, describer)
+            if recognized:
+                await self._recache_translation(msg, translator)
                 msg.media_pending = False
-                self._release_voice_hold(msg)
-                self.session.add(msg)
-                await self.session.flush()
-                continue
-            except Exception as exc:  # noqa: BLE001 — transient: keep flag, retry next tick
-                logger.warning(
-                    "media download failed branch=%d msg=%d: %s",
-                    self.branch_id, msg.id, exc)
-                continue
-            stub.data = data
-            msg.media_pending = False
-            # On a failed transcript/caption, swap the placeholder for a non-pending fallback
-            # so decide()'s media hold releases and the thread never freezes (the bot answers
-            # and asks the lead to type). The bytes are saved either way — no re-download.
-            if stub.kind == "audio" and transcriber is not None:
-                if await self._transcribe_voice(msg, data, transcriber):
-                    await self._recache_translation(msg, translator)
-                else:
-                    self._release_voice_hold(msg)
-                    msg.tr_text = None
-            elif stub.kind == "image" and describer is not None:
-                if await self._describe_image(msg, data, stub.mime, describer):
-                    await self._recache_translation(msg, translator)
-                else:
-                    self._release_image_hold(msg)
-                    msg.tr_text = None
+            elif recognized is False and self._retry_window_open(msg):
+                # Recognition failed but the message is still fresh — the broker may be down
+                # or its provider key not yet configured. Keep the flag so we retry next tick.
+                msg.media_pending = True
+            else:
+                # Nothing can recognize it, or we've retried past the window: stop holding the
+                # thread. The bot answers (asks the lead to type) instead of freezing.
+                self._release_media_hold(msg)
+                msg.media_pending = False
             self.session.add_all([stub, msg])
             await self.session.flush()
             done += 1
@@ -165,17 +170,33 @@ class MediaService:
         if tr:
             msg.tr_text = tr
 
-    def _release_voice_hold(self, msg: Message) -> None:
-        """A voice note we've given up on must not keep its '🎤 voice' placeholder, or decide()
-        holds the reply forever (see _VOICE_UNAVAILABLE). Swap in a non-placeholder so the bot
-        answers — it will ask the lead to type the message instead."""
-        if (msg.text or "").strip() == VOICE_PENDING_PH:
-            msg.text = _VOICE_UNAVAILABLE
+    async def _recognize(
+        self, msg: Message, stub: MediaAsset,
+        transcriber: Transcriber | None, describer: ImageDescriber | None) -> bool | None:
+        """Turn the media bytes into message text. Returns True on success, False when a
+        recognizer ran but failed/empty (retryable), or None when nothing can handle this
+        kind (no recognizer wired — never retry, just release)."""
+        assert stub.data is not None
+        if stub.kind == "audio" and transcriber is not None:
+            return await self._transcribe_voice(msg, stub.data, transcriber)
+        if stub.kind == "image" and describer is not None:
+            return await self._describe_image(msg, stub.data, stub.mime, describer)
+        return None
 
-    def _release_image_hold(self, msg: Message) -> None:
-        """Same as _release_voice_hold, for an image we couldn't caption."""
-        if (msg.text or "").strip() == IMAGE_PENDING_PH:
+    def _retry_window_open(self, msg: Message) -> bool:
+        return utc_now() - msg.occurred_at < _MEDIA_RETRY_WINDOW
+
+    def _release_media_hold(self, msg: Message) -> None:
+        """Media we've given up on must not keep its '🎤 voice' / '🖼 media' placeholder, or
+        decide() holds the reply forever. Swap in a non-placeholder so the bot answers (asks
+        the lead to type instead), and drop any stale placeholder translation."""
+        before = (msg.text or "").strip()
+        if before == VOICE_PENDING_PH:
+            msg.text = _VOICE_UNAVAILABLE
+        elif before == IMAGE_PENDING_PH:
             msg.text = _IMAGE_UNAVAILABLE
+        if msg.text != before:
+            msg.tr_text = None
 
     async def _transcribe_voice(
         self, msg: Message, audio: bytes, transcriber: Transcriber) -> bool:
@@ -212,11 +233,8 @@ class MediaService:
         msg.text = f"🖼 {text}"  # 🖼 marks it an image; the prompt reads the description after it
         return True
 
-    async def _pending_stub(self, message_id: int | None) -> MediaAsset | None:
-        """The not-yet-downloaded MediaAsset for a message (data NULL, url set)."""
-        q = (
-            select(MediaAsset)
-            .where(MediaAsset.message_id == message_id, MediaAsset.data.is_(None))  # type: ignore[union-attr]
-            .limit(1)
-        )
+    async def _media_stub(self, message_id: int | None) -> MediaAsset | None:
+        """The MediaAsset for a message — whether or not its bytes are downloaded yet, so a
+        recognition retry (data already present) reuses the same row instead of re-fetching."""
+        q = select(MediaAsset).where(MediaAsset.message_id == message_id).limit(1)
         return (await self.session.exec(q)).first()

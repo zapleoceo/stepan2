@@ -124,10 +124,11 @@ async def _channel(s, bid) -> int:
 
 
 async def _media_msg(s, bid, cid, *, ext, url="https://cdn/x.jpg", kind="image",
-                     pending=True, stub=True) -> Message:
+                     pending=True, stub=True, at=None) -> Message:
     ph = "🎤 voice" if kind == "audio" else "🖼 media"
+    kw = {"occurred_at": at} if at is not None else {}
     m = Message(branch_id=bid, thread_id=1, channel_id=cid, external_id=ext,
-                direction="in", sent_by="lead", text=ph, media_pending=pending)
+                direction="in", sent_by="lead", text=ph, media_pending=pending, **kw)
     s.add(m)
     await s.flush()
     if stub:  # ingest attaches a not-yet-downloaded MediaAsset (url set, data NULL)
@@ -261,18 +262,52 @@ async def test_backfill_invalidates_stale_placeholder_translation(db_session) ->
     assert refreshed.text == "🎤 halo kak" and refreshed.tr_text is None  # stale cache dropped
 
 
-async def test_voice_transcribe_failure_releases_hold(db_session) -> None:
-    """A missing llm:audio scope must not freeze the thread: bytes stored, flag cleared, and
-    the '🎤 voice' placeholder swapped for a non-pending fallback so decide() stops holding."""
-    from app.modules.media.service import _VOICE_UNAVAILABLE
-
+async def test_recognition_failure_keeps_pending_within_window(db_session) -> None:
+    """A fresh voice whose transcription fails (broker down / provider key not yet configured)
+    keeps media_pending set — the bytes are stored, and the backfill cron retries next tick
+    so it self-heals once the broker is fixed, instead of giving up after one attempt."""
     bid = await _branch(db_session)
     cid = await _channel(db_session, bid)
     msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
     assert await MediaService(db_session, bid).backfill(
         cid, FakeDownloader(), limit=20, transcriber=FakeTranscriber(fail=True)) == 1
     refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🎤 voice" and refreshed.media_pending is True  # held, will retry
+    asset = (await db_session.exec(select(MediaAsset))).first()
+    assert asset.data == b"BYTES"  # bytes kept — the retry reuses them, no re-download
+
+
+async def test_recognition_failure_releases_hold_past_window(db_session) -> None:
+    """Past the retry window a permanently-failing transcription stops holding the thread: the
+    placeholder is swapped for a non-pending fallback so the bot answers (asks the lead to type)."""
+    from datetime import timedelta
+
+    from app.domain.clock import utc_now
+    from app.modules.media.service import _MEDIA_RETRY_WINDOW, _VOICE_UNAVAILABLE
+
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    old = utc_now() - _MEDIA_RETRY_WINDOW - timedelta(minutes=1)
+    msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio",
+                           url="https://cdn/v.mp4", at=old)
+    assert await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20, transcriber=FakeTranscriber(fail=True)) == 1
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
     assert refreshed.text == _VOICE_UNAVAILABLE and refreshed.media_pending is False
+
+
+async def test_recognition_retry_succeeds_on_a_downloaded_asset(db_session) -> None:
+    """A retry (bytes already downloaded, still media_pending) transcribes WITHOUT re-fetching."""
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
+    s = MediaService(db_session, bid)
+    assert await s.backfill(cid, FakeDownloader(), 20, transcriber=FakeTranscriber(fail=True)) == 1
+    dl = FakeDownloader()  # second tick: must NOT be called again
+    assert await s.backfill(cid, dl, 20, transcriber=FakeTranscriber(text="halo")) == 1
+    assert dl.calls == []  # bytes reused, no re-download
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.text == "🎤 halo" and refreshed.media_pending is False
 
 
 class FakeDescriber:
@@ -300,16 +335,14 @@ async def test_image_backfill_describes_into_message_text(db_session) -> None:
     assert refreshed.text == "🖼 jadwal kelas SMM"  # placeholder replaced with description
 
 
-async def test_image_describe_failure_releases_hold(db_session) -> None:
-    from app.modules.media.service import _IMAGE_UNAVAILABLE
-
+async def test_image_describe_failure_keeps_pending_within_window(db_session) -> None:
     bid = await _branch(db_session)
     cid = await _channel(db_session, bid)
     msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
     assert await MediaService(db_session, bid).backfill(
         cid, FakeDownloader(), limit=20, describer=FakeDescriber(fail=True)) == 1
     refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
-    assert refreshed.text == _IMAGE_UNAVAILABLE and refreshed.media_pending is False
+    assert refreshed.text == "🖼 media" and refreshed.media_pending is True  # held, will retry
 
 
 async def test_image_backfill_does_not_transcribe(db_session) -> None:
