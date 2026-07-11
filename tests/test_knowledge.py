@@ -136,3 +136,25 @@ async def test_knowledge_context_light_retrieves_fewer_chunks(db_session):
     light = await svc.knowledge_context("vibe", query="anything", light=True)
     assert light.count("--- Doc") == ksvc._FOLLOWUP_RAG_K
     assert full.count("--- Doc") > light.count("--- Doc")
+
+
+def test_core_card_keeps_facts_drops_bulk() -> None:
+    from app.modules.knowledge.service import _core_card
+    card = (
+        "> Quick facts — Vibe: Rp 13jt, mulai akhir Juli.\n\n"
+        "## Essence\nBikin aplikasi pakai AI dari nol.\n\n"
+        "## Curriculum (modules)\n1. HTML\n2. CSS\n3. JS\n4. Python\n5. Deploy\n\n"
+        "## Price (IDR)\nRp 13.000.000 atau cicil 4x.\n\n"
+        "## Schedule & duration\n4 bulan, 2x/minggu.\n\n"
+        "## Success cases\nPieter Levels bikin startup pakai AI.\n\n"
+        "## Links\nhttps://itstep.id/vibe-coding"
+    )
+    out = _core_card(card)
+    # core facts stay
+    assert "Quick facts" in out and "Rp 13.000.000" in out and "4 bulan" in out
+    assert "Bikin aplikasi pakai AI" in out          # essence kept
+    # bulk deferred to RAG
+    assert "1. HTML" not in out and "Curriculum" not in out
+    assert "Pieter Levels" not in out and "Success cases" not in out
+    assert "itstep.id/vibe-coding" not in out
+    assert len(out) < len(card)                        # genuinely smaller
