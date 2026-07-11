@@ -8,8 +8,11 @@ from __future__ import annotations
 
 from app.api._landing_analytics import analytics_section
 
-# Secondary contact link in the footer (the main demo is the in-page chat widget).
+# Secondary contact links in the footer (the main demo is the in-page chat widget).
 _DEMO_IG = "https://ig.me/m/zapleo_ceo"
+_DEMO_WA = "https://wa.me/380994811889"
+_DEMO_TG = "https://t.me/zapleosoft"
+_DEMO_FB = "https://www.facebook.com/zapleo.ceo"
 
 _WIDGET_JS = r"""
 var STP={msgs:[],busy:false};
@@ -723,6 +726,9 @@ def landing_html() -> str:
         "style=\"width:24px;height:24px;font-size:.8rem\">S</span>Stepan</div>"
         "<div>AI sales agent for Instagram &amp; WhatsApp · "
         f"<a href=\"{_DEMO_IG}\" target=\"_blank\" rel=\"noopener\">Instagram</a> · "
+        f"<a href=\"{_DEMO_WA}\" target=\"_blank\" rel=\"noopener\">WhatsApp</a> · "
+        f"<a href=\"{_DEMO_TG}\" target=\"_blank\" rel=\"noopener\">Telegram</a> · "
+        f"<a href=\"{_DEMO_FB}\" target=\"_blank\" rel=\"noopener\">Facebook</a> · "
         "<a href=\"/login\">Log in</a></div>"
         "</div></footer>"
         # live demo chat widget — Stepan sells itself (POST /demo/chat)
