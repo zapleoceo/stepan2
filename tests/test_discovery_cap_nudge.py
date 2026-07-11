@@ -164,3 +164,43 @@ async def test_live_reply_clarifies_if_still_duplicate_after_guard_regen(db_sess
         db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
     assert decision.reply == guard.CLARIFY_FALLBACK
     assert decision.needs_manager is False
+
+
+class _MgrLLM:
+    """Scripts a needs_manager decision (with a kb_gap so the unexplained-handoff guard
+    doesn't fire), to exercise the phone-before-hand-off gate."""
+
+    def __init__(self, reply: str = "tim kami akan bantu ya Kak") -> None:
+        self.reply = reply
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        return json.dumps({"reply": self.reply, "stage": "presenting",
+                           "needs_manager": True, "kb_gap": "lead asked X not in KB"}), \
+            {"model": "fake", "cost_usd": 0.0}
+
+    async def embed(self, texts, **kw):  # noqa: ANN001, ANN003, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_needs_manager_without_phone_asks_for_contact_first(db_session) -> None:
+    """PHONE BEFORE HAND-OFF: the model wants a manager but the lead has no phone — muting
+    the bot would strand a contact-less lead with a manager who can't reach them (lead 2757).
+    Suppress the escalation, stay on, and ask for a WhatsApp number first."""
+    from app.modules.conversation import guard
+
+    bid, tid = await _thread_with_turns(db_session, 1)
+    d = await ReplyService(
+        db_session, bid, _MgrLLM(), KnowledgeService(db_session, bid)).decide(tid)
+    assert d.needs_manager is False  # not handed off — no contact yet
+    assert d.reply == guard.ASK_PHONE_BEFORE_HANDOFF
+
+
+async def test_needs_manager_with_phone_still_hands_off(db_session) -> None:
+    bid, tid = await _thread_with_turns(db_session, 1)
+    lead = (await db_session.exec(select(Lead).where(Lead.branch_id == bid))).first()
+    lead.phone_e164 = "+628123456789"  # a reachable lead → the hand-off proceeds
+    db_session.add(lead)
+    await db_session.flush()
+    d = await ReplyService(
+        db_session, bid, _MgrLLM(), KnowledgeService(db_session, bid)).decide(tid)
+    assert d.needs_manager is True

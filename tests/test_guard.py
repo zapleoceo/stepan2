@@ -241,8 +241,11 @@ async def test_guard_hands_off_when_fabrication_persists(db_session) -> None:
     bid = await _branch(db_session)
     llm = _ScriptLLM(f"ini linknya {_FAKE_LINK}", f"beneran kok {_FAKE_LINK}")  # both bad
     out = await SimService(db_session, llm).say(bid, "g2", "kirim link lab dong")
+    # The fabrication is never sent. The would-be SAFE_FALLBACK hand-off has no phone for this
+    # sim lead, so the phone-before-hand-off gate asks for a contact instead of muting (a
+    # manager can't work a contact-less lead) — needs_manager is deferred to a later turn.
     assert out["ok"] and _FAKE_LINK not in out["reply"]
-    assert out["reply"] == guard.SAFE_FALLBACK and out["needs_manager"] is True  # handed off
+    assert out["reply"] == guard.ASK_PHONE_BEFORE_HANDOFF and out["needs_manager"] is False
 
 
 def _settings_urls_only():  # noqa: ANN201
