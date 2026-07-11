@@ -275,6 +275,44 @@ async def test_ready_without_phone_keeps_selling(db_session) -> None:
     assert lead.agent_enabled is True
 
 
+async def test_ready_handoff_appends_a_closing_line_for_the_lead(db_session) -> None:
+    """The won/READY exit muted the bot but never guaranteed the lead a 'what happens next'
+    line (unlike the manager exit). The fresh READY flip now appends _READY_HANDOFF_CLOSING."""
+    from app.modules.conversation.reply import _READY_HANDOFF_CLOSING
+
+    bid, tid, _lead = await _world(db_session, phone="+6281234567890")
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(ready=True, stage=Stage.PRESENTING))
+    rows = (await db_session.exec(
+        select(Outbox).where(Outbox.thread_id == tid).order_by(Outbox.scheduled_at))).all()
+    assert [r.text for r in rows] == ["ok", _READY_HANDOFF_CLOSING]  # model's reply, then it
+
+
+async def test_repeated_non_target_winds_down_to_dormant(db_session) -> None:
+    """A lead already classified non_target on a prior turn and STILL non_target now gets its
+    closing line, then exits to DORMANT (bot off) — no more lingering in the active queue."""
+    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.QUALIFYING)
+    lead.lead_type = "non_target"  # already classified off-topic on an earlier turn
+    db_session.add(lead)
+    await db_session.flush()
+    await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(lead_type="non_target", reply="Baik Kak, semoga sukses ya 🙏"))
+    assert lead.stage == Stage.DORMANT and lead.agent_enabled is False
+    ev = (await db_session.exec(select(StageEvent).where(
+        StageEvent.to_stage == str(Stage.DORMANT)))).first()
+    assert ev is not None and ev.reason == "non_target"
+    # the polite closing the model wrote still went out before the wind-down
+    rows = (await db_session.exec(select(Outbox).where(Outbox.thread_id == tid))).all()
+    assert any("semoga sukses" in r.text for r in rows)
+
+
+async def test_first_non_target_classification_does_not_dormant_yet(db_session) -> None:
+    """The FIRST time a lead is classified non_target it still gets one normal turn — only a
+    REPEAT (was non_target coming in AND still is) winds down, mirroring _NON_TARGET_NUDGE."""
+    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.QUALIFYING)
+    await _svc(db_session, bid).enqueue_reply(tid, _decision(lead_type="non_target"))
+    assert lead.stage != Stage.DORMANT  # not wound down on the first classification
+
+
 def test_to_e164_canonicalizes_a_typed_phone() -> None:
     from app.modules.leads.phone import to_e164
     assert to_e164("0812 3456 7890", "62") == "+6281234567890"   # ID local trunk → +62
