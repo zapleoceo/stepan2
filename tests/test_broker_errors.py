@@ -287,6 +287,7 @@ def test_poll_budget_per_capability() -> None:
     s = settings()
     assert broker_mod._poll_budget_s("chat:deep") == s.llm_read_timeout_deep_s
     assert broker_mod._poll_budget_s("chat:smart") == s.llm_read_timeout_slow_s
+    assert broker_mod._poll_budget_s("vision") == s.llm_read_timeout_slow_s
     assert broker_mod._poll_budget_s("chat:fast") == s.llm_read_timeout_s
     assert broker_mod._poll_budget_s("translate") == s.llm_read_timeout_s
 
