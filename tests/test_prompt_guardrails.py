@@ -166,3 +166,11 @@ def test_build_messages_uses_the_light_contract_for_followup_workflow() -> None:
     nudge = build_messages("kb", [], "id", workflow="followup")
     assert _FOLLOWUP_CONTRACT.format(lang="id") in nudge[0]["content"]
     assert _FOLLOWUP_CONTRACT.format(lang="id") not in live[0]["content"]
+
+
+def test_followup_has_the_what_changed_angle() -> None:
+    # PKO-portal technique (deferred-decision repeat call): the strongest re-engagement asks
+    # what changed since the last talk, instead of re-pitching the same offer
+    from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
+    assert "WHAT-CHANGED ANGLE" in _FOLLOWUP_CONTRACT
+    assert "never a re-pitch" in _FOLLOWUP_CONTRACT

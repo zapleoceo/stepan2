@@ -747,10 +747,12 @@ def test_since_route_responds(client: TestClient) -> None:
 # ─── item 5: AI-draft attribution ─────────────────────────────────────────────
 
 def test_send_suggest_js_marks_source_agent() -> None:
+    # plain values object, NOT FormData — htmx.ajax merges `values` by for-in iteration and a
+    # FormData has no own enumerable entries, so the old form posted NO parameters (chat 2872)
     from app.api._ui_html import app_shell
     _set_lang("en")
     html = app_shell("en", "", active_nav="inbox")
-    assert "fd.append('source','agent')" in html
+    assert "values:{text:ta.value,source:'agent'}" in html
 
 
 @pytest.mark.asyncio

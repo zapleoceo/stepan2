@@ -1792,12 +1792,16 @@ def app_shell(
         "if(e.detail.target&&e.detail.target.id==='tl'){_tlScroll=e.detail.target.scrollTop;}});"
         "document.body.addEventListener('htmx:afterSwap',function(e){"
         "if(e.detail.target&&e.detail.target.id==='tl'){e.detail.target.scrollTop=_tlScroll;}});"
+        # values must be a PLAIN object: htmx.ajax merges `values` by for-in iteration, and a
+        # FormData has no own enumerable entries — the POST went out with NO parameters, the
+        # server saw an empty `text` and silently dropped the send (chat 2872: "send as
+        # Stepan" cleared the box but nothing was ever queued).
         "function sendSuggest(tid){"
         "var ta=document.getElementById('sug-ta-'+tid);"
         "if(!ta||!ta.value.trim())return;"
-        "var fd=new FormData();fd.append('text',ta.value);fd.append('source','agent');"
         "htmx.ajax('POST','/ui/chat/'+tid+'/send',{"
-        "target:'#msgs-'+tid,swap:'innerHTML',values:fd});"
+        "target:'#msgs-'+tid,swap:'innerHTML',"
+        "values:{text:ta.value,source:'agent'}});"
         "document.getElementById('sug-'+tid).innerHTML='';}"
         # per-message translate toggle with LLM fetch + client-side cache
         "function trMsg(mid,tid){"
