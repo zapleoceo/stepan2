@@ -69,6 +69,24 @@ async def test_knowledge_context_includes_focused_card(db_session):
     assert await svc.product_card("missing") is None
 
 
+async def test_payment_policy_is_always_in_context(db_session):
+    """payment_policy (bank requisites + DP flow) must ride in EVERY context, not depend on RAG
+    — the bot escalated a payment question the doc answers because RAG didn't surface it (2664)."""
+    from app.adapters.db.models import KnowledgeDoc
+    from app.modules.knowledge import KnowledgeRepo
+
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona-A", [("vibe", "Vibe Coding", "price 1.2M")])
+    await KnowledgeRepo(s, a).add(KnowledgeDoc(
+        slug="payment_policy", branch_id=a,
+        content="Bank BCA · No. Rekening 5245550101 · DP 500.000, sisanya sebelum kelas."))
+
+    svc = KnowledgeService(s, a)  # no llm → no RAG at all
+    ctx = await svc.knowledge_context("vibe")
+    assert "5245550101" in ctx and "payment_policy" in ctx  # requisites present without RAG
+
+
 async def test_persona_block_empty_when_absent(db_session):
     s = db_session
     a = await _branch(s, "Jakarta", "id")
