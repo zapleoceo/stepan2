@@ -323,7 +323,10 @@ async def guard_decision(
             if fixed is not None and fixed.reply:
                 decision, meta = fixed, regen_meta
     issues = _deterministic_issues(decision.reply, context)
-    if mode == "full" and guard.is_risky(decision.reply):
+    # Skip the LLM verify when the reply's only risk is a price that string-matches the KB —
+    # the single most common verify trigger, and a pure repetition of a grounded fact.
+    if mode == "full" and guard.is_risky(decision.reply) \
+            and not guard.price_claims_grounded(decision.reply, context):
         issues += await guard.verify_grounding(
             llm, decision.reply, context, branch_id=branch_id,
             thread_id=thread_id, bill=bill, system=await guard_prompt(session, branch_id))

@@ -258,7 +258,32 @@ async def test_followup_drops_nudge_still_duplicate_after_guard_regen(db_session
     assert await _pending(db_session, tid) is None
     refreshed = (await db_session.exec(
         select(ChannelThread).where(ChannelThread.id == tid))).first()
-    assert refreshed.next_followup_at is not None  # timer NOT consumed — retries next cycle
+    # Dry step BURNED: leaving the timer due meant this thread regenerated (and dropped) a
+    # nudge every 10-min tick — the schedule advances instead, next attempt hours away.
+    assert refreshed.followups_sent == 1
+    assert refreshed.next_followup_at is not None
+    assert refreshed.next_followup_at > _NOW + timedelta(hours=3)  # step 2 = +4h, not +10min
+
+
+async def test_dry_drop_on_last_step_winds_down_to_dormant(db_session) -> None:
+    """A dry drop on the LAST schedule step exhausts the cycle exactly like a sent last
+    nudge would: timer cleared, lead → dormant, bot off (no due-forever regeneration)."""
+    bid, tid, lead, thread = await _world(db_session, timer_due=True, followups_sent=3)
+    prior_line = "Program SMM Intensive ini formatnya hybrid, 3 sesi per minggu online."
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior_line, occurred_at=_NOW - timedelta(hours=1)))
+    await db_session.flush()
+    # the draft itself is a near-duplicate → regen (smart) converges onto the same line
+    llm = FakeLLM(json.dumps({"reply": prior_line, "stage": "qualifying"}))
+    assert await _svc(db_session, bid, llm=llm).run() == 0
+    refreshed = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    assert refreshed.next_followup_at is None  # exhausted — no more attempts
+    assert lead.stage == Stage.DORMANT and lead.agent_enabled is False
+    ev = (await db_session.exec(select(StageEvent).where(
+        StageEvent.to_stage == str(Stage.DORMANT)))).first()
+    assert ev is not None and "dry" in ev.reason
 
 
 async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
@@ -437,6 +462,11 @@ async def test_followup_skipped_when_lead_signaled_annoyance(db_session) -> None
     llm = FakeLLM()
     assert await _svc(db_session, bid, llm=llm).run() == 0
     assert await _pending(db_session, tid) is None
+    refreshed = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    # timer CANCELLED, not merely skipped — a skipped-but-due thread was re-picked (and its
+    # annoyance re-checked) every 10-min tick forever; an annoyed lead gets no more nudges
+    assert refreshed.next_followup_at is None
 
 
 async def test_new_stage_excluded_from_followups(db_session) -> None:
