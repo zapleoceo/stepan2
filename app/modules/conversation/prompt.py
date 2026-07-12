@@ -6,6 +6,7 @@ answer in `lang`; nothing here is tied to a specific language."""
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from app.adapters.db.models import Message
@@ -448,6 +449,21 @@ def manager_note_block(note: str | None) -> str | None:
     return f"{_MANAGER_NOTE_HEADER}\n{text}" if text else None
 
 
+def now_hint(now_local: datetime) -> str:
+    """A branch-local 'today is …' line injected into the prompt so the model can reason about
+    what's already passed. Without it Stepan kept offering a class date that was already in the
+    past (live thread 2262: pushed the '12 Juli' session at 10:24 when it was already 10:38 that
+    same day, twice, even after the lead pointed it out)."""
+    return (
+        "CURRENT DATE & TIME (branch-local): "
+        f"{now_local:%A, %d %B %Y, %H:%M}. "
+        "Any class/batch/session date at or before this moment has ALREADY passed — never "
+        "offer or try to book a session in the past. If the only date you have for a program "
+        "is already past, do NOT repeat it: say the next batch date isn't set yet and offer to "
+        "confirm the schedule with the team, then keep moving the conversation forward."
+    )
+
+
 def build_messages(
     persona_and_kb: str,
     dialog: list[Message],
@@ -458,6 +474,7 @@ def build_messages(
     name_block: str | None = None,
     manager_note: str | None = None,
     workflow: str = "reply",
+    now_block: str | None = None,
 ) -> list[dict[str, Any]]:
     """System (persona+KB+coaching+per-lead note+known-needs+entry+name+contract) then dialog.
 
@@ -467,6 +484,8 @@ def build_messages(
     parts: list[str] = []
     if persona_and_kb.strip():
         parts.append(persona_and_kb.rstrip())
+    if now_block and now_block.strip():
+        parts.append(now_block.strip())
     if coaching_notes:
         notes_block = "\n".join(f"- {n}" for n in coaching_notes)
         parts.append(f"{_COACHING_HEADER}\n{notes_block}")

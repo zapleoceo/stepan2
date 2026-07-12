@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Lead
+from app.adapters.db.models import Branch, Lead
 from app.modules.budget import BudgetService
 
 from .needs import NeedsProfile, needs_summary, parse_needs
-from .prompt import build_messages, lead_name_hint, source_hint
+from .prompt import build_messages, lead_name_hint, now_hint, source_hint
 from .repository import CoachingNoteRepo, MessageRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -104,6 +105,16 @@ class DecisionEngine:
         # assembly — was recomputed identically 2-4× per turn. Memoize it per turn so only the
         # first complete() of a turn pays for retrieval; the regens reuse it.
         self._ctx_cache: dict[tuple[str | None, str, bool], str] = {}
+        self._tz_offset_h: int | None = None  # branch tz, lazily loaded for the now-hint
+
+    async def _now_block(self) -> str:
+        """Branch-local 'today is …' line for the prompt, so the model never offers a past
+        session date. tz is loaded once per engine (one lead-turn)."""
+        if self._tz_offset_h is None:
+            branch = await self.session.get(Branch, self.branch_id)
+            self._tz_offset_h = int(branch.tz_offset_h or 0) if branch is not None else 0
+        now_local = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=self._tz_offset_h)
+        return now_hint(now_local)
 
     async def prepare(self, thread_id: int, workflow: str) -> DecisionContext | None:
         """None if the thread is foreign, has no dialog, or the branch is over budget."""
@@ -153,7 +164,7 @@ class DecisionEngine:
             source_block=source_hint(ctx.thread.lead_source),
             name_block=lead_name_hint(ctx.lead.display_name if ctx.lead else None),
             manager_note=ctx.lead.manager_note if ctx.lead else None,
-            workflow=workflow)
+            workflow=workflow, now_block=await self._now_block())
         if extra_user_msg is not None:
             messages.append({"role": "user", "content": extra_user_msg})
         elif messages[-1]["role"] == "assistant":
