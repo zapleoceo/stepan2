@@ -161,6 +161,52 @@ async def test_decide_persists_captured_needs(db_session) -> None:
     assert "tried before, gave up" in got.pains and "a real job" in got.gains
 
 
+async def test_ad_template_click_records_no_needs(db_session) -> None:
+    """Thread 2912: the lead's ONLY message was the ad's prefilled opener ('👨‍💻 Ceritakan
+    lebih detail tentang program kursus Cybersecurity') — a button click, not their words —
+    yet the model invented a job+gain from the course name and the needs cloud showed them.
+    Until the lead types something of their own, model-claimed needs are NOT persisted."""
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    db_session.add(th)
+    await db_session.flush()
+    db_session.add(Message(
+        branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="m1",
+        direction="in", sent_by="lead",
+        text="👨‍💻 Ceritakan lebih detail tentang program kursus Cybersecurity.",
+        occurred_at=_NOW))
+    await db_session.flush()
+
+    svc = ReplyService(db_session, b.id, _ProfileLLM(),
+                       KnowledgeService(db_session, b.id, _ProfileLLM()),
+                       branch_settings=_parse({}), notifier=None)
+    await svc.decide(th.id)
+    got = parse_needs((await db_session.exec(
+        select(Lead).where(Lead.id == lead.id))).first().needs)
+    assert not got.jobs and not got.pains and not got.gains  # nothing invented from a click
+
+
+def test_lead_spoke_own_words_helper() -> None:
+    from types import SimpleNamespace
+
+    from app.modules.conversation.reply import _lead_spoke_own_words
+
+    def _in(text: str):  # noqa: ANN202
+        return SimpleNamespace(direction="in", text=text)
+
+    template = "💻 Ceritakan lebih detail tentang program kursusnya"
+    assert _lead_spoke_own_words([_in(template)]) is False
+    assert _lead_spoke_own_words([_in("🎤 voice"), _in(template)]) is False
+    assert _lead_spoke_own_words([_in(template), _in("berapa biayanya kak?")]) is True
+    assert _lead_spoke_own_words([_in("🎤 berapa harga kursusnya")]) is True  # transcribed voice
+
+
 async def test_decide_holds_reply_on_untranscribed_voice(db_session) -> None:
     """A voice note the broker hasn't transcribed yet (text is the raw '🎤 voice'
     placeholder) must NOT get a reply — decide() returns None so Stepan waits for the
