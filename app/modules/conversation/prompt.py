@@ -458,9 +458,11 @@ def now_hint(now_local: datetime) -> str:
         "CURRENT DATE & TIME (branch-local): "
         f"{now_local:%A, %d %B %Y, %H:%M}. "
         "Any class/batch/session date at or before this moment has ALREADY passed — never "
-        "offer or try to book a session in the past. If the only date you have for a program "
-        "is already past, do NOT repeat it: say the next batch date isn't set yet and offer to "
-        "confirm the schedule with the team, then keep moving the conversation forward."
+        "offer or try to book a session in the past. State a specific class/batch date ONLY if "
+        "it appears in the knowledge base AND is still in the future — never invent or guess a "
+        "date. If the knowledge base has no confirmed upcoming date (its only date is in the "
+        "past, or none is given), say the next batch isn't scheduled yet and offer to confirm "
+        "the schedule with the team, then keep moving the conversation forward."
     )
 
 
