@@ -22,6 +22,7 @@ def test_now_hint_states_the_date_and_forbids_past_sessions() -> None:
     assert "12 July 2026" in hint and "10:38" in hint
     assert "ALREADY passed" in hint          # the model is told not to offer a past slot
     assert "past" in hint.lower()
+    assert "never invent" in hint.lower()    # …and not to make up a future date either
 
 
 def test_build_messages_injects_the_now_block() -> None:
