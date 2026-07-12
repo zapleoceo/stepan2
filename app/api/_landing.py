@@ -548,7 +548,9 @@ def landing_html() -> str:
         "<nav><div class=\"wrap nav\">"
         "<div class=\"brand\"><span class=\"logo\">S</span>Stepan"
         "<small>AI Sales Agent</small></div>"
-        "<a class=\"login\" href=\"/login\">Log in</a>"
+        "<div style=\"display:flex;align-items:center;gap:1.1rem\">"
+        "<a href=\"/whats-new\" style=\"font-size:.9rem;color:var(--mut)\">What's new</a>"
+        "<a class=\"login\" href=\"/login\">Log in</a></div>"
         "</div></nav>"
         # hero
         "<header class=\"hero\"><div class=\"wrap\">"
@@ -729,6 +731,7 @@ def landing_html() -> str:
         f"<a href=\"{_DEMO_WA}\" target=\"_blank\" rel=\"noopener\">WhatsApp</a> · "
         f"<a href=\"{_DEMO_TG}\" target=\"_blank\" rel=\"noopener\">Telegram</a> · "
         f"<a href=\"{_DEMO_FB}\" target=\"_blank\" rel=\"noopener\">Facebook</a> · "
+        "<a href=\"/whats-new\">What's new</a> · "
         "<a href=\"/login\">Log in</a></div>"
         "</div></footer>"
         # live demo chat widget — Stepan sells itself (POST /demo/chat)
