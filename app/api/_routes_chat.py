@@ -49,7 +49,6 @@ from ._ui_html import (
     messages_html,
     needs_block_html,
     pending_block_html,
-    set_render_tz,
     since_bubbles_html,
     stage_reason_popup_html,
     suggest_box_html,
@@ -121,7 +120,6 @@ async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) ->
         return None
     if is_branch_forbidden(row[0], allowed):
         return None
-    set_render_tz(row[1])
     return row[0]
 
 
@@ -152,7 +150,6 @@ async def _build_chat_panel(
     ).first()
     if not info or is_branch_forbidden(info[3], allowed):
         return None
-    set_render_tz(info[21])
     msgs = await fetch_messages(session, thread_id)
     pending = await fetch_pending(session, thread_id)
     events = await fetch_thread_events(session, thread_id)
@@ -257,7 +254,6 @@ async def chat_bubble(mid: int, request: Request) -> HTMLResponse:
         row = await fetch_message(session, mid)
     if row is None or is_branch_forbidden(row.branch_id, allowed):
         return HTMLResponse("", status_code=404)
-    set_render_tz(row.tz_offset_h)
     return HTMLResponse(_bubble(row, row.thread_id, row.lead_seen_at))
 
 
@@ -483,7 +479,6 @@ async def chat_stage(
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _tz, needs, needs_tr,
          manager_note, channel_kind) = info
-        set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         changed = stage != str(old_stage)
         if changed:
@@ -572,7 +567,6 @@ async def chat_product(
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _tz, needs,
          lead_id, needs_tr, manager_note, channel_kind) = info
-        set_render_tz(_tz)
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if new_slug is not None and new_slug not in {sl for sl, _ in products}:
             new_slug = old_slug  # ignore a slug that isn't an active product of this branch

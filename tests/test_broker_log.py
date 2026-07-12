@@ -139,15 +139,17 @@ async def test_fetch_and_render_broker_log(db_session) -> None:
     assert "fail" in html                     # failure row flagged
 
 
-async def test_log_renders_each_branch_in_its_own_local_time(db_session) -> None:
-    """Owner viewing the log across branches must see each row in ITS branch's tz, not a
-    single global offset — a Jakarta (+7) call and a UTC (+0) call side by side."""
+async def test_log_renders_all_rows_in_the_viewers_tz(db_session) -> None:
+    """Owner viewing the log sees every row in THEIR OWN tz (set_render_tz, from the browser),
+    regardless of which branch the call belongs to — one viewer offset, not per-branch."""
+    from app.api._ui_html import set_render_tz
+
     jakarta = Branch(name="Jakarta", tz_offset_h=7)
     utc_branch = Branch(name="UTC", tz_offset_h=0)
     db_session.add_all([jakarta, utc_branch])
     await db_session.flush()
 
-    when = datetime(2026, 7, 3, 10, 0, 0)
+    when = datetime(2026, 7, 3, 10, 0, 0)  # same UTC instant for both calls
     db_session.add(BrokerLog(branch_id=jakarta.id, kind="reply", capability="chat:smart",
                              ok=True, created_at=when))
     db_session.add(BrokerLog(branch_id=utc_branch.id, kind="reply", capability="chat:smart",
@@ -156,11 +158,13 @@ async def test_log_renders_each_branch_in_its_own_local_time(db_session) -> None
 
     rows, total = await fetch_broker_log(db_session, None, page=0, size=50)
     tz_by_branch = await fetch_branch_tz(db_session, [jakarta.id, utc_branch.id])
-    assert tz_by_branch == {jakarta.id: 7, utc_branch.id: 0}
+    set_render_tz(3)  # viewer at UTC+3
 
     html = broker_log_panel_html(list(rows), 0, 50, total, tz_by_branch)
-    assert "07-03 17:00:00" in html  # Jakarta: 10:00 UTC + 7h
-    assert "07-03 10:00:00" in html  # UTC branch: unshifted
+    # both rows (Jakarta call + UTC-branch call) render at the VIEWER's +3, not each branch's tz
+    assert html.count("07-03 13:00:00") == 2  # 10:00 UTC + 3h, for BOTH rows
+    assert "17:00:00" not in html             # no per-branch (+7) shift anymore
+    set_render_tz(0)
 
 
 async def test_log_groups_one_threads_calls_into_a_turn_with_end_to_end(db_session) -> None:

@@ -6,7 +6,7 @@ import json as _json
 from datetime import UTC, datetime, timedelta
 
 from ._i18n import current_lang, t
-from ._ui_html import _STAGE_COLOR, _STAGE_ICON, _ago, _as_dt, ig_post_url
+from ._ui_html import _STAGE_COLOR, _STAGE_ICON, _ago, _as_dt, _render_tz_h, ig_post_url
 
 _ST_ECSS: dict[str, str] = {
     "proposed": "es-p", "applied": "es-a",
@@ -43,21 +43,20 @@ def _sbadge(stage: str) -> str:
 
 # ─── leads panel ──────────────────────────────────────────────────────────────
 
-def leads_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> str:
-    """List of leads with stage badge, phone, and creation date (branch-local)."""
+def leads_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> str:  # noqa: ARG001
+    """List of leads with stage badge, phone, and creation date (viewer-local)."""
     title = _h.escape(t("nav.leads"))
     name_h = _h.escape(t("lead.name"))
     phone_h = _h.escape(t("lead.phone"))
     stage_h = _h.escape(t("lead.stage"))
     created_h = _h.escape(t("lead.created"))
     hint = _h.escape(t("help.leads"))
-    tz = tz_by_branch or {}
 
     def _created(v: object, branch_id: object) -> str:
         dt = _as_dt(v)
         if dt is None:
             return "—"
-        dt += timedelta(hours=tz.get(branch_id, 0))
+        dt += timedelta(hours=_render_tz_h.get())
         return dt.strftime("%Y-%m-%d")
 
     trows = "".join(
@@ -137,11 +136,11 @@ def outbox_panel_html(
             f'#{_h.escape(str(tid))}</a>'
         )
 
-    def _ts(v: object, branch_id: object) -> str:
+    def _ts(v: object, branch_id: object) -> str:  # noqa: ARG001 (branch_id unused: viewer tz)
         dt = _as_dt(v)
         if dt is None:
             return "—"
-        dt += timedelta(hours=tz.get(branch_id, 0))
+        dt += timedelta(hours=_render_tz_h.get())
         return dt.strftime("%H:%M:%S")
 
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -1913,8 +1912,8 @@ def _log_row(r: object, tz_by_branch: dict[int, int], grouped: bool = False) -> 
     lat, ok, err, created = r.latency_ms, r.ok, r.error, r.created_at
     dt = _as_dt(created)
     if dt is not None:
-        dt += timedelta(hours=tz_by_branch.get(r.branch_id, 0))
-    when = dt.strftime("%m-%d %H:%M:%S") if dt else "—"  # MM-DD HH:MM:SS, branch-local
+        dt += timedelta(hours=_render_tz_h.get())
+    when = dt.strftime("%m-%d %H:%M:%S") if dt else "—"  # MM-DD HH:MM:SS, viewer-local
     rid = f'#{_h.escape(str(req))}' if req else "—"
     chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}" hx-target="#main"'
             f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">#{tid}</a>'
