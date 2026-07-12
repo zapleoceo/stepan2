@@ -1995,30 +1995,62 @@ def _log_histogram_html(
 
     peak = max(buckets) if buckets else 0.0
     total = sum(buckets)
+    span_min = bucket_span_s / 60
+    # multi-line native tooltips: escape, then a literal &#10; per line break
+    def _tip(text: str) -> str:
+        return _h.escape(text).replace("\n", "&#10;")
+
+    chart_tip = _tip(
+        "Гистограмма нагрузки на брокер (генерация ответов).\n"
+        f"Каждый столбик — интервал {span_min:.0f} мин; высота = суммарное end-to-end время "
+        "всех ходов, начатых в этом интервале.\n"
+        "Ход = все запросы одного чата к брокеру в пределах 5 минут "
+        "(поиск по базе + генерация + проверка guard + перегенерации).\n"
+        "Цвет: красный ≥66% пика, синий ≥33%, серо-голубой — низкая нагрузка.\n"
+        "Высокие красные столбики = брокер отвечал медленно или было много ретраев.")
     if peak <= 0:
-        chart = '<span style="color:#6b7685;font-size:.72rem">нет данных за период</span>'
+        chart = (f'<span title="{chart_tip}" style="color:#6b7685;font-size:.72rem'
+                 f';cursor:help">нет данных за период</span>')
     else:
         def _bar(i: int, v: float) -> str:
             h = max(2, v / peak * 34)
-            color = "#c0563a" if v >= peak * 0.66 else "#5b7fa6" if v >= peak * 0.33 else "#8aa0b8"
-            tip = f"{_label(i)}–{_label(i + 1)} · {v:.0f}s"
-            return (f'<div title="{_h.escape(tip)}" style="width:5px;height:{h:.0f}px'
+            if v >= peak * 0.66:
+                color, level = "#c0563a", "пиковая нагрузка"
+            elif v >= peak * 0.33:
+                color, level = "#5b7fa6", "средняя нагрузка"
+            else:
+                color, level = "#8aa0b8", "низкая нагрузка"
+            tip = _tip(
+                f"{_label(i)}–{_label(i + 1)}\n"
+                f"Σ end-to-end: {v:.0f}s ({level})\n"
+                "Суммарное время генерации ответов, начатых в этом интервале: от первого "
+                "запроса к брокеру до конца последнего, включая ретраи и перегенерации.")
+            return (f'<div title="{tip}" style="width:5px;height:{h:.0f}px;cursor:help'
                     f';background:{color};border-radius:1px 1px 0 0"></div>')
         bars = "".join(_bar(i, v) for i, v in enumerate(buckets))
         axis = (f'<div style="display:flex;justify-content:space-between;font-size:.6rem'
                 f';color:#8899aa;margin-top:1px"><span>{_h.escape(_label(0))}</span>'
                 f'<span>сейчас</span></div>')
-        chart = (f'<div style="width:fit-content">'
+        chart = (f'<div style="width:fit-content" title="{chart_tip}">'
                  f'<div style="display:flex;align-items:flex-end;gap:1px;height:38px">{bars}</div>'
                  f'{axis}</div>')
-    summary = (f'<span style="color:#6b7685;font-size:.72rem;white-space:nowrap">'
+    info = (f'<span title="{chart_tip}" style="cursor:help;color:#8899aa;font-size:.66rem'
+            f';border:1px solid #8899aa;border-radius:50%;width:13px;height:13px'
+            f';display:inline-flex;align-items:center;justify-content:center'
+            f';flex:none">?</span>')
+    summary_tip = _tip(
+        "Σ end-to-end — сумма всех столбиков за выбранный период.\n"
+        "Ходов — сколько ответов бот сгенерировал за период.\n"
+        "Пик — самый нагруженный интервал графика.")
+    summary = (f'<span title="{summary_tip}" style="color:#6b7685;font-size:.72rem'
+               f';white-space:nowrap;cursor:help">'
                f'Σ end-to-end <b style="color:#3a4657">{total:.0f}s</b> · {turns} ходов · '
                f'пик {peak:.0f}s</span>')
     return (
         f'<div style="display:flex;align-items:flex-end;gap:.7rem;margin:.4rem 0 .7rem'
         f';flex-wrap:wrap">'
         f'<div style="display:flex;gap:.25rem">{btns}</div>'
-        f'{chart}{summary}</div>'
+        f'{chart}{info}{summary}</div>'
     )
 
 
