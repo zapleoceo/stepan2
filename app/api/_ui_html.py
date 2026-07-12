@@ -1639,6 +1639,7 @@ def app_shell(
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox", outbox_badge)
         + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
         + _na("nav.know", "/ui/knowledge", "fa-solid fa-book", "know")
+        + _hna("nav.personas", "/ui/personas", "fa-solid fa-masks-theater", "personas")
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
         + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")

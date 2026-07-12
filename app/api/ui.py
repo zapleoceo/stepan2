@@ -49,6 +49,7 @@ from ._routes_coach import router as _coach_router
 from ._routes_knowledge import router as _knowledge_router
 from ._routes_mcpadmin import router as _mcpadmin_router
 from ._routes_members import router as _members_router
+from ._routes_personas import router as _personas_router
 from ._routes_products import router as _products_router
 from ._ui_html import (
     app_shell,
@@ -77,6 +78,7 @@ router.include_router(_chat_router)
 router.include_router(_coach_router)
 router.include_router(_knowledge_router)
 router.include_router(_members_router)
+router.include_router(_personas_router)
 router.include_router(_products_router)
 router.include_router(_admin_router)
 router.include_router(_branches_router)

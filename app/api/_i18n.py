@@ -514,6 +514,75 @@ _TR: dict[str, dict[str, str]] = {
     },
     # leads panel
     "nav.leads":        {"ru": "Лиды",        "en": "Leads",       "id": "Lead"},
+    "nav.personas":     {"ru": "Персоны",     "en": "Personas",    "id": "Persona"},
+    "pl.intro": {
+        "ru": "Библиотека готовых персон продавцов (характер, тон, манера). Выбери персону "
+              "для филиала, добавь свои филиальные инструкции по секциям. Товары остаются твои.",
+        "en": "A library of ready seller personas (character, tone, style). Pick one for your "
+              "branch and add your own branch instructions per section. Your catalog stays yours.",
+        "id": "Perpustakaan persona penjual siap pakai (karakter, nada, gaya). Pilih untuk "
+              "cabang Anda dan tambahkan instruksi cabang per bagian. Katalog tetap milik Anda."},
+    "pl.using":  {"ru": "Активная персона:", "en": "In use:", "id": "Dipakai:"},
+    "pl.draft":  {"ru": "Пока используется своя черновая персона филиала (persona_core).",
+                  "en": "Currently using your own draft persona (persona_core).",
+                  "id": "Saat ini memakai persona draf cabang Anda (persona_core)."},
+    "pl.by":     {"ru": "Автор:", "en": "By", "id": "Oleh"},
+    "pl.contact": {"ru": "Связаться", "en": "Contact", "id": "Hubungi"},
+    "pl.contact_h": {"ru": "Написать автору, чтобы он обновил персону.",
+                     "en": "Message the author to request a persona update.",
+                     "id": "Kirim pesan ke penulis untuk minta pembaruan persona."},
+    "pl.fav":    {"ru": "В избранное", "en": "Favorite", "id": "Favorit"},
+    "pl.fav_h":  {"ru": "Пометить персону как избранную для этого филиала.",
+                  "en": "Mark this persona as a favorite for this branch.",
+                  "id": "Tandai persona ini sebagai favorit cabang."},
+    "pl.use":    {"ru": "Выбрать для филиала", "en": "Use for this branch",
+                  "id": "Pakai untuk cabang"},
+    "pl.use_h":  {"ru": "Сделать эту персону активной для филиала (в живой промпт пока НЕ "
+                        "включается — это следующий этап).",
+                  "en": "Make this persona active for the branch (not wired into the live "
+                        "prompt yet, that's the next phase).",
+                  "id": "Jadikan persona aktif untuk cabang (belum masuk prompt live)."},
+    "pl.in_use": {"ru": "Активна", "en": "In use", "id": "Aktif"},
+    "pl.open":   {"ru": "Открыть", "en": "Open", "id": "Buka"},
+    "pl.branches": {"ru": "филиалов", "en": "branches", "id": "cabang"},
+    "pl.stat_h": {"ru": "Сколько филиалов используют персону и сколько добавили в избранное. "
+                        "Метрики продаж по персоне появятся позже.",
+                  "en": "How many branches use this persona and favorited it. Per-persona sales "
+                        "stats come later.",
+                  "id": "Berapa cabang memakai dan memfavoritkan. Statistik penjualan menyusul."},
+    "pl.stats_note": {"ru": "Показаны метрики использования. Эффективность продаж по персоне — "
+                            "следующий этап.",
+                      "en": "Adoption stats shown. Per-persona sales effectiveness is next.",
+                      "id": "Statistik pemakaian. Efektivitas penjualan per persona menyusul."},
+    "pl.empty":  {"ru": "В библиотеке пока нет персон.", "en": "No personas in the library yet.",
+                  "id": "Belum ada persona di perpustakaan."},
+    "pl.back":   {"ru": "← Библиотека", "en": "← Library", "id": "← Perpustakaan"},
+    "pl.detail_intro": {
+        "ru": "Ядро персоны только для чтения. Под каждой секцией добавь свои филиальные "
+              "инструкции — они будут дополнять эту секцию для твоего филиала.",
+        "en": "The persona core is read-only. Under each section add your own branch "
+              "instructions that extend that section for your branch.",
+        "id": "Inti persona hanya-baca. Di tiap bagian tambahkan instruksi cabang Anda."},
+    "pl.add_label": {"ru": "Добавка филиала", "en": "Branch addendum", "id": "Tambahan cabang"},
+    "pl.add_h":  {"ru": "Твои инструкции поверх этой секции — уникальное для филиала.",
+                  "en": "Your instructions on top of this section, unique to the branch.",
+                  "id": "Instruksi Anda untuk bagian ini, khusus cabang."},
+    "pl.add_ph": {"ru": "напр. всегда упоминай нашу рассрочку 0%",
+                  "en": "e.g. always mention our 0% instalment",
+                  "id": "mis. selalu sebut cicilan 0% kami"},
+    "pl.add_none": {"ru": "нет", "en": "none", "id": "tidak ada"},
+    "pl.save":   {"ru": "Сохранить", "en": "Save", "id": "Simpan"},
+    "pl.readonly_note": {
+        "ru": "Обновлять само ядро персоны может только её автор. Нужны правки — свяжись с "
+              "автором (кнопка выше).",
+        "en": "Only the persona's author can update its core. Need a change? Contact the "
+              "author (button above).",
+        "id": "Hanya penulis yang bisa memperbarui inti persona. Hubungi penulis di atas."},
+    "pl.gone":   {"ru": "Персона не найдена.", "en": "Persona not found.",
+                  "id": "Persona tidak ditemukan."},
+    "pl.pick_branch": {"ru": "Выбери один филиал в фильтре, чтобы менять его персону.",
+                       "en": "Pick a single branch in the filter to change its persona.",
+                       "id": "Pilih satu cabang di filter untuk mengubah personanya."},
     "lead.name":        {"ru": "Имя",         "en": "Name",        "id": "Nama"},
     "lead.phone":       {"ru": "Телефон",     "en": "Phone",       "id": "Telepon"},
     "lead.stage":       {"ru": "Стадия",      "en": "Stage",       "id": "Tahap"},

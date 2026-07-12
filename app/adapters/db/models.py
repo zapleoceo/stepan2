@@ -530,3 +530,45 @@ class NeedAggSnapshot(SQLModel, table=True):
     entity_id: int = Field(foreign_key="need_entity.id")
     snap_date: date
     lead_count: int = Field(default=0)
+
+
+class Persona(SQLModel, table=True):
+    """Библиотечная персона продавца (soft-характеристики), branch-agnostic и версионная.
+
+    content — markdown с `## ` секциями. Обновлять может только автор (author_user_id)."""
+    __tablename__ = "persona"
+    __table_args__ = (UniqueConstraint("slug", "version", name="uq_persona_slug_version"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    slug: str = Field(index=True)
+    name: str
+    version: str = Field(default="1.0")
+    author_user_id: int | None = Field(default=None, foreign_key="app_user.id")
+    author_name: str = Field(default="")
+    author_contact: str = Field(default="", description="tg @handle / url для связи")
+    summary: str = Field(default="")
+    content: str = Field(default="", description="markdown, `## ` секции")
+    lang: str = Field(default="en", description="язык написания")
+    country: str = Field(default="", description="страна разработки")
+    status: str = Field(default="published", description="published|draft|retired")
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class BranchPersona(SQLModel, table=True):
+    """Выбор персоны филиалом + филиальные добавки по секциям. Один ряд на филиал."""
+    __tablename__ = "branch_persona"
+
+    branch_id: int | None = Field(default=None, primary_key=True, foreign_key="branch.id")
+    persona_id: int | None = Field(default=None, foreign_key="persona.id")
+    addendum: str = Field(default="{}", description="JSON {section_slug: инструкция}")
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class PersonaFavorite(SQLModel, table=True):
+    """Избранное филиала в библиотеке персон."""
+    __tablename__ = "persona_favorite"
+
+    branch_id: int = Field(primary_key=True, foreign_key="branch.id")
+    persona_id: int = Field(primary_key=True, foreign_key="persona.id")
+    created_at: datetime = Field(default_factory=_utcnow)
