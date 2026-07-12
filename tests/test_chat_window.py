@@ -75,6 +75,20 @@ def test_thread_row_preserves_active_filter_in_chat_url() -> None:
     assert 'href="/ui/inbox?stage=ready"' in html
     plain = thread_list_html([_thread_row(7)])            # no filter → plain chat url
     assert 'hx-push-url="/ui/chat/7"' in plain
+    # regression: the `awaiting` filter must ride along too — it was dropped from the route's
+    # filter_qs, so opening a chat from /ui/inbox?awaiting=off pushed a URL without it and the
+    # 30s #tl poll (which mirrors the address bar) reverted to the whole inbox.
+    aw = thread_list_html([_thread_row(7)], filter_qs="awaiting=off")
+    assert 'hx-push-url="/ui/chat/7?awaiting=off"' in aw
+
+
+def test_shell_thread_list_load_carries_awaiting_filter() -> None:
+    """The shell's own #tl loader must request the awaiting-scoped list, so a full reload of
+    /ui/chat/…?awaiting=off (or /ui/inbox?awaiting=off) shows the filtered list, not all."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "", active_nav="inbox", awaiting="off")
+    assert 'hx-get="/ui/threads?awaiting=off"' in html
 
 
 def test_thread_card_shows_bot_off_indicator() -> None:
