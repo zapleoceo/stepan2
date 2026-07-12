@@ -12,10 +12,14 @@ from app.adapters.db.models import (
     Channel,
     ChannelSession,
     ChannelThread,
+    CrmLeadState,
     Lead,
+    LeadNeedTag,
     ManagerAlert,
     MediaAsset,
     Message,
+    NeedEntity,
+    NeedLeadState,
     Outbox,
     StageEvent,
 )
@@ -54,6 +58,15 @@ async def _world(s):
     s.add(ManagerAlert(branch_id=b.id, lead_id=only.id, thread_id=t_ig2.id, kind="needs_manager"))
     s.add(StageEvent(branch_id=b.id, lead_id=only.id, thread_id=t_ig2.id,
                      from_stage="new", to_stage="qualifying"))
+    # The orphan lead also carries CRM + needs-cloud rows (added by later features). These
+    # FK-reference lead.id, so the purge must clear them before deleting the lead — otherwise
+    # the whole delete aborts on a ForeignKeyViolation (the "can't delete connector" bug).
+    ent = NeedEntity(branch_id=b.id, kind="pains", label="дорого")
+    s.add(ent)
+    await s.flush()
+    s.add(LeadNeedTag(lead_id=only.id, kind="pains", entity_id=ent.id, branch_id=b.id))
+    s.add(NeedLeadState(lead_id=only.id, branch_id=b.id, needs_sha="abc"))
+    s.add(CrmLeadState(branch_id=b.id, lead_id=only.id))
     await s.flush()
     return b, ig, wa, dual, only
 
@@ -82,6 +95,10 @@ async def test_purge_cascades_and_keeps_multichannel_lead(db_session) -> None:
     # the phone-merged lead survives (still has the WA thread); the IG-only lead is gone
     assert (await db_session.exec(select(Lead).where(Lead.id == dual.id))).first() is not None
     assert (await db_session.exec(select(Lead).where(Lead.id == only.id))).first() is None
+    # …and the orphan lead's CRM + needs-cloud rows went with it (no FK violation aborting)
+    assert await _all(db_session, LeadNeedTag) == []
+    assert await _all(db_session, NeedLeadState) == []
+    assert await _all(db_session, CrmLeadState) == []
     # the WA channel + its thread + message are untouched
     assert (await db_session.exec(select(Channel).where(Channel.id == wa.id))).first() is not None
     assert (await db_session.exec(
