@@ -241,7 +241,7 @@ async def threads_partial(
     # reload of it) keeps the filtered list rather than reverting to the whole inbox.
     filter_qs = urlencode({k: v for k, v in
                            (("stage", s), ("lead_type", lt), ("audience", aud),
-                            ("ad_id", ad), ("grp", grp.strip()),
+                            ("ad_id", ad), ("grp", grp.strip()), ("awaiting", aw),
                             ("kind", knd if knd in _CHANNEL_KINDS else "")) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))

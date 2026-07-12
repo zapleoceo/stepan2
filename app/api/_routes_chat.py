@@ -192,11 +192,12 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
 async def chat_page(
     thread_id: int, request: Request,
     stage: str = "", lead_type: str = "", ad_id: str = "", grp: str = "", audience: str = "",
+    awaiting: str = "", kind: str = "",
 ) -> HTMLResponse:
     """Canonical, shareable chat URL. HTMX (HX-Request) gets the bare panel; a direct load,
     F5, or pasted link gets the full app shell with this chat open and highlighted. The inbox
-    filter (stage/lead_type/audience/ad_id/grp) rides along in the query so a full reload keeps
-    the filtered thread list instead of reverting to the whole inbox."""
+    filter (stage/lead_type/audience/ad_id/grp/awaiting/kind) rides along in the query so a
+    full reload keeps the filtered thread list instead of reverting to the whole inbox."""
     lang = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
@@ -211,7 +212,7 @@ async def chat_page(
     resp = HTMLResponse(app_shell(
         lang, html, active_nav="inbox", is_super=is_super_admin(request),
         stage=stage.strip(), lead_type=lead_type.strip(), audience=audience.strip(),
-        ad_id=ad_id.strip(), grp=grp.strip()))
+        ad_id=ad_id.strip(), grp=grp.strip(), awaiting=awaiting.strip(), kind=kind.strip()))
     resp.set_cookie("stepan2_open_thread", str(thread_id), max_age=86400, samesite="lax")
     return resp
 
