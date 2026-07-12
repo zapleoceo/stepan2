@@ -30,6 +30,19 @@ def test_build_messages_injects_the_now_block() -> None:
     assert "CURRENT DATE & TIME" in msgs[0]["content"]   # rides in the system prompt
 
 
+# ─── follow-up story-repeat + consistent register (prompt rules) ─────────────────
+
+def test_followup_contract_forbids_reusing_a_case_or_stat() -> None:
+    sys = build_messages("PERSONA", [], "id", workflow="followup")[0]["content"]
+    assert "redeploy the same case" in sys.lower() or "already used" in sys.lower()
+    assert "success story" in sys.lower()
+
+
+def test_decision_contract_requires_consistent_register() -> None:
+    sys = build_messages("PERSONA", [], "id")[0]["content"]
+    assert "CONSISTENT REGISTER" in sys and "Anda" in sys   # don't drift casual↔formal
+
+
 # ─── fix 3: strip stray markdown artifacts ───────────────────────────────────────
 
 def test_clean_bubble_strips_horizontal_rules_and_headings() -> None:
