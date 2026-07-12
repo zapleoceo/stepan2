@@ -425,23 +425,25 @@ async def test_openhouse_rsvp_notifies_without_muting_bot(db_session) -> None:
     assert "09:00-18:00" in notifier.sends[0] or "09:00-18:00" in alert.summary_en
 
 
-async def test_openhouse_rsvp_without_phone_still_notifies(db_session) -> None:
+async def test_openhouse_rsvp_without_phone_does_not_notify(db_session) -> None:
+    """Policy: no team ping for a contact-less RSVP — the bot keeps talking and collects the
+    WhatsApp first; the ping fires only once a phone is in hand (mirrors the manager gate)."""
     notifier = FakeNotifier()
     bid, tid, lead = await _world(db_session, phone=None, stage=Stage.QUALIFYING)
     await _svc(db_session, bid, notifier=notifier).enqueue_reply(
         tid, _decision(ready=True, ready_subtype="openhouse", stage=Stage.QUALIFYING),
     )
-    assert lead.stage == Stage.QUALIFYING
-    assert lead.agent_enabled is True
-    alert = (await db_session.exec(select(ManagerAlert))).first()
-    assert alert is not None and alert.kind == "ready_openhouse"
+    assert lead.stage == Stage.QUALIFYING and lead.agent_enabled is True  # bot keeps selling
+    assert (await db_session.exec(select(ManagerAlert))).first() is None  # no contact-less ping
+    assert lead.ready_subtype != "openhouse"  # not marked notified → can ping later w/ a phone
+    assert notifier.sends == []
 
 
 async def test_openhouse_rsvp_ignores_conflicting_needs_manager_flag(db_session) -> None:
     """The model sometimes also flags needs_manager on an RSVP turn — the openhouse
     notification already covers the hand-off, so it must not ALSO flip to MANAGER."""
     notifier = FakeNotifier()
-    bid, tid, lead = await _world(db_session, phone=None, stage=Stage.PRESENTING)
+    bid, tid, lead = await _world(db_session, phone="+6281234567890", stage=Stage.PRESENTING)
     await _svc(db_session, bid, notifier=notifier).enqueue_reply(
         tid,
         _decision(ready=True, ready_subtype="openhouse", needs_manager=True,
