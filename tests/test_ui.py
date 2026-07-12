@@ -155,6 +155,17 @@ def test_app_shell_contains_sidebar_and_nav() -> None:
     assert "<div>main</div>" in html
 
 
+def test_send_suggest_posts_plain_values_not_formdata() -> None:
+    """Chat 2872: htmx.ajax merges `values` by for-in iteration, and a FormData has no own
+    enumerable entries — the 'send as Stepan' POST went out with NO parameters, so the server
+    saw an empty text and silently dropped the send. The JS must pass a plain object."""
+    from app.api._ui_html import app_shell
+    _set_lang("en")
+    html = app_shell("en", "<div>main</div>", active_nav="inbox")
+    assert "values:{text:ta.value,source:'agent'}" in html
+    assert "fd.append('source','agent')" not in html  # the broken FormData path is gone
+
+
 def test_thread_list_poll_always_follows_the_current_url() -> None:
     """Real bug: #tl (the thread list) polls itself every 30s, but a stage-pill click only
     swapped its innerHTML — #tl's own hx-get stayed whatever it was born with, so the next
