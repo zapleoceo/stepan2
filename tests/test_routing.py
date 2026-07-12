@@ -61,19 +61,23 @@ def test_parse_smart_stages() -> None:
 
 
 def test_deep_conversation_forces_smart_regardless_of_stage() -> None:
-    # A lead 6+ turns deep represents real invested effort, even stuck in 'qualifying'
-    # with no smart_stage/lead_type/buy-signal to trigger the older rules.
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=5) == FAST
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=6) == SMART
-    assert _pick(stage=Stage.NEW, inbound_count=10) == SMART
+    # A lead 10+ turns deep represents real invested effort, even stuck in 'qualifying'
+    # with no smart_stage/lead_type/buy-signal to trigger the older rules. Was 6 — with the
+    # forever-sticky regen rule it routed 95% of live replies to smart (2026-07-12 data).
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=6) == FAST
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=9) == FAST
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=10) == SMART
+    assert _pick(stage=Stage.NEW, inbound_count=12) == SMART
 
 
 def test_guard_regen_history_stays_on_smart_for_this_lead() -> None:
-    # Once guard has already had to regenerate a reply for this lead, keep it on smart —
-    # a per-LEAD signal, not something a stage or this turn's text could ever show.
+    # Once guard has REPEATEDLY had to regenerate replies for this lead, keep it on smart —
+    # a per-LEAD signal. A single regen over the whole history is noise (it made every lead
+    # who ever tripped one smart forever); two+ is a pattern.
     assert _pick(stage=Stage.NEW, guard_regen_count=0) == FAST
-    assert _pick(stage=Stage.NEW, guard_regen_count=1) == SMART
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", guard_regen_count=2) == SMART
+    assert _pick(stage=Stage.NEW, guard_regen_count=1) == FAST
+    assert _pick(stage=Stage.NEW, guard_regen_count=2) == SMART
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", guard_regen_count=3) == SMART
 
 
 def test_smart_stages_is_tunable() -> None:

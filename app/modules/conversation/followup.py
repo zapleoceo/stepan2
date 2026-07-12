@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, Outbox
+from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
+from app.domain.enums import Stage
 from app.modules.settings.service import BranchSettings, get_channel_settings
 
 from . import guard
@@ -177,9 +178,17 @@ class FollowupService:
             return False
         last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
         if guard.lead_signaled_annoyance(last_in):
+            # Cancel the timer outright, not just skip: a skipped-but-still-due thread was
+            # re-picked every 10-min tick forever. An annoyed lead gets NO more nudges; a
+            # fresh inbound resets the cycle anyway (ingest._reset_followup_cycle).
             logger.warning(
                 "followup: branch=%d thread=%d lead signaled annoyance at being contacted "
-                "— skipping nudge", self.branch_id, thread_id)
+                "— cancelling further nudges", self.branch_id, thread_id)
+            thread = await self.threads.by_id(thread_id)
+            if thread is not None:
+                thread.next_followup_at = None
+                self.session.add(thread)
+                await self.session.flush()
             return False
         lang = await self._lang()
         total = len(self.settings.followup_schedule_h)
@@ -250,10 +259,15 @@ class FollowupService:
         # low-value; skip sending rather than risk another regen loop, next attempt retries.
         _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
         if post_guard_ratio >= _DUPLICATE_RATIO:
+            # We had nothing new to say — a nudge that would only repeat ourselves. Burn the
+            # STEP, not just the attempt: leaving the timer due meant this thread regenerated
+            # (and dropped) a nudge every 10-min tick — the single biggest token sink measured
+            # (~1.3k followup generations/day vs ~0.6k live replies, ~48% of all input tokens).
             logger.warning(
                 "followup: branch=%d thread=%d still near-duplicate after guard regen "
-                "(ratio=%.2f) — dropping this attempt", self.branch_id, thread_id,
+                "(ratio=%.2f) — dry step, backing off", self.branch_id, thread_id,
                 post_guard_ratio)
+            await self._burn_dry_step(thread_id, now)
             return False
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: lead answered while we were generating (S1 guard)
@@ -282,6 +296,35 @@ class FollowupService:
             self.session.add(thread)
             await self.session.flush()
         return True
+
+    async def _burn_dry_step(self, thread_id: int, now: datetime) -> None:
+        """A nudge we couldn't compose without repeating ourselves shouldn't exist — consume
+        the schedule step and arm the NEXT one (hours away), or wind down to dormant when the
+        schedule is exhausted. Mirrors OutboxSender._plan_followup/_to_dormant semantics, just
+        without a send."""
+        thread = await self.threads.by_id(thread_id)
+        if thread is None:
+            return
+        thread.followups_sent += 1
+        schedule = self.settings.followup_schedule_h
+        if self.settings.followup_enabled and schedule \
+                and thread.followups_sent < len(schedule):
+            thread.next_followup_at = now + timedelta(
+                hours=schedule[thread.followups_sent])
+        else:
+            thread.next_followup_at = None
+            lead = await self.session.get(Lead, thread.lead_id)
+            if lead is not None and lead.stage != Stage.DORMANT:
+                self.session.add(StageEvent(
+                    branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+                    from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
+                    actor="system", reason="followup schedule exhausted (dry)",
+                ))
+                lead.stage = Stage.DORMANT
+                lead.agent_enabled = False
+                self.session.add(lead)
+        self.session.add(thread)
+        await self.session.flush()
 
     async def _lead_replied_meanwhile(self, thread_id: int) -> bool:
         row = (

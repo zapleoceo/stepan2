@@ -351,6 +351,59 @@ def is_risky(reply: str) -> bool:
         or _STORY_RE.search(text))
 
 
+# Price-vocabulary risky words — when these are the ONLY risky trigger and every quoted
+# figure is verbatim in the KB context, the draft merely repeats a grounded fact.
+_PRICE_WORDS = frozenset({"harga", "biaya", "tarif", "cicilan", "angsuran"})
+_PRICE_SUFFIX = {"ribu": 1_000, "rb": 1_000, "juta": 1_000_000}
+
+
+_BARE_NUMBER_RE = re.compile(r"\d[\d.,]{3,}")
+
+
+def _canonical_prices(text: str, *, liberal: bool = False) -> set[int]:
+    """Every money figure in `text` as a canonical integer — 'Rp 1.882.955' → 1882955,
+    '500rb' / '500 ribu' → 500000 — so a reply figure can be matched against the KB
+    regardless of formatting. liberal=True (the KB side) also takes bare digit runs
+    ('500,000 IDR' has neither an Rp prefix nor an rb suffix): extra KB numbers only make
+    the subset check stricter-side-safe, while the REPLY side stays strict money shapes."""
+    out: set[int] = set()
+    for m in _PRICE_RE.finditer(text or ""):
+        raw = m.group(0).lower()
+        digits = re.sub(r"[^\d]", "", raw)
+        if not digits:
+            continue
+        n = int(digits)
+        for suffix, mult in _PRICE_SUFFIX.items():
+            if suffix in raw:
+                n *= mult
+                break
+        out.add(n)
+    if liberal:
+        for m in _BARE_NUMBER_RE.finditer(text or ""):
+            digits = re.sub(r"[^\d]", "", m.group(0))
+            if digits:
+                out.add(int(digits))
+    return out
+
+
+def price_claims_grounded(reply: str, context: str) -> bool:
+    """True when the ONLY thing that made this reply risky is price talk AND every figure it
+    quotes appears (canonically) in the KB context — the draft repeats a grounded fact, so
+    the LLM verify would spend ~3k tokens re-reading the KB to confirm a substring match we
+    can do here (verify fired on 600+ replies/day, mostly exactly this case). Any other
+    risky trigger (free/promo/access/story/URL) still goes to the full verify."""
+    text = reply or ""
+    if _STORY_RE.search(text) or _URL_RE.search(text):
+        return False
+    for m in _RISKY_RE.finditer(text):
+        if m.group(0).lower() not in _PRICE_WORDS:
+            return False  # a non-price offer word (gratis/promo/akses/…) — verify for real
+    prices = _canonical_prices(text)
+    if not prices:
+        return False  # price words but no figure — nothing to string-match, let the LLM judge
+    return prices <= _canonical_prices(context, liberal=True)
+
+
 async def verify_grounding(
     llm: LLMPort, reply: str, context: str, *, branch_id: int,
     thread_id: int, bill: bool = True, system: str | None = None,

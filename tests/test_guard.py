@@ -392,3 +392,66 @@ async def test_guard_trims_a_still_doubled_question_instead_of_handing_off(db_se
     assert out["reply"] != guard.SAFE_FALLBACK and out["needs_manager"] is False
     assert not guard.multiple_questions(out["reply"])
     assert out["reply"] == "Boleh! Sebelum itu, kamu sudah kerja atau masih kuliah?"
+
+
+# ─── price_claims_grounded: skip the LLM verify for a grounded price repeat ───
+
+def test_grounded_price_skips_verify() -> None:
+    ctx = "> Quick facts — SMM: Harga Rp 1.882.955 total (DP Rp 500.000), 2 minggu."
+    reply = "Biayanya Rp 1.882.955 ya Kak, dengan DP 500.000 untuk amankan seat 😊"
+    assert guard.price_claims_grounded(reply, ctx) is True
+
+
+def test_formatting_variants_still_match() -> None:
+    ctx = "DP / seat-lock: 500,000 IDR advance; harga total Rp 1.882.955"
+    assert guard.price_claims_grounded("DP-nya 500rb aja Kak", ctx) is True
+    assert guard.price_claims_grounded("DP 500 ribu dulu ya Kak", ctx) is True
+
+
+def test_ungrounded_price_still_verifies() -> None:
+    ctx = "Harga Rp 1.882.955 total."
+    assert guard.price_claims_grounded("Biayanya cuma Rp 750.000 kok Kak!", ctx) is False
+
+
+def test_non_price_offer_word_still_verifies() -> None:
+    # 'gratis' isn't price vocabulary — a free-offer claim needs the real verify
+    ctx = "Harga Rp 700.000."
+    assert guard.price_claims_grounded("Ini gratis kok Kak, harga normal Rp 700.000", ctx) is False
+
+
+def test_story_or_url_still_verifies() -> None:
+    ctx = "Harga Rp 700.000. Landing: https://itstep.id/x"
+    assert guard.price_claims_grounded(
+        "Salah satu alumni kami sukses! Harganya Rp 700.000", ctx) is False
+    assert guard.price_claims_grounded(
+        "Harga Rp 700.000 — cek https://itstep.id/x", ctx) is False
+
+
+def test_price_word_without_figure_still_verifies() -> None:
+    assert guard.price_claims_grounded("Harganya terjangkau banget Kak!", "Harga Rp 1jt") is False
+
+
+async def test_pipeline_skips_llm_verify_for_grounded_price(db_session) -> None:
+    """End-to-end: a reply that only repeats the KB's own price must NOT spend a verify
+    call — the scripted LLM would raise if a second (verify) chat arrived."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    context = "> Quick facts — Cybersecurity Skill Booster: Harga Rp 700.000 offline."
+    engine = _FakeEngine(context)  # no regen scripts: any extra complete() would pop-crash
+
+    class _NoVerifyLLM:
+        async def chat(self, *a, **kw):  # noqa: ANN001, ANN002, ANN003
+            raise AssertionError("LLM verify must be skipped for a grounded price")
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    decision = parse_decision(json.dumps({
+        "reply": "Harganya Rp 700.000 offline ya Kak 😊", "stage": "qualifying"}))
+    ctx = _FakeCtx("berapa harga kursusnya?")
+    fixed, _meta = await guard_decision(
+        db_session, bid, None, _NoVerifyLLM(), engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={})
+    assert fixed.reply == "Harganya Rp 700.000 offline ya Kak 😊"  # untouched, no verify
