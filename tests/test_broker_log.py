@@ -217,3 +217,23 @@ async def test_turn_histogram_sums_end_to_end_per_bucket(db_session) -> None:
     assert round(sum(buckets)) == 13
     assert span_s == 3600 / 24              # 1h window / 24 buckets = 150s per bucket
     assert "1h" in log_window_keys() and "7d" in log_window_keys()
+
+
+async def test_histogram_bars_and_chart_carry_explanatory_tooltips(db_session) -> None:
+    """Every histogram bar tooltips its time range + value + a plain-language explanation,
+    and the chart itself (plus the ? badge and the summary) explains what is being shown."""
+    db_session.add(BrokerLog(
+        request_id="h1", branch_id=7, thread_id=900, kind="reply", capability="chat:smart",
+        ok=True, latency_ms=4000, created_at=_NOW - timedelta(minutes=10)))
+    await db_session.flush()
+
+    rows, total = await fetch_broker_log(db_session, [7], page=0, size=50)
+    buckets, turns, since, span_s = await fetch_turn_histogram(db_session, [7], "1h")
+    html = broker_log_panel_html(
+        list(rows), 0, 50, total, None, (buckets, turns, "1h", log_window_keys(), since, span_s, 0))
+    assert "Гистограмма нагрузки на брокер" in html      # chart-level explanation
+    assert "Σ end-to-end:" in html                       # per-bar tooltip value line
+    assert "включая ретраи и перегенерации" in html      # per-bar plain-language explanation
+    assert "нагрузка" in html                            # per-bar level word
+    assert "сумма всех столбиков" in html                # summary tooltip
+    assert "&#10;" in html                               # tooltips are multi-line
