@@ -55,6 +55,56 @@ function stpKey(e){
 }
 """
 
+# Hero WebGL2 fragment shader (flowing curl-ish FBM in the brand accent, reacts to the
+# cursor) + IntersectionObserver scroll-reveals. Both degrade cleanly: no WebGL → the CSS
+# grid hero shows; reduced-motion → one static shader frame and reveals appear instantly;
+# no JS at all → all content is visible (the reveal hide is scoped to html.has-reveal).
+_FX_JS = r"""
+(function(){
+  var html=document.documentElement; html.classList.add('has-reveal');
+  var mq=window.matchMedia('(prefers-reduced-motion: reduce)');
+  function initReveal(){
+    var els=[].slice.call(document.querySelectorAll('.reveal'));
+    if(mq.matches||!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('in');});return;}
+    var io=new IntersectionObserver(function(ents){ents.forEach(function(en){if(en.isIntersecting){en.target.classList.add('in');io.unobserve(en.target);}});},{threshold:0.15});
+    els.forEach(function(e){io.observe(e);});
+  }
+  function initShader(){
+    var cv=document.getElementById('herofx'); if(!cv) return;
+    var gl; try{gl=cv.getContext('webgl2',{antialias:false,alpha:false});}catch(e){}
+    if(!gl) return;
+    var vs='#version 300 es\nprecision highp float;\nvoid main(){vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));gl_Position=vec4(p*2.0-1.0,0.0,1.0);}';
+    var fs='#version 300 es\nprecision highp float;\nuniform vec2 u_res;uniform float u_time;uniform vec2 u_mouse;out vec4 o;'
+      +'float hash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}'
+      +'float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);float a=hash(i),b=hash(i+vec2(1,0)),c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);}'
+      +'float fbm(vec2 p){float v=0.0,a=0.5;for(int i=0;i<5;i++){v+=a*noise(p);p*=2.03;a*=0.5;}return v;}'
+      +'void main(){vec2 uv=gl_FragCoord.xy/u_res.xy;vec2 p=uv;p.x*=u_res.x/u_res.y;vec2 m=(u_mouse-0.5)*0.35;float t=u_time*0.045;'
+      +'vec2 q=vec2(fbm(p*1.6+t+m),fbm(p*1.6-t+vec2(5.2)));float f=fbm(p*1.9+q*1.8+t*1.4);'
+      +'vec3 bg=vec3(0.031,0.035,0.047);vec3 acc=vec3(1.0,0.36,0.208);'
+      +'vec3 col=mix(bg,acc,smoothstep(0.35,0.95,f)*0.55);col=mix(col,vec3(0.05,0.08,0.14),smoothstep(0.2,0.0,f)*0.4);'
+      +'float vig=smoothstep(1.15,0.25,length(uv-0.5));col*=mix(0.6,1.0,vig);col+=(hash(gl_FragCoord.xy+u_time)-0.5)*0.02;o=vec4(col,1.0);}';
+    function sh(ty,src){var s=gl.createShader(ty);gl.shaderSource(s,src);gl.compileShader(s);return gl.getShaderParameter(s,gl.COMPILE_STATUS)?s:null;}
+    var v=sh(gl.VERTEX_SHADER,vs),fr=sh(gl.FRAGMENT_SHADER,fs); if(!v||!fr) return;
+    var pr=gl.createProgram();gl.attachShader(pr,v);gl.attachShader(pr,fr);gl.linkProgram(pr);
+    if(!gl.getProgramParameter(pr,gl.LINK_STATUS)) return;
+    gl.useProgram(pr);
+    var uRes=gl.getUniformLocation(pr,'u_res'),uTime=gl.getUniformLocation(pr,'u_time'),uMouse=gl.getUniformLocation(pr,'u_mouse');
+    var mouse=[0.5,0.5],mt=[0.5,0.5],raf=null,start=null,visible=true;
+    function resize(){var dpr=Math.min(window.devicePixelRatio||1,2);cv.width=Math.max(1,(cv.clientWidth*dpr)|0);cv.height=Math.max(1,(cv.clientHeight*dpr)|0);gl.viewport(0,0,cv.width,cv.height);}
+    function draw(tsec){gl.uniform2f(uRes,cv.width,cv.height);gl.uniform1f(uTime,tsec);gl.uniform2f(uMouse,mouse[0],mouse[1]);gl.drawArrays(gl.TRIANGLES,0,3);}
+    function frame(ts){raf=null;if(start===null)start=ts;mouse[0]+=(mt[0]-mouse[0])*0.05;mouse[1]+=(mt[1]-mouse[1])*0.05;draw((ts-start)/1000);if(visible&&!document.hidden)req();}
+    function req(){if(raf===null&&!mq.matches)raf=requestAnimationFrame(frame);}
+    resize();window.addEventListener('resize',resize);
+    cv.parentNode.addEventListener('pointermove',function(e){var r=cv.getBoundingClientRect();mt[0]=(e.clientX-r.left)/r.width;mt[1]=1.0-(e.clientY-r.top)/r.height;});
+    if('IntersectionObserver' in window){var io2=new IntersectionObserver(function(en){visible=en[0].isIntersecting;if(visible)req();},{threshold:0});io2.observe(cv);}
+    document.addEventListener('visibilitychange',function(){if(!document.hidden)req();});
+    if(mq.matches){draw(12.0);}else{req();}
+  }
+  function boot(){initReveal();initShader();}
+  if(document.readyState!=='loading')boot();else document.addEventListener('DOMContentLoaded',boot);
+})();
+"""
+
 _CSS = """
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -284,6 +334,45 @@ footer{border-top:1px solid var(--line);padding:2.4rem 0;color:var(--mut);font-s
 .atitle{font-family:var(--disp);font-size:.85rem;font-weight:600;margin-bottom:.8rem;color:var(--ink)}
 .asub{font-family:var(--mono);font-weight:400;color:var(--faint);font-size:.7rem}
 @media (max-width:760px){.shots{grid-template-columns:1fr}.meta{grid-template-columns:1fr}}
+/* hero WebGL shader + contrast scrim */
+.hero-fx{position:absolute;inset:0;z-index:0;width:100%;height:100%;display:block}
+.hero-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;background:radial-gradient(62% 58% at 50% 40%,rgba(8,9,12,.28),rgba(8,9,12,.86) 80%)}
+.hero .wrap{position:relative;z-index:2}
+/* scroll-reveal (progressive: content stays visible without JS or under reduced-motion) */
+@media (prefers-reduced-motion:no-preference){
+  html.has-reveal .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1)}
+  html.has-reveal .reveal.in{opacity:1;transform:none}
+}
+/* mono eyebrow (tech-editorial) */
+.kick,.eyebrow{font-family:var(--mono)}
+/* insights cloud */
+.cloud{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:2.6rem}
+.cloud-col{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.3rem 1.15rem}
+.cloud-h{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);display:flex;align-items:center;gap:.5rem;margin-bottom:1rem}
+.cloud-h .dt{width:8px;height:8px;border-radius:50%}
+.g-goal{background:#4d8dff}.g-pain{background:#ff5c5c}.g-fear{background:#4cc38a}
+.chip{display:block;font-size:.9rem;color:var(--ink);background:var(--panel2);border:1px solid var(--line2);border-radius:10px;padding:.5rem .7rem;margin-bottom:.55rem;will-change:transform}
+.cloud-col.c-goal{background:linear-gradient(180deg,rgba(77,141,255,.07),var(--panel) 60%)}
+.cloud-col.c-pain{background:linear-gradient(180deg,rgba(255,92,92,.07),var(--panel) 60%)}
+.cloud-col.c-fear{background:linear-gradient(180deg,rgba(76,195,138,.07),var(--panel) 60%)}
+@media (prefers-reduced-motion:no-preference){.chip{animation:floaty var(--d,7s) ease-in-out infinite}}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@media (max-width:760px){.cloud{grid-template-columns:1fr}}
+/* persona library — split: copy left, versioned persona rows right */
+.plib{display:grid;grid-template-columns:1fr 1fr;gap:2.2rem;align-items:center;margin-top:2.6rem}
+.plib-list{display:flex;flex-direction:column;gap:.8rem}
+.prow{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.05rem 1.15rem;transition:border-color .18s,transform .12s}
+.prow:hover{border-color:var(--line2);transform:translateY(-2px)}
+.prow.hi{border-color:var(--acc);background:linear-gradient(180deg,var(--acc-soft),var(--panel) 65%)}
+.prow-top{display:flex;align-items:center;gap:.6rem;margin-bottom:.3rem}
+.prow-nm{font-family:var(--disp);font-weight:600;font-size:1rem;letter-spacing:-.01em}
+.prow-ver{font-family:var(--mono);font-size:.64rem;color:var(--faint);border:1px solid var(--line2);border-radius:6px;padding:.1rem .4rem}
+.prow-metric{margin-left:auto;text-align:right}
+.prow-metric b{font-family:var(--disp);font-size:1.15rem;color:var(--ok)}
+.prow-metric span{display:block;font-size:.6rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+.prow-desc{font-size:.85rem;color:var(--mut)}
+.plib .plq li{display:flex;gap:.55rem;align-items:flex-start;font-size:.9rem;color:var(--mut);margin-top:.7rem;list-style:none}
+@media (max-width:760px){.plib{grid-template-columns:1fr}}
 """
 
 
@@ -434,12 +523,12 @@ def _trust_section() -> str:
     rollout support. All facts, no illustrative mockup data."""
     cards = [
         ("building", "Built for multiple brands", "Run every location or brand as its own "
-         "branch — separate knowledge base, numbers and reporting, one account."),
-        ("users", "Role-based access", "Admin, branch admin or view-only — control exactly "
+         "branch: separate knowledge base, numbers and reporting, one account."),
+        ("users", "Role-based access", "Admin, branch admin or view-only. Control exactly "
          "who can see or touch which brand's leads."),
         ("shield", "Grounded &amp; auditable", "Every claim traces back to your own facts. "
          "Full transcript on every lead, synced to your CRM."),
-        ("layers", "Deep integrations", "MCP connector, ad-account attribution, CRM sync — "
+        ("layers", "Deep integrations", "MCP connector, ad-account attribution, CRM sync, "
          "built to sit inside a real stack, not replace it."),
     ]
     items = "".join(
@@ -499,6 +588,89 @@ def _ad_accounts_section() -> str:
     )
 
 
+def _insights_cloud_section() -> str:
+    """What Stepan captures from every conversation — goals / pains / fears — as a living,
+    gently-floating cloud of chips (a real conceptual viz, not a fake screenshot)."""
+    def chip(text: str, d: str) -> str:
+        return f'<span class="chip" style="--d:{d}s">{text}</span>'
+    goals = "".join(chip(x, d) for x, d in (
+        ("Land my first data job", "6.5"), ("Grow my brand's reach", "8"),
+        ("Switch careers into tech", "7.2"), ("Earn on the side freelancing", "9")))
+    pains = "".join(chip(x, d) for x, d in (
+        ("No time for a full course", "7.8"), ("Tried tutorials, got stuck", "6.2"),
+        ("Budget is tight right now", "8.6"), ("Burned before by empty promises", "7")))
+    fears = "".join(chip(x, d) for x, d in (
+        ("What if I'm too old to start?", "6.8"), ("Scared it's too technical", "8.2"),
+        ("Worried I won't finish it", "7.5"), ("Afraid it won't get me hired", "9.1")))
+    return (
+        "<section class=\"divide\"><div class=\"wrap\">"
+        "<div class=\"shead reveal\">"
+        "<div class=\"kick\">Lead intelligence</div>"
+        "<h2>Every lead's goals, pains and fears, captured while they talk</h2>"
+        "<p class=\"lead\">Stepan listens for what each lead really wants, what is blocking "
+        "them, and what they are quietly afraid of, then turns it into a living profile you "
+        "can segment, score and act on.</p></div>"
+        "<div class=\"cloud reveal\">"
+        "<div class=\"cloud-col c-goal\"><div class=\"cloud-h\">"
+        f"<span class=\"dt g-goal\"></span>Goals</div>{goals}</div>"
+        "<div class=\"cloud-col c-pain\"><div class=\"cloud-h\">"
+        f"<span class=\"dt g-pain\"></span>Pains</div>{pains}</div>"
+        "<div class=\"cloud-col c-fear\"><div class=\"cloud-h\">"
+        f"<span class=\"dt g-fear\"></span>Fears</div>{fears}</div>"
+        "</div>"
+        "<p class=\"mnote\" style=\"margin-top:1rem\">Illustrative examples of what Stepan "
+        "captures per lead.</p>"
+        "</div></section>"
+    )
+
+
+def _persona_row(name: str, ver: str, desc: str, metric: str, hi: bool = False) -> str:
+    cls = "prow hi" if hi else "prow"
+    return (
+        f'<div class="{cls}"><div class="prow-top">'
+        f'<span class="prow-nm">{name}</span>'
+        f'<span class="prow-ver">{ver}</span>'
+        f'<div class="prow-metric"><b>{metric}</b><span>ready leads</span></div></div>'
+        f'<div class="prow-desc">{desc}</div></div>'
+    )
+
+
+def _persona_library_section() -> str:
+    """The Seller Persona Library — soft selling craft shared + versioned, catalog stays
+    per-branch. Split layout: pitch left, versioned persona rows (with a close-rate metric,
+    a number not a progress-track bar) right."""
+    rows = (
+        _persona_row("The Consultative Closer", "v2.1",
+                     "Warm, asks sharp questions, times the offer to the buying signal.",
+                     "41%", hi=True)
+        + _persona_row("The Warm Advisor", "v1.4",
+                       "Patient and reassuring, great with nervous first-time buyers.", "34%")
+        + _persona_row("The Fast Mover", "v1.2",
+                       "Concise and momentum-driven, built for high-volume inbound.", "29%")
+    )
+    bullets = "".join(
+        f'<li>{_svg(_IC["check"], 16)}{b}</li>' for b in (
+            "Load a proven persona per brand or location instead of writing one from scratch.",
+            "Every persona is versioned, so you can roll back or improve the core over time.",
+            "Stepan tracks which persona sells best and helps you roll out the winner.",
+        ))
+    return (
+        "<section class=\"divide\"><div class=\"wrap\"><div class=\"plib\">"
+        "<div class=\"reveal\">"
+        "<div class=\"kick\">Seller persona library</div>"
+        "<h2>A library of proven sales personas</h2>"
+        "<p class=\"lead\">The selling craft is shared, your catalog stays yours. Pick a "
+        "battle-tested persona for each brand, keep your own products and facts, and let the "
+        "best-performing personas spread across your locations.</p>"
+        f"<ul class=\"plq\">{bullets}</ul></div>"
+        f"<div class=\"plib-list reveal\">{rows}</div>"
+        "</div>"
+        "<p class=\"mnote\" style=\"margin-top:1.4rem\">Illustrative personas and sample close "
+        "rates.</p>"
+        "</div></section>"
+    )
+
+
 def landing_html() -> str:
     steps = "".join([
         _step("01", "chat", "Greets every lead", "The moment someone DMs — from an ad, a comment, a "
@@ -537,6 +709,7 @@ def landing_html() -> str:
         "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">"
         "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>"
         "<link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&"
+        "family=JetBrains+Mono:wght@400;500&"
         "family=Space+Grotesk:wght@500;600;700&display=swap\" rel=\"stylesheet\">"
         "<link rel=\"icon\" href=\"data:image/svg+xml,"
         "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
@@ -552,20 +725,22 @@ def landing_html() -> str:
         "<a href=\"/whats-new\" style=\"font-size:.9rem;color:var(--mut)\">What's new</a>"
         "<a class=\"login\" href=\"/login\">Log in</a></div>"
         "</div></nav>"
-        # hero
-        "<header class=\"hero\"><div class=\"wrap\">"
+        # hero — a live WebGL shader breathes behind the copy (falls back to the CSS grid)
+        "<header class=\"hero\">"
+        "<canvas id=\"herofx\" class=\"hero-fx\" aria-hidden=\"true\"></canvas>"
+        "<div class=\"hero-scrim\"></div>"
+        "<div class=\"wrap\">"
         "<span class=\"eyebrow\"><span class=\"d\"></span>Built for teams running serious lead "
         "volume</span>"
         "<h1>Your best salesperson,<br><em>scaled across every brand you run.</em></h1>"
-        "<p class=\"sub\">Stepan is an AI sales agent that greets, qualifies and actually "
-        "<b>sells</b> to every lead across your brands and locations in Instagram and "
-        "WhatsApp — consistent, auditable, and instantly scalable, in any language.</p>"
+        "<p class=\"sub\">Stepan greets, qualifies and actually <b>sells</b> to every lead in "
+        "your Instagram and WhatsApp DMs, in any language.</p>"
         "<div class=\"cta\">"
         "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button>"
         "<a class=\"btn btn-g\" href=\"#how\">See how it works</a>"
         "</div>"
-        "<p class=\"note\">The best demo is Stepan itself — message it and watch it qualify "
-        "you.</p>"
+        "<p class=\"note\">The best demo is Stepan itself. Message it and watch it qualify you."
+        "</p>"
         f"{_trust_section()}"
         "</div></header>"
         # how it works
@@ -633,6 +808,9 @@ def landing_html() -> str:
         "</div>"
         "<p class=\"mnote\">Illustrative — sample data, not a real customer.</p>"
         "</div></section>"
+        # what Stepan captures per lead (goals/pains/fears) + the seller persona library
+        + _insights_cloud_section()
+        + _persona_library_section()
         # ad accounts: direct pull + product↔ad mapping + identity + re-qualification
         + _ad_accounts_section() +
         # analytics dashboard
@@ -747,5 +925,6 @@ def landing_html() -> str:
         "<button class=\"stp-send\" onclick=\"sendStepan()\" aria-label=\"Send\">➤</button></div>"
         "</div>"
         f"<script>{_WIDGET_JS}</script>"
+        f"<script>{_FX_JS}</script>"
         "</body></html>"
     )
