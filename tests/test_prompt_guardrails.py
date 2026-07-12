@@ -142,6 +142,20 @@ def test_followup_contract_is_lighter_but_keeps_the_same_json_schema() -> None:
     assert '"stage_reason"' in _FOLLOWUP_CONTRACT
 
 
+def test_followup_never_re_addresses_a_handled_concern() -> None:
+    # threads 2047/2143: nudges re-sent the opener and re-reassured "we're official" 7×
+    from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
+    assert "ADVANCES" in _FOLLOWUP_CONTRACT
+    assert "ALREADY addressed" in _FOLLOWUP_CONTRACT
+    assert "better to stay silent" in _FOLLOWUP_CONTRACT
+
+
+def test_interested_but_blocked_is_advanced_not_deferred() -> None:
+    # thread 2143: "tertarik tapi lagi nabung untuk laptop" got a passive "kabari kalau siap"
+    assert "INTERESTED-BUT-BLOCKED" in _DECISION_CONTRACT
+    assert "fixable blocker" in _DECISION_CONTRACT
+
+
 def test_build_messages_uses_the_light_contract_for_followup_workflow() -> None:
     from app.modules.conversation.prompt import (
         _FOLLOWUP_CONTRACT,

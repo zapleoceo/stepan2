@@ -111,6 +111,15 @@ def _last_question(text: str) -> str | None:
     return matches[-1].strip() if matches else None
 
 
+_WORD_RE = re.compile(r"[a-zа-яё0-9]+", re.IGNORECASE)
+
+
+def _content_words(text: str) -> set[str]:
+    """Word set (≥3 chars) for a rough topic-overlap signal — short function words dropped so
+    the overlap reflects shared CONTENT, not shared grammar."""
+    return {w for w in _WORD_RE.findall((text or "").lower()) if len(w) >= 3}
+
+
 def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
     """The prior bot message most similar to new_text, and that similarity ratio.
 
@@ -126,6 +135,7 @@ def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: AN
     new_norm = (new_text or "").strip().lower()
     new_q = _last_question(new_text)
     new_bubbles = [b.lower() for b in _split_bubbles(new_text)]
+    new_words = _content_words(new_text)
     for m in dialog:
         if m.direction != "out" or not (m.text or "").strip():
             continue
@@ -138,6 +148,14 @@ def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: AN
                 ratio = max(ratio, SequenceMatcher(None, new_q.lower(), prior_q.lower()).ratio())
         for bubble in new_bubbles:
             ratio = max(ratio, SequenceMatcher(None, bubble, prior_lower).ratio())
+        # Word-overlap (Jaccard) catches a REWORDED repeat — the same greeting/point in fresh
+        # phrasing — that the char-sequence ratio slides under (threads 2047/2143: a re-sent
+        # opener / reassurance). Only for messages long enough that overlap is meaningful, so a
+        # short "Baik Kak 🙏" doesn't collide with another short line.
+        prior_words = _content_words(prior)
+        if len(new_words) >= 5 and len(prior_words) >= 5:
+            jaccard = len(new_words & prior_words) / len(new_words | prior_words)
+            ratio = max(ratio, jaccard)
         if ratio > best_ratio:
             best_text, best_ratio = prior, ratio
     return best_text, best_ratio
