@@ -171,10 +171,24 @@ def _script_lang(text: str) -> str | None:
     return "ru" if _CYRILLIC_RE.search(text or "") else None
 
 
+# Horizontal-rule / lone-heading lines the model sometimes leaks into a DM (markdown bleed).
+_MD_ARTIFACT_RE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,}|—{3,}|#{1,6})[ \t]*$", re.MULTILINE)
+
+
+def _clean_bubble(text: str) -> str:
+    """Strip markdown artifacts that read as noise in a chat bubble — a horizontal rule
+    (---, ***, ___) or a lone heading marker (live thread 2778: a trailing '---' shipped to
+    the lead). Conservative: only removes lines that are ONLY the artifact, never trims real
+    content (so 'Rp 500.000 - 600.000' is untouched)."""
+    cleaned = _MD_ARTIFACT_RE.sub("", text or "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
     """Split the model's reply on '|||' into ≤max_parts non-empty bubbles; overflow is
     merged into the last one so we never send more than max_parts messages."""
-    parts = [p.strip() for p in reply.split("|||") if p.strip()]
+    parts = [c for p in reply.split("|||") if (c := _clean_bubble(p))]
     if len(parts) <= max_parts:
         return parts
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
@@ -481,12 +495,29 @@ class ReplyService:
         if decision.reply:
             _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
             if post_guard_ratio >= _DUPLICATE_RATIO:
-                logger.warning(
-                    "%s: branch=%d thread=%d still near-duplicate after guard regen "
-                    "(ratio=%.2f) → clarify", workflow, self.branch_id, thread_id,
-                    post_guard_ratio)
                 from dataclasses import replace  # noqa: PLC0415
-                decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
+                last_out = next(
+                    (m.text or "" for m in reversed(ctx.dialog) if m.direction == "out"), "")
+                looping = SequenceMatcher(
+                    None, last_out.strip().lower(),
+                    guard.CLARIFY_FALLBACK.strip().lower()).ratio() >= 0.7
+                if looping:
+                    # We already asked the lead to narrow down LAST turn and still can't produce
+                    # a fresh answer → the info genuinely isn't in the KB. Never repeat the
+                    # identical "be more specific" (live loop in thread 2262: sent verbatim twice
+                    # for a clear "show me the mini project" the KB had no example for). Hand the
+                    # lead's real question to a human instead of looping.
+                    logger.warning("%s: branch=%d thread=%d clarify loop → hand-off",
+                                   workflow, self.branch_id, thread_id)
+                    decision = replace(
+                        decision, reply=guard.SAFE_FALLBACK, needs_manager=True,
+                        kb_gap=decision.kb_gap or guard.GUARD_HANDOFF_REASON)
+                else:
+                    logger.warning(
+                        "%s: branch=%d thread=%d still near-duplicate after guard regen "
+                        "(ratio=%.2f) → clarify", workflow, self.branch_id, thread_id,
+                        post_guard_ratio)
+                    decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
         # PHONE BEFORE HAND-OFF (hard gate): never mute the bot and hand a contact-less lead to
         # a manager who then has no way to reach them (lead 2757 went to MANAGER with a NULL
         # phone; the SAFE_FALLBACK path sets needs_manager, bypassing the prompt's soft rule).
