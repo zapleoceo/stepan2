@@ -14,7 +14,7 @@ from __future__ import annotations
 import html as _h
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
@@ -50,11 +50,27 @@ from ._routes_knowledge import router as _knowledge_router
 from ._routes_mcpadmin import router as _mcpadmin_router
 from ._routes_members import router as _members_router
 from ._routes_products import router as _products_router
-from ._ui_html import app_shell, funnel_html, thread_list_html
+from ._ui_html import (
+    app_shell,
+    funnel_html,
+    set_render_tz,
+    thread_list_html,
+    viewer_tz_offset,
+)
 from ._ui_kb import kb_tree_html
 from ._ui_panels import coach_chat_html, reports_panel_html
 
-router = APIRouter(prefix="/ui")
+
+def _apply_viewer_tz(request: Request) -> None:
+    """Router-level dependency: pin this request's timestamp rendering to the VIEWER's own tz
+    (from the `tzoff` cookie), so every /ui timestamp shows in the admin's zone, not the
+    branch's. Runs in the handler's own context, so the contextvar propagates (unlike a
+    BaseHTTPMiddleware). The Reports 'activity by hour' histogram opts back into branch-local
+    on its own (it never reads this contextvar)."""
+    set_render_tz(viewer_tz_offset(request))
+
+
+router = APIRouter(prefix="/ui", dependencies=[Depends(_apply_viewer_tz)])
 router.include_router(_channels_router)
 router.include_router(_chat_router)
 router.include_router(_coach_router)

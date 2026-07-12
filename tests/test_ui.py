@@ -109,20 +109,22 @@ def test_thread_list_html_with_row() -> None:
     assert "/ui/chat/42/panel" not in html
 
 
-def test_thread_list_html_shifts_last_active_to_branch_local_time() -> None:
-    """Sidebar thread list must show each thread's OWN branch-local time, not UTC —
-    a per-row tz_offset_h (from b.tz_offset_h) shifts last_act before formatting."""
+def test_thread_list_html_shifts_last_active_to_viewer_local_time() -> None:
+    """Sidebar thread list shows the VIEWER's own local time (from set_render_tz, fed by the
+    browser tz), not UTC and not the branch's — the row's tz_offset_h is ignored now."""
     from datetime import datetime
 
-    from app.api._ui_html import thread_list_html
+    from app.api._ui_html import set_render_tz, thread_list_html
     _set_lang("en")
+    set_render_tz(7)  # viewer at UTC+7
     last_act = datetime(2026, 1, 1, 20, 0, 0)  # 20:00 UTC
     row = (42, "Alice Test", "new", last_act,
            "+62812345", "course-a", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
-           "KL", 7, "instagram")  # UTC+7 branch
+           "KL", 0, "instagram")  # branch tz 0 → proves the VIEWER offset (7) drives the shift
     html = thread_list_html([row])
-    assert "03:00" in html  # 20:00 UTC + 7h = 03:00 next day, branch-local
+    assert "03:00" in html  # 20:00 UTC + 7h = 03:00 next day, viewer-local
     assert "20:00" not in html
+    set_render_tz(0)
 
 
 def test_badge_renders_stage_en() -> None:
@@ -209,8 +211,9 @@ def test_chat_summary_translate_toggles_and_no_ptr_emulation() -> None:
     assert 'hx-post="/ui/chat/7/translate"' not in panel
     shell = app_shell("en", "", active_nav="inbox")
     assert "function trChat(" in shell and "function trClose(" in shell
-    assert "touchstart" not in shell                # PTR emulation removed
-    assert "location.reload()" not in shell
+    assert "touchstart" not in shell                # PTR emulation removed (the real signal)
+    # NB: the shell now legitimately calls location.reload() once on first visit to re-render
+    # in the viewer's tz (see the tzoff-capture script) — that's not the PTR emulation.
 
 
 def test_app_shell_opens_chats_at_the_bottom() -> None:
@@ -749,18 +752,21 @@ def test_leads_panel_html_with_rows() -> None:
     assert "sq" in html  # qualifying badge CSS
 
 
-def test_leads_panel_html_created_date_is_branch_local() -> None:
-    """A lead created at 23:30 UTC in a UTC+7 branch is already the NEXT calendar day
-    locally — the created-date column must reflect that, not the raw UTC date."""
+def test_leads_panel_html_created_date_is_viewer_local() -> None:
+    """A lead created at 23:30 UTC shown to a UTC+7 viewer is already the NEXT calendar day —
+    the created-date column reflects the VIEWER's tz (set_render_tz), not UTC or the branch."""
     from datetime import datetime
 
+    from app.api._ui_html import set_render_tz
     from app.api._ui_panels import leads_panel_html
     _set_lang("en")
+    set_render_tz(7)  # viewer at UTC+7
     created = datetime(2026, 1, 1, 23, 30, 0)  # 2026-01-01 UTC
     rows = [(1, "Alice Test", "+62811234567", "qualifying", created, 9)]
-    html = leads_panel_html(rows, tz_by_branch={9: 7})
+    html = leads_panel_html(rows, tz_by_branch={9: 0})  # branch tz ignored now
     assert "2026-01-02" in html  # shifted +7h crosses into the next day
     assert "2026-01-01" not in html
+    set_render_tz(0)
 
 
 def test_outbox_panel_html_empty() -> None:
@@ -829,18 +835,22 @@ def test_outbox_panel_html_shows_sending_paused_marker() -> None:
     assert "sending paused" in both.lower() and "cap reached" not in both.lower()
 
 
-def test_outbox_panel_html_shifts_times_to_branch_local() -> None:
-    """scheduled_at/sent_at must render in the row's own branch-local time, not raw UTC —
-    was a plain str(v)[11:19] slice with zero tz correction."""
+def test_outbox_panel_html_shifts_times_to_viewer_local() -> None:
+    """scheduled_at/sent_at render in the VIEWER's tz (set_render_tz), not raw UTC or branch.
+    The branch's own quiet-window logic stays branch-local; only the displayed time follows
+    the viewer."""
     from datetime import datetime
 
+    from app.api._ui_html import set_render_tz
     from app.api._ui_panels import outbox_panel_html
     _set_lang("en")
+    set_render_tz(7)  # viewer at UTC+7
     scheduled = datetime(2026, 1, 1, 10, 0, 0)  # 10:00 UTC
     rows = [(1, 10, "pending", "agent", "Hi", scheduled, None, 5)]
-    html = outbox_panel_html(rows, tz_by_branch={5: 7})
+    html = outbox_panel_html(rows, tz_by_branch={5: 0})  # branch tz ignored for display
     assert "17:00:00" in html  # 10:00 UTC + 7h
     assert "10:00:00" not in html
+    set_render_tz(0)
 
 
 def test_product_edit_html_new() -> None:

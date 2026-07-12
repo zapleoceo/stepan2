@@ -12,13 +12,35 @@ from datetime import UTC, datetime, timedelta
 
 from ._i18n import t
 
-# Branch tz offset (hours) for the current render — chat timestamps show branch-local time.
-_render_tz_h: ContextVar[int] = ContextVar("render_tz_h", default=0)
+# Tz offset (hours, may be fractional for +5:30 etc.) applied to timestamps in the current
+# render. Fed the VIEWER's own tz (from the browser, via the `tzoff` cookie) so every admin
+# sees times in their own zone — NOT the branch's. The one deliberate exception is the Reports
+# "activity by hour" histogram, which stays branch-local (see _HOUR_Q) on purpose.
+_render_tz_h: ContextVar[float] = ContextVar("render_tz_h", default=0.0)
+
+# Cookie the shell's inline JS writes with the browser's UTC offset in hours (e.g. "7", "5.5").
+VIEWER_TZ_COOKIE = "tzoff"
 
 
-def set_render_tz(offset_h: int) -> None:
-    """Set the branch tz offset for timestamp rendering in this request/task."""
-    _render_tz_h.set(int(offset_h or 0))
+def set_render_tz(offset_h: float) -> None:
+    """Set the tz offset (hours) for timestamp rendering in this request/task."""
+    try:
+        _render_tz_h.set(float(offset_h or 0))
+    except (TypeError, ValueError):
+        _render_tz_h.set(0.0)
+
+
+def viewer_tz_offset(request: object) -> float:
+    """The viewing admin's own UTC offset in hours, from the `tzoff` cookie the shell sets;
+    0 (UTC) until the browser has reported it. Bounded to a sane [-14, +14] range."""
+    raw = ""
+    cookies = getattr(request, "cookies", None)
+    if isinstance(cookies, dict):
+        raw = cookies.get(VIEWER_TZ_COOKIE, "") or ""
+    try:
+        return max(-14.0, min(14.0, float(raw)))
+    except (TypeError, ValueError):
+        return 0.0
 
 _HTMX = "https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"
 _FA = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
@@ -710,7 +732,7 @@ def _as_dt(v: object) -> datetime | None:
 
 
 def _fmt_time(dt: datetime | None) -> str:
-    """Branch-local DD.MM HH:MM:SS — always includes the date, not just time-of-day, so a
+    """Viewer-local DD.MM HH:MM:SS — always includes the date, not just time-of-day, so a
     message/event timestamp is never ambiguous about which day it happened."""
     if dt is None:
         return ""
@@ -719,7 +741,7 @@ def _fmt_time(dt: datetime | None) -> str:
 
 
 def _fmt_dt_short(dt: datetime | None) -> str:
-    """Branch-local DD.MM HH:MM (no seconds) — for the compact sidebar thread list, where
+    """Viewer-local DD.MM HH:MM (no seconds) — for the compact sidebar thread list, where
     an explicit last-message date/time replaces the old vague '2h ago' style label."""
     if dt is None:
         return ""
@@ -824,9 +846,8 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
      ig_username, avatar_url, follower_count, following_count, agent_enabled,
      last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h,
      channel_kind) = row  # type: ignore[misc]
-    dt = _as_dt(last_act)
-    if dt is not None:
-        dt += timedelta(hours=int(tz_offset_h or 0))
+    dt = _as_dt(last_act)  # raw UTC; _fmt_dt_short applies the viewer offset once (was a
+    # per-row branch shift here + the contextvar shift there — now a single viewer shift)
     on = " on" if tid == active_tid else ""
     prod_badge = (
         f' <span class="bg sq" style="font-size:.57rem;text-transform:none">'
@@ -1332,7 +1353,8 @@ def chat_header_html(
         meta_parts.append(f'<a href="tel:{_h.escape(phone)}">📞 {_h.escape(phone)}</a>')
     created_dt = _as_dt(created_at)  # raw text() SQL returns a str on sqlite, datetime on pg
     if created_dt:
-        meta_parts.append(f'<span>📅 с {created_dt.strftime("%d %b %Y")}</span>')
+        created_local = created_dt + timedelta(hours=_render_tz_h.get())
+        meta_parts.append(f'<span>📅 с {created_local.strftime("%d %b %Y")}</span>')
     if last_in_at:
         meta_parts.append(f'<span>⬇ {_fmt_time(last_in_at)}</span>')
     meta_row = (
@@ -1981,6 +2003,16 @@ def app_shell(
     _thr_style = "" if _show_thr else " style='display:none'"
     return (
         f'<!doctype html><html lang="{lang}"><head>'
+        # Report the browser's own UTC offset (hours) into the `tzoff` cookie so every
+        # timestamp renders in the VIEWER's zone, not the branch's. Runs before content; on
+        # the very first visit (no cookie yet) it reloads once so the server re-renders in the
+        # right zone. The sessionStorage guard makes that reload strictly one-shot even if
+        # cookies are blocked, so there's no reload loop.
+        f'<script>(function(){{try{{var o=(-new Date().getTimezoneOffset()/60);'
+        f'var m=document.cookie.match(/(?:^|; )tzoff=([^;]+)/);var cur=m?m[1]:null;'
+        f"if(String(o)!==cur){{document.cookie='tzoff='+o+';path=/;max-age=31536000;samesite=Lax';"
+        f"if(cur===null&&!sessionStorage.getItem('tzr')){{sessionStorage.setItem('tzr','1');"
+        f'location.reload();}}}}}}catch(e){{}}}})();</script>'
         f'<meta charset="utf-8">'
         f'<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'{_FAVICON}'
