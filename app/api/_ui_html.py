@@ -529,8 +529,12 @@ _CSS = (
     # ('hover me'), and one fixed-position tip floats ABOVE the page so card/table
     # overflow can never clip it.
     "body.help-mode .help-btn{background:#e2b33d;color:#1a1f2e}"
-    "body.help-mode [data-help]{outline:1px dashed #4da6ff;outline-offset:2px;"
-    "cursor:help}"
+    # Help mode lights up EVERY hinted element unmistakably (amber outline + tint + a ? cursor)
+    # so it's obvious where to hover; the full text shows on hover in #help-tip.
+    "body.help-mode [data-help]{outline:2px solid rgba(226,179,61,.85);outline-offset:1px;"
+    "background:rgba(226,179,61,.10);border-radius:4px;cursor:help}"
+    "body.help-mode [data-help]:hover{background:rgba(226,179,61,.22);"
+    "outline-color:#e2b33d}"
     "#help-tip{position:fixed;z-index:900;max-width:300px;background:#1b2432;"
     "border:1px solid #3a5578;border-radius:8px;padding:.5rem .7rem;font-size:.78rem;"
     "color:#cfe0f4;line-height:1.5;box-shadow:0 6px 24px rgba(0,0,0,.55);display:none;"
@@ -1736,6 +1740,10 @@ def app_shell(
         "if(!document.body.classList.contains('help-mode'))return;"
         "var tp=document.getElementById('help-tip');if(!tp)return;"
         "var el=e.target.closest?e.target.closest('[data-help]'):null;"
+        # No dead zones: hovering somewhere without its own hint falls back to the section
+        # hint (the panel title's data-help), so any spot in a section still explains itself.
+        "if(!el&&e.target.closest){var pn=e.target.closest('#main,.thr,aside');"
+        "if(pn)el=pn.querySelector('[data-help]');}"
         "if(!el){tp.style.display='none';return;}"
         "tp.textContent=el.getAttribute('data-help');"
         "tp.style.display='block';tp.style.top='0px';tp.style.left='0px';"
