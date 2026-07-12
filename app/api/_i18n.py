@@ -738,6 +738,29 @@ _TR: dict[str, dict[str, str]] = {
     "br.edit":       {"ru": "Изменить",    "en": "Edit",         "id": "Edit"},
     "br.save":       {"ru": "Сохранить",   "en": "Save",         "id": "Simpan"},
     "br.back":           {"ru": "← Филиалы",  "en": "← Branches",   "id": "← Cabang"},
+    "br.name_h": {
+        "ru": "Название филиала — как он показан в списке, фильтрах и отчётах.",
+        "en": "Branch name — as shown in the list, filters and reports.",
+        "id": "Nama cabang — seperti tampil di daftar, filter, dan laporan."},
+    "br.lang_h": {
+        "ru": "Язык, на котором бот по умолчанию отвечает лидам этого филиала.",
+        "en": "Default language the bot replies in for this branch's leads.",
+        "id": "Bahasa default bot untuk membalas lead cabang ini."},
+    "br.tz_h": {
+        "ru": "Часовой пояс филиала — для аналитики «пиковые часы» и тихих часов отправки. "
+              "На отображение времени в твоём интерфейсе не влияет (оно в твоём поясе).",
+        "en": "Branch time zone — for peak-hour analytics and the quiet-hours send window. "
+              "Does not affect how times are shown to you (those follow your own zone).",
+        "id": "Zona waktu cabang — untuk analitik jam sibuk dan jendela jam tenang pengiriman. "
+              "Tidak memengaruhi tampilan waktu untuk Anda."},
+    "br.active_h": {
+        "ru": "Выключенный филиал не обрабатывается ботом и скрыт из рабочих списков.",
+        "en": "An inactive branch isn't processed by the bot and is hidden from working lists.",
+        "id": "Cabang nonaktif tidak diproses bot dan disembunyikan dari daftar kerja."},
+    "br.kb_source_h": {
+        "ru": "Брать базу знаний из другого филиала (здесь она read-only). Пусто = своя база.",
+        "en": "Use another branch's knowledge base (read-only here). Empty = its own base.",
+        "id": "Gunakan basis pengetahuan cabang lain (read-only di sini). Kosong = milik sendiri."},
     "br.settings_seeded": {
         "ru": "Настройки бота засеяны по умолчанию.",
         "en": "Default bot settings have been seeded automatically.",
