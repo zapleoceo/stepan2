@@ -32,11 +32,16 @@ _PHONE_RE = re.compile(r"\d[\d\s\-]{7,}\d")  # a phone-length digit run = ready-
 # A lead this deep into a conversation represents real invested effort — losing a near-closed
 # deal to a cheap-model slip costs more than it would have earlier. Not stage-gated: a lead can
 # sit in 'qualifying' for many turns of genuine back-and-forth without ever hitting a smart_stage.
-_DEEP_CONVERSATION_TURNS = 6
-# Once guard has already had to regenerate a reply for THIS lead, that's direct evidence the
+# Was 6 — together with the forever-sticky regen threshold it routed 95% of live replies to
+# smart (measured 2026-07-12: 558 smart vs 29 fast/24h), defeating the hybrid split. 10 keeps
+# the protection for genuinely long threads while returning the mid-length majority to fast.
+_DEEP_CONVERSATION_TURNS = 10
+# Once guard has repeatedly had to regenerate replies for THIS lead, that's direct evidence the
 # cheap model struggles with this specific conversation — a per-lead signal no stage or regex
-# can see, since it comes from the LEAD's own history, not this turn's text.
-_GUARD_REGEN_STICKY_THRESHOLD = 1
+# can see, since it comes from the LEAD's own history, not this turn's text. Was 1 — but a
+# single regen over a whole lead history is noise (any lead who ever tripped one stayed smart
+# forever); two+ is a pattern.
+_GUARD_REGEN_STICKY_THRESHOLD = 2
 
 
 def parse_smart_stages(raw: str | None) -> frozenset[str]:
