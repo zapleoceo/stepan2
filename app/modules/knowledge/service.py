@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 PERSONA_SLUG = "persona"
 # Persona identity is injected directly, persona_core first when present.
 _PERSONA_ORDER = ("persona_core", "persona")
+# Docs injected on EVERY turn (not left to RAG) — central, small, close-critical.
+_ALWAYS_DOC_SLUGS = ("payment_policy",)
 # Hard ceiling on the assembled context (chars) — see knowledge_context's docstring.
 _CTX_CHAR_BUDGET = settings().knowledge_context_char_budget
 # A follow-up nudge retrieves fewer chunks — it leans on the focus card, not broad recall.
@@ -87,6 +89,9 @@ class KnowledgeService:
         focused = await self._focused(product_slug)
         if focused is not None:
             blocks.append(_focus_block(focused, resolved_lang))
+        always = await self._always_docs_block()
+        if always:
+            blocks.append(always)
         blocks.append(_catalog_block(await self.products.active(), resolved_lang))
         if self.llm is not None and query:
             try:
@@ -113,6 +118,18 @@ class KnowledgeService:
                         _CTX_CHAR_BUDGET)
                 blocks.append(_rag_block(kept))
         return "\n\n".join(b for b in blocks if b)
+
+    async def _always_docs_block(self) -> str:
+        """Docs too central to leave to RAG chance — injected on EVERY turn. payment_policy
+        carries the bank requisites + DP flow the model needs to close a ready-to-pay lead and
+        to answer 'when/how do I pay', which RAG didn't reliably surface so the bot escalated a
+        payment question the KB already answers (thread 2664)."""
+        parts = []
+        for slug in _ALWAYS_DOC_SLUGS:
+            doc = await self.docs.by_slug(slug)
+            if doc is not None and doc.content.strip():
+                parts.append(f"[{slug}]\n{doc.content.strip()}")
+        return "\n\n".join(parts)
 
     async def _focused(self, product_slug: str | None) -> Product | None:
         if product_slug is None:
