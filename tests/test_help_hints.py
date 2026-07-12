@@ -39,3 +39,30 @@ def test_settings_field_without_help_falls_back_to_label() -> None:
         return
     html = field_html(f, "", "en")
     assert "data-help=" in html               # still hinted, using the label
+
+
+def test_broker_log_columns_and_title_are_hinted() -> None:
+    from app.api._ui_panels import broker_log_panel_html
+    _lang.set("ru")
+    html = broker_log_panel_html([], page=0, size=50, total=0)
+    # 9 column headers + the section title = 10 hinted anchors, even with no rows
+    assert html.count("data-help=") >= 10
+    assert t("log.h.cost")[:10] in html       # a column hint made it into a <th>
+
+
+def test_every_main_panel_title_is_hinted() -> None:
+    _lang.set("ru")
+    from app.api._ui_members import members_panel_html
+    from app.api._ui_panels import (
+        branches_panel_html,
+        coach_chat_html,
+        leads_panel_html,
+        outbox_panel_html,
+        products_panel_html,
+    )
+    assert "data-help=" in leads_panel_html([])
+    assert "data-help=" in outbox_panel_html([])
+    assert "data-help=" in products_panel_html([])
+    assert "data-help=" in coach_chat_html(1, [], [])
+    assert "data-help=" in branches_panel_html([])
+    assert "data-help=" in members_panel_html([], [])

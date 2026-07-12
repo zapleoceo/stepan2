@@ -159,9 +159,11 @@ def mcp_page_html(
     crm_has_secret: bool, new_token: str | None = None,
     branches: list[tuple[int, str]] | None = None,
 ) -> str:
+    from app.api._i18n import t  # noqa: PLC0415
     return (
         '<div id="mcp-page" style="padding:1rem 1.2rem;max-width:920px">'
-        f'<div style="color:{_C_INK};font-size:1.2rem;font-weight:700;margin-bottom:.2rem">'
+        f'<div data-help="{_h.escape(t("help.mcp"))}"'
+        f' style="color:{_C_INK};font-size:1.2rem;font-weight:700;margin-bottom:.2rem">'
         'MCP — подключения и токены</div>'
         f'<div style="color:{_C_MUTE};font-size:.82rem;margin-bottom:1rem">Управление доступом'
         ' к Степану по MCP: входящие коннекторы (внешние клиенты) и исходящая связь с CRM.</div>'

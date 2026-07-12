@@ -80,7 +80,8 @@ def members_panel_html(rows: list, branches: list) -> str:
     )
 
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.members"))}">'
+        f'{title}</span></div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{help_txt}</div>'
         f'<table class="tbl">'

@@ -134,7 +134,8 @@ def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
     meta = (f'<span class="kb-by">{_h.escape(t("kb.edited_by"))} {_h.escape(updated_by)}</span>'
             if updated_by else "")
     return (
-        f'<div class="ch"><span class="ch-n">{_h.escape(title or slug)}</span>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.know"))}">'
+        f'{_h.escape(title or slug)}</span>'
         f'<span class="ch-slug">{_h.escape(slug)}</span>'
         f'<div style="margin-left:auto;display:flex;gap:.4rem;align-items:center">{meta}'
         f'<a class="btn-sm" hx-get="/ui/knowledge/{doc_id}/history" hx-target="#main"'
