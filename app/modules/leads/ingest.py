@@ -200,7 +200,12 @@ class IngestService:
             thread.window_until = inbound.occurred_at + WINDOW
             await self._reset_followup_cycle(thread)
             self._revive_bot(lead, thread)
-            if was_off:
+            # Only ping "Bot is OFF" when the bot STAYS off after the revive attempt — i.e. a
+            # human-led (manager/ready/handed_off) or blocked lead the bot won't answer. A
+            # dormant lead that just got revived (agent_enabled flipped back ON) WILL be
+            # answered this tick, so the old "was_off" ping was a stale, misleading alert
+            # ("Bot is OFF" arriving right before the bot replied — thread 2121).
+            if was_off and not lead.agent_enabled:
                 await self._notify_bot_off(lead, thread, inbound.text)
         if inbound.product_hint and thread.product_slug is None:
             thread.product_slug = inbound.product_hint
