@@ -133,25 +133,30 @@ def field_html(
     computed fresh by the route each request — this function never hardcodes a threshold.
     `channel_id` routes the autosave to the connector tier instead of the branch tier."""
     check = ' <span style="color:#51cf66">✓</span>' if saved else ""
+    label_txt = S.tr(f.label, lang)
     help_txt = S.tr(f.help, lang) if f.help else ""
     help_html = f'<div style="{_HELP}">{_h.escape(help_txt)}</div>' if help_txt else ""
     usage = cap_usage.get(f.key) if cap_usage else None
     if usage is not None:
         help_html += _usage_badge(usage[0], usage[1], lang)
-    label = f'<div style="{_LBL}">{_h.escape(S.tr(f.label, lang))}{check}</div>'
+    label = f'<div style="{_LBL}">{_h.escape(label_txt)}{check}</div>'
+    # Help-mode (the ? button) tip: prefer the field's own help text, fall back to its label,
+    # so every setting lights up and explains itself when help mode is on.
+    tip = (f"{label_txt} — {help_txt}" if help_txt else label_txt).strip(" —")
+    dh = f' data-help="{_h.escape(tip)}"' if tip else ""
     if f.kind == "multi" or _is_wide(f):
         # A wide control (checkbox group, token, URL) can't share the row — the label collapses
         # to one word per line. Stack it: label + help on top, control full-width below.
         ctrl = (_control(f, value, lang, channel_id=channel_id) if f.kind == "multi"
                 else _control(f, value, lang, "100%", channel_id=channel_id))
         return (
-            f'<div class="set-fld" style="{_ROW};display:block">'
+            f'<div class="set-fld"{dh} style="{_ROW};display:block">'
             f'{label}{help_html}'
             f'<div style="margin-top:.5rem">{ctrl}</div>'
             f'</div>'
         )
     return (
-        f'<div class="set-fld" style="{_ROW}">'
+        f'<div class="set-fld"{dh} style="{_ROW}">'
         f'<div style="min-width:0">{label}{help_html}</div>'
         f'<div style="flex-shrink:0">{_control(f, value, lang, channel_id=channel_id)}</div>'
         f'</div>'

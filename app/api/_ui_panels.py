@@ -649,18 +649,19 @@ def branch_edit_html(
         f'{seeded_note}'
         f'<form hx-post="{action}" hx-target="#main" hx-push-url="true"'
         f' style="max-width:400px">'
-        f'<div class="frm-grp">'
+        f'<div class="frm-grp" data-help="{_h.escape(t("br.name_h"))}">'
         f'<label class="frm-lbl">{name_lbl}</label>'
         f'<input class="frm-inp" name="name" value="{_h.escape(name)}" required></div>'
-        f'<div class="frm-grp">'
+        f'<div class="frm-grp" data-help="{_h.escape(t("br.lang_h"))}">'
         f'<label class="frm-lbl">{lang_lbl}</label>'
         f'<select class="act-sel" name="lang"'
         f' style="width:100%;padding:.32rem .35rem">{lang_opts}</select></div>'
-        f'<div class="frm-grp">'
+        f'<div class="frm-grp" data-help="{_h.escape(t("br.tz_h"))}">'
         f'<label class="frm-lbl">{tz_lbl}</label>'
         f'<select class="act-sel" name="tz_offset_h"'
         f' style="width:100%;padding:.32rem .35rem">{_tz_opts(tz)}</select></div>'
-        f'<div class="frm-grp" style="display:flex;align-items:center;gap:.5rem">'
+        f'<div class="frm-grp" data-help="{_h.escape(t("br.active_h"))}"'
+        f' style="display:flex;align-items:center;gap:.5rem">'
         f'<input type="checkbox" name="is_active" id="br-active" {active_checked}>'
         f'<label class="frm-lbl" for="br-active" style="margin:0">{active_lbl}</label></div>'
         + (_kb_link_field(kb_source_branch_id, other_branches or [])
@@ -680,7 +681,8 @@ def _kb_link_field(kb_source: int | None, others: list[tuple[int, str]]) -> str:
         f'<option value="{i}" {"selected" if i == kb_source else ""}>{_h.escape(nm)}</option>'
         for i, nm in others)
     return (
-        '<div class="frm-grp"><label class="frm-lbl">База знаний из филиала</label>'
+        f'<div class="frm-grp" data-help="{_h.escape(t("br.kb_source_h"))}">'
+        '<label class="frm-lbl">База знаний из филиала</label>'
         f'<select class="act-sel" name="kb_source_branch_id"'
         f' style="width:100%;padding:.32rem .35rem">{opts}</select></div>')
 
