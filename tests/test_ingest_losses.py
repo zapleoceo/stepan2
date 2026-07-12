@@ -104,6 +104,26 @@ async def test_bot_off_new_message_pings_telegram(db_session) -> None:
     assert lead.agent_enabled is False  # MANAGER stage — _revive_bot leaves it off
 
 
+async def test_revived_dormant_lead_does_not_ping_bot_off(db_session) -> None:
+    """A dormant lead that writes again is REVIVED and answered this tick, so the 'Bot is OFF'
+    ping would be stale and misleading (thread 2121: the alert arrived right before the bot
+    replied). Only a bot that STAYS off (human-led / blocked) should ping."""
+    bid, cid, lead, _thread = await _world(db_session)
+    lead.stage = Stage.DORMANT
+    lead.agent_enabled = False
+    await db_session.flush()
+    notifier = _FakeNotifier()
+    await IngestService(db_session, bid, notifier=notifier).ingest(
+        cid, [_in("engga kak", ext="i11")])
+    assert lead.stage == Stage.QUALIFYING and lead.agent_enabled is True  # revived, will answer
+    assert notifier.sends == []  # no misleading "Bot is OFF" ping
+
+    from sqlalchemy import text as _text
+    alert = (await db_session.execute(
+        _text("SELECT count(*) FROM manager_alert WHERE lead_id = :i"), {"i": lead.id})).scalar()
+    assert alert == 0
+
+
 async def test_bot_off_message_skipped_silently_without_a_notifier(db_session) -> None:
     """No notifier configured (branch has no Telegram token) — must not raise, just skip."""
     bid, cid, lead, _thread = await _world(db_session)
