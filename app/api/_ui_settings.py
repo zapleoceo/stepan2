@@ -211,7 +211,8 @@ def settings_form_html(
     )
     return (
         f'{script}'
-        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.settings"))}">'
+        f'{title}</span>'
         f'<span style="font-size:.68rem;color:#5f6b78;margin-left:.6rem">'
         f'· {autosave}</span></div>'
         f'<div class="pnl-body" style="max-width:1400px">'

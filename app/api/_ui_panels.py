@@ -71,7 +71,8 @@ def leads_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> 
         for r in rows  # (id, display_name, phone_e164, stage, created_at, branch_id)
     )
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.leads"))}">'
+        f'{title}</span></div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{hint}</div>'
         f'<table class="tbl">'
@@ -204,7 +205,8 @@ def outbox_panel_html(
         for r in rows  # (id, thread_id, status, source, text, scheduled_at, sent_at, branch_id)
     )
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.outbox"))}">'
+        f'{title}</span>'
         f'<span style="font-size:.68rem;color:#4a5568;margin-left:.5rem">(read-only)</span></div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{hint}</div>'
@@ -339,7 +341,8 @@ def coach_chat_html(branch_id: int, edits: list, notes: list) -> str:
     think_msgs = _h.escape(_json.dumps(
         [t("coach.think1"), t("coach.think2"), t("coach.think3"), t("coach.think4")]))
     return (
-        f'<div class="ch"><span class="ch-n">Coach KB</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.coach"))}">'
+        f'Coach KB</span></div>'
         f'{rules_section}'
         f'<div class="msgs" id="coach-msgs">{history}</div>'
         # a detailed 'thinking' line (cycling stages via JS) shown while the chat:deep call
@@ -393,7 +396,8 @@ def products_panel_html(products: list) -> str:
         for p in products  # (id, slug, title, is_active, sort_order, kind, branch_name)
     )
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.products"))}">'
+        f'{title}</span>'
         f'<div style="margin-left:auto">'
         f'<a class="btn-sm btn-p" hx-get="/ui/products/new" hx-target="#main"'
         f' hx-push-url="/ui/products/new" style="text-decoration:none">'
@@ -544,7 +548,8 @@ def branches_panel_html(rows: list) -> str:
         for r in rows  # (id, name, lang, tz_offset_h, is_active)
     )
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.branches"))}">'
+        f'{title}</span>'
         f'<div class="ch-acts">'
         f'<button class="act-btn"'
         f' hx-get="/ui/branches/new"'
@@ -1135,7 +1140,8 @@ def settings_panel_html(settings: list) -> str:
             f'</tr>'
         )
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.settings"))}">'
+        f'{title}</span></div>'
         f'<div class="pnl-body">'
         f'<table class="tbl">'
         f'<thead><tr><th>Key</th><th>Value</th></tr></thead>'
@@ -1823,7 +1829,8 @@ def reports_panel_html(
 
     title_lbl = _h.escape(t("rep.title"))
     return (
-        f'<div class="ch"><span class="ch-n">{title_lbl}</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.reports"))}">'
+        f'{title_lbl}</span></div>'
         f'<div class="pnl-body">'
         f'{_date_range_form_html(date_from, date_to, active_range)}'
         f'<div class="kpi-row">{kpis}</div>'
@@ -2031,17 +2038,26 @@ def broker_log_panel_html(
             parts.append(_log_row(cluster[0], tz))
     body = "".join(parts) or (
         f'<tr><td colspan="9" style="color:#4a5568">{_h.escape(t("log.empty"))}</td></tr>')
+    def _th(label: str, hint_key: str, right: bool = False) -> str:
+        style = ' style="text-align:right"' if right else ""
+        return f'<th{style} data-help="{_h.escape(t(hint_key))}">{_h.escape(label)}</th>'
+
     head = (
-        f'<tr><th>ID</th><th>{_h.escape(t("log.when"))}</th>'
-        f'<th>{_h.escape(t("log.kind"))}</th><th>{_h.escape(t("log.chat"))}</th>'
-        f'<th>cap</th><th>{_h.escape(t("log.model"))}</th>'
-        f'<th style="text-align:right">tok</th>'
-        f'<th style="text-align:right">{_h.escape(t("log.cost"))}</th>'
-        f'<th style="text-align:right">{_h.escape(t("log.dur"))}</th></tr>'
+        "<tr>"
+        + _th("ID", "log.h.id")
+        + _th(t("log.when"), "log.h.when")
+        + _th(t("log.kind"), "log.h.kind")
+        + _th(t("log.chat"), "log.h.chat")
+        + _th("cap", "log.h.cap")
+        + _th(t("log.model"), "log.h.model")
+        + _th("tok", "log.h.tok", right=True)
+        + _th(t("log.cost"), "log.h.cost", right=True)
+        + _th(t("log.dur"), "log.h.dur", right=True)
+        + "</tr>"
     )
     hist_html = _log_histogram_html(*hist) if hist is not None else ""
     return (
-        f'<div class="ch"><span class="ch-n">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(intro)}">{title}</span></div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{intro}</div>'
         f'{hist_html}'
