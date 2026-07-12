@@ -120,6 +120,26 @@ def _content_words(text: str) -> set[str]:
     return {w for w in _WORD_RE.findall((text or "").lower()) if len(w) >= 3}
 
 
+# The click-to-message ad prefill family ("💻 Ceritakan lebih detail tentang program …",
+# any emoji prefix) — a button click, not the lead's own words.
+_AD_TEMPLATE_RE = re.compile(r"^[^a-zA-Z]*ceritakan lebih detail tentang program", re.IGNORECASE)
+
+
+def _lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
+    """True once ANY inbound is something the lead actually typed/said — not an ad's
+    prefilled opener and not an unresolved media placeholder."""
+    for m in dialog:
+        if m.direction != "in":
+            continue
+        text = (m.text or "").strip()
+        if not text or _AD_TEMPLATE_RE.match(text):
+            continue
+        if text in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
+            continue
+        return True
+    return False
+
+
 def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
     """The prior bot message most similar to new_text, and that similarity ratio.
 
@@ -537,10 +557,15 @@ class ReplyService:
                                kb_gap=None, reply=guard.ASK_PHONE_BEFORE_HANDOFF)
         self._last_llm_meta = meta
         if lead is not None:
-            merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
-                                 decision.gains, decision.discovery_complete)
-            lead.needs = merged.to_json()
-            self.session.add(lead)
+            # Needs are recorded ONLY once the lead has typed something of their own. An ad's
+            # prefilled opener is a button click, not their words — the model kept inventing a
+            # job+gain out of the course name in the template (thread 2912: one template click
+            # → "menjadi ahli keamanan siber" appeared in the needs cloud).
+            if _lead_spoke_own_words(ctx.dialog):
+                merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
+                                     decision.gains, decision.discovery_complete)
+                lead.needs = merged.to_json()
+                self.session.add(lead)
         return decision
 
     async def _lang(self, lead: Lead | None = None) -> str:
