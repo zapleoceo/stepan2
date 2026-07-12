@@ -134,6 +134,12 @@ def create_app() -> FastAPI:
         from app.api._privacy import privacy_html  # noqa: PLC0415
         return HTMLResponse(privacy_html())
 
+    @app.get("/whats-new", include_in_schema=False, response_class=HTMLResponse)
+    async def whats_new() -> HTMLResponse:
+        # Public, customer-facing changelog + project version (see app/api/_changelog.py).
+        from app.api._changelog import changelog_html  # noqa: PLC0415
+        return HTMLResponse(changelog_html())
+
     @app.get("/admin", include_in_schema=False)
     async def admin_root() -> RedirectResponse:
         return RedirectResponse(url="/ui/inbox", status_code=302)
