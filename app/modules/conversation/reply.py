@@ -854,29 +854,30 @@ class ReplyService:
         callback-hours note, keep the bot ON. Unlike _handoff (a course deal), this is
         a seat sale, not a hand-off — no agent_enabled/stage change, no CAPI event.
 
-        Fires the alert at most ONCE per lead: this path has no stage/mute gate (the bot
-        stays on and the model keeps `ready=true`), so without a dedup an RSVP'd lead who
-        keeps chatting re-pinged the team every single turn. ready_subtype='openhouse' is
-        the 'already notified' marker."""
-        already_notified = lead.ready_subtype == "openhouse"
-        lead.ready_subtype = lead.ready_subtype or "openhouse"
-        if already_notified:
-            self.session.add(lead)
+        Notify only once we have a PHONE — per policy, no team ping for a contact-less RSVP:
+        the bot keeps talking and asks for the WhatsApp first, and the ping fires the turn a
+        number is in hand. Fires at most ONCE (ready_subtype='openhouse' is the 'already
+        notified' marker, set ONLY when the alert actually goes out, so a phone-less RSVP can
+        still ping later once the number arrives)."""
+        if lead.ready_subtype == "openhouse":  # already notified
             return
-        contact = lead.phone_e164 or (f"IG @{lead.ig_username}" if lead.ig_username else None) \
-            or "no contact yet"
+        if not lead.phone_e164:
+            # No phone yet — don't ping the team for a contact-less RSVP; keep the bot on to
+            # collect the WhatsApp first. A later turn WITH a number fires the ping.
+            return
+        lead.ready_subtype = "openhouse"  # mark notified only now that the alert actually fires
         alerts = AlertService(self.session, self.branch_id, self._notifier, llm=self.llm)
         try:
             await alerts.raise_alert(
                 lead_id=lead.id,
                 kind="ready_openhouse",
                 summary_en=(
-                    f"Lead RSVP'd for an event · contact {contact} · IT STEP will call back "
-                    "Mon-Fri, 09:00-18:00 WIB (no same-day callback outside those hours)"
+                    f"Lead RSVP'd for an event · phone {lead.phone_e164} · IT STEP will call "
+                    "back Mon-Fri, 09:00-18:00 WIB (no same-day callback outside those hours)"
                 ),
                 summary_ru=(
-                    f"Лид согласился на ивент · контакт {contact} · перезвонят в рабочее "
-                    "время IT STEP (Пн-Пт, 09:00-18:00 WIB, без обещания в тот же день)"
+                    f"Лид согласился на ивент · телефон {lead.phone_e164} · перезвонят в "
+                    "рабочее время IT STEP (Пн-Пт, 09:00-18:00 WIB, без обещания в тот же день)"
                 ),
                 thread_id=thread.id,
                 lead_phone=lead.phone_e164,
