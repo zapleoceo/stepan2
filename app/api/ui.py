@@ -61,12 +61,13 @@ from ._ui_kb import kb_tree_html
 from ._ui_panels import coach_chat_html, reports_panel_html
 
 
-def _apply_viewer_tz(request: Request) -> None:
+async def _apply_viewer_tz(request: Request) -> None:
     """Router-level dependency: pin this request's timestamp rendering to the VIEWER's own tz
     (from the `tzoff` cookie), so every /ui timestamp shows in the admin's zone, not the
-    branch's. Runs in the handler's own context, so the contextvar propagates (unlike a
-    BaseHTTPMiddleware). The Reports 'activity by hour' histogram opts back into branch-local
-    on its own (it never reads this contextvar)."""
+    branch's. MUST be async: a sync dependency runs in a threadpool, so the contextvar it sets
+    would land in the wrong thread and never reach the endpoint. Async → same request task →
+    the contextvar propagates. The Reports 'activity by hour' histogram opts back into
+    branch-local on its own (it never reads this contextvar)."""
     set_render_tz(viewer_tz_offset(request))
 
 
