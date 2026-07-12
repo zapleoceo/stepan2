@@ -41,11 +41,25 @@ def test_fmt_time_shifts_by_render_tz() -> None:
     assert uh._fmt_time(dt) == "12.07 00:30:00"             # UTC
 
 
-def test_apply_viewer_tz_dependency_pins_contextvar() -> None:
-    uh.set_render_tz(0)
-    _apply_viewer_tz(_Req("7"))                             # dependency reads cookie → sets tz
-    dt = datetime(2026, 7, 12, 20, 0, 0)
-    assert uh._fmt_time(dt) == "13.07 03:00:00"             # +7 rolls past midnight
+def test_router_dependency_propagates_tz_via_real_request() -> None:
+    """Guards the sync-vs-async trap: a SYNC dependency runs in a threadpool, so the contextvar
+    it sets never reaches the (event-loop) endpoint and every timestamp silently renders in
+    UTC. Driving it through a real request proves the async dependency propagates in-task."""
+    from fastapi import APIRouter, Depends, FastAPI
+    from fastapi.testclient import TestClient
+
+    r = APIRouter(dependencies=[Depends(_apply_viewer_tz)])
+
+    @r.get("/probe")
+    async def _probe() -> dict:
+        return {"tz": uh._render_tz_h.get()}
+
+    app2 = FastAPI()
+    app2.include_router(r)
+    c = TestClient(app2)
+    assert c.get("/probe", headers={"Cookie": "tzoff=7"}).json()["tz"] == 7.0
+    assert c.get("/probe", headers={"Cookie": "tzoff=3.5"}).json()["tz"] == 3.5
+    assert c.get("/probe").json()["tz"] == 0.0             # no cookie → UTC
 
 
 def test_shell_emits_browser_tz_capture_script() -> None:
