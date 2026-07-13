@@ -90,6 +90,26 @@ def test_library_panel_renders_cards_stats_and_author() -> None:
     assert 'class="pa-use active"' in html            # the active persona is marked in-use
 
 
+async def test_import_from_branch_bundles_all_kb_and_versions(db_session) -> None:
+    from app.adapters.db.models import KnowledgeDoc
+    bid = await _branch(db_session)
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="persona_core", category="persona",
+                                content="## Voice\nwarm"))
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="playbook_close", category="playbook",
+                                content="close on value"))
+    await db_session.flush()
+
+    p1 = await P.import_from_branch(db_session, bid, "Indonesia persona", lang="id", country="ID")
+    assert p1.version == "1.0" and p1.country == "ID" and p1.lang == "id"
+    # bundles EVERY non-product KB doc, not just persona_core
+    assert "## persona_core" in p1.content and "warm" in p1.content
+    assert "## playbook_close" in p1.content and "close on value" in p1.content
+
+    # re-import mints the next version (so a branch can refresh its library copy)
+    p2 = await P.import_from_branch(db_session, bid, "Indonesia persona")
+    assert p2.slug == p1.slug and p2.version == "1.1"
+
+
 def test_personas_route_is_wired() -> None:
     # DB-touching route: the app engine isn't migrated in the unit harness, so 200 (schema
     # present) or 500 (not) both prove the route is mounted; the logic is covered above.

@@ -64,6 +64,22 @@ async def persona_detail(pid: int, request: Request) -> HTMLResponse:
         can_write=bid is not None))
 
 
+@router.post("/personas/import", response_class=HTMLResponse)
+async def personas_import(request: Request) -> HTMLResponse:
+    """Snapshot the acting branch's full persona (persona core + playbooks + references + sales,
+    everything except products) into the library as the next version. Reusable per branch."""
+    apply_lang(request)
+    bid = _acting_branch(request)
+    if bid is None:
+        return HTMLResponse(f'<div class="emp">{t("pl.pick_branch")}</div>', status_code=400)
+    async with session_scope() as session:
+        from app.adapters.db.models import Branch  # noqa: PLC0415
+        branch = await session.get(Branch, bid)
+        name = f"{branch.name} persona" if branch and branch.name else f"Branch {bid} persona"
+        await P.import_from_branch(session, bid, name, lang=(branch.lang if branch else "id"))
+    return HTMLResponse(await _render_library(request))
+
+
 @router.post("/personas/{pid}/use", response_class=HTMLResponse)
 async def persona_use(pid: int, request: Request) -> HTMLResponse:
     apply_lang(request)
