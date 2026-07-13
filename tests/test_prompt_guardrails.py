@@ -174,3 +174,17 @@ def test_followup_has_the_what_changed_angle() -> None:
     from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
     assert "WHAT-CHANGED ANGLE" in _FOLLOWUP_CONTRACT
     assert "never a re-pitch" in _FOLLOWUP_CONTRACT
+
+
+def test_money_question_leads_with_paid_not_no() -> None:
+    # thread 2951: "apakah harus modal?" got "Tidak, tidak perlu modal besar", hiding that the
+    # course is paid — the manager had to jump in with the price
+    assert "IS-IT-PAID / MONEY QUESTIONS" in _DECISION_CONTRACT
+    assert "NEVER open with 'Tidak/No'" in _DECISION_CONTRACT
+    assert "memang berbayar" in _DECISION_CONTRACT
+
+
+def test_answer_first_then_ask_for_contact() -> None:
+    # sim of thread 2951: "bakal dapat uang?" got only a WhatsApp request, no actual answer
+    assert "ANSWER FIRST, THEN ASK FOR CONTACT" in _DECISION_CONTRACT
+    assert "rides ON TOP of a real answer" in _DECISION_CONTRACT
