@@ -201,9 +201,13 @@ def test_lead_spoke_own_words_helper() -> None:
         return SimpleNamespace(direction="in", text=text)
 
     template = "💻 Ceritakan lebih detail tentang program kursusnya"
+    # the second (largest) prefill family — was slipping through as the lead's own words (2983/3005)
+    template2 = "Halo, saya ingin tahu detail program SMM dan biaya kursusnya 😊"
     assert _lead_spoke_own_words([_in(template)]) is False
+    assert _lead_spoke_own_words([_in(template2)]) is False
     assert _lead_spoke_own_words([_in("🎤 voice"), _in(template)]) is False
     assert _lead_spoke_own_words([_in(template), _in("berapa biayanya kak?")]) is True
+    assert _lead_spoke_own_words([_in(template2), _in("buat karier freelance ka")]) is True
     assert _lead_spoke_own_words([_in("🎤 berapa harga kursusnya")]) is True  # transcribed voice
 
 
