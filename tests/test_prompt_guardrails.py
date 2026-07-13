@@ -180,3 +180,17 @@ def test_ad_opener_is_not_permission_to_present() -> None:
     # thread 2983: an ad-click prefilled opener got the full product pitch on turn one
     assert "BUTTON CLICK, not a real 'tell me about the program'" in _DECISION_CONTRACT
     assert "discovery skipped entirely" in _DECISION_CONTRACT
+
+
+def test_money_question_leads_with_paid_not_no() -> None:
+    # thread 2951: "apakah harus modal?" got "Tidak, tidak perlu modal besar", hiding that the
+    # course is paid — the manager had to jump in with the price
+    assert "IS-IT-PAID / MONEY QUESTIONS" in _DECISION_CONTRACT
+    assert "NEVER open with 'Tidak/No'" in _DECISION_CONTRACT
+    assert "memang berbayar" in _DECISION_CONTRACT
+
+
+def test_answer_first_then_ask_for_contact() -> None:
+    # sim of thread 2951: "bakal dapat uang?" got only a WhatsApp request, no actual answer
+    assert "ANSWER FIRST, THEN ASK FOR CONTACT" in _DECISION_CONTRACT
+    assert "rides ON TOP of a real answer" in _DECISION_CONTRACT
