@@ -105,9 +105,21 @@ async def test_import_from_branch_bundles_all_kb_and_versions(db_session) -> Non
     assert "## persona_core" in p1.content and "warm" in p1.content
     assert "## playbook_close" in p1.content and "close on value" in p1.content
 
-    # re-import mints the next version (so a branch can refresh its library copy)
-    p2 = await P.import_from_branch(db_session, bid, "Indonesia persona")
+    assert p1.changelog                                   # first import gets a default note
+    # re-import mints the next version + records a 'what changed' note
+    p2 = await P.import_from_branch(db_session, bid, "Indonesia persona",
+                                    changelog="tightened the closing playbook")
     assert p2.slug == p1.slug and p2.version == "1.1"
+    assert p2.changelog == "tightened the closing playbook"
+
+    # the library grid shows only the LATEST version per slug…
+    listed = await P.list_personas(db_session)
+    same = [p for p in listed if p.slug == p1.slug]
+    assert len(same) == 1 and same[0].version == "1.1"
+    # …while the full, readable history is newest-first with the changelog notes
+    hist = await P.versions_of(db_session, p1.slug)
+    assert [h.version for h in hist] == ["1.1", "1.0"]
+    assert hist[0].changelog == "tightened the closing playbook"
 
 
 def test_personas_route_is_wired() -> None:

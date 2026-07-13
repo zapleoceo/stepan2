@@ -83,9 +83,11 @@ def personas_panel_html(
         for p in personas
     ) or f'<div class="emp">{_h.escape(t("pl.empty"))}</div>'
     import_btn = (
-        f'<div class="ch-acts"><button class="btn-sm btn-p"'
-        f' hx-post="/ui/personas/import" hx-target="#main" hx-swap="innerHTML"'
-        f' data-help="{_h.escape(t("pl.import_h"))}">{_h.escape(t("pl.import"))}</button></div>'
+        f'<form class="pa-imp" hx-post="/ui/personas/import" hx-target="#main"'
+        f' hx-swap="innerHTML" data-help="{_h.escape(t("pl.import_h"))}">'
+        f'<input name="changelog" maxlength="300"'
+        f' placeholder="{_h.escape(t("pl.changed_ph"))}">'
+        f'<button class="btn-sm btn-p" type="submit">{_h.escape(t("pl.import"))}</button></form>'
         if can_write else ""
     )
     return (
@@ -120,12 +122,39 @@ def _section_block(pid: int, title: str, slug: str, body: str, add: str, can_wri
     )
 
 
+def _fmt_day(dt: object) -> str:
+    return dt.strftime("%d %b %Y") if hasattr(dt, "strftime") else ""
+
+
+def _history_html(history: list[Persona]) -> str:
+    if not history:
+        return ""
+    rows = "".join(
+        f'<div class="pa-hist-row">'
+        f'<span class="pa-hist-v">v{_h.escape(v.version)}</span>'
+        f'<span class="pa-hist-d">{_h.escape(_fmt_day(v.created_at))}</span>'
+        f'<span class="pa-hist-a">{_h.escape(v.author_name or "—")}</span>'
+        f'<div class="pa-hist-note">{_h.escape((v.changelog or "").strip() or "—")}</div>'
+        f'</div>'
+        for v in history
+    )
+    return (
+        f'<div class="pa-hist"><div class="pa-hist-h">{_h.escape(t("pl.history"))}</div>{rows}</div>'
+    )
+
+
 def persona_detail_html(
     p: Persona, addendum: dict[str, str], active: bool, fav: bool, can_write: bool,
+    history: list[Persona] | None = None, stat: tuple[int, int] = (0, 0),
 ) -> str:
     secs = "".join(
         _section_block(p.id, tt, sl, body, addendum.get(sl, ""), can_write)
         for tt, sl, body in sections(p.content)
+    )
+    used, favs = stat
+    stats_line = (
+        f'<span class="pa-stat" data-help="{_h.escape(t("pl.stat_h"))}">'
+        f'{used} {_h.escape(t("pl.branches"))} · {favs} ★</span>'
     )
     return (
         f'<style>{_PERSONA_CSS}</style>'
@@ -137,7 +166,9 @@ def persona_detail_html(
         f'<div class="ch-acts">{_star(p.id, fav, can_write)}{_use_btn(p.id, active, can_write)}</div>'
         f'</div>'
         f'<div class="pnl-body">'
-        f'<div class="pa-by" style="margin-bottom:.8rem">{_h.escape(t("pl.by"))} {_contact_link(p)}</div>'
+        f'<div class="pa-by" style="margin-bottom:.6rem">{_h.escape(t("pl.by"))} '
+        f'{_contact_link(p)} &nbsp; {stats_line}</div>'
+        f'{_history_html(history or [])}'
         f'<div class="hint">{_h.escape(t("pl.detail_intro"))}</div>'
         f'{secs}'
         f'<p class="mnote" style="margin-top:1rem">{_h.escape(t("pl.readonly_note"))}</p>'
@@ -175,4 +206,17 @@ _PERSONA_CSS = (
     ".pa-add textarea{background:#1a1f2b;border:1px solid #2d3748;border-radius:8px;color:#c9d1d9;padding:.5rem;font-size:.85rem;font-family:inherit;resize:vertical}"
     ".pa-add-ro{font-size:.8rem;color:#666e7d;margin-top:.6rem}"
     ".pa-add button{align-self:flex-start}"
+    ".pa-imp{display:flex;gap:.4rem;align-items:center;margin-left:auto}"
+    ".pa-imp input{background:#1a1f2b;border:1px solid #2d3748;border-radius:8px;color:#c9d1d9;"
+    "font-size:.78rem;padding:.32rem .5rem;width:220px}"
+    ".pa-hist{border:1px solid #20232b;border-radius:12px;padding:.9rem 1rem;margin:1rem 0}"
+    ".pa-hist-h{font-family:var(--disp,inherit);font-weight:600;color:#e8eef4;font-size:.9rem;"
+    "margin-bottom:.6rem}"
+    ".pa-hist-row{display:grid;grid-template-columns:auto auto 1fr;gap:.6rem;align-items:baseline;"
+    "padding:.4rem 0;border-top:1px solid #20232b}"
+    ".pa-hist-row:first-of-type{border-top:none}"
+    ".pa-hist-v{font-family:monospace;font-size:.7rem;color:#ff5c35}"
+    ".pa-hist-d{font-size:.7rem;color:#666e7d}"
+    ".pa-hist-a{font-size:.7rem;color:#9aa3b2}"
+    ".pa-hist-note{grid-column:1/-1;font-size:.85rem;color:#c9d1d9;line-height:1.5}"
 )
