@@ -29,22 +29,33 @@ def test_threads_route_accepts_kind_and_stays_ok(client: TestClient) -> None:
     assert client.get("/ui/threads?kind=not_a_kind").status_code in (200, 500)
 
 
-def test_kind_chip_is_server_side_htmx_not_client_toggle() -> None:
-    """Each chip reloads #tl from the server with ?kind=… (so the connector's older chats,
-    outside the recency LIMIT, are actually fetched) — not a client-only display toggle."""
+def test_kind_chips_are_independent_toggles_reloading_tl_server_side() -> None:
+    """Each connector is its own on/off toggle (not a single-select radio). Toggling reloads
+    #tl from the SERVER with the ON subset, so a connector's older chats outside the recency
+    LIMIT are actually fetched — not a client-only hide."""
     html = app_shell("en", "", active_nav="inbox")
-    assert 'hx-get="/ui/threads?kind=meta_business"' in html
-    assert 'hx-target="#tl"' in html
-    assert "toggleKind" not in html            # the old client-side hide is gone
+    assert 'data-kind="meta_business"' in html
+    assert 'data-kind="instagram"' in html and 'data-kind="whatsapp"' in html
+    assert 'onclick="kindChip(this)"' in html
+    assert "htmx.ajax('GET','/ui/threads'" in html   # the toggle reloads #tl server-side
+    assert "toggleKind" not in html                  # the old client-side hide is gone
+    # default (no kind param) = every chip ON, none struck off
+    assert html.count('class="chk-kind on"') == 3
+    assert 'class="chk-kind off"' not in html
 
 
-def test_active_kind_chip_highlights_and_toggles_off_and_preserves_filters() -> None:
+def test_kind_chips_reflect_active_subset_and_tl_loader_preserves_filters() -> None:
     html = app_shell("en", "", active_nav="inbox", kind="meta_business", stage="qualifying")
-    # the active chip is highlighted and clicking it CLEARS the kind (back to all connectors)…
-    assert 'class="chk-kind on"' in html
-    assert 'hx-get="/ui/threads?stage=qualifying"' in html      # active chip → drop kind
-    # …while the other chips switch kind, carrying the stage filter along
-    assert 'hx-get="/ui/threads?stage=qualifying&kind=instagram"' in html
-    assert 'hx-push-url="/ui/inbox?stage=qualifying&kind=instagram"' in html
-    # the 30s poll on #tl keeps the active kind so it doesn't reset the filter
+    # only meta_business is ON; the other two are struck-through OFF (independent toggles)
+    assert html.count('class="chk-kind on"') == 1
+    assert html.count('class="chk-kind off"') == 2
+    # the #tl loader (and its 30s poll, which mirrors the address bar) requests the active
+    # subset AND carries the stage filter along
     assert 'hx-get="/ui/threads?stage=qualifying&kind=meta_business"' in html
+
+
+def test_kind_multi_subset_shows_union() -> None:
+    html = app_shell("en", "", active_nav="inbox", kind="instagram,whatsapp")
+    assert html.count('class="chk-kind on"') == 2       # IG + WA on
+    assert html.count('class="chk-kind off"') == 1       # Meta off
+    assert 'hx-get="/ui/threads?kind=instagram,whatsapp"' in html

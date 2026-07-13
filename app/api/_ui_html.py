@@ -1695,11 +1695,20 @@ def app_shell(
         # Instant connector-chip state: clicking the active chip clears the filter (all neutral);
         # clicking another makes it 'on' and struck-through 'off' on the rest. The hx-get still
         # reloads #tl server-side; this only fixes the chip bar's visual state, which #tl won't.
-        "function kindChip(btn){var was=btn.classList.contains('on');"
-        "var all=btn.parentNode.querySelectorAll('.chk-kind');"
-        "all.forEach(function(b){b.classList.remove('on');b.classList.remove('off');});"
-        "if(!was){btn.classList.add('on');"
-        "all.forEach(function(b){if(b!==btn)b.classList.add('off');});}}"
+        # Multi-toggle connector facet: flip THIS chip, recompute the ON set from the DOM, and
+        # reload only #tl with kind=<on-list> ('' all on, 'none' all off). The chip bar isn't in
+        # #tl, so its state is the client-side source of truth; the address bar is kept in sync so
+        # the 30s #tl poll (which mirrors window.location.search) requests the same set.
+        "function kindChip(btn){var nowOn=btn.classList.toggle('on');"
+        "btn.classList.toggle('off',!nowOn);"
+        "var all=[].slice.call(btn.parentNode.querySelectorAll('.chk-kind'));"
+        "var on=all.filter(function(b){return b.classList.contains('on');})"
+        ".map(function(b){return b.getAttribute('data-kind');});"
+        "var kind=on.length===all.length?'':(on.length===0?'none':on.join(','));"
+        "var p=new URLSearchParams(window.location.search);"
+        "if(kind)p.set('kind',kind);else p.delete('kind');var qs=p.toString();"
+        "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl'});"
+        "history.replaceState(null,'','/ui/inbox'+(qs?'?'+qs:''));}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
         "function smartScroll(m){if(!m)return;"
         "var near=m.scrollHeight-m.scrollTop-m.clientHeight<150;"
@@ -1967,28 +1976,28 @@ def app_shell(
         ) if awaiting else ""
         # Connector filter chips — SERVER-SIDE: the thread list is LIMIT-capped by recency, so a
         # client-side hide would only reveal the connector's chats that made the global top-N
-        # (an older Meta chat stays hidden behind newer Instagram ones). Each chip reloads #tl
-        # from /ui/threads?kind=…; the active one is highlighted and clicking it clears back to all.
-        _base_params = "&".join(
-            f"{k}={_h.escape(v)}"
-            for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
-                         ("lead_type", lead_type), ("audience", audience),
-                         ("awaiting", awaiting)) if v)
-        _base_amp = (_base_params + "&") if _base_params else ""
+        # (an older Meta chat stays hidden behind newer Instagram ones), so the filter is
+        # server-side and reloads #tl.
+
+        # MULTI-TOGGLE facet: each chip is an independent on/off switch; the visible thread list
+        # is the UNION of the ON channels. `kind` is a comma-list of ON channels (''=all on,
+        # 'none'=all off). kindChip() (client JS) toggles the chip, recomputes the list from the
+        # DOM, and reloads only #tl — the server filters by the set.
+        _all_kinds = ("instagram", "meta_business", "whatsapp")
+        if kind == "none":
+            _sel_kinds: set[str] = set()
+        elif kind:
+            _picked = {x for x in kind.split(",") if x in _all_kinds}
+            _sel_kinds = _picked or set(_all_kinds)  # garbage → all on
+        else:
+            _sel_kinds = set(_all_kinds)
 
         def _kind_chip(k: str, icon: str, color: str, lbl: str) -> str:
-            active = (k == kind)
-            thr = f"/ui/threads?{_base_params}" if active else f"/ui/threads?{_base_amp}kind={k}"
-            push = f"/ui/inbox?{_base_params}" if active else f"/ui/inbox?{_base_amp}kind={k}"
-            cls = "chk-kind on" if active else ("chk-kind off" if kind else "chk-kind")
-            # onclick flips the on/off (strikethrough) state instantly; the hx-get reloads only
-            # #tl (server-side filter), which does NOT re-render this chip bar, so without the
-            # client-side flip the struck-through state only appeared after a full reload.
+            cls = "chk-kind on" if k in _sel_kinds else "chk-kind off"
             return (
                 f'<button type="button" class="{cls}" title="{_h.escape(lbl)}"'
-                f' onclick="kindChip(this)"'
-                f' hx-get="{thr.rstrip("?")}" hx-target="#tl" hx-swap="innerHTML"'
-                f' hx-push-url="{push.rstrip("?")}">'
+                f' data-kind="{k}" onclick="kindChip(this)"'
+                f' data-help="{_h.escape(t("hint.kind_filter"))}">'
                 f'<i class="{icon}" style="color:{color}"></i></button>'
             )
 

@@ -276,6 +276,13 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Funnel: lead count per stage. Click a stage to filter the chat list.",
         "id": "Funnel: jumlah lead per tahap. Klik tahap untuk memfilter daftar chat.",
     },
+    "hint.kind_filter": {
+        "ru": "Фильтр по источнику чата. Каждая кнопка включается/выключается отдельно — "
+              "показаны чаты включённых коннекторов.",
+        "en": "Chat-source filter. Each button toggles on/off independently — the list shows "
+              "chats from the enabled connectors.",
+        "id": "Filter sumber chat. Tiap tombol bisa dinyalakan/dimatikan sendiri.",
+    },
     "hint.stage": {
         "ru": "Стадия воронки этого лида. Меняется ботом автоматически; можно поправить вручную.",
         "en": "This lead's funnel stage. The bot moves it automatically; override by hand here.",
