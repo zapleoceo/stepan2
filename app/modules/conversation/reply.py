@@ -133,6 +133,23 @@ def _content_words(text: str) -> set[str]:
     return {w for w in _WORD_RE.findall((text or "").lower()) if len(w) >= 3}
 
 
+# A concrete, answerable question from the lead — a "?" or a question/money/enroll keyword. The
+# CLARIFY_FALLBACK ("sebutkan lebih spesifik") is only right for a VAGUE lead message; asking a
+# lead who WAS specific to be more specific is dismissive (sim of thread 2977: "Apakah harus
+# modal?" got clarify instead of "the course is paid, Rp X").
+# Concrete keywords only — NOT the bare "gimana/how", which is the vague dead-end the
+# clarify→escalate loop is meant to catch (a lead typing just "terus gimana" has nothing
+# specific to answer). An explicit "?" still counts, so "gimana caranya?" is answered.
+_ANSWERABLE_Q_RE = re.compile(
+    r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
+    r"cicilan|daftar|syarat|sertif|bnsp|online|offline|jadwal|lokasi|durasi)\b",
+    re.IGNORECASE)
+
+
+def _is_answerable_question(text: str) -> bool:
+    return bool(_ANSWERABLE_Q_RE.search(text or ""))
+
+
 # The click-to-message ad prefill families — a button click, not the lead's own words. Two
 # canned openers seen at scale (2026-07: 609 threads on the second family alone, all identical
 # down to the 😊): "💻 Ceritakan lebih detail tentang program …" and "Halo, saya ingin tahu
@@ -538,6 +555,8 @@ class ReplyService:
         # STYLE dead-end, not a knowledge gap — don't summon a manager for it (that was the
         # top false-escalation driver on terse SMM threads 2541/2566); leave needs_manager to
         # the model's own decision.
+        last_in_txt = next(
+            (m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
         if decision.reply:
             _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
             if post_guard_ratio >= _DUPLICATE_RATIO:
@@ -547,7 +566,12 @@ class ReplyService:
                 looping = SequenceMatcher(
                     None, last_out.strip().lower(),
                     guard.CLARIFY_FALLBACK.strip().lower()).ratio() >= 0.7
-                if looping:
+                if _is_answerable_question(last_in_txt):
+                    # the lead asked a CONCRETE question — send the answer even if it repeats a
+                    # fact; "be more specific" is dismissive when they WERE specific (sim of
+                    # thread 2977: "Apakah harus modal?" got clarify instead of the price).
+                    pass
+                elif looping:
                     # We already asked the lead to narrow down LAST turn and still can't produce
                     # a fresh answer → the info genuinely isn't in the KB. Never repeat the
                     # identical "be more specific" (live loop in thread 2262: sent verbatim twice

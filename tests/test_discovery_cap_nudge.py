@@ -247,3 +247,33 @@ async def test_needs_manager_with_phone_still_hands_off(db_session) -> None:
     d = await ReplyService(
         db_session, bid, _MgrLLM(), KnowledgeService(db_session, bid)).decide(tid)
     assert d.needs_manager is True
+
+
+async def test_direct_question_gets_the_answer_not_clarify(db_session) -> None:
+    """Sim of thread 2977: the lead asked a CONCRETE question ('Apakah harus modal?') but the
+    bot's answer repeated a fact already given, so the near-duplicate guard degraded it to
+    'be more specific'. A specific question must get the answer, dup or not."""
+    from app.modules.conversation import guard
+
+    bid, tid = await _thread_with_texts(db_session, ["Apakah harus modal?"])
+    ch_id = (await db_session.exec(select(ChannelThread).where(
+        ChannelThread.id == tid))).one().channel_id
+    prior = "Untuk kursusnya memang berbayar ya Kak, Rp 1.670.000 per bulan selama 8 bulan."
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=ch_id,
+                           external_id="out1", direction="out", sent_by="agent",
+                           text=prior, occurred_at=_NOW))
+    await db_session.flush()
+
+    class _DupLLM:
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            # answers the money question, but near-verbatim to the prior line → dup ≥ 0.6
+            return json.dumps({"reply": prior, "stage": "qualifying"}), \
+                {"model": "fake", "cost_usd": 0.0}
+
+        async def embed(self, texts):  # noqa: ANN001
+            return [[0.0] for _ in texts]
+
+    decision = await ReplyService(
+        db_session, bid, _DupLLM(), KnowledgeService(db_session, bid)).decide(tid)
+    assert decision.reply != guard.CLARIFY_FALLBACK       # not fobbed off with "be specific"
+    assert "berbayar" in decision.reply                    # the money answer went through
