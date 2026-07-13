@@ -194,3 +194,10 @@ def test_answer_first_then_ask_for_contact() -> None:
     # sim of thread 2951: "bakal dapat uang?" got only a WhatsApp request, no actual answer
     assert "ANSWER FIRST, THEN ASK FOR CONTACT" in _DECISION_CONTRACT
     assert "rides ON TOP of a real answer" in _DECISION_CONTRACT
+
+
+def test_need_payoff_gain_is_pulled_before_presenting() -> None:
+    # thread 2903: captured the pain (fear) but presented with gains empty, never drawing out
+    # what success would look like — the GAIN is what the pitch sells back to the lead
+    assert "ALWAYS attempt this before you present" in _DECISION_CONTRACT
+    assert "the GAIN (the future they want)" in _DECISION_CONTRACT
