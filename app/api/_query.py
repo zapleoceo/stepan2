@@ -14,22 +14,17 @@ _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
 
 # Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked
-# (the total badge). IN_QUEUE = the EXACT worker threads_awaiting_reply predicate on top, so
-# "in generation queue" matches what Stepan will actually reply to; the complement (base AND
-# NOT in-queue) is "Stepan won't reply" (bot off / silent stage / older than the age cap / a
-# reply already queued). The two partition AWAITING_BASE, so they sum to the total.
-# BOT_SILENT_STAGES = {ready, handed_off, dormant}; needs a bound :awaiting_cutoff param.
+# (the total badge). The split is by whether STEPAN IS ON for the chat, not by the momentary
+# generation queue: a bot-ON chat that's dormant (or whose last inbound is old) is NOT "off" —
+# Stepan still replies to it the next time the lead writes. So IN_QUEUE_EXTRA = agent_enabled,
+# and the complement (base AND NOT agent_enabled) is the true "Stepan is off" bucket. The two
+# partition AWAITING_BASE, so they sum to the total.
 AWAITING_BASE = (
     "ct.last_in_at IS NOT NULL"
     " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
     " AND l.is_blocked = false"
 )
-IN_QUEUE_EXTRA = (
-    "l.agent_enabled = true"
-    " AND l.stage NOT IN ('ready', 'handed_off', 'dormant')"
-    " AND ct.last_in_at >= :awaiting_cutoff"
-    " AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.thread_id = ct.id AND o.status = 'pending')"
-)
+IN_QUEUE_EXTRA = "l.agent_enabled = true"
 
 
 def awaiting_cutoff() -> datetime:

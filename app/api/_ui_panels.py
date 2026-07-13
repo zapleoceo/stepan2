@@ -93,8 +93,9 @@ def outbox_count_html(n: int) -> str:
 
 def inbox_awaiting_badge_html(in_queue: int, off: int) -> str:
     """Inbox nav badge, split into two clickable numbers that sum to the total unanswered:
-    IN the generation queue (Stepan will reply, orange) and NOT in it (bot off / silent stage /
-    too old / reply already queued — Stepan won't, grey). Empty when nothing awaits (hidden)."""
+    bot ON (Stepan will reply, orange) and bot OFF (Stepan is disabled for the chat, grey). A
+    dormant-but-enabled chat counts as ON — Stepan replies on the next inbound. Empty when
+    nothing awaits (hidden)."""
     if in_queue + off <= 0:
         return ""
 
