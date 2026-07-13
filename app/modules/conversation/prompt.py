@@ -80,7 +80,12 @@ _DECISION_CONTRACT = (
     "course on Z?'). In that case: acknowledge warmly and promise to answer, then ask ONE "
     "discovery question FIRST - e.g. 'Happy to tell you - one quick question first so I point "
     "you to the right fit: what makes you look into this now?' Do NOT dump the price/details "
-    "yet. Present only once a need is on the table.\n"
+    "yet. Present only once a need is on the table. This applies DOUBLY to an ad's prefilled "
+    "opener ('Ceritakan lebih detail tentang program …') - that is a BUTTON CLICK, not a real "
+    "'tell me about the program' request, so it is NOT permission to present. Open with a warm "
+    "greeting + ONE discovery question about their goal/motivation; the program details wait "
+    "until a need surfaces (live miss, thread 2983: an ad-click opener got the full Vibe "
+    "Coding pitch on turn one, discovery skipped entirely).\n"
     "⛔ THIS DEFERRAL IS FOR THE OPENING MESSAGE ONLY - it never applies again once the "
     "conversation is underway. A SPECIFIC FACTUAL QUESTION asked mid-conversation ('is there "
     "a 3-month version?', 'apa bisa online?', 'ada kelas weekend?', any yes/no or "
@@ -410,9 +415,10 @@ _COACHING_HEADER = "MANDATORY RULES (from manager — follow strictly):"
 # a lighter, more casual entry. Organic/unknown gets no hint (no assumptions).
 _SOURCE_HINTS = {
     "ad_clicktomsg": (
-        "ENTRY: the lead started this chat by tapping one of our paid ads — they already "
-        "showed intent in a specific offer. Don't ask what brought them here; acknowledge it "
-        "warmly and move straight to discovering their goal."
+        "ENTRY: the lead started this chat by tapping one of our paid ads and its prefilled "
+        "message — a click showing topic interest, NOT a request to be pitched. Don't ask what "
+        "brought them here and don't present the product yet; acknowledge warmly and open with "
+        "ONE discovery question about their goal/motivation. Details come after a need surfaces."
     ),
     "story": (
         "ENTRY: the lead replied to our Instagram story — a light, casual entry. Warm up and "

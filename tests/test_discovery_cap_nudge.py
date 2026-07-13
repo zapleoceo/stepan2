@@ -48,6 +48,49 @@ async def _thread_with_turns(s, n_inbound: int) -> tuple[int, int]:
     return b.id, th.id
 
 
+async def _thread_with_texts(s, texts: list[str]) -> tuple[int, int]:
+    b = Branch(name="T", lang="id")
+    s.add(b)
+    await s.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    s.add_all([ch, lead])
+    await s.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
+    s.add(th)
+    await s.flush()
+    for i, txt in enumerate(texts):
+        s.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id=f"m{i}",
+                      direction="in", sent_by="lead", text=txt, occurred_at=_NOW))
+    await s.flush()
+    return b.id, th.id
+
+
+async def test_ad_opener_only_forces_discovery_not_a_pitch(db_session) -> None:
+    """Thread 2983: the lead's only message was the ad's prefilled opener (a button click) and
+    the bot pitched the product on turn one. The ad-opener nudge must be injected so it warms
+    up + asks a discovery question instead."""
+    from app.modules.conversation.reply import _AD_OPENER_NUDGE
+
+    bid, tid = await _thread_with_texts(
+        db_session, ["💻 Ceritakan lebih detail tentang program kursusnya"])
+    llm = _SpyLLM()
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    assert llm.last_messages[-1]["role"] == "user"
+    assert llm.last_messages[-1]["content"] == _AD_OPENER_NUDGE
+
+
+async def test_no_ad_opener_nudge_once_lead_speaks_own_words(db_session) -> None:
+    from app.modules.conversation.reply import _AD_OPENER_NUDGE
+
+    bid, tid = await _thread_with_texts(
+        db_session, ["💻 Ceritakan lebih detail tentang program kursusnya", "apa itu coding?"])
+    llm = _SpyLLM()
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    last = llm.last_messages[-1]
+    assert not (last["role"] == "user" and last["content"] == _AD_OPENER_NUDGE)
+
+
 async def test_no_nudge_within_cap(db_session) -> None:
     bid, tid = await _thread_with_turns(db_session, _DISCOVERY_TURN_CAP)
     llm = _SpyLLM()

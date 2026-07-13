@@ -85,6 +85,19 @@ _NON_TARGET_NUDGE = (
     "and stop there; only re-engage if THEY bring up a real interest in one of our "
     "programs. Return the JSON as usual.]"
 )
+# The lead's only message so far is the ad's prefilled opener — a button click, not their
+# words. Prompt rules alone weren't reliable here (thread 2983: the ad opener got the full
+# product pitch on turn one, discovery skipped), so force the warm-up phase deterministically
+# on the FIRST turn, before the lead has said anything of their own.
+_AD_OPENER_NUDGE = (
+    "[System: the lead's ONLY message so far is the ad's prefilled opener (a BUTTON CLICK, not "
+    "their own words) — they tapped an ad, nothing more. Do NOT present the product, its "
+    "features, price, or schedule this turn. Open the DISCOVERY phase: a warm greeting, then "
+    "ONE light question about their goal or what drew them in (e.g. 'apa yang bikin Kakak "
+    "kepikiran belajar ini?' / 'lagi cari skill buat kerja, bisnis, atau pengen tau aja dulu?'). "
+    "Warm-up + one question only — the pitch comes AFTER a real need surfaces. Keep stage "
+    "qualifying. Return the JSON as usual.]"
+)
 
 # A live reply that repeats a question already asked in this thread — same failure mode
 # followup.py guards against (chat 1830), but on the live-reply path, which had NO dedup
@@ -458,6 +471,9 @@ class ReplyService:
             # _apply_decision below) — reaching here means the model already called this
             # non_target once and the lead is back for another round; don't re-engage.
             extra_user_msg = _NON_TARGET_NUDGE
+        elif not _lead_spoke_own_words(ctx.dialog):
+            # Only the ad's prefilled opener so far — force warm-up + discovery, not a pitch.
+            extra_user_msg = _AD_OPENER_NUDGE
         else:
             needs_captured = ctx.stored_needs.discovery_complete or ctx.stored_needs.has_needs()
             if not needs_captured and inbound_count > _DISCOVERY_TURN_CAP:

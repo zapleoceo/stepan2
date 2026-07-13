@@ -174,3 +174,9 @@ def test_followup_has_the_what_changed_angle() -> None:
     from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
     assert "WHAT-CHANGED ANGLE" in _FOLLOWUP_CONTRACT
     assert "never a re-pitch" in _FOLLOWUP_CONTRACT
+
+
+def test_ad_opener_is_not_permission_to_present() -> None:
+    # thread 2983: an ad-click prefilled opener got the full product pitch on turn one
+    assert "BUTTON CLICK, not a real 'tell me about the program'" in _DECISION_CONTRACT
+    assert "discovery skipped entirely" in _DECISION_CONTRACT
