@@ -13,18 +13,23 @@ from app.domain.clock import utc_now
 _PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
 _WON_STAGES = ("ready", "handed_off")
 
-# Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked
-# (the total badge). The split is by whether STEPAN IS ON for the chat, not by the momentary
-# generation queue: a bot-ON chat that's dormant (or whose last inbound is old) is NOT "off" —
-# Stepan still replies to it the next time the lead writes. So IN_QUEUE_EXTRA = agent_enabled,
-# and the complement (base AND NOT agent_enabled) is the true "Stepan is off" bucket. The two
-# partition AWAITING_BASE, so they sum to the total.
+# Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked,
+# on a WORKING connector (Meta Business is excluded until its connector is finished — those
+# chats just hang, they don't count). IN_QUEUE = the chats Stepan actively works: bot on AND in
+# a funnel stage where Stepan participates (new/nurturing/qualifying/presenting/objection). The
+# complement (base AND NOT in-queue) is everything else unanswered — dormant, handed_off/manager
+# (a human owns it), ready, or bot off. The two partition AWAITING_BASE, so they sum to total.
 AWAITING_BASE = (
     "ct.last_in_at IS NOT NULL"
     " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
     " AND l.is_blocked = false"
+    " AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
+    "             AND c.kind <> 'meta_business')"
 )
-IN_QUEUE_EXTRA = "l.agent_enabled = true"
+IN_QUEUE_EXTRA = (
+    "l.agent_enabled = true"
+    " AND l.stage IN ('new', 'nurturing', 'qualifying', 'presenting', 'objection')"
+)
 
 
 def awaiting_cutoff() -> datetime:
