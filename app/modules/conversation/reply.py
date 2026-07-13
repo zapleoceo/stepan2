@@ -133,9 +133,16 @@ def _content_words(text: str) -> set[str]:
     return {w for w in _WORD_RE.findall((text or "").lower()) if len(w) >= 3}
 
 
-# The click-to-message ad prefill family ("💻 Ceritakan lebih detail tentang program …",
-# any emoji prefix) — a button click, not the lead's own words.
-_AD_TEMPLATE_RE = re.compile(r"^[^a-zA-Z]*ceritakan lebih detail tentang program", re.IGNORECASE)
+# The click-to-message ad prefill families — a button click, not the lead's own words. Two
+# canned openers seen at scale (2026-07: 609 threads on the second family alone, all identical
+# down to the 😊): "💻 Ceritakan lebih detail tentang program …" and "Halo, saya ingin tahu
+# detail program X dan biaya kursusnya 😊". Only the FIRST was matched before, so the biggest
+# prefill slipped through as if the lead had typed it (thread 3005: the bot front-loaded the
+# pitch instead of opening discovery). An emoji prefix is tolerated.
+_AD_TEMPLATE_RE = re.compile(
+    r"^[^a-zA-Z]*(ceritakan lebih detail tentang program"
+    r"|(halo[\s,]*)?(saya |aku )?ingin tahu detail program)",
+    re.IGNORECASE)
 
 
 def _lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
