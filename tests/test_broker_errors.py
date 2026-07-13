@@ -125,6 +125,55 @@ async def test_chat_submits_a_job_and_polls_to_done(monkeypatch) -> None:
     assert calls[-1]["ok"] is True and calls[-1]["cap"] == "chat:smart"
 
 
+class _CaptureJobClient(_JobClient):
+    """Records the submit POST's params + json body so we can assert the workflow tag."""
+
+    def __init__(self, submits, polls=None):  # noqa: ANN001
+        super().__init__(submits, polls)
+        self.sent: dict[str, Any] = {}
+
+    async def post(self, *a: object, **k: object) -> _FakeResp:
+        self.sent = {"params": k.get("params"), "json": k.get("json")}
+        return self._submits.pop(0)
+
+
+async def test_chat_forwards_workflow_tag_to_the_broker(monkeypatch) -> None:
+    """Regression: the workflow label was logged locally but never SENT to the broker, so the
+    dashboard grouped every chat under '(none)'. It must ride in both params and the body."""
+    client = _CaptureJobClient([_job(1)], [_done("ok")])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    _capture_log(monkeypatch)
+    await _llm().chat([{"role": "user", "content": "hi"}],
+                      capability="chat:smart", workflow="reply")
+    assert client.sent["params"].get("workflow") == "reply"
+    assert client.sent["json"].get("workflow") == "reply"
+
+
+class _CaptureEmbedClient:
+    def __init__(self) -> None:
+        self.sent: dict[str, Any] = {}
+
+    async def __aenter__(self) -> _CaptureEmbedClient:
+        return self
+
+    async def __aexit__(self, *a: object) -> None:
+        return None
+
+    async def post(self, *a: object, **k: object) -> _FakeResp:
+        self.sent = {"params": k.get("params"), "json": k.get("json")}
+        return _FakeResp({"embeddings": [[0.1]], "model": "voyage", "tokens_in": 1,
+                          "cost_usd": 0.0, "request_id": "r"})
+
+
+async def test_embed_forwards_its_kind_as_workflow(monkeypatch) -> None:
+    client = _CaptureEmbedClient()
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    _capture_log(monkeypatch)
+    await _llm().embed(["x"], kind="embed:index")
+    assert client.sent["params"].get("workflow") == "embed:index"
+    assert client.sent["json"].get("workflow") == "embed:index"
+
+
 async def test_describe_image_submits_vision_job_with_multimodal_content(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
