@@ -88,7 +88,7 @@ def _actor_name(request: Request) -> str:
 
 
 async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | None, lang: str,
-                     *, branch_id: int | None = None):
+                     *, branch_id: int | None = None, thread_id: int | None = None):
     """Auto-translate the lead's captured needs into the current UI language, caching the
     result on lead.needs_tr so re-rendering the header never re-bills the same phrase.
 
@@ -96,7 +96,7 @@ async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | N
     /needs endpoint uses it. The main panel render uses cached_needs() instead, which is
     pure cache lookup with no I/O, so opening a chat never waits on the LLM."""
     profile, new_tr = await translated_needs(parse_needs(needs), needs_tr, lang, BrokerLLM(),
-                                             branch_id=branch_id)
+                                             branch_id=branch_id, thread_id=thread_id)
     if new_tr is not None:
         await session.execute(
             text("UPDATE lead SET needs_tr = :v WHERE id = :id"), {"v": new_tr, "id": lead_id},
@@ -240,7 +240,8 @@ async def chat_needs_lazy(thread_id: int, request: Request) -> HTMLResponse:
         if not row or is_branch_forbidden(row[0], allowed):
             return HTMLResponse("")
         needs_bid, needs, needs_tr, lead_id = row
-        profile = await _needs_for(session, lead_id, needs, needs_tr, lang, branch_id=needs_bid)
+        profile = await _needs_for(session, lead_id, needs, needs_tr, lang, branch_id=needs_bid,
+                                   thread_id=thread_id)
     return HTMLResponse(needs_block_html(profile, thread_id))
 
 
@@ -700,7 +701,8 @@ async def chat_tr_draft(
             return HTMLResponse("")
     target = target_for_lang(lang_code)
     try:
-        tr = await translate_text(BrokerLLM(), text_body, target=target, branch_id=draft_bid)
+        tr = await translate_text(BrokerLLM(), text_body, target=target, branch_id=draft_bid,
+                                  thread_id=thread_id)
     except Exception as exc:
         _log.warning("draft translate error tid=%s: %s", thread_id, exc)
         return HTMLResponse("")
@@ -790,7 +792,7 @@ async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HT
         try:
             tr = await translate_message(
                 session, mid, BrokerLLM(), target=target_for_lang(lang_code),
-                branch_id=msg_tr_bid)
+                branch_id=msg_tr_bid, thread_id=thread_id)
         except Exception as exc:
             _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
             return HTMLResponse("")  # empty → JS leaves the bubble as-is, lets the user retry
@@ -894,7 +896,7 @@ async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLR
             return HTMLResponse(f"🌐 {_h.escape(row[1])}")
         try:
             tr = await translate_text(BrokerLLM(), row[0], target=target_for_lang(lang_code),
-                                      branch_id=outmsg_bid)
+                                      branch_id=outmsg_bid, thread_id=thread_id)
         except Exception as exc:
             _log.warning("pending translate error tid=%s oid=%s: %s", thread_id, oid, exc)
             return HTMLResponse("")
