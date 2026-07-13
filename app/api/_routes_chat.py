@@ -749,7 +749,7 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     llm = BrokerLLM()
     try:
         summary, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=500,
-                                    workflow="translate", thread_id=thread_id)
+                                    workflow="chat-summary", thread_id=thread_id)
     except Exception as exc:
         _log.warning("chat summary LLM error tid=%s: %s", thread_id, exc)
         summary = ""

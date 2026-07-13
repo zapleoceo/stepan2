@@ -153,11 +153,18 @@ class BrokerLLM:
         same shape as before so the audit page / request_id lookups are unchanged."""
         self.calls += 1
         start = time.perf_counter()
+        # Tag the call with the scenario so the broker dashboard can break spend down per
+        # workflow (reply / followup / coach / translate / guard / …) instead of one "(none)"
+        # blob. The broker reads `workflow` from either the query params or the body; send both.
+        params = {"capability": capability}
+        if workflow:
+            params["workflow"] = workflow
+            body["workflow"] = workflow
         try:
             async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
                 r = await c.post(
                     f"{self._url}/v1/jobs",
-                    params={"capability": capability},
+                    params=params,
                     headers={"X-Project-Key": self._key},
                     json=body,
                 )
@@ -296,9 +303,9 @@ class BrokerLLM:
             async with httpx.AsyncClient(timeout=_SYNC_TIMEOUT) as c:
                 r = await c.post(
                     f"{self._url}/v1/embed",
-                    params={"provider": "voyage"},
+                    params={"provider": "voyage", "workflow": kind},  # per-scenario dashboard tag
                     headers={"X-Project-Key": self._key},
-                    json={"input": texts},
+                    json={"input": texts, "workflow": kind},
                 )
             r.raise_for_status()
             d = r.json()
