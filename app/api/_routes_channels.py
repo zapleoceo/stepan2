@@ -205,7 +205,12 @@ async def channel_save(
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
         values = await SettingRepo(session).load_all(branch_id, ch_id)
     body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
-    return HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id))
+    resp = HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id))
+    # Refresh the channel LIST too (like create/delete/connect do): saving can flip is_active,
+    # and without this the row keeps showing the old on/off state — looked like the save didn't
+    # take (manager toggled "channel active" off, list still showed it on).
+    resp.headers["HX-Trigger"] = "refreshChannelList"
+    return resp
 
 
 # ─── delete ───────────────────────────────────────────────────────────────────
