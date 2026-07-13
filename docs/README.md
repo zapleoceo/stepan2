@@ -13,6 +13,7 @@ Stepan-1.
 | [broker-log.md](broker-log.md) | Лог вызовов брокера: что логируется, поля, страница `/settings/log`, ретенция |
 | [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
+| [dialogue-qa-checklist.md](dialogue-qa-checklist.md) | **Регрессия диалогов**: чеклист найденных-и-починенных ошибок + как прогонять sim (только на ClodeCouch, branch 8). Обновляется при каждой новой ошибке |
 | [ad-attribution-and-reports.md](ad-attribution-and-reports.md) | Атрибуция рекламы, авто-привязка продукта (`ad_product_map`), провенанс `product_source` |
 | [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |
 | [deploy.md](deploy.md) | Деплой: изолированный стек на Hetzner, nginx/Cloudflare, auth (Telegram Login), cutover со Stepan-1, CI/CD |
@@ -25,3 +26,6 @@ Stepan-1.
 - Документацию обновляем **в том же PR**, что и код.
 - Никаких секретов, токенов, реальных данных клиентов в `docs/`.
 - Изоляция филиалов — security-инвариант: каждый запрос к данным фильтруется по `branch_id`.
+- **Симуляции диалогов — только на ClodeCouch (`branch_id=8`), НЕ на боевой Индонезии
+  (`branch_id=1`).** Найдена новая ошибка диалога → после фикса добавь строку в
+  [dialogue-qa-checklist.md](dialogue-qa-checklist.md).
