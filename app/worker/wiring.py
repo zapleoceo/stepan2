@@ -84,8 +84,12 @@ async def threads_awaiting_reply(
     rows = await session.exec(
         select(ChannelThread.id)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
+        # inactive channel = undeliverable: generating a reply for it burns tokens into a
+        # queue the sender can't drain (2026-07-13: 27 rows for the switched-off Meta channel)
+        .join(Channel, Channel.id == ChannelThread.channel_id)  # type: ignore[arg-type]
         .where(
             Lead.branch_id == branch_id,
+            Channel.is_active.is_(True),  # type: ignore[attr-defined]
             Lead.agent_enabled.is_(True),  # type: ignore[attr-defined]
             Lead.is_blocked.is_(False),  # type: ignore[attr-defined]
             Lead.stage.not_in(BOT_SILENT_STAGES),  # type: ignore[attr-defined]
@@ -130,7 +134,16 @@ async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> 
     earliest = func.min(Outbox.id)
     rows = await session.exec(
         select(Outbox.thread_id)
-        .where(Outbox.branch_id == branch_id, Outbox.status == "pending")
+        # exclude inactive channels: their rows are unsendable, and being the oldest they
+        # monopolised every _SEND_BATCH_CAP slot — live channels' rows never made the batch
+        # and the whole outbox looked frozen (2026-07-13, the switched-off Meta channel)
+        .join(ChannelThread, ChannelThread.id == Outbox.thread_id)  # type: ignore[arg-type]
+        .join(Channel, Channel.id == ChannelThread.channel_id)  # type: ignore[arg-type]
+        .where(
+            Outbox.branch_id == branch_id,
+            Outbox.status == "pending",
+            Channel.is_active.is_(True),  # type: ignore[attr-defined]
+        )
         .group_by(Outbox.thread_id)
         .order_by(has_reply.desc(), earliest)
         .limit(_SEND_BATCH_CAP)
