@@ -111,10 +111,31 @@ async def ensure_seeded(session: AsyncSession) -> None:
     await session.flush()
 
 
+def _ver_key(v: str) -> tuple[int, ...]:
+    try:
+        return tuple(int(x) for x in (v or "0").split("."))
+    except ValueError:
+        return (0,)
+
+
 async def list_personas(session: AsyncSession) -> list[Persona]:
-    rows = (await session.execute(
-        select(Persona).where(Persona.status == "published").order_by(Persona.name))).scalars()
-    return list(rows)
+    """The library grid: the LATEST version of each persona line (by slug), so re-imported
+    versions collapse into one card. The full version history lives on the detail page."""
+    rows = list((await session.execute(
+        select(Persona).where(Persona.status == "published"))).scalars())
+    latest: dict[str, Persona] = {}
+    for p in rows:
+        cur = latest.get(p.slug)
+        if cur is None or _ver_key(p.version) > _ver_key(cur.version):
+            latest[p.slug] = p
+    return sorted(latest.values(), key=lambda p: p.name)
+
+
+async def versions_of(session: AsyncSession, slug: str) -> list[Persona]:
+    """Every version of a persona line (newest first) — the readable change history."""
+    rows = list((await session.execute(
+        select(Persona).where(Persona.slug == slug))).scalars())
+    return sorted(rows, key=lambda p: _ver_key(p.version), reverse=True)
 
 
 async def adoption(session: AsyncSession) -> dict[int, tuple[int, int]]:
@@ -141,7 +162,7 @@ def _next_version(v: str) -> str:
 async def import_from_branch(
     session: AsyncSession, branch_id: int, name: str, *,
     lang: str = "id", country: str = "", author_name: str = _AUTHOR,
-    author_contact: str = _CONTACT,
+    author_contact: str = _CONTACT, changelog: str = "",
 ) -> Persona:
     """Snapshot a branch's FULL non-product config into a versioned library persona: the
     persona core plus every playbook / reference / sales / behaviour doc (all of knowledge_doc).
@@ -158,12 +179,15 @@ async def import_from_branch(
         select(Persona).where(Persona.slug == slug)
         .order_by(Persona.version.desc()))).scalars().first()
     version = _next_version(prev.version) if prev else "1.0"
+    note = (changelog or "").strip() or (
+        "Re-imported from the branch KB." if prev else "Initial import from the branch KB.")
     now = utc_now()
     persona = Persona(
         slug=slug, name=name, version=version, lang=lang, country=country,
         summary=f"Imported from the {name} branch: persona core + all playbooks, references "
                 "and sales docs (everything except the product catalog).",
-        content="\n\n".join(parts), author_name=author_name, author_contact=author_contact,
+        content="\n\n".join(parts), changelog=note,
+        author_name=author_name, author_contact=author_contact,
         status="published", created_at=now, updated_at=now)
     session.add(persona)
     await session.flush()

@@ -548,6 +548,7 @@ class Persona(SQLModel, table=True):
     author_contact: str = Field(default="", description="tg @handle / url для связи")
     summary: str = Field(default="")
     content: str = Field(default="", description="markdown, `## ` секции")
+    changelog: str = Field(default="", description="что изменено в этой версии (для истории)")
     lang: str = Field(default="en", description="язык написания")
     country: str = Field(default="", description="страна разработки")
     status: str = Field(default="published", description="published|draft|retired")

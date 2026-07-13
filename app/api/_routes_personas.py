@@ -59,15 +59,18 @@ async def persona_detail(pid: int, request: Request) -> HTMLResponse:
             return HTMLResponse(f'<div class="emp">{t("pl.gone")}</div>', status_code=404)
         active_id, addendum, fav_ids = (
             await P.branch_state(session, bid) if bid is not None else (None, {}, set()))
+        history = await P.versions_of(session, persona.slug)
+        stat = (await P.adoption(session)).get(persona.id, (0, 0))
     return HTMLResponse(persona_detail_html(
         persona, addendum, active=persona.id == active_id, fav=persona.id in fav_ids,
-        can_write=bid is not None))
+        can_write=bid is not None, history=history, stat=stat))
 
 
 @router.post("/personas/import", response_class=HTMLResponse)
-async def personas_import(request: Request) -> HTMLResponse:
+async def personas_import(request: Request, changelog: str = Form(default="")) -> HTMLResponse:
     """Snapshot the acting branch's full persona (persona core + playbooks + references + sales,
-    everything except products) into the library as the next version. Reusable per branch."""
+    everything except products) into the library as the NEXT version, with a 'what changed'
+    note for the readable history. Reusable per branch."""
     apply_lang(request)
     bid = _acting_branch(request)
     if bid is None:
@@ -76,7 +79,8 @@ async def personas_import(request: Request) -> HTMLResponse:
         from app.adapters.db.models import Branch  # noqa: PLC0415
         branch = await session.get(Branch, bid)
         name = f"{branch.name} persona" if branch and branch.name else f"Branch {bid} persona"
-        await P.import_from_branch(session, bid, name, lang=(branch.lang if branch else "id"))
+        await P.import_from_branch(session, bid, name, lang=(branch.lang if branch else "id"),
+                                   changelog=changelog)
     return HTMLResponse(await _render_library(request))
 
 
