@@ -644,7 +644,8 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        suggest_bid = await _guarded_branch(session, thread_id, allowed)
+        if suggest_bid is None:
             return HTMLResponse("")
         msgs = (
             await session.execute(
@@ -676,7 +677,8 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
     llm = BrokerLLM()
     try:
         draft, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=300,
-                                  workflow="suggest", thread_id=thread_id)
+                                  workflow="suggest", thread_id=thread_id,
+                                  branch_id=suggest_bid)
     except Exception as exc:
         _log.warning("suggest LLM error tid=%s: %s", thread_id, exc)
         draft = ""
@@ -714,7 +716,8 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        summary_bid = await _guarded_branch(session, thread_id, allowed)
+        if summary_bid is None:
             return HTMLResponse("")
         rows = (
             await session.execute(
@@ -749,7 +752,8 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
     llm = BrokerLLM()
     try:
         summary, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=500,
-                                    workflow="chat-summary", thread_id=thread_id)
+                                    workflow="chat-summary", thread_id=thread_id,
+                                    branch_id=summary_bid)
     except Exception as exc:
         _log.warning("chat summary LLM error tid=%s: %s", thread_id, exc)
         summary = ""
