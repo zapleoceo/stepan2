@@ -130,6 +130,46 @@ async def adoption(session: AsyncSession) -> dict[int, tuple[int, int]]:
     return {int(k): (int(used.get(k, 0)), int(favs.get(k, 0))) for k in keys}
 
 
+def _next_version(v: str) -> str:
+    try:
+        major, _, minor = (v or "1.0").partition(".")
+        return f"{int(major)}.{int(minor or 0) + 1}"
+    except ValueError:
+        return "1.1"
+
+
+async def import_from_branch(
+    session: AsyncSession, branch_id: int, name: str, *,
+    lang: str = "id", country: str = "", author_name: str = _AUTHOR,
+    author_contact: str = _CONTACT,
+) -> Persona:
+    """Snapshot a branch's FULL non-product config into a versioned library persona: the
+    persona core plus every playbook / reference / sales / behaviour doc (all of knowledge_doc).
+    Products stay per-branch (separate table), so they're never bundled. Re-importing the same
+    name mints the NEXT version, so a branch can refresh its library copy after edits."""
+    from app.adapters.db.models import KnowledgeDoc  # noqa: PLC0415
+    docs = (await session.execute(
+        select(KnowledgeDoc).where(KnowledgeDoc.branch_id == branch_id)
+        .order_by(KnowledgeDoc.category, KnowledgeDoc.slug))).scalars().all()
+    parts = [f"## {d.slug}\n{(d.content or '').strip()}"
+             for d in docs if (d.content or "").strip()]
+    slug = slugify(name)
+    prev = (await session.execute(
+        select(Persona).where(Persona.slug == slug)
+        .order_by(Persona.version.desc()))).scalars().first()
+    version = _next_version(prev.version) if prev else "1.0"
+    now = utc_now()
+    persona = Persona(
+        slug=slug, name=name, version=version, lang=lang, country=country,
+        summary=f"Imported from the {name} branch: persona core + all playbooks, references "
+                "and sales docs (everything except the product catalog).",
+        content="\n\n".join(parts), author_name=author_name, author_contact=author_contact,
+        status="published", created_at=now, updated_at=now)
+    session.add(persona)
+    await session.flush()
+    return persona
+
+
 async def get_persona(session: AsyncSession, pid: int) -> Persona | None:
     return (await session.execute(
         select(Persona).where(Persona.id == pid))).scalar_one_or_none()

@@ -82,9 +82,16 @@ def personas_panel_html(
         _card(p, adopt.get(p.id, (0, 0)), p.id == active_id, p.id in fav_ids, can_write)
         for p in personas
     ) or f'<div class="emp">{_h.escape(t("pl.empty"))}</div>'
+    import_btn = (
+        f'<div class="ch-acts"><button class="btn-sm btn-p"'
+        f' hx-post="/ui/personas/import" hx-target="#main" hx-swap="innerHTML"'
+        f' data-help="{_h.escape(t("pl.import_h"))}">{_h.escape(t("pl.import"))}</button></div>'
+        if can_write else ""
+    )
     return (
         f'<style>{_PERSONA_CSS}</style>'
-        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("pl.intro"))}">{title}</span></div>'
+        f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("pl.intro"))}">{title}</span>'
+        f'{import_btn}</div>'
         f'<div class="pnl-body">'
         f'<div class="hint">{intro}</div>'
         f'{using}'

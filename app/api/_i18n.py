@@ -586,6 +586,14 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Only the persona's author can update its core. Need a change? Contact the "
               "author (button above).",
         "id": "Hanya penulis yang bisa memperbarui inti persona. Hubungi penulis di atas."},
+    "pl.import": {"ru": "Импортировать персону филиала", "en": "Import this branch's persona",
+                  "id": "Impor persona cabang ini"},
+    "pl.import_h": {"ru": "Снять снимок текущей персоны филиала (ядро + плейбуки + reference + "
+                          "sales, всё кроме продуктов) в библиотеку как новую версию.",
+                    "en": "Snapshot this branch's current persona (core + playbooks + references "
+                          "+ sales, everything except products) into the library as a new version.",
+                    "id": "Simpan persona cabang ini (inti + playbook + referensi + sales, "
+                          "semua kecuali produk) ke perpustakaan sebagai versi baru."},
     "pl.gone":   {"ru": "Персона не найдена.", "en": "Persona not found.",
                   "id": "Persona tidak ditemukan."},
     "pl.pick_branch": {"ru": "Выбери один филиал в фильтре, чтобы менять его персону.",
