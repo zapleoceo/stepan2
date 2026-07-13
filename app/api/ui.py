@@ -186,10 +186,18 @@ async def threads_partial(
     if branch_ids:
         conditions.append("l.branch_id = ANY(:bids)")
         params["bids"] = branch_ids
+    # Connector filter is a MULTI-TOGGLE facet: `kind` is a comma-list of the channels to SHOW
+    # (empty/absent = all, the literal 'none' = every chip toggled off). Server-side (not a CSS
+    # hide) so an older Meta chat isn't hidden behind newer IG ones past the per-query LIMIT.
     knd = kind.strip()
-    if knd in _CHANNEL_KINDS:  # connector filter (server-side): the LIMIT is per-kind, so an
-        conditions.append("ch.kind = :kind")  # older Meta chat isn't hidden behind newer IG ones
-        params["kind"] = knd
+    if knd == "none":
+        conditions.append("1=0")  # all connectors toggled off → show nothing
+    elif knd:
+        sel = [k for k in knd.split(",") if k in _CHANNEL_KINDS]
+        if sel and len(sel) < len(_CHANNEL_KINDS):  # a real subset (all or garbage → no filter)
+            ph = ", ".join(f":knd{i}" for i in range(len(sel)))
+            conditions.append(f"ch.kind IN ({ph})")  # noqa: S608 — ph is bound params, not input
+            params.update({f"knd{i}": k for i, k in enumerate(sel)})
     s = stage.strip()
     if s == "blocked":  # is_blocked is a flag, not a stage — the funnel's 🚫 chip filters on it
         conditions.append("l.is_blocked = true")
@@ -241,10 +249,15 @@ async def threads_partial(
     show_branch = not branch_ids or len(branch_ids) > 1
     # Carry the active filter into each row's chat URL so opening a chat (and any later full
     # reload of it) keeps the filtered list rather than reverting to the whole inbox.
+    if knd == "none":
+        kind_qs = "none"
+    else:
+        _sel = [k for k in knd.split(",") if k in _CHANNEL_KINDS]
+        kind_qs = ",".join(_sel) if (0 < len(_sel) < len(_CHANNEL_KINDS)) else ""
     filter_qs = urlencode({k: v for k, v in
                            (("stage", s), ("lead_type", lt), ("audience", aud),
                             ("ad_id", ad), ("grp", grp.strip()), ("awaiting", aw),
-                            ("kind", knd if knd in _CHANNEL_KINDS else "")) if v})
+                            ("kind", kind_qs)) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))
 
