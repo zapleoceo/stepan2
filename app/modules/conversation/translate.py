@@ -68,7 +68,9 @@ def _system_prompt(target: str) -> str:
     )
 
 
-async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> str | None:
+async def translate_text(
+    llm: LLMPort, body: str, target: str = "Russian", *, branch_id: int | None = None,
+) -> str | None:
     """One-shot translation of raw text (no cache) — for unsent/queued content."""
     if not (body or "").strip():
         return None
@@ -85,7 +87,7 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
     for capability in ("chat:fast", SMART):
         out, _ = await llm.chat(messages, capability=capability,
                                 max_tokens=settings().translate_max_tokens,
-                                workflow="translate")
+                                workflow="translate", branch_id=branch_id)
         clean = out.strip()
         # Some models echo back the ''' delimiters from the prompt despite being told not
         # to — strip any that wrap the whole response.
@@ -101,7 +103,8 @@ async def translate_text(llm: LLMPort, body: str, target: str = "Russian") -> st
 
 
 async def translate_message(
-    session: AsyncSession, mid: int, llm: LLMPort, target: str = "Russian"
+    session: AsyncSession, mid: int, llm: LLMPort, target: str = "Russian",
+    *, branch_id: int | None = None,
 ) -> str | None:
     """Cached translation of message `mid`, or None if the message is missing/empty.
 
@@ -115,7 +118,7 @@ async def translate_message(
         return None
     if row[1]:  # cache hit — no LLM call
         return row[1]
-    clean = await translate_text(llm, row[0] or "", target)
+    clean = await translate_text(llm, row[0] or "", target, branch_id=branch_id)
     if clean:
         await session.execute(
             text("UPDATE message SET tr_text=:t WHERE id=:mid"), {"t": clean, "mid": mid}

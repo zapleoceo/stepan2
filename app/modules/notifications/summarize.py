@@ -33,7 +33,7 @@ def lang_name(code: str) -> str:
 
 async def build_alert_body(
     session: AsyncSession, llm: LLMPort | None, thread_id: int | None,
-    *, branch_lang: str, reason_en: str, reason_ru: str,
+    *, branch_lang: str, reason_en: str, reason_ru: str, branch_id: int | None = None,
 ) -> AlertBody:
     """(summary in branch lang, summary in Russian, reason in branch lang). Falls back to
     empty summaries + the English reason when there's no LLM, no dialog, or the call fails."""
@@ -56,7 +56,7 @@ async def build_alert_body(
     msgs = [{"role": "system", "content": system}, {"role": "user", "content": convo}]
     try:
         raw, _ = await llm.chat(msgs, capability="chat:fast", max_tokens=700,
-                                workflow="alert", thread_id=thread_id)
+                                workflow="alert", thread_id=thread_id, branch_id=branch_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("alert summary LLM failed thread=%s: %s", thread_id, exc)
         return AlertBody("", "", reason_en)

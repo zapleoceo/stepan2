@@ -87,6 +87,7 @@ class AlertService:
         body = await build_alert_body(
             self.session, self._llm, thread_id,
             branch_lang=lang, reason_en=reason_en, reason_ru=reason_ru,
+            branch_id=self.branch_id,
         )
         lead_name = (lead.display_name or lead.ig_username or f"lead #{lead_id}") if lead else ""
         text = self._compose(

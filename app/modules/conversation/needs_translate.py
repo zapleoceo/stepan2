@@ -61,6 +61,7 @@ def cached_needs(
 
 async def translated_needs(
     profile: NeedsProfile, needs_tr: str | None, lang: str, llm: LLMPort,
+    *, branch_id: int | None = None,
 ) -> tuple[NeedsProfile, str | None]:
     """Return (profile with jobs/pains/gains in `lang`, updated needs_tr JSON or None).
 
@@ -73,7 +74,7 @@ async def translated_needs(
     missing = [s for s in all_items if s not in cache]
     new_tr = None
     if missing:
-        fresh = await _translate_batch(llm, missing, lang)
+        fresh = await _translate_batch(llm, missing, lang, branch_id=branch_id)
         if fresh:
             cache = {**cache, **fresh}
             new_tr = _save_cache(needs_tr, lang, cache)
@@ -86,7 +87,9 @@ async def translated_needs(
     return translated, new_tr
 
 
-async def _translate_batch(llm: LLMPort, items: list[str], lang: str) -> dict[str, str]:
+async def _translate_batch(
+    llm: LLMPort, items: list[str], lang: str, *, branch_id: int | None = None,
+) -> dict[str, str]:
     """One broker call for every cache-miss phrase; empty dict (no cache write) on any
     failure so the next render retries instead of freezing a bad/partial result."""
     from app.modules.notifications.summarize import lang_name  # noqa: PLC0415
@@ -109,7 +112,8 @@ async def _translate_batch(llm: LLMPort, items: list[str], lang: str) -> dict[st
         # message). 600 truncated the JSON array mid-string here, so every translation for
         # a lead with a full needs profile failed forever (until this cap was raised).
         raw, _ = await llm.chat(
-            messages, capability="chat:fast", max_tokens=2500, workflow="translate",
+            messages, capability="chat:fast", max_tokens=2500, workflow="needs-translate",
+            branch_id=branch_id,
         )
         arr = json.loads(raw)
     except Exception as exc:  # noqa: BLE001 — degrade to originals, never break the render
