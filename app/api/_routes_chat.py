@@ -87,14 +87,16 @@ def _actor_name(request: Request) -> str:
     return str(user.get("nm")) if user and user.get("nm") else "manager"
 
 
-async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | None, lang: str):
+async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | None, lang: str,
+                     *, branch_id: int | None = None):
     """Auto-translate the lead's captured needs into the current UI language, caching the
     result on lead.needs_tr so re-rendering the header never re-bills the same phrase.
 
     This calls the broker and therefore blocks on network latency — only the lazy
     /needs endpoint uses it. The main panel render uses cached_needs() instead, which is
     pure cache lookup with no I/O, so opening a chat never waits on the LLM."""
-    profile, new_tr = await translated_needs(parse_needs(needs), needs_tr, lang, BrokerLLM())
+    profile, new_tr = await translated_needs(parse_needs(needs), needs_tr, lang, BrokerLLM(),
+                                             branch_id=branch_id)
     if new_tr is not None:
         await session.execute(
             text("UPDATE lead SET needs_tr = :v WHERE id = :id"), {"v": new_tr, "id": lead_id},
@@ -237,8 +239,8 @@ async def chat_needs_lazy(thread_id: int, request: Request) -> HTMLResponse:
         ).first()
         if not row or is_branch_forbidden(row[0], allowed):
             return HTMLResponse("")
-        _, needs, needs_tr, lead_id = row
-        profile = await _needs_for(session, lead_id, needs, needs_tr, lang)
+        needs_bid, needs, needs_tr, lead_id = row
+        profile = await _needs_for(session, lead_id, needs, needs_tr, lang, branch_id=needs_bid)
     return HTMLResponse(needs_block_html(profile, thread_id))
 
 
@@ -693,11 +695,12 @@ async def chat_tr_draft(
     lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        draft_bid = await _guarded_branch(session, thread_id, allowed)
+        if draft_bid is None:
             return HTMLResponse("")
     target = target_for_lang(lang_code)
     try:
-        tr = await translate_text(BrokerLLM(), text_body, target=target)
+        tr = await translate_text(BrokerLLM(), text_body, target=target, branch_id=draft_bid)
     except Exception as exc:
         _log.warning("draft translate error tid=%s: %s", thread_id, exc)
         return HTMLResponse("")
@@ -781,11 +784,13 @@ async def msg_translate_single(thread_id: int, mid: int, request: Request) -> HT
     lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        msg_tr_bid = await _guarded_branch(session, thread_id, allowed)
+        if msg_tr_bid is None:
             return HTMLResponse("")
         try:
             tr = await translate_message(
-                session, mid, BrokerLLM(), target=target_for_lang(lang_code))
+                session, mid, BrokerLLM(), target=target_for_lang(lang_code),
+                branch_id=msg_tr_bid)
         except Exception as exc:
             _log.warning("per-msg translate error tid=%s mid=%s: %s", thread_id, mid, exc)
             return HTMLResponse("")  # empty → JS leaves the bubble as-is, lets the user retry
@@ -876,7 +881,8 @@ async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLR
     lang_code = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        if await _guarded_branch(session, thread_id, allowed) is None:
+        outmsg_bid = await _guarded_branch(session, thread_id, allowed)
+        if outmsg_bid is None:
             return HTMLResponse("")
         row = (await session.execute(
             text("SELECT text, tr_text FROM outbox WHERE id=:oid AND thread_id=:tid"),
@@ -887,7 +893,8 @@ async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLR
         if row[1]:  # already translated (cache) — no LLM call
             return HTMLResponse(f"🌐 {_h.escape(row[1])}")
         try:
-            tr = await translate_text(BrokerLLM(), row[0], target=target_for_lang(lang_code))
+            tr = await translate_text(BrokerLLM(), row[0], target=target_for_lang(lang_code),
+                                      branch_id=outmsg_bid)
         except Exception as exc:
             _log.warning("pending translate error tid=%s oid=%s: %s", thread_id, oid, exc)
             return HTMLResponse("")

@@ -162,7 +162,7 @@ class MediaService:
                 body = body[len(mark):]
                 break
         try:
-            tr = await translate_text(translator, body)
+            tr = await translate_text(translator, body, branch_id=self.branch_id)
         except Exception as exc:  # noqa: BLE001 — translation is best-effort, never block backfill
             logger.warning("media translate failed branch=%d msg=%d: %s",
                            self.branch_id, msg.id, exc)
