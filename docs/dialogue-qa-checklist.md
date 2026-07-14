@@ -52,6 +52,14 @@ occurred_at` и прогони список через `sim.say(8, ...)`.
 | 12b | Нервный «hehe» при реальном («kerja kuli kak») | Взять как реальную ситуацию, подать позитивно | Высмеять / принять за шутку | 2933 |
 | 13 | Простое согласие/благодарность («oke», «boleh», «makasih») | Ответить тепло / выдать обещанное | needs_manager (ложная эскалация) | 2541, 2566, 2324 |
 | 14 | Любая цена/факт/история/зарплата | Только из карточки/market_facts, как range+контекст | Выдуманная цифра / обещание дохода | market_facts |
+| 15 | Размытая цель без продукта («coding для маркетинга») | Предложить реальные продукты с ценами из карточек | Выдуманный «пакет mulai dari Rp X juta/bulan» (нет в карточках) | 899 |
+| 16 | Приглашение на Open House | campus tour + Q&A с командой; демо AI-проектов Директора только если спросят (Vibe) | «kenalan mentor», «coba/rasakan suasana kelas», «contoh karya peserta/alumni» | 2879 |
+
+**Prohibition-слой (guard):** глобальные баны живут в `policy_prohibitions` (always-injected);
+`guard_verify` enforce-ит любую строку KB с `NEVER / does NOT / jangan / BUKAN`, даже если
+похожие слова есть в KB. Единые источники политик: `policy_certificates` (BNSP), `policy_discounts`
+(referral/pelajar/Vibe book-now), `policy_success_cases` (правила подачи кейсов). Карточки на них
+ссылаются, не дублируют. Цены-канонизатор понимает «Rp X juta/ribu» + десятичную запятую.
 
 ## Как расширять
 
