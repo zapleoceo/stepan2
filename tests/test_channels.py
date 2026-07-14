@@ -296,9 +296,10 @@ class _RaisingIGClient:
     """Fake instagrapi client whose login() raises a given exception once, then succeeds
     (simulating a retry after the operator resolves whatever instagrapi asked for)."""
 
-    def __init__(self, exc: Exception | None) -> None:
+    def __init__(self, exc: Exception | None, last_json: dict | None = None) -> None:
         self._exc = exc
         self.login_calls: list[tuple] = []
+        self.last_json = last_json or {}  # instagrapi stashes the 2FA response here
 
     def login(self, username=None, password=None, verification_code=""):
         self.login_calls.append((username, password, verification_code))
@@ -371,18 +372,87 @@ async def test_attempt_ig_login_code_based_challenge_shows_code_field() -> None:
     _ig_flows.pop("fid-challenge", None)
 
 
-async def test_attempt_ig_login_two_factor_stores_password_for_relogin() -> None:
+async def test_attempt_ig_login_totp_2fa_shows_code_field() -> None:
+    """A TOTP/SMS 2FA (two_factor_info flags a code method) shows the code-entry field."""
     from instagrapi.exceptions import TwoFactorRequired
 
     from app.api._routes_channels import _attempt_ig_login, _ig_flows
 
-    cl = _RaisingIGClient(TwoFactorRequired("2FA required"))
+    cl = _RaisingIGClient(TwoFactorRequired("2FA required"),
+                          last_json={"two_factor_info": {"totp_two_factor_on": True}})
     resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-2fa")
     body = resp.body.decode()
     assert 'name="code"' in body
     assert _ig_flows["fid-2fa"] == {"client": cl, "channel_id": 42, "kind": "2fa",
                                     "username": "u", "password": "p"}
     _ig_flows.pop("fid-2fa", None)
+
+
+async def test_attempt_ig_login_device_approval_shows_continue_not_code() -> None:
+    """A device-approval push (two_factor_info flags NO code method) must NOT demand a code —
+    it shows the 'approve on your phone, then continue' step that re-logins (the itstep.kl bug
+    where a push-approval login kept asking for a code that never comes)."""
+    from instagrapi.exceptions import TwoFactorRequired
+
+    from app.api._routes_channels import _attempt_ig_login, _ig_flows
+
+    cl = _RaisingIGClient(TwoFactorRequired("2FA required"),
+                          last_json={"two_factor_info": {"totp_two_factor_on": False,
+                                                         "sms_two_factor_on": False}})
+    resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-dev")
+    body = resp.body.decode()
+    assert 'name="code"' not in body                       # no code to type on a push approval
+    assert "approved on my phone" in body.lower() or "continue" in body.lower()
+    assert _ig_flows["fid-dev"]["kind"] == "device"
+    assert _ig_flows["fid-dev"]["password"] == "p"  # noqa: S105 — kept for the no-code relogin
+    _ig_flows.pop("fid-dev", None)
+
+
+async def test_ig_verify_device_kind_relogins_without_a_code() -> None:
+    """Clicking Continue on the device-approval step re-attempts login on the SAME client with
+    no code (after the user approved on their phone) — and on success saves the session."""
+    from starlette.requests import Request
+
+    from app.api._routes_channels import _ig_flows, ig_login_verify
+
+    # first attempt raises device-approval; the SAME client succeeds on the retry
+    cl = _RaisingIGClient(None, last_json={"two_factor_info": {}})
+    _ig_flows["fid-dev2"] = {"client": cl, "channel_id": 7, "kind": "device",
+                             "username": "u", "password": "p"}  # noqa: S106 — test dummy
+
+    async def _fake_branch(_s, _ch, _allowed):
+        return 7
+
+    import app.api._routes_channels as rc
+    _orig = rc._channel_branch
+    rc._channel_branch = _fake_branch
+
+    class _Scope:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *_a):
+            return False
+
+    _orig_scope = rc.session_scope
+    rc.session_scope = lambda: _Scope()
+    # _ig_save writes to the DB; stub it to isolate the relogin behaviour
+    _orig_save = rc._ig_save
+
+    async def _fake_save(ch_id, dump):
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse("saved")
+
+    rc._ig_save = _fake_save
+    try:
+        req = Request({"type": "http", "method": "POST", "path": "/", "query_string": b"",
+                       "headers": []})
+        resp = await ig_login_verify(7, req, flow_id="fid-dev2", code="", skip_code="")
+        assert resp.body.decode() == "saved"               # relogin succeeded → session saved
+        assert cl.login_calls[-1][2] == ""                 # retried with NO verification code
+    finally:
+        rc._channel_branch, rc.session_scope, rc._ig_save = _orig, _orig_scope, _orig_save
+        _ig_flows.pop("fid-dev2", None)
 
 
 def test_credential_panel_shows_session_after_connect() -> None:

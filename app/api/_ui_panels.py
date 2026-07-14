@@ -948,9 +948,14 @@ def _ch_ig_form(
     kind: str = "", username: str = "",
 ) -> str:
     """Two-step Instagram connect flow: (1) credentials, (2) resolving whatever Instagram
-    asked for. Step 2's content switches on `kind` — instagrapi hits THREE unrelated
+    asked for. Step 2's content switches on `kind` — instagrapi hits FOUR unrelated
     Instagram mechanisms that all land here:
-    - `kind='2fa'` — real 2FA, code from an authenticator app/SMS, resolved by re-login.
+    - `kind='2fa'` — real 2FA where a TYPED code exists (authenticator app / SMS, detected via
+      two_factor_info's totp_two_factor_on / sms_two_factor_on), resolved by re-login.
+    - `kind='device'` — a login-approval PUSH to the user's other device: no code exists, the
+      user taps Approve in the Instagram notification, then we re-login on the same client. No
+      code field — only a "I approved on my phone → continue" button (the itstep.kl bug: a push
+      approval was shown a code field that never accepts anything).
     - `kind='challenge'` — a security "is this really you" check, code emailed/texted,
       resolved via challenge_resolve.
     - `kind='manual'` — a checkpoint instagrapi flags as NOT resolvable by any text code at
@@ -981,15 +986,20 @@ def _ch_ig_form(
             f'{_h.escape(t("ch.for_account"))} <b>@{_h.escape(username)}</b></div>'
             if username else ""
         )
-        if kind == "manual":
+        if kind in ("manual", "device"):
+            # No code to type — the login is approved on the phone. 'device' = a login-approval
+            # push to another device (tap Approve, then Continue); 'manual' = an in-app checkpoint
+            # instagrapi flags as code-unresolvable. Same no-code retry UI, kind-specific copy.
+            hint = t("ch.hint_device") if kind == "device" else t("ch.hint_manual")
+            btn = t("ch.continue_device") if kind == "device" else t("ch.retry_manual")
             return (
                 f'{_ch_step(t("ch.step2"))}{who}{err}'
-                f'{_ch_hint(t("ch.hint_manual"))}'
+                f'{_ch_hint(hint)}'
                 f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
                 f' hx-swap="innerHTML" style="max-width:340px">'
                 f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
                 f'<button type="submit" class="btn-sm btn-p" hx-disabled-elt="this"'
-                f' hx-indicator="#{spin_id}">{_h.escape(t("ch.retry_manual"))}</button>'
+                f' hx-indicator="#{spin_id}">{_h.escape(btn)}</button>'
                 f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
                 f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
                 f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
