@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.6.0"
+PROJECT_VERSION = "1.7.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,18 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.7.0", "date": "15 Jul 2026", "tag": "Selling",
+        "title": "Sells the way people actually decide",
+        "blurb": "Stepan now handles a chat the way a good human rep would. It gets to know "
+                 "what a lead really wants before pitching, and reads a polite 'maybe later' or "
+                 "'let me think about it' as a cue to ease off, not push harder, so fewer leads "
+                 "go quiet. When money is tight it opens with an affordable first step instead "
+                 "of the full price, and with a school student it brings a parent into the "
+                 "conversation. It never promises an income or dresses a public example up as "
+                 "its own graduate. The result is a calmer, more human conversation that more "
+                 "people actually finish.",
+    },
     {
         "version": "1.6.0", "date": "14 Jul 2026", "tag": "New",
         "title": "Seller persona library",

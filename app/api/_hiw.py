@@ -385,6 +385,7 @@ _BODY_EN = r"""
         <li><b>Facts only from the knowledge base.</b> Prices, dates, alumni stories — nothing "from memory".</li>
         <li><b>Phone before handoff.</b> A client cannot be passed to a manager without a phone number: if the model pushes to escalate and there is no phone, the bot first asks for WhatsApp. (Added after a client rode off to a manager with an empty number.)</li>
         <li><b>Presentation only after pain.</b> Double protection: a prompt rule plus a code gate — if the model requests the "presenting" stage but no client pain has been captured, the code rolls it back to discovery. After 4 turns of questioning the gate lets go — no interrogations.</li>
+        <li><b>Reads the room.</b> When the client stalls politely ("nanti", "let me think", "I'll ask my family"), signals a tight budget, or turns out to be a school student, the code detects it and steers that one reply on the spot — ease off instead of pushing, lead with an affordable first step, bring a parent in — rather than trusting the model to remember every rule inside a long prompt.</li>
         <li><b>The system decides readiness.</b> The model cannot set the "ready" stage itself — only raise a flag; the code makes the call.</li>
       </ul>
       <details class="l3"><summary>All the way down: what exactly the model returns</summary><div class="body">
