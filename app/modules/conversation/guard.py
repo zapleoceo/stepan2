@@ -307,7 +307,10 @@ _VERIFY_SYSTEM = (
     "case (name, outcome, or link) appears in the knowledge base's Success Cases / Stories "
     "content. A GENERALIZED true statement ('banyak peserta kami mulai dari nol, ada yang jadi "
     "developer, ada yang freelance') is fine even without a specific case — only flag a "
-    "SPECIFIC unsourced story. Ignore generic rapport, questions, and paraphrases of KB facts. "
+    "SPECIFIC unsourced story. A public figure the KB lists as an EXTERNAL example (e.g. a "
+    "founder in Success Cases) must be presented as that public example — flag it if the draft "
+    "reframes them as 'alumni/peserta/lulusan kami' (our own student), which is false even "
+    "though the name is in the KB. Ignore generic rapport, questions, and paraphrases of KB facts. "
     "Output ONE unsupported claim per line (a short quote or description), nothing else — no "
     "numbering, no JSON, no prose. If everything is grounded, reply with the single word CLEAN.")
 

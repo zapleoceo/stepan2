@@ -102,6 +102,57 @@ _AD_OPENER_NUDGE = (
     "qualifying. Return the JSON as usual.]"
 )
 
+# Situational nudges — the static prompt already carries these rules (soft-no, budget,
+# minors), but a 100-dialog audit (2026-07-15) showed the model follows them UNRELIABLY at
+# 26k-char prompt scale (it kept pushing DP after 'nanti', priced full courses to unemployed
+# leads, pitched DP straight at school kids). Same fix as the discovery-cap/ad-opener nudges:
+# detect the situation deterministically and inject ONE short instruction at the exact turn.
+# Fire at most one (priority minor > soft-no > budget > discovery-cap) to stay token-light.
+_SOFT_NO_RE = re.compile(
+    r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|pikir[- ]?(pikir\s*)?(dulu|lagi)|mikir\s*dulu|"
+    r"nabung\s*dulu|belum\s*(ada|punya|siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
+    r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
+    r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
+    r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",
+    re.IGNORECASE)
+_SOFT_NO_NUDGE = (
+    "[System: the lead just softly declined or stalled — a polite Indonesian 'not now' "
+    "('nanti/pikir dulu/insyaallah/belum ada biaya/lain kali' or 'tanya keluarga dulu'), "
+    "usually a real 'no' wrapped to save face. Do NOT push price, DP, scarcity or a new "
+    "pitch this turn — that makes them ghost. Acknowledge sincerely, give a graceful out, and "
+    "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster) "
+    "or just ask permission to follow up later ('boleh aku kabari kalau ada info baru?'). "
+    "Never repeat an offer you already made. Return the JSON as usual.]"
+)
+_LOW_BUDGET_RE = re.compile(
+    r"\b(?:nggak|ngga|ndak|tidak|tdk|gak|ga|gk|belum)\s*(?:ada|punya)?\s*"
+    r"(?:duit|uang|modal|biaya|dana|ongkos)"
+    r"|ga\s*sanggup|(?:nggak|ngga|ndak|gak|ga|gk)\s*mampu|"
+    r"mahal\s*(banget|amat|bgt|bener|sekali)|kemahalan|"
+    r"gratis(an|in)?|belum\s*(kerja|ada\s*penghasilan)|nganggur|pengangguran|"
+    r"butuh\s*(kerja|duit|uang|kerjaan)|lagi\s*bokek",
+    re.IGNORECASE)
+_LOW_BUDGET_NUDGE = (
+    "[System: the lead signaled tight or no budget (no money, unemployed, 'mahal banget', "
+    "'gratisan', 'ga sanggup'). Do NOT lead with the full course price or a DP request. "
+    "Acknowledge honestly, then offer the CHEAPEST real entry FIRST (1-day Skill Booster / "
+    "mini course, or the free Open House) as the main path; mention the full program only as "
+    "a 'later, once you've tried it' option. Never guarantee income or 'balik modal'. Return "
+    "the JSON as usual.]"
+)
+_MINOR_RE = re.compile(
+    r"\b(smp|sma|smk|mts)\b|kelas\s*(10|11|12|sepuluh|sebelas|dua\s*belas)\b|"
+    r"masih\s*sekolah|anak\s*(saya|sy|ku|nya)\b|umur\s*1[0-7]\b|\b1[0-7]\s*(tahun|thn)\b",
+    re.IGNORECASE)
+_MINOR_NUDGE = (
+    "[System: the lead looks school-age / a minor (SMP/SMA/SMK, 'kelas 10-12', 'masih "
+    "sekolah', or a parent asking for a child). The PARENT is the payer and decision-maker. "
+    "Do NOT push DP or price straight at the student. Encourage them warmly and pivot to "
+    "involving a parent — invite them to bring a parent to the free Open House, or offer info "
+    "the parent can review (mention the 10% student discount). Positive, no pressure. Return "
+    "the JSON as usual.]"
+)
+
 # A live reply that repeats a question already asked in this thread — same failure mode
 # followup.py guards against (chat 1830), but on the live-reply path, which had NO dedup
 # check at all (thread 2260, 2026-07-08: the SECOND occurrence of a re-asked discovery
@@ -503,8 +554,14 @@ class ReplyService:
             # Only the ad's prefilled opener so far — force warm-up + discovery, not a pitch.
             extra_user_msg = _AD_OPENER_NUDGE
         else:
-            needs_captured = ctx.stored_needs.captured()
-            if not needs_captured and inbound_count > _DISCOVERY_TURN_CAP:
+            last_txt = (last_in.text if last_in is not None else "") or ""
+            if _MINOR_RE.search(last_txt):
+                extra_user_msg = _MINOR_NUDGE
+            elif _SOFT_NO_RE.search(last_txt):
+                extra_user_msg = _SOFT_NO_NUDGE
+            elif _LOW_BUDGET_RE.search(last_txt):
+                extra_user_msg = _LOW_BUDGET_NUDGE
+            elif not ctx.stored_needs.captured() and inbound_count > _DISCOVERY_TURN_CAP:
                 extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
