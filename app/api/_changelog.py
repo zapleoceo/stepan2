@@ -28,51 +28,76 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.4.0"
+PROJECT_VERSION = "1.6.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
 COMING_NEXT = {
-    "title": "Seller Persona Library",
-    "blurb": "Pick a proven, versioned sales persona for each brand or location instead of "
-             "writing one from scratch. Track which persona sells best and roll the winner "
-             "out everywhere — your product catalog stays yours, the selling craft is shared.",
+    "title": "Two-way CRM sync",
+    "blurb": "Stepan already writes every qualified lead and stage change into your CRM. "
+             "Next it reads back from it too, so a deal your team advances by hand stays "
+             "perfectly in step with the conversation.",
 }
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
     {
+        "version": "1.6.0", "date": "14 Jul 2026", "tag": "New",
+        "title": "Seller persona library",
+        "blurb": "Give every brand or location a proven, ready-made sales personality instead "
+                 "of writing one from scratch. Each persona is versioned and shows who authored "
+                 "it and how widely it is used, and any location can layer its own house rules "
+                 "on top, section by section. Your product catalog stays yours; the selling "
+                 "craft is shared and keeps improving for everyone.",
+    },
+    {
+        "version": "1.5.0", "date": "13 Jul 2026", "tag": "Trust",
+        "title": "Never makes things up",
+        "blurb": "Every price, date and promise now comes only from your own facts. Stepan will "
+                 "not invent a number or a class that does not exist, and a built-in guard "
+                 "re-checks each reply before it sends. When something cannot be answered "
+                 "safely it asks your team instead of guessing, so its messages survive a "
+                 "screenshot.",
+    },
+    {
         "version": "1.4.0", "date": "12 Jul 2026", "tag": "New",
         "title": "Smarter, more human conversations",
-        "blurb": "Stepan now sounds even more like your best rep: no repetitive scripts, no "
-                 "robotic loops when a question is unusual, always aware of today's date so it "
-                 "never offers a class that already passed, and one warm, consistent tone from "
-                 "the first hello to the close.",
+        "blurb": "Stepan sounds even more like your best rep. It uncovers the real goal and the "
+                 "pain behind it before pitching, holds one warm, consistent tone from the "
+                 "first hello to the close, stays aware of today's date so it never offers a "
+                 "class that already passed, and no longer slips into repetitive loops on an "
+                 "unusual question.",
     },
     {
-        "version": "1.3.0", "date": "29 Jun 2026", "tag": "New",
-        "title": "Live demo — let Stepan sell you",
-        "blurb": "Chat with Stepan right on this page and watch it qualify and pitch in real "
-                 "time. The moment a visitor is ready to buy and leaves a contact, your team "
-                 "gets an instant hand-off.",
+        "version": "1.3.0", "date": "11 Jul 2026", "tag": "New",
+        "title": "Stepan sees and hears",
+        "blurb": "Leads rarely type everything. Stepan now reads the images they send, a "
+                 "screenshot, a price list, a payment proof, and understands voice notes, then "
+                 "answers what was actually shown or said. It is all translated into your "
+                 "team's language in the chat log.",
     },
     {
-        "version": "1.2.0", "date": "20 Jun 2026", "tag": "Channels",
-        "title": "WhatsApp & Messenger, not just Instagram",
-        "blurb": "One brain across Instagram, WhatsApp and Messenger DMs — every lead, every "
-                 "channel, answered in their own language.",
+        "version": "1.2.0", "date": "08 Jul 2026", "tag": "New",
+        "title": "Smart follow-ups and a clean hand-off",
+        "blurb": "Stepan brings back leads who went quiet with fresh, natural angles that never "
+                 "repeat and stay safe for your account. When a lead turns hot it captures a "
+                 "phone first, then passes it to your team at exactly the right moment, never a "
+                 "dead-end bot.",
     },
     {
-        "version": "1.1.0", "date": "10 Jun 2026", "tag": "Insight",
-        "title": "Operator-grade analytics & ad attribution",
-        "blurb": "See your full funnel, your peak hours, and exactly which ad drives which "
-                 "sale — with conversions pushed back so your ad algorithm learns who buys.",
+        "version": "1.1.0", "date": "30 Jun 2026", "tag": "Insight",
+        "title": "Operator dashboard, funnel and ad attribution",
+        "blurb": "See your whole funnel, your peak hours and exactly which ad drives which "
+                 "sale, with conversions pushed back so your ad algorithm learns who buys. "
+                 "Coach Stepan in plain words and it updates its own playbook, with your "
+                 "approval.",
     },
     {
-        "version": "1.0.0", "date": "15 May 2026", "tag": "Launch",
+        "version": "1.0.0", "date": "29 Jun 2026", "tag": "Launch",
         "title": "Stepan is live",
-        "blurb": "Your AI sales agent that greets, qualifies and closes leads in your DMs — "
-                 "24/7, in any language, grounded only in your own facts.",
+        "blurb": "Your AI sales agent that greets, qualifies and closes leads in your DMs, "
+                 "24/7 and in any language, across Instagram, WhatsApp and Messenger. Grounded "
+                 "only in your own facts, with a live demo you can try right on this page.",
     },
 ]
 

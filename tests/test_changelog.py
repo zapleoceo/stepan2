@@ -36,7 +36,17 @@ def test_changelog_page_renders_version_and_entries() -> None:
     html = changelog_html()
     assert f"Version {PROJECT_VERSION}" in html
     assert RELEASES[0]["title"] in html
-    assert "Seller Persona Library" in html            # the 'coming next' teaser
+    assert "Seller persona library" in html            # shipped feature, not just a teaser
+    assert "Two-way CRM sync" in html                  # the 'coming next' teaser
+
+
+def test_releases_read_as_features_not_bugfixes() -> None:
+    # The public changelog is a product story, not a fix log: every entry leads with a
+    # capability a buyer cares about, and none is worded as a raw bug fix.
+    titles = " ".join(r["title"].lower() for r in RELEASES)
+    assert "fix" not in titles and "bug" not in titles
+    assert any("persona" in r["title"].lower() for r in RELEASES)      # newest big feature
+    assert any("sees and hears" in r["title"].lower() for r in RELEASES)  # vision + voice
 
 
 def test_whats_new_route_is_public() -> None:
