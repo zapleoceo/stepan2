@@ -111,20 +111,33 @@ def _xma_emoji(ty: str, text: str) -> str:
     return _XMA_EMOJI.get(ty, "📎")
 
 
+def _versions_url(med: dict) -> tuple[str, str] | None:
+    vv = med.get("video_versions")
+    if vv:
+        return "video", vv[0].get("url")
+    cands = (med.get("image_versions2") or {}).get("candidates") or []
+    if cands:
+        return "image", cands[0].get("url")
+    return None
+
+
 def media_url(item: dict) -> tuple[str, str] | None:
     """(kind, url) of real in-DM media (photo/video/gif/voice). Shared posts/reels are
     NOT here (their preview comes from the XMA payload). None when there is no media."""
     ty = item.get("item_type")
     if ty in ("media", "raven_media"):
-        med = item.get(ty) or {}
-        if ty == "raven_media" and isinstance(med.get("media"), dict):
-            med = med["media"]
-        vv = med.get("video_versions")
-        if vv:
-            return "video", vv[0].get("url")
-        cands = (med.get("image_versions2") or {}).get("candidates") or []
-        if cands:
-            return "image", cands[0].get("url")
+        # A disappearing / view-once photo (item_type raven_media) carries its real media
+        # under item['visual_media']['media'], NOT item['raven_media'] — reading only the
+        # latter dropped every such photo as a bare '🖼 media' with no asset. Try every
+        # nesting the private API is known to use.
+        meds = [item.get(ty) or {}, (item.get("visual_media") or {}).get("media") or {}]
+        for base in list(meds):
+            if isinstance(base.get("media"), dict):
+                meds.append(base["media"])
+        for med in meds:
+            got = _versions_url(med)
+            if got and got[1]:
+                return got
     elif ty == "animated_media":
         imgs = (item.get("animated_media") or {}).get("images") or {}
         for k in ("fixed_height", "original", "fixed_width"):
