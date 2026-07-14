@@ -457,10 +457,11 @@ class ReplyService:
     async def decide(self, thread_id: int, workflow: str = "reply") -> Decision | None:
         """Run the model over the thread; None if the thread is foreign or has no dialog.
 
-        workflow tags the broker-log row and gates billing: 'sim' (sandbox testing) routes
-        exactly like a real reply but is logged distinctly and does NOT charge the branch's
-        daily LLM budget."""
-        bill = workflow != "sim"
+        workflow tags the broker-log row: 'sim' (sandbox testing) routes exactly like a
+        real reply and is logged distinctly. Sim runs BILL like everything else — they run
+        on the dedicated sandbox branch, so its own llm_spend ledger carries the cost and
+        the daily-budget gate stays meaningful (prepare() already enforces it for sims)."""
+        bill = True
         route_wf = "reply" if workflow == "sim" else workflow  # sim mirrors reply routing
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge,
                                 broker_budget_s=self._broker_budget_s)

@@ -148,18 +148,19 @@ JS едет инлайном во фрагменте (`_AD_FUNNEL_JS`), обра
 
 `lead_type` и `audience` живьём проставляются только как побочный эффект решения при ответе
 (`ReplyService._apply_decision`), поэтому у исторических лидов они NULL (→ «не ясно» / «Взрослые»
-в дереве). Миграция `031_lead_audience.sql` перенесла существующих `lead_type='student'` на
+в дереве). Миграция (ныне alembic-ревизия `e3f4a5b6c8d9`, поглотившая ручной
+`031_lead_audience.sql`) перенесла существующих `lead_type='student'` на
 `audience='student'` и сбросила их `lead_type` в `unclear` — температура восстановится на
 следующем ответе в диалоге.
 
-`scripts/reclassify_lead_types.py` — one-off бэкофилл по образцу `rederive_needs.py`: берёт
-ТОЛЬКО сообщения лида (`direction='in'`), гонит через брокер (`chat:smart`), пишет `lead.lead_type`.
-⚠️ **Скрипт написан под старую одно-осевую модель** (7 типов, включая `student` как `lead_type`) —
-прогон как есть вернёт `student` обратно в `lead_type` в обход оси `audience`. Перед бэкофиллом
-его надо привести к двум осям (6 типов + отдельный `audience`), синхронно с блоками LEAD TYPE /
-AUDIENCE в `prompt.py`. Идемпотентно и резюмируемо (каждый лид — своя транзакция), флаги
-`--branch/--limit/--dry`. Запуск в контейнере: `docker exec -e PYTHONPATH=/app stepan2-worker
-python -m scripts.reclassify_lead_types`.
+Бэкофилл — `scripts/reclassify_leads.py`: за ОДИН вызов брокера на лида переопределяет
+стадию воронки + `lead_type` + `audience` уже по двух-осевой модели (relabel-only: пишет
+`lead.stage` + аудит `stage_event`, `lead.lead_type`, `lead.audience` и ничего больше; не шлёт
+ответов и не делает hand-off; ready/handed_off/manager никогда не назначает). Идемпотентно и
+резюмируемо (каждый лид — своя транзакция), флаги `--branch/--limit/--dry`. Запуск в контейнере:
+`docker exec -e PYTHONPATH=/app stepan2-worker python -m scripts.reclassify_leads`.
+(Старый одно-осевой `reclassify_lead_types.py` удалён 2026-07-14 — он возвращал `student`
+в `lead_type` в обход оси `audience`; преемник выше делает то же и больше, корректно.)
 
 ## Миграция
 
