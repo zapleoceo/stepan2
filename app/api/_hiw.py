@@ -198,7 +198,7 @@ _BODY_EN = r"""
     <p class="lede">A platform where an AI sells over chat in Instagram and WhatsApp: it finds out what a person needs, picks the right course, handles objections and hands the hot lead over to a human manager. Every branch is an isolated tenant with its own knowledge base, bot and people.</p>
     <div class="stats">
       <div class="stat"><b>146</b><span>Python source files</span></div>
-      <div class="stat"><b>~1,034</b><span>automated tests in 97 files</span></div>
+      <div class="stat"><b>~1,070</b><span>automated tests in 98 files</span></div>
       <div class="stat"><b>11</b><span>scheduled background jobs</span></div>
       <div class="stat"><b>3</b><span>channels: Instagram · WhatsApp · Meta</span></div>
       <div class="stat"><b>0–5</b><span>build phases — all closed</span></div>
@@ -606,7 +606,7 @@ _BODY_EN = r"""
     <div class="body">
       <ul>
         <li>The write is atomic — one "insert or add" SQL statement with no races (<code>app/modules/budget/service.py</code>). The code records a real incident: an ambiguous column reference crashed the write on PostgreSQL and an already-paid reply was silently dropped (SQLite in tests swallowed it).</li>
-        <li>The limit check happens <b>before</b> the model call; the charge — after a successful reply. Simulations are not billed.</li>
+        <li>The limit check happens <b>before</b> the model call; the charge — after a successful reply. Sandbox simulations are billed too — they run on the dedicated sandbox branch and charge its own ledger, so nothing escapes the accounting.</li>
         <li>Every broker call is a row in the <code>broker_log</code> journal: scenario (reply/reminder/guard/translation/search), provider, model, tokens, price, latency, success. Kept 30 days, viewed in the admin with a histogram. A journal-write failure never breaks the client's reply.</li>
       </ul>
     </div>
@@ -633,7 +633,7 @@ _BODY_EN = r"""
   <details>
     <summary>Ads: which creative brings the clients</summary>
     <div class="body">
-      <p>The ad ID a client came from is extracted from the Instagram conversation. Which course an ad maps to is set by the operator in a mapping table (automation only suggests from history and never writes on its own — that is a self-reinforcing signal). A client from an ad gets the right course in the chat immediately, before the first question.</p>
+      <p>The ad ID a client came from is extracted from the Instagram conversation. Which course an ad maps to is set by the operator in a mapping table (automation only suggests from history and never writes on its own — that is a self-reinforcing signal). The chat of a client arriving from an ad is <b>tagged</b> with the advertised course — for attribution and as context for the bot. The conversation itself still opens with discovery: a deterministic first-turn rule forbids pitching the product, its price or schedule until the client's real need surfaces (added after a real incident where an ad click got the full pitch on turn one).</p>
       <details class="l3"><summary>All the way down: the reports</summary><div class="body">
         <p>The reports page: a funnel per ad (clicks lead to a filtered inbox; the "Open in FB" link goes to the public Ad Library — lead ads run under an agency account and are invisible in one's own Ads Manager); segments by temperature × audience with a success rate; a stage-flow diagram (a Sankey over the transition journal, rollbacks visible); the product source in a chat — ad/model/manager, and the model never overrides a manager's manual choice. Files: <code>app/modules/ads/mapping.py</code>, <code>app/api/_ui_panels.py</code>.</p>
       </div></details>
@@ -673,7 +673,7 @@ _BODY_EN = r"""
     <div class="body">
       <p>External systems (and Claude) can manage a client by phone number: find them, move them along the funnel, close the deal, mark "couldn't reach by phone" (then Stepan himself writes to the client: "we tried to call — let's continue here"). A separate <b>read-only</b> access exists for a reviewer: view and analyse chats with physically no way to change anything.</p>
       <details class="l3"><summary>All the way down</summary><div class="body">
-        <p>Three surfaces: a local process for Claude Desktop (<code>mcp_server/stepan_mcp.py</code>), the web connector <code>/connector/mcp</code>, the reader <code>/reader/mcp</code>. Tokens are stored as hashes only (shown once), scoped to one branch or all; the access rule is a single fail-closed function: no authorisation context means deny, not "access everything". A branch token never acts on another branch's client, even if the phone resolves cross-branch. There is a sandbox, <code>sim_say</code>: a turn through the real engine (search + guard) but with no Instagram and no budget charge — the 17-scenario regression suite runs on it (<code>docs/dialogue-qa-checklist.md</code>).</p>
+        <p>Three surfaces: a local process for Claude Desktop (<code>mcp_server/stepan_mcp.py</code>), the web connector <code>/connector/mcp</code>, the reader <code>/reader/mcp</code>. Tokens are stored as hashes only (shown once), scoped to one branch or all; the access rule is a single fail-closed function: no authorisation context means deny, not "access everything". A branch token never acts on another branch's client, even if the phone resolves cross-branch. There is a sandbox, <code>sim_say</code>: a turn through the real engine (search + guard) with no Instagram — billed to the sandbox branch's own ledger and logged like every other call — the 17-scenario regression suite runs on it (<code>docs/dialogue-qa-checklist.md</code>).</p>
       </div></details>
     </div>
   </details>
@@ -683,7 +683,7 @@ _BODY_EN = r"""
 <section class="card reveal" id="quality">
   <div class="kicker">13 · Quality and delivery</div>
   <h2>Tests, CI/CD and the road to production</h2>
-  <p class="gist">~1,034 automated tests in 97 files cover every subsystem: branch isolation, client merging, the worker, the guard, knowledge search, the budget, MCP. Plus a separate "live" dialogue regression suite — scenarios where the bot once broke and was fixed.</p>
+  <p class="gist">~1,070 automated tests in 98 files cover every subsystem: branch isolation, client merging, the worker, the guard, knowledge search, the budget, MCP. Plus a separate "live" dialogue regression suite — scenarios where the bot once broke and was fixed.</p>
   <details>
     <summary>How code reaches production</summary>
     <div class="body">
@@ -721,11 +721,9 @@ _BODY_EN = r"""
     <summary>Honest weak spots (better to name them yourself)</summary>
     <div class="body">
       <ul>
-        <li>Authentication is <b>optional</b> and off by default (a "ship dark" design); it is on in production, but a public deployment without it would leave the UI open. The raw admin is protected always, though.</li>
+        <li>Everything internal sits behind authentication: only the landing, the changelog and the privacy page are public, and every other request is checked by middleware on each hit. The honest caveat: enforcement hangs on a deploy-time flag (kept off only for the very first boot, before the Telegram login bot exists, with a loud warning in the logs) — a misconfigured deployment would run open. In production it is on; the raw admin is protected always, flag or no flag.</li>
         <li>A viewer sees the write buttons — the server returns 403, but the UI does not hide them (the security boundary is server-side; hiding is cosmetics, not done yet).</li>
         <li>pgvector is installed but unused: fingerprints are JSON, similarity is computed in Python (SQLite test compatibility; fine at current volumes, a growth point at scale).</li>
-        <li>The docs lag the code in places (the worker job table); one backfill script targets an outdated classification model — flagged in the docs.</li>
-        <li>Two "manual" SQL migration files live outside Alembic.</li>
         <li>The CRM integration is half plan: reading and event push are built (behind flags), stage write-back and Meta signals are designed, not implemented.</li>
       </ul>
     </div>
@@ -790,7 +788,7 @@ _BODY_UK = r"""
     <p class="lede">Платформа, де ШІ сам листується з клієнтами в Instagram і WhatsApp: з'ясовує, що людині потрібно, добирає курс, відповідає на заперечення й передає «гарячого» клієнта живому менеджеру. Кожна філія — ізольований «мешканець» зі своєю базою знань, ботом і людьми.</p>
     <div class="stats">
       <div class="stat"><b>146</b><span>файлів коду (Python)</span></div>
-      <div class="stat"><b>~1 034</b><span>автотести у 97 файлах</span></div>
+      <div class="stat"><b>~1 070</b><span>автотести у 98 файлах</span></div>
       <div class="stat"><b>11</b><span>фонових задач за розкладом</span></div>
       <div class="stat"><b>3</b><span>канали: Instagram · WhatsApp · Meta</span></div>
       <div class="stat"><b>0–5</b><span>фази розвитку — всі закриті</span></div>
@@ -1198,7 +1196,7 @@ _BODY_UK = r"""
     <div class="body">
       <ul>
         <li>Запис атомарний — одна SQL-команда «вставити або доповнити» без гонок (<code>app/modules/budget/service.py</code>). У коді зафіксований реальний інцидент: неоднозначне посилання на колонку валило запис у PostgreSQL, і вже оплачена відповідь тихо губилася (SQLite у тестах це ковтав).</li>
-        <li>Перевірка ліміту — <b>до</b> виклику нейромережі; списання — після успішної відповіді. Симуляції не тарифікуються.</li>
+        <li>Перевірка ліміту — <b>до</b> виклику нейромережі; списання — після успішної відповіді. Пісочничні симуляції теж тарифікуються — вони живуть в окремій тестовій філії і списуються з її власної «касової книги», тож повз облік не проходить нічого.</li>
         <li>Кожен виклик брокера — рядок у журналі <code>broker_log</code>: сценарій (відповідь/нагадування/страховка/переклад/пошук), провайдер, модель, токени, ціна, затримка, успіх. Зберігається 30 днів, переглядається в адмінці з гістограмою. Помилка запису журналу ніколи не валить відповідь клієнту.</li>
       </ul>
     </div>
@@ -1225,7 +1223,7 @@ _BODY_UK = r"""
   <details>
     <summary>Реклама: яке оголошення приводить клієнтів</summary>
     <div class="body">
-      <p>З Instagram-листування дістається ID рекламного оголошення, з якого прийшов клієнт. Якому курсу відповідає оголошення — задає оператор у табличці відповідностей (автоматика лише підказує з історії, але ніколи не записує сама — це самопідсилювальний сигнал). Клієнт із реклами одразу отримує потрібний курс у чаті, ще до першого запитання.</p>
+      <p>З Instagram-листування дістається ID рекламного оголошення, з якого прийшов клієнт. Якому курсу відповідає оголошення — задає оператор у табличці відповідностей (автоматика лише підказує з історії, але ніколи не записує сама — це самопідсилювальний сигнал). Чат клієнта з реклами отримує <b>мітку</b> рекламованого курсу — для атрибуції та як контекст для бота. Сама ж розмова все одно починається з виявлення потреби: детерміноване правило першого ходу забороняє презентувати продукт, ціну чи розклад, доки не з'явиться справжня потреба клієнта (додано після реального інциденту, коли клік по рекламі отримав повний піч на першому ході).</p>
       <details class="l3"><summary>До дна: звіти</summary><div class="body">
         <p>Сторінка звітів: воронка по кожному оголошенню (кліки ведуть у відфільтрований інбокс; посилання «Відкрити у FB» веде в публічну Бібліотеку реклами — лід-оголошення крутяться під агентським кабінетом і у своєму Ads Manager не видні); сегменти за температурою × аудиторією з відсотком успіху; діаграма потоку по стадіях (санкей за журналом переходів, видно відкати назад); джерело продукту в чаті — реклама/модель/менеджер, і модель ніколи не перебиває ручний вибір менеджера. Файли: <code>app/modules/ads/mapping.py</code>, <code>app/api/_ui_panels.py</code>.</p>
       </div></details>
@@ -1265,7 +1263,7 @@ _BODY_UK = r"""
     <div class="body">
       <p>Зовнішні системи (і Claude) можуть керувати клієнтом за номером телефону: знайти, пересунути по стадії, закрити угоду, позначити «не додзвонилися» (тоді Степан сам напише клієнту «намагалися додзвонитися — давайте тут»). Окремий <b>лише читальний</b> доступ — для рев'юера: дивитися й аналізувати чати, фізично без можливості щось змінити.</p>
       <details class="l3"><summary>До дна</summary><div class="body">
-        <p>Три поверхні: локальний процес для Claude Desktop (<code>mcp_server/stepan_mcp.py</code>), веб-конектор <code>/connector/mcp</code>, читалка <code>/reader/mcp</code>. Токени зберігаються лише хешами (показуються один раз), бувають на одну філію або на всі; правило доступу — єдина функція, fail-closed: немає контексту авторизації — відмова, а не «доступ до всього». Токен філії не діє на чужого клієнта, навіть якщо телефон знайшовся в іншій філії. Є пісочниця <code>sim_say</code>: репліка через справжній рушій (пошук + страховка), але без Instagram і без списання бюджету — на ній ганяється регресійний набір із 17 сценаріїв (<code>docs/dialogue-qa-checklist.md</code>).</p>
+        <p>Три поверхні: локальний процес для Claude Desktop (<code>mcp_server/stepan_mcp.py</code>), веб-конектор <code>/connector/mcp</code>, читалка <code>/reader/mcp</code>. Токени зберігаються лише хешами (показуються один раз), бувають на одну філію або на всі; правило доступу — єдина функція, fail-closed: немає контексту авторизації — відмова, а не «доступ до всього». Токен філії не діє на чужого клієнта, навіть якщо телефон знайшовся в іншій філії. Є пісочниця <code>sim_say</code>: репліка через справжній рушій (пошук + страховка), без Instagram — тарифікується на власну «касову книгу» тестової філії і логується як будь-який інший виклик; на ній ганяється регресійний набір із 17 сценаріїв (<code>docs/dialogue-qa-checklist.md</code>).</p>
       </div></details>
     </div>
   </details>
@@ -1275,7 +1273,7 @@ _BODY_UK = r"""
 <section class="card reveal" id="quality">
   <div class="kicker">13 · Якість і доставлення</div>
   <h2>Тести, CI/CD і шлях у прод</h2>
-  <p class="gist">~1 034 автотести у 97 файлах покривають усі підсистеми: ізоляцію філій, склеювання клієнтів, воркер, страховку, пошук по знаннях, бюджет, MCP. Плюс окремий «живий» регресійний набір діалогів — сценарії, на яких бот колись ламався і був полагоджений.</p>
+  <p class="gist">~1 070 автотестів у 98 файлах покривають усі підсистеми: ізоляцію філій, склеювання клієнтів, воркер, страховку, пошук по знаннях, бюджет, MCP. Плюс окремий «живий» регресійний набір діалогів — сценарії, на яких бот колись ламався і був полагоджений.</p>
   <details>
     <summary>Як код потрапляє в прод</summary>
     <div class="body">
@@ -1313,11 +1311,9 @@ _BODY_UK = r"""
     <summary>Чесні слабкі місця (краще назвати самим)</summary>
     <div class="body">
       <ul>
-        <li>Автентифікація — <b>опційна</b> і за замовчуванням вимкнена (дизайн «викотити темним»); у проді ввімкнена, але публічний деплой без неї залишив би інтерфейс відкритим. Сира адмінка при цьому захищена завжди.</li>
+        <li>Уся внутрішня частина — за автентифікацією: публічні лише лендинг, сторінка новин і політика приватності, а кожен інший запит перевіряється middleware при кожному зверненні. Чесне застереження: примус тримається на деплой-прапорці (його вимикають лише для найпершого запуску, поки не налаштований Telegram-бот входу, — з гучним попередженням у логах) — неправильно сконфігурований деплой працював би відкритим. У проді прапорець увімкнений; сира адмінка захищена завжди, незалежно від прапорця.</li>
         <li>Спостерігач бачить кнопки запису — сервер поверне 403, але інтерфейс їх не ховає (межа безпеки серверна, приховування — косметика, поки не зроблено).</li>
         <li>pgvector встановлений, але не використовується: відбитки — JSON, близькість рахується в Python (сумісність із тестами на SQLite; на поточних обсягах ок, на більших — точка зростання).</li>
-        <li>Документація місцями відстає від коду (таблиця задач воркера); один скрипт бекфілу написаний під застарілу модель класифікації — позначено в доках.</li>
-        <li>Два «ручні» SQL-файли міграцій живуть поза Alembic.</li>
         <li>CRM-інтеграція наполовину план: читання і push подій готові (вимкнені прапорцями), запис стадій і сигнали в Meta — спроєктовані, не реалізовані.</li>
       </ul>
     </div>
