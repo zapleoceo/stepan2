@@ -10,6 +10,23 @@ from __future__ import annotations
 
 import html as _h
 
+from app.config import settings
+
+
+def _whatsnew_seo() -> str:
+    base = (settings().public_url or "https://stepan2.zapleo.com").rstrip("/")
+    return (
+        f'<link rel="canonical" href="{base}/whats-new">'
+        '<meta name="robots" content="index,follow,max-image-preview:large">'
+        '<meta property="og:type" content="website">'
+        '<meta property="og:site_name" content="Stepan">'
+        '<meta property="og:title" content="What\'s New — Stepan">'
+        f'<meta property="og:url" content="{base}/whats-new">'
+        f'<meta property="og:image" content="{base}/og.svg">'
+        '<meta name="twitter:card" content="summary_large_image">'
+    )
+
+
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
 PROJECT_VERSION = "1.4.0"
 
@@ -127,6 +144,7 @@ def changelog_html() -> str:
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>What\'s New — Stepan</title>'
         '<meta name="description" content="The latest improvements to Stepan, the AI sales agent that closes in your DMs.">'
+        + _whatsnew_seo() +
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
         '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">'

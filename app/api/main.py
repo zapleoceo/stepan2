@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.types import ASGIApp
@@ -139,6 +139,22 @@ def create_app() -> FastAPI:
         # Public, customer-facing changelog + project version (see app/api/_changelog.py).
         from app.api._changelog import changelog_html  # noqa: PLC0415
         return HTMLResponse(changelog_html())
+
+    @app.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)
+    async def robots() -> PlainTextResponse:
+        from app.api._seo import robots_txt  # noqa: PLC0415
+        return PlainTextResponse(robots_txt(), media_type="text/plain")
+
+    @app.get("/sitemap.xml", include_in_schema=False)
+    async def sitemap() -> Response:
+        from app.api._seo import sitemap_xml  # noqa: PLC0415
+        return Response(sitemap_xml(), media_type="application/xml")
+
+    @app.get("/og.svg", include_in_schema=False)
+    async def og_image() -> Response:
+        from app.api._seo import og_svg  # noqa: PLC0415
+        return Response(og_svg(), media_type="image/svg+xml",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/admin", include_in_schema=False)
     async def admin_root() -> RedirectResponse:
