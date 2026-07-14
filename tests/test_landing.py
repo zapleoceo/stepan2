@@ -50,3 +50,20 @@ def test_root_route_serves_landing() -> None:
     resp = client.get("/")
     assert resp.status_code == 200
     assert 'id="herofx"' in resp.text
+
+
+def test_landing_has_seo_and_structured_data() -> None:
+    html = landing_html()
+    assert 'rel="canonical"' in html
+    assert 'name="robots"' in html and "index,follow" in html
+    assert 'property="og:title"' in html and 'name="twitter:card"' in html
+    assert 'application/ld+json' in html and '"SoftwareApplication"' in html
+
+
+def test_seo_endpoints_render() -> None:
+    from app.api._seo import og_svg, robots_txt, sitemap_xml
+    r = robots_txt()
+    assert "Sitemap:" in r and "Disallow: /ui/" in r and "GPTBot" in r and "ClaudeBot" in r
+    sm = sitemap_xml()
+    assert "/whats-new" in sm and "<urlset" in sm
+    assert og_svg().startswith("<svg") and "Stepan" in og_svg()

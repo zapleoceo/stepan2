@@ -256,6 +256,15 @@ def test_gate_enabled_healthz_public(monkeypatch) -> None:
     assert TestClient(app, raise_server_exceptions=False).get("/healthz").status_code == 200
 
 
+def test_gate_enabled_marketing_pages_public(monkeypatch) -> None:
+    # /whats-new was redirecting to /login with auth on — it's a public marketing page and
+    # must render for anonymous visitors and crawlers, like / and /privacy.
+    _enable(monkeypatch)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    for path in ("/", "/whats-new", "/privacy", "/robots.txt", "/sitemap.xml", "/og.svg"):
+        assert client.get(path).status_code == 200, path
+
+
 # ─── login page ───────────────────────────────────────────────────────────────
 
 def test_login_html_with_bot_has_widget() -> None:

@@ -7,6 +7,51 @@ No mention of any specific client."""
 from __future__ import annotations
 
 from app.api._landing_analytics import analytics_section
+from app.config import settings
+
+_SITE_NAME = "Stepan"
+_TAGLINE = "Stepan — the AI sales agent that closes in your DMs"
+_DESC = ("Stepan is an AI sales agent that qualifies and sells to your leads in "
+         "Instagram & WhatsApp DMs — like your best rep, 24/7. Consultative selling, "
+         "multilingual replies, smart follow-ups and human handoff.")
+
+
+def _base_url() -> str:
+    return (settings().public_url or "https://stepan2.zapleo.com").rstrip("/")
+
+
+def _seo_head() -> str:
+    """Search- and AI-crawler metadata: canonical, robots, Open Graph, Twitter card and
+    schema.org JSON-LD so Google, Bing and LLM crawlers (GPTBot, ClaudeBot, PerplexityBot)
+    can index and cite the page correctly."""
+    base = _base_url()
+    ld = (
+        '{"@context":"https://schema.org","@graph":['
+        '{"@type":"Organization","@id":"' + base + '/#org","name":"Stepan",'
+        '"url":"' + base + '/","description":"' + _DESC + '"},'
+        '{"@type":"SoftwareApplication","name":"Stepan",'
+        '"applicationCategory":"BusinessApplication","operatingSystem":"Web",'
+        '"url":"' + base + '/","description":"' + _DESC + '",'
+        '"offers":{"@type":"Offer","price":"0","priceCurrency":"USD",'
+        '"description":"Talk to a live demo in your DMs"},'
+        '"publisher":{"@id":"' + base + '/#org"}}]}'
+    )
+    return (
+        f'<link rel="canonical" href="{base}/">'
+        '<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">'
+        '<meta name="theme-color" content="#0b0d12">'
+        '<meta property="og:type" content="website">'
+        f'<meta property="og:site_name" content="{_SITE_NAME}">'
+        f'<meta property="og:title" content="{_TAGLINE}">'
+        f'<meta property="og:description" content="{_DESC}">'
+        f'<meta property="og:url" content="{base}/">'
+        f'<meta property="og:image" content="{base}/og.svg">'
+        '<meta name="twitter:card" content="summary_large_image">'
+        f'<meta name="twitter:title" content="{_TAGLINE}">'
+        f'<meta name="twitter:description" content="{_DESC}">'
+        f'<meta name="twitter:image" content="{base}/og.svg">'
+        f'<script type="application/ld+json">{ld}</script>'
+    )
 
 # Secondary contact links in the footer (the main demo is the in-page chat widget).
 _DEMO_IG = "https://ig.me/m/zapleo_ceo"
@@ -703,9 +748,9 @@ def landing_html() -> str:
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Stepan — the AI sales agent that closes in your DMs</title>"
-        "<meta name=\"description\" content=\"Stepan is an AI sales agent that qualifies and "
-        "sells to your leads in Instagram &amp; WhatsApp DMs — like your best rep, 24/7.\">"
+        f"<title>{_TAGLINE}</title>"
+        f"<meta name=\"description\" content=\"{_DESC}\">"
+        + _seo_head() +
         "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">"
         "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>"
         "<link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&"
