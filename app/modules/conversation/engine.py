@@ -174,6 +174,6 @@ class DecisionEngine:
             workflow=workflow, thread_id=thread_id, branch_id=self.branch_id,
             read_timeout_s=self._broker_budget_s,
         )
-        if bill:  # sandbox sim runs don't charge the branch's daily LLM budget
+        if bill:  # every workflow (sim included) charges its branch's daily LLM ledger
             await ctx.budget.record(float(meta.get("cost_usd") or 0.0))
         return raw, meta

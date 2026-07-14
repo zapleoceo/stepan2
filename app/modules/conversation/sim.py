@@ -79,7 +79,7 @@ class SimService:
         kb = await effective_kb_branch(self.session, branch_id)
         reply = ReplyService(self.session, branch_id, self.llm,
                              KnowledgeService(self.session, kb, self.llm), cfg)
-        decision = await reply.decide(th.id, workflow="sim")  # tagged in log, not billed
+        decision = await reply.decide(th.id, workflow="sim")  # sim-tagged log, billed
         if decision is None:
             return {"ok": False, "detail": "no decision (over budget / empty / voice-hold)"}
 
