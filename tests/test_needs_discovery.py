@@ -11,6 +11,7 @@ from sqlmodel import select
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message, StageEvent
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
+from app.modules.conversation.reply import _DISCOVERY_TURN_CAP
 from app.modules.conversation.decision import Decision, parse_decision
 from app.modules.conversation.needs import (
     NeedsProfile,
@@ -129,8 +130,28 @@ async def test_gate_stops_forcing_discovery_after_turn_cap(db_session) -> None:
     svc = _svc(db_session, b.id)
     bare = Decision(reply="here's the fit...", stage=Stage.PRESENTING, product_slug="vibe",
                     ready=False, needs_manager=False)
-    assert svc._stage_for(bare, lead, inbound_count=1) == Stage.QUALIFYING   # early → keep digging
-    assert svc._stage_for(bare, lead, inbound_count=2) == Stage.PRESENTING   # past cap → present
+    assert svc._stage_for(bare, lead, inbound_count=_DISCOVERY_TURN_CAP - 1) == Stage.QUALIFYING
+    assert svc._stage_for(bare, lead, inbound_count=_DISCOVERY_TURN_CAP) == Stage.PRESENTING
+
+
+async def test_gate_blocks_premature_discovery_complete_without_pain(db_session) -> None:
+    """The model sets discovery_complete=true with pains=[] (thread 1081), which used to skip
+    warm-up. A pain-less 'complete' must NOT satisfy the gate — keep discovering."""
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    db_session.add(lead)
+    await db_session.flush()
+    svc = _svc(db_session, b.id)
+    flag_no_pain = Decision(reply="here's the program...", stage=Stage.PRESENTING,
+                            product_slug="vibe", ready=False, needs_manager=False,
+                            gains=["build an app"], discovery_complete=True)  # pains=[]
+    assert svc._stage_for(flag_no_pain, lead) == Stage.QUALIFYING  # no pain → keep warming up
+    flag_with_pain = Decision(reply="...", stage=Stage.PRESENTING, product_slug="vibe",
+                              ready=False, needs_manager=False, pains=["takut gagal"],
+                              discovery_complete=True)
+    assert svc._stage_for(flag_with_pain, lead) == Stage.PRESENTING  # pain-backed → allowed
 
 
 async def test_gate_allows_presenting_when_lead_already_has_needs(db_session) -> None:

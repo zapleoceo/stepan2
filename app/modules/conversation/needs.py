@@ -26,6 +26,13 @@ class NeedsProfile:
         right after the lead stated a goal, skipping SPIN's implication/need-payoff beats."""
         return bool(self.pains and self.gains)
 
+    def captured(self) -> bool:
+        """Discovery has actually collected the emotional layer — the gate to stop warming up
+        and present. The model sets discovery_complete=true PREMATURELY (thread 1081: the flag
+        true with pains=[]), which skips warm-up and leaves needs uncollected, so the flag only
+        counts when a PAIN is on the table. A pain-less 'complete' is not complete."""
+        return self.has_needs() or (self.discovery_complete and bool(self.pains))
+
     def to_json(self) -> str:
         return json.dumps({
             "jobs": self.jobs, "pains": self.pains, "gains": self.gains,

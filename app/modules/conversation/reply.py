@@ -55,9 +55,12 @@ _READY_HANDOFF_CLOSING = (
     "Siap Kak! Pendaftaran Kakak aku teruskan ke tim ya - nanti dihubungi via telepon atau "
     "WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) untuk langkah pembayaran & jadwal 🙏"
 )
-# After this many lead turns the discovery gate stops forcing more questions — a lead who
-# hasn't yielded a real need by now won't from a third question; present on what we have.
-_DISCOVERY_TURN_CAP = 2
+# After this many lead turns the discovery gate stops forcing more questions and presents on
+# what we have — the escape hatch for a lead who won't voice a pain. Was 2 (too aggressive:
+# the ad-opener burns turn 1, so the bot could present after a single real message, skipping
+# warm-up and collecting no pain — thread 1081); 4 gives discovery real room. The bot still
+# stops the moment a pain surfaces (NeedsProfile.captured()), so this is only the ceiling.
+_DISCOVERY_TURN_CAP = 4
 # A static KB rule alone wasn't reliable (live testing kept seeing a 3rd-4th discovery
 # question) — this is injected into the prompt AT THE EXACT TURN the cap is exceeded, the
 # same mechanism the reply-guard uses for its correction nudge, so it lands as an immediate
@@ -499,7 +502,7 @@ class ReplyService:
             # Only the ad's prefilled opener so far — force warm-up + discovery, not a pitch.
             extra_user_msg = _AD_OPENER_NUDGE
         else:
-            needs_captured = ctx.stored_needs.discovery_complete or ctx.stored_needs.has_needs()
+            needs_captured = ctx.stored_needs.captured()
             if not needs_captured and inbound_count > _DISCOVERY_TURN_CAP:
                 extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
         raw, meta = await engine.complete(
@@ -884,10 +887,11 @@ class ReplyService:
 
     @staticmethod
     def _needs_captured(decision: Decision, lead: Lead) -> bool:
-        if decision.discovery_complete or decision.has_needs():
-            return True
-        stored = parse_needs(lead.needs)
-        return stored.discovery_complete or stored.has_needs()
+        # discovery_complete only counts when backed by a captured PAIN — the model sets the
+        # flag prematurely with pains=[] (thread 1081), which skips warm-up and leaves needs
+        # uncollected. Require the pain here so the bot keeps discovering until it has one.
+        this_turn = decision.has_needs() or (decision.discovery_complete and bool(decision.pains))
+        return this_turn or parse_needs(lead.needs).captured()
 
     async def _handoff(self, lead: Lead, thread, subtype: str | None) -> None:
         """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event.
