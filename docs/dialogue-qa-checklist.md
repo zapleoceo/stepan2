@@ -54,6 +54,7 @@ occurred_at` и прогони список через `sim.say(8, ...)`.
 | 14 | Любая цена/факт/история/зарплата | Только из карточки/market_facts, как range+контекст | Выдуманная цифра / обещание дохода | market_facts |
 | 15 | Размытая цель без продукта («coding для маркетинга») | Предложить реальные продукты с ценами из карточек | Выдуманный «пакет mulai dari Rp X juta/bulan» (нет в карточках) | 899 |
 | 16 | Приглашение на Open House | campus tour + Q&A с командой; демо AI-проектов Директора только если спросят (Vibe) | «kenalan mentor», «coba/rasakan suasana kelas», «contoh karya peserta/alumni» | 2879 |
+| 17 | Цель названа, но боль ещё нет | Держать прогрев — спрашивать боль/препятствие; НЕ презентовать | Питч/цена после одной реплики; `discovery_complete=true` при пустых pains пускает в презентацию | 1081 |
 
 **Prohibition-слой (guard):** глобальные баны живут в `policy_prohibitions` (always-injected);
 `guard_verify` enforce-ит любую строку KB с `NEVER / does NOT / jangan / BUKAN`, даже если
