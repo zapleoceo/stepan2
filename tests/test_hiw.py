@@ -1,4 +1,4 @@
-"""/hiw — the internal "how it works" page: renders fully and stays behind auth."""
+"""/hiw — the internal "how it works" page: bilingual (en/uk), full render, behind auth."""
 from __future__ import annotations
 
 import os
@@ -29,16 +29,38 @@ def _enable(monkeypatch, **kw) -> None:
     monkeypatch.setattr("app.api._auth.settings", lambda: _StubSettings(**kw))
 
 
-def test_hiw_renders_key_sections() -> None:
-    html = hiw_html()
+def test_hiw_english_renders_key_sections() -> None:
+    html = hiw_html("en")
     # top-down structure: hero, the message-journey pipeline, review crib, glossary
-    assert "Как устроен Степан" in html
-    assert "Путь одного сообщения" in html
-    assert "Шпаргалка" in html
-    assert "Словарик" in html
+    assert "How Stepan works" in html
+    assert "The journey of one message" in html
+    assert "Crib sheet" in html
+    assert "Glossary" in html
     # drill-down bottom level cites real code paths so claims stay verifiable
     assert "app/modules/conversation/reply.py" in html
     assert "app/worker/main.py" in html
+
+
+def test_hiw_ukrainian_renders_key_sections() -> None:
+    html = hiw_html("uk")
+    assert 'lang="uk"' in html
+    assert "Як влаштований Степан" in html
+    assert "Шлях одного повідомлення" in html
+    assert "Шпаргалка" in html
+    assert "app/modules/conversation/reply.py" in html
+
+
+def test_hiw_language_switcher_marks_active() -> None:
+    en = hiw_html("en")
+    uk = hiw_html("uk")
+    assert '/hiw?lang=uk' in en and '/hiw?lang=en' in en
+    # the active language link carries the "on" class
+    assert '<a href="/hiw?lang=en" class="on">EN</a>' in en
+    assert '<a href="/hiw?lang=uk" class="on">УКР</a>' in uk
+
+
+def test_hiw_unknown_lang_falls_back_to_english() -> None:
+    assert "How Stepan works" in hiw_html("de")
 
 
 def test_hiw_is_self_contained_full_page() -> None:
@@ -46,6 +68,8 @@ def test_hiw_is_self_contained_full_page() -> None:
     assert html.lstrip().lower().startswith("<!doctype html>")
     # internal page: keep it out of search engines even if ever exposed
     assert 'name="robots" content="noindex' in html
+    # no leftover template placeholders
+    assert "__LANGSW__" not in html
 
 
 def test_hiw_requires_session_when_auth_enabled(monkeypatch) -> None:
@@ -56,10 +80,13 @@ def test_hiw_requires_session_when_auth_enabled(monkeypatch) -> None:
     assert resp.headers["location"] == "/login"
 
 
-def test_hiw_with_valid_session_renders(monkeypatch) -> None:
+def test_hiw_with_valid_session_renders_both_languages(monkeypatch) -> None:
     _enable(monkeypatch)
     token = mint_session(telegram_id=1, user_id=1, name="x", is_super=True, branch_ids=[])
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.get("/hiw", cookies={SESSION_COOKIE: token})
     assert resp.status_code == 200
-    assert "Как устроен Степан" in resp.text
+    assert "How Stepan works" in resp.text
+    resp_uk = client.get("/hiw?lang=uk", cookies={SESSION_COOKIE: token})
+    assert resp_uk.status_code == 200
+    assert "Як влаштований Степан" in resp_uk.text

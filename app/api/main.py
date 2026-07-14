@@ -141,11 +141,12 @@ def create_app() -> FastAPI:
         return HTMLResponse(changelog_html())
 
     @app.get("/hiw", include_in_schema=False, response_class=HTMLResponse)
-    async def how_it_works() -> HTMLResponse:
-        # Internal "how it works" map for the team. NOT in the public allowlist
-        # (app/api/_auth.py) → requires a session when auth is enabled.
+    async def how_it_works(lang: str = "en") -> HTMLResponse:
+        # Internal "how it works" map for the team, in English (default) or
+        # Ukrainian (?lang=uk). NOT in the public allowlist (app/api/_auth.py)
+        # → requires a session when auth is enabled.
         from app.api._hiw import hiw_html  # noqa: PLC0415
-        return HTMLResponse(hiw_html())
+        return HTMLResponse(hiw_html(lang))
 
     @app.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)
     async def robots() -> PlainTextResponse:
