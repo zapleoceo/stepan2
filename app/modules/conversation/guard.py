@@ -292,6 +292,16 @@ _VERIFY_SYSTEM = (
     "bot may use, then the DRAFT. List every CONCRETE factual claim in the draft that is "
     "NOT supported by the knowledge base: invented links, free/discount/trial offers, lab "
     "or resource access, prices, dates, certifications, guarantees, statistics. "
+    "PROHIBITIONS: the knowledge base contains explicit bans — lines with NEVER / 'does NOT "
+    "happen' / 'do NOT invent/promise' / 'jangan' / 'BUKAN'. Flag any draft claim that "
+    "promises or asserts something a ban forbids, EVEN IF related words appear elsewhere in "
+    "the KB. Examples of bans to enforce: Open House offers no mentor session, no live class / "
+    "class demo, no student/alumni project or campaign showcase; a Skill Booster gives an "
+    "E-certificate, not BNSP; never promise an income or a guaranteed salary; never state a "
+    "discount that isn't written in the KB. So 'kenalan mentor di Open House', 'lihat contoh "
+    "karya peserta', 'coba suasana kelas', 'dapat sertifikat BNSP' on a booster, or 'pasti "
+    "dapat gaji X' are all violations to flag even though 'mentor', 'peserta', 'BNSP', 'gaji' "
+    "appear in the KB. "
     "ALUMNI/SUCCESS-STORY CLAIMS: a specific-sounding story ('salah satu alumni kami yang...', "
     "a named or implied individual with a concrete outcome) is a fabrication UNLESS that exact "
     "case (name, outcome, or link) appears in the knowledge base's Success Cases / Stories "
@@ -341,43 +351,75 @@ def ungrounded_urls(reply: str, context: str) -> list[str]:
     return [u for u in _URL_RE.findall(reply or "") if not _grounded_url(u, context)]
 
 
+# Promise-shaped claims about things the cards forbid at Open House — meet a mentor, sit in
+# on a class, see alumni/student project work — carry no price/URL/gratis word, so is_risky
+# missed them and the KB's NEVER lines never got enforced (thread 2879: "kenalan mentor",
+# "contoh aplikasi yang dibuat peserta kami"). Trigger a verify so the prohibition is checked.
+_PROHIBITION_TOPIC_RE = re.compile(
+    r"\b(kenalan|ketemu|bertemu|sesi|ngobrol\s+(?:sama|dengan))\s+mentor"
+    r"|\b(suasana|coba|cobain|ikut|masuk|demo|rasakan|rasain)\s+kelas"
+    r"|\b(contoh|karya|hasil|project|proyek|portofolio|portfolio)\b[^.?!]{0,30}"
+    r"\b(peserta|alumni|siswa|murid|lulusan)\b",
+    re.IGNORECASE)
+
+
 def is_risky(reply: str) -> bool:
     """Cheap gate: does the reply look like it might hand out an offer/resource/link,
-    state a concrete price (chat-452 shape), or tell a specific alumni/success story
-    (chat-1827 shape) that needs checking against the curated Success Cases content?"""
+    state a concrete price (chat-452 shape), tell a specific alumni/success story
+    (chat-1827 shape), or promise an Open-House experience the cards forbid (chat-2879)?"""
     text = reply or ""
     return bool(
         _URL_RE.search(text) or _RISKY_RE.search(text) or _PRICE_RE.search(text)
-        or _STORY_RE.search(text))
+        or _STORY_RE.search(text) or _PROHIBITION_TOPIC_RE.search(text))
 
 
 # Price-vocabulary risky words — when these are the ONLY risky trigger and every quoted
 # figure is verbatim in the KB context, the draft merely repeats a grounded fact.
 _PRICE_WORDS = frozenset({"harga", "biaya", "tarif", "cicilan", "angsuran"})
-_PRICE_SUFFIX = {"ribu": 1_000, "rb": 1_000, "juta": 1_000_000}
-
+_MAGNITUDE = {"juta": 1_000_000, "jt": 1_000_000, "ribu": 1_000, "rb": 1_000, "k": 1_000}
 
 _BARE_NUMBER_RE = re.compile(r"\d[\d.,]{3,}")
+# A money figure with an OPTIONAL magnitude word — crucially captures that word even behind
+# an "Rp" prefix ("Rp2,5 juta"), which the old regex dropped (→ 25 instead of 2_500_000).
+_MONEY_RE = re.compile(
+    r"(rp\.?\s*)?(\d[\d.,]*)\s*(juta|jt|ribu|rb|k)?\b", re.IGNORECASE)
+
+
+def _parse_money(num: str, mag: str) -> int | None:
+    """A magnitude word makes the number a DECIMAL count of that unit — '2,5 juta' → 2.5 →
+    2_500_000, '1,67 juta' → 1_670_000, '500 ribu' → 500_000 (Indonesian ',' = decimal).
+    With NO magnitude word, separators are thousands groupers — '1.882.955' → 1_882_955."""
+    digits_only = re.sub(r"[^\d]", "", num)
+    if not digits_only:
+        return None
+    if not mag:
+        return int(digits_only)
+    s = num.replace(",", ".")
+    parts = s.split(".")
+    if len(parts) > 1:
+        s = "".join(parts[:-1]) + "." + parts[-1]
+    try:
+        return int(round(float(s) * _MAGNITUDE[mag]))
+    except ValueError:
+        return int(digits_only) * _MAGNITUDE[mag]
 
 
 def _canonical_prices(text: str, *, liberal: bool = False) -> set[int]:
     """Every money figure in `text` as a canonical integer — 'Rp 1.882.955' → 1882955,
-    '500rb' / '500 ribu' → 500000 — so a reply figure can be matched against the KB
-    regardless of formatting. liberal=True (the KB side) also takes bare digit runs
-    ('500,000 IDR' has neither an Rp prefix nor an rb suffix): extra KB numbers only make
-    the subset check stricter-side-safe, while the REPLY side stays strict money shapes."""
+    'Rp2,5 juta' → 2500000, '500rb' / '500 ribu' → 500000 — so a reply figure can be matched
+    against the KB regardless of formatting. Strict side: only figures carrying an 'Rp' prefix
+    OR a magnitude word count (a bare '16' isn't a price). liberal=True (the KB side) also
+    takes bare digit runs ('500,000 IDR'): extra KB numbers only make the subset check
+    stricter-side-safe, while the REPLY side stays strict money shapes."""
     out: set[int] = set()
-    for m in _PRICE_RE.finditer(text or ""):
-        raw = m.group(0).lower()
-        digits = re.sub(r"[^\d]", "", raw)
-        if not digits:
-            continue
-        n = int(digits)
-        for suffix, mult in _PRICE_SUFFIX.items():
-            if suffix in raw:
-                n *= mult
-                break
-        out.add(n)
+    for m in _MONEY_RE.finditer(text or ""):
+        has_rp = bool(m.group(1))
+        mag = (m.group(3) or "").lower()
+        if not has_rp and not mag:
+            continue  # bare number, no Rp and no magnitude word — not a price on the strict side
+        val = _parse_money(m.group(2), mag)
+        if val is not None:
+            out.add(val)
     if liberal:
         for m in _BARE_NUMBER_RE.finditer(text or ""):
             digits = re.sub(r"[^\d]", "", m.group(0))
@@ -393,7 +435,7 @@ def price_claims_grounded(reply: str, context: str) -> bool:
     can do here (verify fired on 600+ replies/day, mostly exactly this case). Any other
     risky trigger (free/promo/access/story/URL) still goes to the full verify."""
     text = reply or ""
-    if _STORY_RE.search(text) or _URL_RE.search(text):
+    if _STORY_RE.search(text) or _URL_RE.search(text) or _PROHIBITION_TOPIC_RE.search(text):
         return False
     for m in _RISKY_RE.finditer(text):
         if m.group(0).lower() not in _PRICE_WORDS:
