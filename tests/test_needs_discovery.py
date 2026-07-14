@@ -11,7 +11,6 @@ from sqlmodel import select
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message, StageEvent
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
-from app.modules.conversation.reply import _DISCOVERY_TURN_CAP
 from app.modules.conversation.decision import Decision, parse_decision
 from app.modules.conversation.needs import (
     NeedsProfile,
@@ -19,6 +18,7 @@ from app.modules.conversation.needs import (
     needs_summary,
     parse_needs,
 )
+from app.modules.conversation.reply import _DISCOVERY_TURN_CAP
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import _parse
 
