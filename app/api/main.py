@@ -140,6 +140,13 @@ def create_app() -> FastAPI:
         from app.api._changelog import changelog_html  # noqa: PLC0415
         return HTMLResponse(changelog_html())
 
+    @app.get("/hiw", include_in_schema=False, response_class=HTMLResponse)
+    async def how_it_works() -> HTMLResponse:
+        # Internal "how it works" map for the team. NOT in the public allowlist
+        # (app/api/_auth.py) → requires a session when auth is enabled.
+        from app.api._hiw import hiw_html  # noqa: PLC0415
+        return HTMLResponse(hiw_html())
+
     @app.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)
     async def robots() -> PlainTextResponse:
         from app.api._seo import robots_txt  # noqa: PLC0415
