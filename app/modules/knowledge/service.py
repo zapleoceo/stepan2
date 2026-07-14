@@ -24,7 +24,10 @@ PERSONA_SLUG = "persona"
 # Persona identity is injected directly, persona_core first when present.
 _PERSONA_ORDER = ("persona_core", "persona")
 # Docs injected on EVERY turn (not left to RAG) — central, small, close-critical.
-_ALWAYS_DOC_SLUGS = ("payment_policy",)
+# policy_prohibitions carries the cross-product NEVER-list the reply-guard enforces: the
+# Open-House bans (mentor/class-demo/alumni-work) apply even when the OH card wasn't the
+# focus/retrieved product, so the verifier only sees them if they're always present (2879).
+_ALWAYS_DOC_SLUGS = ("payment_policy", "policy_prohibitions")
 # Hard ceiling on the assembled context (chars) — see knowledge_context's docstring.
 _CTX_CHAR_BUDGET = settings().knowledge_context_char_budget
 # A follow-up nudge retrieves fewer chunks — it leans on the focus card, not broad recall.
