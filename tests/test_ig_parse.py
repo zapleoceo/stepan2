@@ -82,3 +82,20 @@ def test_clean_url_handles_none_and_wrapper() -> None:
 
 def test_media_url_none_for_shared_post() -> None:
     assert media_url({"item_type": "xma_media_share", "xma_media_share": [{}]}) is None
+
+
+def test_raven_media_photo_from_visual_media() -> None:
+    # A view-once / disappearing photo nests its media under visual_media.media, not
+    # under raven_media — these were dropped as bare '🖼 media' with no asset.
+    item = {"item_type": "raven_media",
+            "visual_media": {"media": {"media_type": 1,
+                "image_versions2": {"candidates": [{"url": "http://c/once.jpg"}]}}}}
+    got = media_url(item)
+    assert got == ("image", "http://c/once.jpg")
+    assert item_content(item)["media_url"] == "http://c/once.jpg"
+
+
+def test_raven_media_video_from_visual_media() -> None:
+    item = {"item_type": "raven_media",
+            "visual_media": {"media": {"video_versions": [{"url": "http://c/once.mp4"}]}}}
+    assert media_url(item) == ("video", "http://c/once.mp4")
