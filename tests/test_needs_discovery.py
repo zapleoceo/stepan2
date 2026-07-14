@@ -38,6 +38,28 @@ def test_parse_and_merge_union() -> None:
     assert merged.discovery_complete is True
 
 
+def test_near_duplicate_phrasings_collapse() -> None:
+    # thread 1081: the same job/gain reworded each turn must NOT pile up
+    stored = parse_needs(json.dumps({
+        "jobs": ["pengen buat aplikasi", "buat aplikasi bantu UMKM", "membuat aplikasi"],
+        "gains": ["aplikasi dibantu AI", "bisa bikin aplikasi sendiri dengan AI",
+                  "bisa bikin aplikasi UMKM dengan AI"],
+        "pains": [], "discovery_complete": True}))
+    assert stored.jobs == ["buat aplikasi bantu UMKM"]          # collapsed to the most specific
+    assert stored.gains == ["bisa bikin aplikasi UMKM dengan AI"]
+    merged = merge_needs(stored, jobs=["membuat aplikasi bantu UMKM"], pains=[],
+                         gains=["bisa bikin aplikasi UMKM pakai AI"], discovery_complete=True)
+    assert len(merged.jobs) == 1 and len(merged.gains) == 1     # reworded restatement adds nothing
+
+
+def test_distinct_needs_not_collapsed() -> None:
+    stored = parse_needs(json.dumps({
+        "jobs": ["dapat kerja jadi developer", "bikin startup sendiri"],
+        "pains": ["takut buang waktu", "ga punya laptop"],
+        "gains": ["gaji lebih tinggi"], "discovery_complete": False}))
+    assert len(stored.jobs) == 2 and len(stored.pains) == 2     # genuinely different → kept
+
+
 def test_needs_summary_and_roundtrip() -> None:
     p = NeedsProfile(jobs=["become a developer"], pains=["failed self-study"], gains=[])
     s = needs_summary(p)
