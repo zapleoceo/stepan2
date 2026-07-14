@@ -431,6 +431,47 @@ def test_price_word_without_figure_still_verifies() -> None:
     assert guard.price_claims_grounded("Harganya terjangkau banget Kak!", "Harga Rp 1jt") is False
 
 
+# ─── _canonical_prices: Indonesian "Rp X juta/ribu" + decimal comma (thread 899) ───
+
+def test_canonical_prices_magnitude_words() -> None:
+    assert guard._canonical_prices("Rp2,5 juta per bulan") == {2_500_000}
+    assert guard._canonical_prices("Rp 2,5 juta") == {2_500_000}
+    assert guard._canonical_prices("mulai 1,67 juta/bln") == {1_670_000}
+    assert guard._canonical_prices("DP 500 ribu") == {500_000}
+    assert guard._canonical_prices("cuma 750rb") == {750_000}
+    assert guard._canonical_prices("harganya 13 juta") == {13_000_000}
+
+
+def test_canonical_prices_thousands_separators() -> None:
+    assert guard._canonical_prices("Rp 1.882.955") == {1_882_955}
+    assert guard._canonical_prices("Rp 750.000 offline") == {750_000}
+
+
+def test_canonical_prices_ignores_bare_numbers_strict() -> None:
+    assert guard._canonical_prices("kelas 2 minggu, 16 jam") == set()
+    assert 500_000 in guard._canonical_prices("500,000 IDR", liberal=True)
+
+
+def test_fabricated_juta_price_now_ungrounded() -> None:
+    # thread 899: "Rp2,5 juta/bulan" invented; the real cards have 1.670.000, 750.000, etc.
+    ctx = "Harga Rp 1.670.000/bln; booster Rp 750.000."
+    assert guard.price_claims_grounded("paket mulai Rp2,5 juta per bulan", ctx) is False
+
+
+# ─── is_risky / price skip: Open-House prohibition topics (thread 2879) ───
+
+def test_is_risky_detects_prohibition_topics() -> None:
+    assert guard.is_risky("di Open House bisa kenalan mentor")
+    assert guard.is_risky("Kakak bisa coba suasana kelas langsung")
+    assert guard.is_risky("mau aku kirim contoh aplikasi yang dibuat peserta kami?")
+    assert not guard.is_risky("Kakak bisa datang ke kampus dan tanya ke tim kami")
+
+
+def test_price_skip_not_bypassing_prohibition() -> None:
+    ctx = "Harga Rp 750.000. Open House: NEVER promise mentor sessions."
+    assert guard.price_claims_grounded("harga 750rb, dan bisa kenalan mentor", ctx) is False
+
+
 async def test_pipeline_skips_llm_verify_for_grounded_price(db_session) -> None:
     """End-to-end: a reply that only repeats the KB's own price must NOT spend a verify
     call — the scripted LLM would raise if a second (verify) chat arrived."""
