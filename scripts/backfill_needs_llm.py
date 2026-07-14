@@ -99,12 +99,13 @@ async def main() -> None:
             merged = merge_needs(stored, [], _lst(d.get("pains")), [], stored.discovery_complete)
             if merged.pains and not stored.pains:
                 recovered += 1
-            print(f"[{lead_id}] pains {stored.pains} -> {merged.pains}")
+            print(f"[{lead_id}] pains {stored.pains} -> {merged.pains}", flush=True)
             if not DRY and merged.to_json() != (raw or "").strip():
                 await s.execute(text("UPDATE lead SET needs = :n WHERE id = :i"),
                                 {"n": merged.to_json(), "i": lead_id})
+                await s.commit()  # per-lead: a slow-broker timeout mid-batch keeps prior work
                 updated += 1
-        print(f"pains_recovered={recovered} updated={updated}")
+        print(f"pains_recovered={recovered} updated={updated} ALL_DONE", flush=True)
 
 
 asyncio.run(main())
