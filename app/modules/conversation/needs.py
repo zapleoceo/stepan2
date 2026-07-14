@@ -6,6 +6,7 @@ nothing is lost, feed it back into the next prompt, and gate presentation on it.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 
 _MAX_PER_LIST = 6
@@ -73,27 +74,60 @@ def needs_summary(p: NeedsProfile) -> str:
     return "\n".join(lines)
 
 
+# Indonesian filler that doesn't carry a need's meaning — dropped before near-dup comparison
+# so "pengen buat aplikasi", "membuat aplikasi", "bisa bikin aplikasi sendiri" collapse to the
+# same content ({aplikasi}) instead of accumulating as four separate jobs (thread 1081).
+_STOP = frozenset({
+    "buat", "membuat", "bikin", "membikin", "pengen", "pengin", "ingin", "mau", "bisa", "dapat",
+    "untuk", "dengan", "pakai", "memakai", "menggunakan", "sendiri", "aku", "saya", "kak", "kakak",
+    "yang", "jadi", "menjadi", "sebuah", "agar", "supaya", "biar", "dan", "atau", "nanti", "kira",
+    "punya", "adalah", "ini", "itu", "ke", "di", "dari", "sudah", "udah", "lebih", "juga", "the",
+    "a", "an", "to", "of", "my", "i", "want", "be", "able", "with", "make", "build", "own",
+    "bantu", "dibantu", "membantu", "bantuin", "tolong", "help",
+})
+
+
+def _content_tokens(s: str) -> frozenset[str]:
+    toks = re.findall(r"[a-z0-9]+", s.lower())
+    return frozenset(t for t in toks if len(t) >= 2 and t not in _STOP)
+
+
+def _near(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Two need phrases mean the same thing when their content-word sets are nested (one a
+    subset of the other — the more specific supersedes) or overlap heavily (Jaccard >= 0.6)."""
+    if not a or not b:
+        return a == b
+    if a <= b or b <= a:
+        return True
+    return len(a & b) / len(a | b) >= 0.6
+
+
+def _dedup_near(items: list[str]) -> list[str]:
+    """Collapse near-duplicate phrasings, keeping the MOST specific (most content words; ties
+    → longer string) so a reworded restatement doesn't add a new entry (thread 1081)."""
+    kept: list[str] = []
+    sets: list[frozenset[str]] = []
+    for raw in items:
+        s = raw.strip()
+        if not s:
+            continue
+        toks = _content_tokens(s)
+        for i, ks in enumerate(sets):
+            if _near(toks, ks):
+                if len(toks) > len(ks) or (len(toks) == len(ks) and len(s) > len(kept[i])):
+                    kept[i], sets[i] = s, toks  # upgrade to the more specific phrasing
+                break
+        else:
+            kept.append(s)
+            sets.append(toks)
+    return kept[:_MAX_PER_LIST]
+
+
 def _clean(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
-    out: list[str] = []
-    for item in value:
-        s = str(item).strip()
-        if s and s not in out:
-            out.append(s)
-        if len(out) >= _MAX_PER_LIST:
-            break
-    return out
+    return _dedup_near([str(item) for item in value])
 
 
 def _union(base: list[str], extra: list[str]) -> list[str]:
-    seen = {s.lower(): s for s in base}
-    out = list(base)
-    for s in extra:
-        s = s.strip()
-        if s and s.lower() not in seen:
-            seen[s.lower()] = s
-            out.append(s)
-        if len(out) >= _MAX_PER_LIST:
-            break
-    return out
+    return _dedup_near(list(base) + list(extra))
