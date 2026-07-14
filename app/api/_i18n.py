@@ -821,6 +821,20 @@ _TR: dict[str, dict[str, str]] = {
     },
     "ch.retry_manual": {"ru": "Я подтвердил — повторить", "en": "I've confirmed — retry",
                         "id": "Sudah dikonfirmasi — coba lagi"},
+    "ch.hint_device": {
+        "ru": "Instagram отправил запрос подтверждения входа на ваш телефон. Откройте "
+              "уведомление Instagram и нажмите «Это я» / «Подтвердить», затем нажмите "
+              "«Продолжить» ниже. Код вводить не нужно.",
+        "en": "Instagram sent a login-approval request to your phone. Open the Instagram "
+              "notification and tap “It's me” / “Approve”, then click Continue below. "
+              "No code needed.",
+        "id": "Instagram mengirim permintaan persetujuan login ke ponsel Anda. Buka notifikasi "
+              "Instagram dan ketuk “Ini saya” / “Setujui”, lalu klik Lanjutkan di bawah. "
+              "Tanpa kode.",
+    },
+    "ch.continue_device": {"ru": "Я подтвердил на телефоне — продолжить",
+                           "en": "I approved on my phone — continue",
+                           "id": "Sudah disetujui di ponsel — lanjutkan"},
     "ch.already_confirmed": {
         "ru": "Уже подтвердил в приложении — повторить",
         "en": "Already confirmed in the app — retry",

@@ -351,9 +351,14 @@ async def _attempt_ig_login(
         else:
             await asyncio.to_thread(cl.login, user, pw)
     except TwoFactorRequired:
-        _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "2fa",
+        # Instagram's 2FA is NOT always a typed code. Read two_factor_info: only TOTP/SMS need
+        # a code — otherwise it's a device-approval push ("tap Approve on your phone"), where the
+        # right move is to re-login on the SAME client, not to demand a code that never arrives
+        # (the itstep.kl "keeps asking for a code" bug). Render the matching step.
+        kind = _two_factor_kind(cl)
+        _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": kind,
                           "username": user, "password": pw}
-        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="2fa",
+        return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind=kind,
                                         username=user))
     except ChallengeRequired as exc:
         if _is_manual_challenge(exc):
@@ -372,6 +377,22 @@ async def _attempt_ig_login(
         _ig_flows.pop(fid, None)
         return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:200]))
     return await _ig_save(ch_id, cl.get_settings())
+
+
+def _two_factor_kind(cl: Any) -> str:
+    """Classify the 2FA Instagram is asking for from the client's last response.
+
+    'code'  → TOTP app or SMS code the user must type (totp_two_factor_on / sms_two_factor_on).
+    'device' → a login-approval push to the user's other device: no code exists; login is
+               completed by re-attempting on the same client after the user taps Approve.
+    Defaults to 'device' when neither code method is flagged (that's the notification path)."""
+    info = {}
+    last = getattr(cl, "last_json", None)
+    if isinstance(last, dict):
+        info = last.get("two_factor_info") or {}
+    if info.get("totp_two_factor_on") or info.get("sms_two_factor_on"):
+        return "2fa"
+    return "device"
 
 
 async def _channel_geo(session: Any, ch_id: int) -> tuple[str, int]:
@@ -411,13 +432,13 @@ async def ig_login_verify(
     if not flow or flow["channel_id"] != ch_id:
         return HTMLResponse(_ch_ig_form(ch_id, error="Flow expired — please login again"))
     cl = flow["client"]
-    if flow.get("kind") == "manual" or (skip_code and flow.get("password")):
-        # No code to apply — either this checkpoint is only cleared by approving in the
-        # real Instagram app (kind='manual'), or the operator says they already approved a
-        # parallel push notification there (skip_code — Instagram can prompt for a 2FA code
-        # AND send an in-app "was this you?" push for the SAME login attempt at once; typing
-        # a code the operator never needed just to reach the manual retry was pointless).
-        # Retry on the SAME client (same flow_id) either way.
+    if flow.get("kind") in ("manual", "device") or (skip_code and flow.get("password")):
+        # No code to apply — this login is cleared by APPROVING on the phone, not by typing a
+        # code: either a challenge only the real Instagram app clears (kind='manual'), a login-
+        # approval push to another device (kind='device'), or the operator says they approved a
+        # parallel push (skip_code — Instagram can prompt for a 2FA code AND send an in-app
+        # "was this you?" push for the SAME attempt at once). Retry on the SAME client either way
+        # (the device fingerprint that got approved lives on it).
         return await _attempt_ig_login(cl, ch_id, flow["username"], flow["password"], flow_id)
     try:
         await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())
