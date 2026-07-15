@@ -841,26 +841,50 @@ _TR: dict[str, dict[str, str]] = {
     "ch.hint_manual": {
         "ru": "Код здесь не поможет — Instagram требует подтверждения прямо в приложении. "
               "Откройте официальный Instagram (приложение или сайт) на доверенном "
-              "устройстве, подтвердите вход там, затем нажмите «Повторить» ниже.",
+              "устройстве и подтвердите вход там. Больше ничего нажимать не нужно — "
+              "мы сами дожмём вход, как только вы подтвердите.",
         "en": "No code will help here — Instagram requires confirming this login inside the "
-              "app itself. Open the official Instagram app or website on a trusted device, "
-              "approve the login there, then click Retry below.",
+              "app itself. Open the official Instagram app or website on a trusted device and "
+              "approve the login there. Nothing else to click — we finish the login for you "
+              "as soon as you approve.",
         "id": "Kode tidak akan membantu di sini — Instagram meminta konfirmasi langsung di "
-              "aplikasi. Buka aplikasi atau situs Instagram resmi di perangkat tepercaya, "
-              "setujui login di sana, lalu klik Coba Lagi di bawah.",
+              "aplikasi. Buka aplikasi atau situs Instagram resmi di perangkat tepercaya dan "
+              "setujui login di sana. Tidak perlu klik apa pun lagi — kami menyelesaikan "
+              "login begitu Anda menyetujui.",
     },
+    "ch.waiting_approve": {
+        "ru": "Ждём подтверждения в приложении Instagram — войдём автоматически",
+        "en": "Waiting for your approval in the Instagram app — we'll log in automatically",
+        "id": "Menunggu persetujuan di aplikasi Instagram — kami login otomatis"},
+    "ch.poll_gave_up": {
+        "ru": "Подтверждения пока не видно. Мы перестали проверять автоматически, чтобы не "
+              "долбить Instagram повторными входами (это ведёт к блокировке). Подтвердите в "
+              "приложении и нажмите кнопку ниже.",
+        "en": "No approval seen yet. We stopped checking automatically so we don't hammer "
+              "Instagram with repeated logins (that gets accounts blocked). Approve in the "
+              "app, then use the button below.",
+        "id": "Persetujuan belum terlihat. Kami berhenti memeriksa otomatis agar tidak "
+              "membanjiri Instagram dengan login berulang (itu memicu blokir). Setujui di "
+              "aplikasi, lalu gunakan tombol di bawah."},
+    "ch.flow_expired": {
+        "ru": "Начатый вход потерян (сервер перезапускался — обычно это деплой). "
+              "Введите логин и пароль заново.",
+        "en": "The login in progress was lost (the server restarted — usually a deploy). "
+              "Please enter the username and password again.",
+        "id": "Proses login yang berjalan hilang (server dimulai ulang — biasanya deploy). "
+              "Silakan masukkan nama pengguna dan kata sandi lagi."},
     "ch.retry_manual": {"ru": "Я подтвердил — повторить", "en": "I've confirmed — retry",
                         "id": "Sudah dikonfirmasi — coba lagi"},
     "ch.hint_device": {
         "ru": "Instagram отправил запрос подтверждения входа на ваш телефон. Откройте "
-              "уведомление Instagram и нажмите «Это я» / «Подтвердить», затем нажмите "
-              "«Продолжить» ниже. Код вводить не нужно.",
+              "уведомление Instagram и нажмите «Это я» / «Подтвердить» — и всё. Код вводить "
+              "не нужно, кнопку жать тоже: мы сами дожмём вход, как только вы подтвердите.",
         "en": "Instagram sent a login-approval request to your phone. Open the Instagram "
-              "notification and tap “It's me” / “Approve”, then click Continue below. "
-              "No code needed.",
+              "notification and tap “It's me” / “Approve” — that's all. No code to type and "
+              "no button to press: we finish the login as soon as you approve.",
         "id": "Instagram mengirim permintaan persetujuan login ke ponsel Anda. Buka notifikasi "
-              "Instagram dan ketuk “Ini saya” / “Setujui”, lalu klik Lanjutkan di bawah. "
-              "Tanpa kode.",
+              "Instagram dan ketuk “Ini saya” / “Setujui” — selesai. Tanpa kode dan tanpa "
+              "tombol: kami menyelesaikan login begitu Anda menyetujui.",
     },
     "ch.continue_device": {"ru": "Я подтвердил на телефоне — продолжить",
                            "en": "I approved on my phone — continue",

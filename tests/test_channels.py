@@ -350,8 +350,9 @@ async def test_attempt_ig_login_manual_challenge_shows_retry_not_code_field() ->
         "Manual verification required via Instagram native challenge flow."))
     resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-manual")
     body = resp.body.decode()
-    assert "I&#x27;ve confirmed" in body or "confirmed" in body.lower()
     assert 'name="code"' not in body  # no code field — a code can't resolve this
+    # nothing to click either: approving in the app is the whole job, so we poll for them
+    assert "/ui/channels/42/ig/verify" in body and "hx-trigger=" in body
     assert _ig_flows["fid-manual"]["kind"] == "manual"
     assert _ig_flows["fid-manual"]["client"] is cl
     _ig_flows.pop("fid-manual", None)
@@ -388,10 +389,11 @@ async def test_attempt_ig_login_totp_2fa_shows_code_field() -> None:
     _ig_flows.pop("fid-2fa", None)
 
 
-async def test_attempt_ig_login_device_approval_shows_continue_not_code() -> None:
+async def test_attempt_ig_login_device_approval_auto_completes_with_no_code_and_no_button() -> None:
     """A device-approval push (two_factor_info flags NO code method) must NOT demand a code —
-    it shows the 'approve on your phone, then continue' step that re-logins (the itstep.kl bug
-    where a push-approval login kept asking for a code that never comes)."""
+    and must not demand a click either. The operator approves in the Instagram app; the panel
+    finishes the login on its own (the itstep.kl bug: a push-approval login kept asking for a
+    code that never comes, and then for a button press that just restarted the whole thing)."""
     from instagrapi.exceptions import TwoFactorRequired
 
     from app.api._routes_channels import _attempt_ig_login, _ig_flows
@@ -402,10 +404,38 @@ async def test_attempt_ig_login_device_approval_shows_continue_not_code() -> Non
     resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="p", fid="fid-dev")
     body = resp.body.decode()
     assert 'name="code"' not in body                       # no code to type on a push approval
-    assert "approved on my phone" in body.lower() or "continue" in body.lower()
+    assert 'hx-post="/ui/channels/42/ig/verify"' in body   # it retries by itself…
+    assert 'hx-trigger="load delay:' in body               # …on a timer, no click required
+    assert '"attempt":"1"' in body                         # and carries the back-off counter
     assert _ig_flows["fid-dev"]["kind"] == "device"
     assert _ig_flows["fid-dev"]["password"] == "p"  # noqa: S105 — kept for the no-code relogin
     _ig_flows.pop("fid-dev", None)
+
+
+def test_device_poll_backs_off_and_stops_instead_of_hammering_login() -> None:
+    """Every poll is a REAL Instagram login call, so the gap must grow and the polling must
+    stop — repeated logins are a checkpoint/ban vector. Past the cap the operator gets a
+    button back rather than an endless background login loop."""
+    import re
+
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _IG_POLL_DELAYS, _ch_ig_form
+
+    _lang.set("en")
+    assert list(_IG_POLL_DELAYS) == sorted(_IG_POLL_DELAYS)      # never tightens
+    assert _IG_POLL_DELAYS[0] >= 5                                # never a fast tick
+
+    delays = []
+    for att in range(len(_IG_POLL_DELAYS)):
+        html = _ch_ig_form(5, step="2fa", flow_id="f", kind="device", username="u", attempt=att)
+        delays.append(int(re.search(r'hx-trigger="load delay:(\d+)s"', html).group(1)))
+    assert delays == list(_IG_POLL_DELAYS)
+
+    # past the cap: no more auto-retry, a manual button instead
+    end = _ch_ig_form(5, step="2fa", flow_id="f", kind="device", username="u",
+                      attempt=len(_IG_POLL_DELAYS))
+    assert "hx-trigger=" not in end
+    assert "<button" in end and 'name="flow_id"' in end
 
 
 async def test_ig_verify_device_kind_relogins_without_a_code() -> None:
@@ -533,12 +563,18 @@ def test_ig_form_step2_never_puts_disabled_elt_or_indicator_on_the_form() -> Non
     for html in (
         _ch_ig_form(5, step="2fa", flow_id="abc", kind="2fa", username="u"),
         _ch_ig_form(5, step="2fa", flow_id="abc", kind="challenge", username="u"),
+        # the no-code kinds auto-poll first and only fall back to a form at the cap — cover
+        # both, so the form that DOES appear there is still held to the same rule
         _ch_ig_form(5, step="2fa", flow_id="abc", kind="manual", username="u"),
+        _ch_ig_form(5, step="2fa", flow_id="abc", kind="manual", username="u", attempt=99),
+        _ch_ig_form(5, step="2fa", flow_id="abc", kind="device", username="u", attempt=99),
     ):
-        form_tag = re.search(r"<form\b[^>]*>", html).group(0)
-        assert "hx-disabled-elt" not in form_tag, form_tag
-        assert "hx-indicator" not in form_tag, form_tag
-        # every <button> in the form must carry its own hx-disabled-elt
+        form_match = re.search(r"<form\b[^>]*>", html)
+        if form_match is not None:
+            form_tag = form_match.group(0)
+            assert "hx-disabled-elt" not in form_tag, form_tag
+            assert "hx-indicator" not in form_tag, form_tag
+        # every <button> must carry its own hx-disabled-elt
         for btn_tag in re.findall(r"<button\b[^>]*>", html):
             assert "hx-disabled-elt=\"this\"" in btn_tag, btn_tag
 

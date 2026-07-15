@@ -27,7 +27,7 @@ from app.modules.meta.tokens import page_access_token
 from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import get_settings
 
-from ._i18n import apply_lang
+from ._i18n import apply_lang, t
 from ._ui_panels import (
     _ch_form_for,
     _ch_ig_form,
@@ -330,6 +330,7 @@ def _is_manual_challenge(exc: Exception) -> bool:
 
 async def _attempt_ig_login(
     cl: Any, ch_id: int, user: str, pw: str, fid: str, *, verification_code: str = "",
+    attempt: int = 0,
 ) -> HTMLResponse:
     """Shared login attempt for both the first credentials submit and a retry after the
     operator resolves a challenge out-of-band (2FA code, challenge code, or a manual in-app
@@ -359,13 +360,13 @@ async def _attempt_ig_login(
         _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": kind,
                           "username": user, "password": pw}
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind=kind,
-                                        username=user))
+                                        username=user, attempt=attempt))
     except ChallengeRequired as exc:
         if _is_manual_challenge(exc):
             _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "manual",
                               "username": user, "password": pw}
             return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="manual",
-                                            username=user))
+                                            username=user, attempt=attempt))
         # username kept only for display here — the challenge is resolved via
         # challenge_code_handler on the live client, not a re-login call, so it never
         # needs the password like the 2fa/manual branches do (see _resolve_ig_code).
@@ -423,6 +424,7 @@ async def ig_login_verify(
     flow_id: str = Form(default=""),
     code: str = Form(default=""),
     skip_code: str = Form(default=""),
+    attempt: int = Form(default=0),
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
@@ -430,7 +432,9 @@ async def ig_login_verify(
             return HTMLResponse(_ch_ig_form(ch_id, error="Forbidden"))
     flow = _ig_flows.get(flow_id)
     if not flow or flow["channel_id"] != ch_id:
-        return HTMLResponse(_ch_ig_form(ch_id, error="Flow expired — please login again"))
+        # The flow (and its logged-in client) lives in this process's memory, so a restart
+        # mid-login — a deploy, most often — drops it and there is nothing to continue.
+        return HTMLResponse(_ch_ig_form(ch_id, error=t("ch.flow_expired")))
     cl = flow["client"]
     if flow.get("kind") in ("manual", "device") or (skip_code and flow.get("password")):
         # No code to apply — this login is cleared by APPROVING on the phone, not by typing a
@@ -439,7 +443,8 @@ async def ig_login_verify(
         # parallel push (skip_code — Instagram can prompt for a 2FA code AND send an in-app
         # "was this you?" push for the SAME attempt at once). Retry on the SAME client either way
         # (the device fingerprint that got approved lives on it).
-        return await _attempt_ig_login(cl, ch_id, flow["username"], flow["password"], flow_id)
+        return await _attempt_ig_login(cl, ch_id, flow["username"], flow["password"], flow_id,
+                                       attempt=attempt)
     try:
         await asyncio.to_thread(_resolve_ig_code, cl, flow, code.strip())
     except Exception as exc:  # keep the flow so the user can retry

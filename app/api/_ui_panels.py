@@ -943,9 +943,16 @@ def _ch_hint(text_: str) -> str:
     )
 
 
+# Seconds to wait before each automatic re-attempt of a phone-approved login. Every entry
+# costs one real Instagram login call, so this backs off instead of polling on a fixed tick,
+# and its length is the attempt cap (~2.5 min total) after which we stop and hand the
+# operator a button. Never make this tighter: repeated logins are a checkpoint/ban vector.
+_IG_POLL_DELAYS = (8, 15, 25, 40, 60)
+
+
 def _ch_ig_form(
     ch_id: int, step: str = "login", flow_id: str = "", error: str = "",
-    kind: str = "", username: str = "",
+    kind: str = "", username: str = "", attempt: int = 0,
 ) -> str:
     """Two-step Instagram connect flow: (1) credentials, (2) resolving whatever Instagram
     asked for. Step 2's content switches on `kind` — instagrapi hits FOUR unrelated
@@ -988,22 +995,45 @@ def _ch_ig_form(
         )
         if kind in ("manual", "device"):
             # No code to type — the login is approved on the phone. 'device' = a login-approval
-            # push to another device (tap Approve, then Continue); 'manual' = an in-app checkpoint
-            # instagrapi flags as code-unresolvable. Same no-code retry UI, kind-specific copy.
+            # push to another device; 'manual' = an in-app checkpoint instagrapi flags as
+            # code-unresolvable. Either way the operator approves in the Instagram app and we
+            # just re-attempt on the same client, so there is nothing for them to click: poll
+            # for them. Each poll is a REAL login attempt, so the delay grows (_IG_POLL_DELAYS)
+            # and stops at the cap — hammering login is a checkpoint/ban vector, and the
+            # operator may simply not have reached their phone yet. Past the cap we fall back
+            # to the manual button so they stay in control and Instagram is left alone.
             hint = t("ch.hint_device") if kind == "device" else t("ch.hint_manual")
+            back = (
+                f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
+                f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
+                f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
+                f'{_h.escape(t("ch.start_over"))}</button>'
+            )
+            if attempt < len(_IG_POLL_DELAYS):
+                delay = _IG_POLL_DELAYS[attempt]
+                vals = (f'{{"flow_id":"{_h.escape(flow_id)}","attempt":"{attempt + 1}"}}')
+                return (
+                    f'{_ch_step(t("ch.step2"))}{who}{err}'
+                    f'{_ch_hint(hint)}'
+                    f'<div style="max-width:340px">'
+                    f'<div id="ig-poll-{ch_id}" hx-post="/ui/channels/{ch_id}/ig/verify"'
+                    f" hx-trigger=\"load delay:{delay}s\" hx-target=\"#ch-form\""
+                    f' hx-swap="innerHTML" hx-vals=\'{vals}\''
+                    f' style="font-size:.76rem;color:#8b98a5;margin-bottom:.5rem">'
+                    f'<span class="spin" style="margin-right:.4rem;vertical-align:middle"></span>'
+                    f'{_h.escape(t("ch.waiting_approve"))}</div>'
+                    f'{back}</div>'
+                )
             btn = t("ch.continue_device") if kind == "device" else t("ch.retry_manual")
             return (
                 f'{_ch_step(t("ch.step2"))}{who}{err}'
-                f'{_ch_hint(hint)}'
+                f'{_ch_hint(hint)}{_ch_hint(t("ch.poll_gave_up"))}'
                 f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
                 f' hx-swap="innerHTML" style="max-width:340px">'
                 f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
                 f'<button type="submit" class="btn-sm btn-p" hx-disabled-elt="this"'
                 f' hx-indicator="#{spin_id}">{_h.escape(btn)}</button>'
-                f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
-                f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
-                f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
-                f'{_h.escape(t("ch.start_over"))}</button>{spin}'
+                f'{back}{spin}'
                 f'</form>'
             )
         is_challenge = kind == "challenge"
