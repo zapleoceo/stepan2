@@ -70,50 +70,61 @@ class AdSyncService:
         if not wanted:
             return 0
         try:
-            creative_to_pk = await self._find_creatives(client, wanted)
-            if not creative_to_pk:
-                return 0
-            rows = await self._ads_for_creatives(client, creative_to_pk)
+            rows = await self._match_ads(client, wanted)
         except MetaAdsRateLimited as exc:
             logger.warning("branch=%s ad map sync throttled: %s", self.branch_id, exc)
             return 0
         return await repo.upsert_creative_map(self.session, self.branch_id, rows)
 
-    async def _find_creatives(
+    async def _match_ads(
         self, client: MetaAdsClient, wanted: dict[str, str],
-    ) -> dict[str, tuple[str, str]]:
-        """creative_id → (media_pk, shortcode) for the wanted shortcodes. Stops early once
-        all are found — the account has ~4500 creatives and we usually want a handful."""
-        found: dict[str, tuple[str, str]] = {}
-        async for creative in client.iter_creatives():
-            pk = wanted.get(creative.shortcode)
-            if pk is not None:
-                found[creative.creative_id] = (pk, creative.shortcode)
-                if len(found) == len(wanted):
-                    break
-        return found
-
-    async def _ads_for_creatives(
-        self, client: MetaAdsClient, creative_to_pk: dict[str, tuple[str, str]],
     ) -> list[dict]:
-        """Walk ads until every wanted creative has its ad. A creative with no ad using it
-        yields nothing — that media stays unmapped and is retried on the next tick."""
+        """Walk ads once and match each against the media we still need, cheapest first.
+
+        Promoting an existing IG post makes dark copies, so the medium a lead saw is not
+        always the one on the ad's permalink. Three pointers are tried per ad:
+
+          1. permalink shortcode      — free, already in the walk
+          2. effective_instagram_media_id — one extra call; resolves on ads_management
+          3. source_instagram_media_id    — one extra call; needs instagram_basic, which the
+             System User does NOT currently hold, so this tier is a no-op until it is added
+
+        Tiers 2-3 cost a call per ad, so they only run for ads whose permalink missed AND only
+        while something is still wanted — the walk stops as soon as every medium is matched."""
         rows: list[dict] = []
-        seen: set[str] = set()
-        async for ad in client.iter_ads():
-            hit = creative_to_pk.get(ad.creative_id)
-            if hit is None or ad.creative_id in seen:
-                continue
-            seen.add(ad.creative_id)
-            media_pk, shortcode = hit
+        pending = dict(wanted)
+
+        def _take(code: str | None, ad) -> bool:
+            pk = pending.pop(code, None) if code else None
+            if pk is None:
+                return False
             rows.append({
-                "media_pk": media_pk, "shortcode": shortcode, "ad_id": ad.ad_id,
-                "ad_name": ad.ad_name, "adset_id": ad.adset_id, "adset_name": ad.adset_name,
+                "media_pk": pk, "shortcode": code, "ad_id": ad.ad_id, "ad_name": ad.ad_name,
+                "adset_id": ad.adset_id, "adset_name": ad.adset_name,
                 "campaign_id": ad.campaign_id, "campaign_name": ad.campaign_name,
                 "objective": ad.objective,
             })
-            if len(seen) == len(creative_to_pk):
+            return True
+
+        deferred: list = []
+        async for ad in client.iter_ads():
+            if _take(ad.shortcode, ad):
+                # Check AFTER the match, not at the top of the loop: checking first reads one
+                # more page-worth of ads than needed before noticing there is nothing left.
+                if not pending:
+                    break
+                continue
+            if ad.effective_media_id or ad.source_media_id:
+                deferred.append(ad)  # needs a lookup — do it only if still unmatched at the end
+        for ad in deferred:
+            if not pending:
                 break
+            for media_id in (ad.effective_media_id, ad.source_media_id):
+                if not media_id:
+                    continue
+                code = await client.media_shortcode(media_id)
+                if _take(code, ad):
+                    break
         return rows
 
     async def sync_insights(self, *, today: date | None = None) -> int:

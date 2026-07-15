@@ -58,6 +58,15 @@ class AdRow:
     campaign_id: str | None
     campaign_name: str | None
     objective: str | None
+    # Three ways an ad points at an IG post, in descending order of usefulness to us:
+    #   shortcode   — parsed from instagram_permalink_url; free, present on ~1004/1145 ads
+    #   effective_media_id — the post as DELIVERED; resolvable to a shortcode with ads_management
+    #   source_media_id    — the ORIGINAL post a boost was made from; needs instagram_basic
+    # Promoting an existing IG post makes dark copies, so the medium a lead actually saw may
+    # be any of the three. Matching only the permalink caps coverage at ~45%.
+    shortcode: str | None = None
+    effective_media_id: str | None = None
+    source_media_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -162,11 +171,23 @@ class MetaAdsClient:
                 yield CreativeRow(creative_id=str(row["id"]), shortcode=code)
 
     async def iter_ads(self, start_url: str | None = None) -> AsyncIterator[AdRow]:
+        """Walk ads WITH their creative's IG pointers.
+
+        This edge — not adcreatives — is the one to match on. adcreatives finds a creative for
+        96.8% of our media but most are orphans no ad references (4499 creatives vs 1154 ads),
+        which stalled coverage at 38%; matching straight off the ad reaches 45.3% and, unlike
+        adcreatives, every hit has an ad and therefore spend."""
+        from app.modules.ads.bridge import shortcode_from_permalink  # noqa: PLC0415
+
         async for row in self._walk(
-            "ads", "id,name,creative{id},adset{id,name},campaign{id,name,objective}",
+            "ads",
+            "id,name,adset{id,name},campaign{id,name,objective},"
+            "creative{id,instagram_permalink_url,effective_instagram_media_id,"
+            "source_instagram_media_id}",
             start_url=start_url,
         ):
-            creative_id = (row.get("creative") or {}).get("id")
+            creative = row.get("creative") or {}
+            creative_id = creative.get("id")
             if not creative_id:
                 continue
             adset = row.get("adset") or {}
@@ -180,7 +201,27 @@ class MetaAdsClient:
                 campaign_id=campaign.get("id"),
                 campaign_name=campaign.get("name"),
                 objective=campaign.get("objective"),
+                shortcode=shortcode_from_permalink(creative.get("instagram_permalink_url")),
+                effective_media_id=creative.get("effective_instagram_media_id"),
+                source_media_id=creative.get("source_instagram_media_id"),
             )
+
+    async def media_shortcode(self, media_id: str) -> str | None:
+        """IG media id → shortcode, or None when this token may not read that media.
+
+        effective_instagram_media_id resolves on ads_management alone (it is an ad object).
+        source_instagram_media_id is an IG-owned post and needs instagram_basic — WITHOUT that
+        permission this returns None, which is why coverage is capped rather than broken."""
+        url = f"{self._base}/{media_id}"
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            try:
+                payload = await self._get(client, url, {"fields": "shortcode"})
+            except MetaAdsRateLimited:
+                raise
+            except MetaAdsError:
+                return None  # not visible to this token — expected, not a failure
+        code = payload.get("shortcode")
+        return str(code) if code else None
 
     async def iter_insights(self, since: date, until: date) -> AsyncIterator[InsightRow]:
         """Daily per-ad insights over [since, until]. time_increment=1 → one row per day."""
