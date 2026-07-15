@@ -152,6 +152,40 @@ _MINOR_NUDGE = (
     "the parent can review (mention the 10% student discount). Positive, no pressure. Return "
     "the JSON as usual.]"
 )
+# The lead sent something the bot genuinely CANNOT read: a reel/post IG won't hand over
+# ("Message unavailable · This content may have been deleted by its owner…"), a bare share
+# that carries only an account handle and no caption, or an image/voice the broker never
+# described (vision/transcription keys aren't configured, so 🖼 media / 🎤 voice stay raw).
+# The model treats the placeholder as if it were the lead's words: thread 3058 answered the
+# clarify stub, thread 3035 invented a drama-streaming app out of a shared reel. ~5/day.
+_UNSEEN_MEDIA_RE = re.compile(
+    r"message unavailable|deleted by its owner|hidden by their privacy"
+    r"|^(?:🖼\s*media|🎤\s*voice|🎬\s*reel|📖\s*story|📎\s*attachment|🔗\s*link)$"
+    r"|^[📷🎬📖👤]\s*\S+$",  # bare share: icon + handle, no caption to read
+    re.IGNORECASE)
+
+
+def _unseen_media_in_turn(dialog) -> bool:  # noqa: ANN001
+    """Did the lead's CURRENT turn (everything since our last send) include content we can't
+    read? The placeholder is often not the last message — thread 3058 sent the unavailable
+    reel, then 'Like2 ders' — so checking only the last inbound would miss it."""
+    for m in reversed(dialog):
+        if m.direction == "out":
+            break
+        if m.direction == "in" and _UNSEEN_MEDIA_RE.search((m.text or "").strip()):
+            return True
+    return False
+
+
+_UNSEEN_MEDIA_NUDGE = (
+    "[System: the lead sent something you CANNOT see — a shared post/reel/story, an image or "
+    "a voice note whose content never reached you (deleted, private, or just not readable on "
+    "your side). You only received a placeholder, NOT the content itself. Do NOT guess what it "
+    "showed, do NOT invent a topic from the account name, and do NOT reply with a generic "
+    "clarifier. Say plainly and warmly that it doesn't open on your side, and ask them to tell "
+    "you in their own words what it was about or what they want to know. Return the JSON as "
+    "usual.]"
+)
 # The lead asked a DIRECT answerable question in their OWN words (price, schedule, how to
 # enrol, certificate…). The most expensive live failure in the 3-day audit (2026-07-15): the
 # model replies with the clarify stub ('boleh sebutkan lebih spesifik' — 39 of its 41 uses
@@ -573,7 +607,10 @@ class ReplyService:
             extra_user_msg = _AD_OPENER_NUDGE
         else:
             last_txt = (last_in.text if last_in is not None else "") or ""
-            if _MINOR_RE.search(last_txt):
+            if _unseen_media_in_turn(ctx.dialog):
+                # Can't read what they sent — nothing else in this turn matters.
+                extra_user_msg = _UNSEEN_MEDIA_NUDGE
+            elif _MINOR_RE.search(last_txt):
                 extra_user_msg = _MINOR_NUDGE
             elif _SOFT_NO_RE.search(last_txt):
                 extra_user_msg = _SOFT_NO_NUDGE

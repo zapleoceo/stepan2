@@ -15,6 +15,7 @@ from app.modules.conversation.reply import (  # noqa: E402
     _MINOR_RE,
     _SOFT_NO_RE,
     _is_answerable_question,
+    _unseen_media_in_turn,
 )
 
 
@@ -43,6 +44,41 @@ def test_answer_first_never_fires_on_ad_prefill() -> None:
 def test_answer_first_ignores_non_questions() -> None:
     for s in ["oke makasih", "iya kak", "Mantap"]:
         assert not _answer_first_fires(s), s
+
+
+# ─── unseen media: the lead sent something the bot cannot read ───
+
+class _M:
+    def __init__(self, direction: str, text: str) -> None:
+        self.direction, self.text = direction, text
+
+
+def test_unseen_media_detects_unreadable_content() -> None:
+    for txt in ["🎬 Message unavailable · This content may have been deleted by its owner or "
+                "hidden by their privacy settings.",
+                "📷 dramaindonesia.official",   # bare share, no caption to read
+                "🖼 media",                      # image the broker never described
+                "🎤 voice"]:                     # voice never transcribed
+        assert _unseen_media_in_turn([_M("out", "hai"), _M("in", txt)]), txt
+
+
+def test_unseen_media_found_even_when_not_last_message() -> None:
+    # thread 3058: unavailable reel, THEN 'Like2 ders' — last-message-only checks miss it
+    dialog = [_M("out", "hai kak"),
+              _M("in", "🎬 Message unavailable · This content may have been deleted by its owner"),
+              _M("in", "Like2 ders")]
+    assert _unseen_media_in_turn(dialog)
+
+
+def test_unseen_media_ignores_readable_turns_and_older_history() -> None:
+    # a share WITH a caption is readable — don't claim blindness
+    assert not _unseen_media_in_turn(
+        [_M("out", "hai"), _M("in", "📷 itstep_jakarta · Masih scroll tapi belum menghasilkan?")])
+    # plain text turn
+    assert not _unseen_media_in_turn([_M("out", "hai"), _M("in", "berapa harganya kak?")])
+    # an unreadable item from an EARLIER turn (before our last send) is already handled
+    assert not _unseen_media_in_turn(
+        [_M("in", "🖼 media"), _M("out", "aku belum bisa lihat"), _M("in", "oke kak")])
 
 
 def test_soft_no_detects_polite_refusals() -> None:
