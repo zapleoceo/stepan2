@@ -114,14 +114,14 @@ _THREAD_TMPL = (
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "", awaiting: str = "", kind: str = "",
+    audience: str = "", awaiting: str = "", kind: str = "", q: str = "",
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
                                   ad_id=ad_id.strip(), grp=grp.strip(),
                                   lead_type=lead_type.strip(), audience=audience.strip(),
-                                  awaiting=awaiting.strip(), kind=kind.strip(),
+                                  awaiting=awaiting.strip(), kind=kind.strip(), q=q.strip(),
                                   is_super=is_super_admin(request)))
 
 
@@ -178,7 +178,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "", awaiting: str = "", kind: str = "",
+    audience: str = "", awaiting: str = "", kind: str = "", q: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
@@ -186,6 +186,16 @@ async def threads_partial(
     if branch_ids:
         conditions.append("l.branch_id = ANY(:bids)")
         params["bids"] = branch_ids
+    # Search runs HERE, not in the browser: the list is capped at 100 rows, so a client-side
+    # filter could only ever match the chats already on screen and silently missed every
+    # older one. Same fields the old data-search index used (name + IG handle), now across
+    # the whole branch-scoped inbox.
+    needle = q.strip()
+    if needle:
+        conditions.append(
+            "(LOWER(COALESCE(l.display_name, '')) LIKE :q"
+            " OR LOWER(COALESCE(l.ig_username, '')) LIKE :q)")
+        params["q"] = f"%{needle.lower()}%"
     # Connector filter is a MULTI-TOGGLE facet: `kind` is a comma-list of the channels to SHOW
     # (empty/absent = all, the literal 'none' = every chip toggled off). Server-side (not a CSS
     # hide) so an older Meta chat isn't hidden behind newer IG ones past the per-query LIMIT.
@@ -257,7 +267,7 @@ async def threads_partial(
     filter_qs = urlencode({k: v for k, v in
                            (("stage", s), ("lead_type", lt), ("audience", aud),
                             ("ad_id", ad), ("grp", grp.strip()), ("awaiting", aw),
-                            ("kind", kind_qs)) if v})
+                            ("kind", kind_qs), ("q", needle)) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))
 

@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from app.modules.conversation.needs import NeedsProfile
 from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
+from urllib.parse import quote_plus
 
 from ._i18n import t
 
@@ -887,7 +888,6 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
         f'<span class="ti-off" title="{_h.escape(t("chat.bot_off_hint"))}">🤖⛔</span>'
         if not agent_enabled else ""
     )
-    search_idx = _h.escape(f"{name or ''} {ig_username or ''}".lower())
     # Preserve the active inbox filter in the pushed URL, so a full reload (F5 / background
     # nav) rebuilds the shell with the same filtered thread list, not the whole inbox.
     _chat_url = f"/ui/chat/{tid}?{filter_qs}" if filter_qs else f"/ui/chat/{tid}"
@@ -895,7 +895,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
     _kind_attr = _h.escape(str(channel_kind or ""))
     _name_esc = _h.escape(str(name or "Lead"))
     return (
-        f'<a class="ti{on}" data-search="{search_idx}" data-channel-kind="{_kind_attr}"'
+        f'<a class="ti{on}" data-channel-kind="{_kind_attr}"'
         f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="{_h.escape(_chat_url)}"'
         f' onclick="setOn(this);setOpenThread({tid})"'
         f' href="{_h.escape(_back_url)}">'
@@ -1626,6 +1626,7 @@ def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
     lead_type: str = "", audience: str = "", awaiting: str = "", kind: str = "",
+    q: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -1719,10 +1720,19 @@ def app_shell(
         "document.body.classList.add('chat-open');document.body.classList.remove('nav-open');}"
         "function backToList(){document.body.classList.remove('chat-open');}"
         "function toggleNav(){document.body.classList.toggle('nav-open');}"
-        "function filterTi(){var i=document.getElementById('ti-q');var q=i?i.value:'';"
-        "q=q.toLowerCase().trim();document.querySelectorAll('#tl .ti').forEach(function(e){"
-        "var s=e.getAttribute('data-search')||'';"
-        "e.style.display=(!q||s.indexOf(q)>=0)?'':'none';});}"
+        # Live search hits the SERVER (debounced): the list is capped at 100 rows, so the old
+        # client-side show/hide could only match chats already rendered and silently missed
+        # every older one. Reloading only #tl keeps the input (a sibling, not inside #tl)
+        # focused mid-typing; the address bar is kept in sync so the 30s #tl poll and a full
+        # reload request the same query.
+        "var _tiT=null;"
+        "function filterTi(){clearTimeout(_tiT);_tiT=setTimeout(doFilterTi,250);}"
+        "function doFilterTi(){var i=document.getElementById('ti-q');"
+        "var q=i?i.value.trim():'';"
+        "var p=new URLSearchParams(window.location.search);"
+        "if(q)p.set('q',q);else p.delete('q');var qs=p.toString();"
+        "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl'});"
+        "history.replaceState(null,'','/ui/inbox'+(qs?'?'+qs:''));}"
         # Instant connector-chip state: clicking the active chip clears the filter (all neutral);
         # clicking another makes it 'on' and struck-through 'off' on the rest. The hx-get still
         # reloads #tl server-side; this only fixes the chip bar's visual state, which #tl won't.
@@ -1968,11 +1978,13 @@ def app_shell(
         # ad_id (+ optional grp: pipeline|won|dormant, from a clicked funnel count) narrows
         # only the thread list (funnel stays branch-wide); an active filter shows a
         # dismissable chip linking back to the unfiltered inbox.
+        # safe="," keeps the connector facet's comma-list readable (kind=instagram,whatsapp);
+        # everything else (notably a search term with spaces or &) is properly encoded.
         _thr_params = "&".join(
-            f"{k}={_h.escape(v)}"
+            f"{k}={quote_plus(v, safe=',')}"
             for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
                          ("lead_type", lead_type), ("audience", audience),
-                         ("awaiting", awaiting), ("kind", kind)) if v)
+                         ("awaiting", awaiting), ("kind", kind), ("q", q)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
         _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
                     "dormant": t("rep.dormant")}.get(grp, "")
@@ -2045,7 +2057,7 @@ def app_shell(
             f'<div class="thr-h">{inbox_lbl}<span class="chk-kinds">{_kind_chips}</span></div>'
             f'{_ad_chip}{_seg_chip}{_await_chip}'
             f'<input id="ti-q" class="ti-q" type="search" autocomplete="off"'
-            f' data-help="{_h.escape(t("hint.search"))}"'
+            f' data-help="{_h.escape(t("hint.search"))}" value="{_h.escape(q)}"'
             f' placeholder="{_h.escape(t("inbox.search"))}" oninput="filterTi()">'
             f'<div id="tl" hx-get="/ui/threads{_thr_qs}" hx-trigger="load, every 30s"'
             f' hx-swap="innerHTML"></div>'

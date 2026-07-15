@@ -100,11 +100,12 @@ def test_thread_card_shows_bot_off_indicator() -> None:
     assert "🤖⛔" not in thread_list_html([_thread_row(5)])  # enabled → none
 
 
-def test_thread_card_has_lowercase_search_index() -> None:
+def test_thread_card_carries_no_client_side_search_index() -> None:
+    # Search is server-side now (see test_inbox_search.py) — the per-row index the old
+    # client-side filter matched against is dead weight and must not come back.
     from app.api._ui_html import thread_list_html
     _set_lang("en")
-    html = thread_list_html([_thread_row(3)])  # name "Alice", handle "alice"
-    assert 'data-search="alice alice"' in html  # name + @handle, lowercased for live search
+    assert "data-search" not in thread_list_html([_thread_row(3)])
 
 
 def test_thread_card_branch_badge_only_in_multibranch_view() -> None:
