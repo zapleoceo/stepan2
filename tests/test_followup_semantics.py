@@ -185,35 +185,59 @@ async def test_due_thread_queues_nudge_consumes_timer_without_burning_step(db_se
     assert refreshed.next_followup_at is None  # timer consumed so run() won't re-queue
 
 
-async def test_followup_needs_manager_raises_an_alert(db_session) -> None:
-    """A nudge can trip needs_manager too (an unfixable guard violation, or the model
-    surfacing a genuine KB gap) — it must alert a human same as a live reply, or nobody
-    ever finds out the lead needs one (the gap this closes)."""
+class _Notifier:
+    def __init__(self) -> None:
+        self.sends: list[str] = []
+
+    async def create_topic(self, *, name: str, icon_emoji=None) -> int:  # noqa: ANN001, ARG002
+        return 1
+
+    async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
+        self.sends.append(text)
+        return "ok"
+
+
+_NM_PAYLOAD = json.dumps({
+    "reply": "Untuk yang ini aku cek dulu ke tim ya Kak",
+    "stage": "qualifying", "needs_manager": True, "manager_question": "Promo bulan ini?",
+    "kb_gap": "no monthly promo info in KB",
+})
+
+
+async def test_followup_needs_manager_no_alert_when_lead_silent(db_session) -> None:
+    """The lead is SILENT (that's why we nudge), so manager_question has nothing to quote and
+    the model invents one — thread 3072 alerted a schedule question the bot itself raised, 30h
+    after the lead's last (non-question) 'halo'. A follow-up needs_manager on a lead whose own
+    last message asked nothing must NOT ping a human."""
     from app.adapters.db.models import ManagerAlert
 
-    bid, tid, lead, _thread = await _world(db_session, timer_due=True)
+    bid, _tid, lead, _thread = await _world(db_session, timer_due=True)  # last inbound = "halo"
     lead.phone_e164 = "+6281234567890"
     db_session.add(lead)
     await db_session.flush()
-
-    class _Notifier:
-        def __init__(self) -> None:
-            self.sends: list[str] = []
-
-        async def create_topic(self, *, name: str, icon_emoji=None) -> int:  # noqa: ANN001, ARG002
-            return 1
-
-        async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
-            self.sends.append(text)
-            return "ok"
-
-    payload = json.dumps({
-        "reply": "Untuk yang ini aku cek dulu ke tim ya Kak",
-        "stage": "qualifying", "needs_manager": True, "manager_question": "Promo bulan ini?",
-        "kb_gap": "no monthly promo info in KB",
-    })
     notifier = _Notifier()
-    svc = FollowupService(db_session, bid, FakeLLM(payload), KnowledgeService(db_session, bid),
+    svc = FollowupService(db_session, bid, FakeLLM(_NM_PAYLOAD), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=notifier)
+    assert await svc.run() == 1                                   # the nudge still goes out
+    assert (await db_session.exec(select(ManagerAlert))).first() is None  # but no phantom alert
+    assert notifier.sends == []
+
+
+async def test_followup_needs_manager_alerts_on_a_real_question(db_session) -> None:
+    """When the lead's OWN last message really does ask something, the follow-up needs_manager
+    still alerts — the genuine case this path was built for."""
+    from app.adapters.db.models import ManagerAlert, Message
+
+    bid, tid, lead, thread = await _world(db_session, timer_due=True)
+    lead.phone_e164 = "+6281234567890"
+    db_session.add(lead)
+    # the lead's last message is a real question (still older than last_out → timer stays due)
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="q1", direction="in", sent_by="lead",
+                           text="ada diskon ga kak?", occurred_at=_NOW - timedelta(hours=5)))
+    await db_session.flush()
+    notifier = _Notifier()
+    svc = FollowupService(db_session, bid, FakeLLM(_NM_PAYLOAD), KnowledgeService(db_session, bid),
                           _cfg(), notifier=notifier)
     assert await svc.run() == 1
     alert = (await db_session.exec(select(ManagerAlert))).first()

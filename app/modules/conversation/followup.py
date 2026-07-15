@@ -25,6 +25,7 @@ from .reply import (
     _BUBBLE_GAP_S,
     _DUPLICATE_RATIO,
     _REPEAT_CORRECTION,
+    _is_answerable_question,
     _most_similar_prior,
     _split_bubbles,
     guard_decision,
@@ -274,7 +275,17 @@ class FollowupService:
         # A nudge can trip needs_manager too (an unfixable guard violation, or the model
         # itself surfacing a KB gap) — it must alert same as a live reply, or a human never
         # finds out (the pre-2026-07-07 gap: this used to queue the nudge silently).
-        if decision.needs_manager and ctx.lead is not None:
+        #
+        # BUT here the lead is SILENT by definition — that's why we're nudging. `manager_question`
+        # ("the lead's question in their words") then has nothing to quote and the model INVENTS
+        # one: thread 3072 alerted "⚠️ Jadwal kelas kapan?" 30h after the lead's last message,
+        # about a schedule the BOT itself raised in its own follow-up; the owner opened the chat
+        # and found no such question. 24 of 87 needs_manager alerts in a week were this. So alert
+        # only when the lead's OWN last message really does ask something, and only once per
+        # silence — thread 2532 pinged twice, three days apart, for one question.
+        if (decision.needs_manager and ctx.lead is not None
+                and _is_answerable_question(last_in)
+                and not await self._already_alerted_since_lead(thread_id)):
             await raise_manager_alert(
                 self.session, self.branch_id, self.notifier, self.llm,
                 thread_id, ctx.lead.id, decision, ctx.lead.phone_e164)
@@ -325,6 +336,23 @@ class FollowupService:
                 self.session.add(lead)
         self.session.add(thread)
         await self.session.flush()
+
+    async def _already_alerted_since_lead(self, thread_id: int) -> bool:
+        """True when a needs_manager alert already went out for this same silence — re-raising
+        the same gap on every follow-up cycle just buries the owner in duplicates."""
+        row = (
+            await self.session.execute(
+                text(
+                    "SELECT 1 FROM manager_alert ma"
+                    " JOIN channel_thread ct ON ct.id = ma.thread_id"
+                    " WHERE ma.thread_id = :t AND ma.kind = 'needs_manager'"
+                    "   AND (ct.last_in_at IS NULL OR ma.created_at > ct.last_in_at)"
+                    " LIMIT 1"
+                ),
+                {"t": thread_id},
+            )
+        ).first()
+        return row is not None
 
     async def _lead_replied_meanwhile(self, thread_id: int) -> bool:
         row = (
