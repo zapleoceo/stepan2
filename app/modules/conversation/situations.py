@@ -145,10 +145,13 @@ AD_OPENER_NUDGE = (
     "2) ONE short hook: why this topic is worth their time, in THEIR world — what it lets a "
     "person actually DO. One or two lines, concrete, no hype. This is what they clicked for, so "
     "do not leave them empty-handed.\n"
-    "3) ONE easy question with 3-4 NUMBERED options (1️⃣ 2️⃣ 3️⃣) covering the usual reasons "
-    "people come (switch career / build their own thing / level up at work / just curious), and "
-    "tell them to simply send the number. Tapping a number is effortless; composing a sentence "
-    "about their goals is not — that gap is where these leads are lost.\n"
+    "3) ONE easy question with 4 NUMBERED options (1️⃣ 2️⃣ 3️⃣ 4️⃣) covering the usual reasons "
+    "people come — switch career / build their own thing or level up at work / mencari kursus "
+    "buat anaknya / just curious — and tell them to simply send the number. ALWAYS include the "
+    "for-my-child option: parents shopping for a kid are a real segment with their own "
+    "programs, and knowing it on turn one sets the whole sell path (the parent decides and "
+    "pays). Tapping a number is effortless; composing a sentence about their goals is not — "
+    "that gap is where these leads are lost.\n"
     "⛔ Still NO price, NO schedule, NO module list, NO brochure dump — those come once they "
     "tell you which way they lean. This holds EVEN THOUGH the button's canned text asks for "
     "them ('…dan biaya kursusnya', 'ceritakan lebih detail'): that wording is the ad's, not the "
@@ -240,6 +243,20 @@ NEED_PAYOFF_NUDGE = (
     "then ask ONE question about the result they want ('kalau nanti Kakak udah bisa X, apa "
     "yang paling berubah buat Kakak?' / 'pengen hasil akhirnya kayak gimana?'), grounded in "
     "the pain they just named. Return the JSON as usual.]"
+)
+
+# Appended to the follow-up nudge when the lead has NEVER typed a word of their own — their
+# only message is the ad button. The reply path already refuses to price a button click
+# (AD_OPENER_NUDGE), but the FOLLOW-UP path had no such guard: thread 3926 got "Biaya total
+# Rp 1.882.955 — DP 500.000…" as its first-ever follow-up, price dumped at a silent clicker.
+FOLLOWUP_SILENT_CLICKER_EXTRA = (
+    "\n[System addition: this lead has NEVER typed a word of their own — their only message "
+    "is the ad's prefilled button text. The ad-opener rules STILL hold here: NO price, NO "
+    "schedule, NO module dump (the button's '…dan biaya kursusnya' is the ad's wording, not "
+    "theirs). Re-open warmly instead: one light, concrete hook about what this skill lets a "
+    "person actually do, then ONE effortless question with 3-4 NUMBERED options (career "
+    "switch / own project / level up at work / mencari kursus buat anaknya / just curious) "
+    "and 'cukup balas angkanya'. Return the JSON as usual.]"
 )
 
 DISCOVERY_CAP_NUDGE = (

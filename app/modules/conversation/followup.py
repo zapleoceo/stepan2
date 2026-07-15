@@ -31,7 +31,14 @@ from .reply import (
     raise_manager_alert,
 )
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
-from .situations import is_answerable_question as _is_answerable_question
+from .situations import (
+    AD_TEMPLATE_RE,
+    FOLLOWUP_SILENT_CLICKER_EXTRA,
+    lead_spoke_own_words,
+)
+from .situations import (
+    is_answerable_question as _is_answerable_question,
+)
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -201,6 +208,9 @@ class FollowupService:
         cap = pick_capability(workflow="followup", stage=None, lead_type=None,
                               last_inbound="", mode=mode, followup_attempt=sent_so_far)
         nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
+        if not lead_spoke_own_words(ctx.dialog):
+            # a button click is not the lead speaking — no price/pitch in their follow-ups
+            nudge += FOLLOWUP_SILENT_CLICKER_EXTRA
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow="followup",
             extra_user_msg=nudge, capability=cap,
@@ -283,8 +293,14 @@ class FollowupService:
         # and found no such question. 24 of 87 needs_manager alerts in a week were this. So alert
         # only when the lead's OWN last message really does ask something, and only once per
         # silence — thread 2532 pinged twice, three days apart, for one question.
+        # …and the "question" must be the LEAD's, not the ad button's: the prefill text
+        # contains 'biaya', so _is_answerable_question alone let thread 3926 raise a phantom
+        # "Berapa biaya?" alert for a lead who never typed a word (and whose price the
+        # follow-up itself had already quoted).
         if (decision.needs_manager and ctx.lead is not None
+                and lead_spoke_own_words(ctx.dialog)
                 and _is_answerable_question(last_in)
+                and not AD_TEMPLATE_RE.match(last_in)
                 and not await self._already_alerted_since_lead(thread_id)):
             await raise_manager_alert(
                 self.session, self.branch_id, self.notifier, self.llm,

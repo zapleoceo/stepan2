@@ -377,6 +377,11 @@ _DECISION_CONTRACT = (
     "paid they join the adult group. Route toward the parent; keep selling the discounted path. "
     "NEVER mark a student non_target just for being a student.\n"
     "- 'adult': a working adult / decision-maker who pays for themselves.\n"
+    "WHO IS THE COURSE FOR: when discovery hasn't revealed whether they're choosing for "
+    "THEMSELVES or for their CHILD, ask once, lightly ('kursusnya untuk Kakak sendiri atau "
+    "buat anak?') — a parent shopping for a kid sells completely differently (audience stays "
+    "'adult': THEY decide and pay, but program fit, schedule and the payoff must be about the "
+    "child), and without asking you'd run a career pitch at someone choosing for their son.\n"
     "This drives routing, reporting AND the sell path - never let it erase the temperature.\n\n"
 ) + _JSON_SCHEMA_BLOCK
 

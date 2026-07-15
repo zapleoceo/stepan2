@@ -246,6 +246,59 @@ async def test_followup_needs_manager_alerts_on_a_real_question(db_session) -> N
     assert len(notifier.sends) == 1
 
 
+_AD_PREFILL = "Halo, saya ingin tahu detail program SMM dan biaya kursusnya 😊"
+
+
+async def test_followup_needs_manager_no_alert_on_ad_template_question(db_session) -> None:
+    """Thread 3926: the ad button's canned text contains 'biaya', so the question-gate alone
+    read it as the lead asking a price — and raised a phantom 'Berapa biaya?' alert for a lead
+    who never typed a word. The button's text is the ad's, never the lead's."""
+    from app.adapters.db.models import ManagerAlert, Message
+
+    bid, tid, lead, thread = await _world(db_session, timer_due=True)
+    lead.phone_e164 = "+6281234567890"
+    db_session.add(lead)
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="ad1", direction="in", sent_by="lead",
+                           text=_AD_PREFILL, occurred_at=_NOW - timedelta(hours=5)))
+    await db_session.flush()
+    notifier = _Notifier()
+    svc = FollowupService(db_session, bid, FakeLLM(_NM_PAYLOAD), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=notifier)
+    assert await svc.run() == 1                                   # nudge still goes out
+    assert (await db_session.exec(select(ManagerAlert))).first() is None
+    assert notifier.sends == []
+
+
+async def test_followup_to_silent_clicker_carries_no_price_constraint(db_session) -> None:
+    """A lead whose ONLY message is the ad button must not get a price in a follow-up either
+    (thread 3926: the first-ever follow-up dumped 'Rp 1.882.955 — DP 500.000'). The nudge to
+    the model must carry the silent-clicker constraint block."""
+    from app.adapters.db.models import Message
+    from app.modules.conversation.situations import FOLLOWUP_SILENT_CLICKER_EXTRA
+
+    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
+    # make the ONLY inbound the ad prefill — the lead never spoke their own words
+    msg = (await db_session.exec(select(Message).where(Message.thread_id == tid,
+                                                       Message.direction == "in"))).first()
+    msg.text = _AD_PREFILL
+    db_session.add(msg)
+    await db_session.flush()
+
+    captured: list[str] = []
+
+    class _CaptureLLM(FakeLLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            captured.append(messages[-1]["content"] if messages else "")
+            return await super().chat(messages, **kw)
+
+    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=None)
+    assert await svc.run() == 1
+    assert any(FOLLOWUP_SILENT_CLICKER_EXTRA.strip() in c for c in captured), \
+        "silent-clicker follow-up must carry the no-price constraint"
+
+
 async def test_followup_drops_nudge_still_duplicate_after_guard_regen(db_session) -> None:
     """Live case (thread 2087, 2026-07-08): the dedup check runs BEFORE guard_decision, so
     it only sees the FIRST draft. If that draft is fresh (passes dedup) but guard flags an
