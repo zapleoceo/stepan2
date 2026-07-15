@@ -6,7 +6,14 @@ from datetime import datetime, timedelta
 from sqlalchemy import case, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, ChannelThread, Lead, StageEvent
+from app.adapters.db.models import (
+    AdCreativeMap,
+    AdInsightDaily,
+    Branch,
+    ChannelThread,
+    Lead,
+    StageEvent,
+)
 from app.config import settings
 from app.domain.clock import utc_now
 
@@ -78,6 +85,69 @@ async def fetch_ad_funnel(
     if until is not None:
         q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
     return list((await session.execute(q)).all())
+
+
+async def fetch_ad_spend(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> dict[str, dict]:
+    """Meta spend + conversation depth per ad_id, summed over the window. ad_id → metrics.
+
+    Reads ONLY the local cache (ad_insight_daily) — never Graph, so the reports page stays a
+    plain SQL page. Day granularity is what makes an arbitrary date range a SUM here.
+
+    Keyed by ad_id so the caller can join it to our own per-ad funnel through ad_creative_map;
+    the two are reported side by side rather than summed, since they count different things
+    (Meta counts conversations it attributed, we count leads we actually hold)."""
+    q = (
+        select(
+            AdInsightDaily.ad_id,
+            func.sum(AdInsightDaily.spend).label("spend"),
+            func.sum(AdInsightDaily.impressions).label("impressions"),
+            func.sum(AdInsightDaily.conv_started).label("conv_started"),
+            func.sum(AdInsightDaily.conv_depth_3).label("conv_depth_3"),
+            func.sum(AdInsightDaily.conv_depth_5).label("conv_depth_5"),
+            func.sum(AdInsightDaily.blocks).label("blocks"),
+        )
+        .group_by(AdInsightDaily.ad_id)
+    )
+    if branch_ids:
+        q = q.where(AdInsightDaily.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(AdInsightDaily.day >= since.date())  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(AdInsightDaily.day < until.date())  # type: ignore[attr-defined]
+    return {
+        row.ad_id: {
+            "spend": float(row.spend or 0), "impressions": int(row.impressions or 0),
+            "conv_started": int(row.conv_started or 0),
+            "conv_depth_3": int(row.conv_depth_3 or 0),
+            "conv_depth_5": int(row.conv_depth_5 or 0),
+            "blocks": int(row.blocks or 0),
+        }
+        for row in (await session.execute(q)).all()
+    }
+
+
+async def fetch_media_to_ad(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> dict[str, dict]:
+    """ad_media_id → {ad_id, campaign_name, …}. The join key is the MEDIA pk, never the
+    ad_id we store from instagrapi — that one lives in a different id space and resolves to
+    code 100 against Graph (see app/modules/ads/bridge.py)."""
+    q = select(
+        AdCreativeMap.media_pk, AdCreativeMap.ad_id, AdCreativeMap.ad_name,
+        AdCreativeMap.campaign_name, AdCreativeMap.objective,
+    )
+    if branch_ids:
+        q = q.where(AdCreativeMap.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    return {
+        row.media_pk: {
+            "ad_id": row.ad_id, "ad_name": row.ad_name,
+            "campaign_name": row.campaign_name, "objective": row.objective,
+        }
+        for row in (await session.execute(q)).all()
+    }
 
 
 async def fetch_segment_dist(

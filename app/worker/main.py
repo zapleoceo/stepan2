@@ -514,6 +514,40 @@ async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
     return synced
 
 
+async def sync_ads(ctx: dict[str, Any]) -> int:
+    """Fan out the Meta ad map + insight sync, one job per branch.
+
+    Not gated by the platform kill-switch: this is read-only reporting, it sends nothing to
+    a lead, so an operator stopping the bot mid-incident still wants their spend numbers."""
+    return await _fan_out_per_branch(ctx, "sync_ads_branch")
+
+
+async def sync_ads_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's ad attribution: map new lead media → ad, then refresh the insight window.
+
+    Cheap by construction — the map walk is skipped entirely when no lead media is unmapped
+    (the steady state), and insights cover only ads our own leads came from. Map and insights
+    run in SEPARATE transactions so a throttled insight pull can't roll back a map row that
+    was already resolved: the map is immutable and expensive to rediscover, insights are
+    re-pulled next tick anyway."""
+    from app.modules.ads.sync import AdSyncService  # noqa: PLC0415
+    from app.modules.settings.service import get_settings  # noqa: PLC0415
+    mapped = 0
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            mapped = await AdSyncService(session, branch_id, cfg).sync_map()
+    except Exception:
+        logger.exception("ad map sync failed branch=%d", branch_id)
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            await AdSyncService(session, branch_id, cfg).sync_insights()
+    except Exception:
+        logger.exception("ad insight sync failed branch=%d", branch_id)
+    return mapped
+
+
 async def refresh_profiles(ctx: dict[str, Any]) -> int:
     """Refresh IG follower/following stats for stale active-funnel leads (TTL ~6h).
 
@@ -673,7 +707,7 @@ class WorkerSettings:
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
-        reindex_knowledge, aggregate_needs,
+        reindex_knowledge, aggregate_needs, sync_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
         # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
@@ -681,6 +715,7 @@ class WorkerSettings:
         ingest_branch, reply_pending_branch, send_outbox_branch, schedule_followups_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
+        sync_ads_branch,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
         # timeout re-dispatches next tick rather than immediately re-hitting the same slow broker
         # and double-billing). keep_result=0 is the worker default — a killed/failed reply job
@@ -729,6 +764,11 @@ class WorkerSettings:
         # Needs-cloud aggregation once a day at 17:00 UTC = 00:00 WIB (midnight Jakarta), all
         # branches. Incremental + analytics-only, so it's cheap and safe to run platform-wide.
         cron(aggregate_needs, hour={17}, minute={0}, second=0, run_at_startup=False),
+        # Meta ad map + insights every 20 min. Deliberately slow: Meta throttles an ad account
+        # account-wide after a burst (code 80004 — hit live while building this), and its own
+        # attribution lags ~7 days, so a faster cadence would buy nothing but 429s. Costs zero
+        # Graph calls when no new ad appeared and no lead media is unmapped.
+        cron(sync_ads, minute={3, 23, 43}, second=20, run_at_startup=False),
     ]
     on_startup = _on_startup
     redis_settings = _redis_settings()
