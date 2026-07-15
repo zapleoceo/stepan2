@@ -277,3 +277,59 @@ async def test_direct_question_gets_the_answer_not_clarify(db_session) -> None:
         db_session, bid, _DupLLM(), KnowledgeService(db_session, bid)).decide(tid)
     assert decision.reply != guard.CLARIFY_FALLBACK       # not fobbed off with "be specific"
     assert "berbayar" in decision.reply                    # the money answer went through
+
+
+class _PainThenSpyLLM:
+    """First draft catches a pain and pitches; captures the nudge of any redraft."""
+
+    def __init__(self, *, gains: list[str] | None = None) -> None:
+        self.calls = 0
+        self.nudges: list[str] = []
+        self._gains = gains or []
+
+    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        self.calls += 1
+        last = messages[-1]
+        if last["role"] == "user" and last["content"].startswith("[System:"):
+            self.nudges.append(last["content"])
+        return json.dumps({
+            "reply": "Investasinya Rp 1.882.955", "stage": "qualifying",
+            "pains": ["kurangnya modal"], "gains": self._gains,
+        }), {"model": "fake", "cost_usd": 0.0}
+
+    async def embed(self, texts, **kw):  # noqa: ANN001, ANN003, ANN201
+        return [[0.0] for _ in texts]
+
+
+async def test_first_pain_without_payoff_triggers_need_payoff_redraft(db_session) -> None:
+    """Audit 2026-07-15 (thread 3073): the lead names the pain and the bot answers with the
+    price. The nudge alone can't catch that turn — the pain is only in THIS draft, not yet in
+    the stored profile — so the reply is redrafted once with the need-payoff instruction."""
+    from app.modules.conversation.reply import _NEED_PAYOFF_NUDGE
+
+    bid, tid = await _thread_with_texts(
+        db_session, ["mau belajar SMM", "tantangannya kurangnya modal dan ragu untuk memulai"])
+    llm = _PainThenSpyLLM()
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    assert _NEED_PAYOFF_NUDGE in llm.nudges  # the redraft asked for the payoff
+
+
+async def test_no_redraft_when_the_payoff_is_already_there(db_session) -> None:
+    """A pain WITH a gain is a complete need — present away, don't burn an extra call."""
+    from app.modules.conversation.reply import _NEED_PAYOFF_NUDGE
+
+    bid, tid = await _thread_with_texts(
+        db_session, ["mau belajar SMM", "kurangnya modal tapi pengen punya brand sendiri"])
+    llm = _PainThenSpyLLM(gains=["punya brand sendiri"])
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    assert _NEED_PAYOFF_NUDGE not in llm.nudges
+
+
+async def test_no_redraft_when_the_lead_asked_a_direct_question(db_session) -> None:
+    """They asked — answer-first wins; don't hijack the turn into a discovery question."""
+    from app.modules.conversation.reply import _NEED_PAYOFF_NUDGE
+
+    bid, tid = await _thread_with_texts(db_session, ["mau belajar SMM", "berapa harganya kak?"])
+    llm = _PainThenSpyLLM()
+    await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
+    assert _NEED_PAYOFF_NUDGE not in llm.nudges
