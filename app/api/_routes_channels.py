@@ -287,6 +287,7 @@ async def ig_login_start(
     username: str = Form(default=""),
     password: str = Form(default=""),
     session_json: str = Form(default=""),
+    sessionid: str = Form(default=""),
 ) -> HTMLResponse:
     apply_lang(request)
     async with session_scope() as session:
@@ -299,6 +300,21 @@ async def ig_login_start(
         except Exception:
             return HTMLResponse(_ch_ig_form(ch_id, error="Invalid JSON"))
         return await _ig_save(ch_id, dump)
+
+    if sessionid.strip():
+        # Adopt a session a browser already established. Instagram's 2FA now lives on its
+        # Bloks endpoints while instagrapi still calls the legacy accounts/two_factor_login/
+        # (subzeroid/instagrapi#2231), so a 2FA account cannot complete the password flow
+        # here at all — this carries the finished session in instead. Same proxy+geo as the
+        # worker, or the first poll from a different geo trips a checkpoint.
+        cl = build_ig_client(proxy=settings().ig_proxy, lang=lang, tz_offset_h=tz)
+        try:
+            await asyncio.to_thread(cl.login_by_sessionid, sessionid.strip())
+        except Exception as exc:  # noqa: BLE001 — surface the reason; never log the sessionid
+            logger.warning("IG sessionid login failed channel=%d: %s: %s",
+                           ch_id, type(exc).__name__, str(exc)[:200])
+            return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:200]))
+        return await _ig_save(ch_id, cl.get_settings())
 
     if not username.strip() or not password.strip():
         return HTMLResponse(_ch_ig_form(ch_id, error="Username and password required"))

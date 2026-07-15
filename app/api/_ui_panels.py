@@ -1090,6 +1090,24 @@ def _ch_ig_form(
         f'<button type="submit" class="btn-sm btn-p">'
         f'{_h.escape(t("ch.ig_login"))}</button>{spin}'
         f'</form>'
+        # Sign in with a sessionid taken from a browser that is ALREADY logged in. Not hidden
+        # away: Instagram moved 2FA onto its Bloks endpoints and instagrapi still calls the
+        # legacy accounts/two_factor_login/ (subzeroid/instagrapi#2231, #2109), so for an
+        # account with 2FA on this is the only path through this panel that works at all —
+        # it carries an existing session and never touches the login/2FA flow.
+        f'<div style="margin-top:.9rem;border-top:1px solid #2d3748;padding-top:.7rem">'
+        f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
+        f' hx-swap="innerHTML" hx-disabled-elt="find button"'
+        f' hx-indicator="find .htmx-indicator" style="max-width:360px">'
+        f'<div class="frm-grp">'
+        f'<label class="frm-lbl">{_h.escape(t("ch.sessionid"))}</label>'
+        # type=password: this grants full account access, so it must not sit in plain view
+        # on a shared screen, and it must never be offered to a password manager.
+        f'<input class="frm-inp" name="sessionid" type="password" autocomplete="off"></div>'
+        f'{_ch_hint(t("ch.hint_sessionid"))}'
+        f'<button type="submit" class="btn-sm btn-p">'
+        f'{_h.escape(t("ch.connect_sessionid"))}</button>{spin}'
+        f'</form></div>'
         # Session-JSON import is a power-user escape hatch (paste an already-logged-in
         # instagrapi session, skip the login/2FA dance entirely) — collapsed by default so
         # it doesn't compete with the normal path for attention.

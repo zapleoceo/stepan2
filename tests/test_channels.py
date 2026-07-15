@@ -807,3 +807,107 @@ def test_two_factor_classification_is_logged_at_a_readable_level(
     # where a code that "never arrives" is actually going — masked by Instagram already
     assert "+60 *** *** 89" in text
     assert "obfuscated_phone_number" in text          # full key set, to spot unknown signals
+
+
+# ─── connect by sessionid (the only path a 2FA account can take) ───
+
+def _mk_async(value):
+    async def _f(*_a, **_k):
+        return value
+    return _f
+
+
+class _null_scope:  # noqa: N801 — a context-manager stand-in, not a class API
+    async def __aenter__(self):
+        return None
+
+    async def __aexit__(self, *_a):
+        return False
+
+    def __call__(self):
+        return self
+
+async def test_sessionid_login_saves_the_session_without_a_password(monkeypatch) -> None:
+    """Instagram moved 2FA to its Bloks endpoints while instagrapi still calls the legacy
+    accounts/two_factor_login/ (#2231), so a 2FA account cannot finish the password flow at
+    all. A sessionid carries a finished browser session in instead — no password, no code."""
+    from starlette.requests import Request
+
+    import app.api._routes_channels as rc
+
+    used: dict[str, object] = {}
+
+    class _Cl:
+        def login_by_sessionid(self, sid: str) -> bool:
+            used["sid"] = sid
+            return True
+
+        def get_settings(self) -> dict:
+            return {"authorization_data": {"ds_user_id": "42"}}
+
+    monkeypatch.setattr(rc, "build_ig_client", lambda **kw: _Cl())
+
+    async def _fake_branch(_s, _ch, _allowed):
+        return 7
+
+    saved: dict[str, object] = {}
+
+    async def _fake_save(ch_id, dump):
+        saved["ch"], saved["dump"] = ch_id, dump
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse("ok")
+
+    monkeypatch.setattr(rc, "_channel_branch", _fake_branch)
+    monkeypatch.setattr(rc, "_ig_save", _fake_save)
+    monkeypatch.setattr(rc, "_channel_geo", _mk_async(("id", 7)))
+    monkeypatch.setattr(rc, "session_scope", _null_scope())
+
+    req = Request({"type": "http", "headers": [], "state": {}})
+    resp = await rc.ig_login_start(7, req, username="", password="", session_json="",
+                                   sessionid="SID-SECRET")
+    assert resp.status_code == 200
+    assert used["sid"] == "SID-SECRET"                    # passed through, stripped
+    assert saved["dump"] == {"authorization_data": {"ds_user_id": "42"}}
+
+
+async def test_sessionid_is_never_logged_even_when_login_fails(monkeypatch) -> None:
+    """The sessionid grants full account access — a failure must report the reason without
+    ever putting the key itself into the logs."""
+    from starlette.requests import Request
+
+    import app.api._routes_channels as rc
+
+    class _Cl:
+        def login_by_sessionid(self, sid: str) -> bool:
+            raise RuntimeError("login_required")
+
+    logged: list[str] = []
+    monkeypatch.setattr(rc.logger, "warning",
+                        lambda msg, *a, **k: logged.append(msg % a if a else msg))
+    monkeypatch.setattr(rc, "build_ig_client", lambda **kw: _Cl())
+
+    async def _fake_branch(_s, _ch, _allowed):
+        return 7
+
+    monkeypatch.setattr(rc, "_channel_branch", _fake_branch)
+    monkeypatch.setattr(rc, "_channel_geo", _mk_async(("id", 7)))
+    monkeypatch.setattr(rc, "session_scope", _null_scope())
+
+    req = Request({"type": "http", "headers": [], "state": {}})
+    resp = await rc.ig_login_start(7, req, username="", password="", session_json="",
+                                   sessionid="SID-SECRET")
+    text = " ".join(logged)
+    assert "login_required" in text and "RuntimeError" in text
+    assert "SID-SECRET" not in text                       # the key never reaches the log
+    assert "SID-SECRET" not in resp.body.decode()         # nor the page
+
+
+def test_sessionid_field_is_offered_and_masked() -> None:
+    from app.api._i18n import _lang
+    from app.api._ui_panels import _ch_ig_form
+    _lang.set("ru")
+    html = _ch_ig_form(5)
+    assert 'name="sessionid"' in html
+    assert 'type="password"' in html.split('name="sessionid"')[0].rsplit("<input", 1)[-1] + \
+           html.split('name="sessionid"')[1].split(">")[0]   # masked, not plain text
+    assert 'autocomplete="off"' in html.split('name="sessionid"')[1].split(">")[0]

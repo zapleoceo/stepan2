@@ -901,6 +901,29 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Already confirmed in the app — retry",
         "id": "Sudah dikonfirmasi di aplikasi — coba lagi",
     },
+    "ch.sessionid": {"ru": "Session ID (кука instagram.com)",
+                     "en": "Session ID (instagram.com cookie)",
+                     "id": "Session ID (cookie instagram.com)"},
+    "ch.connect_sessionid": {"ru": "Подключить по сессии",
+                             "en": "Connect with the session",
+                             "id": "Hubungkan dengan sesi"},
+    "ch.hint_sessionid": {
+        "ru": "Для аккаунта с двухфакторкой это единственный рабочий способ: Instagram "
+              "перенёс 2FA на новый внутренний API, и вход по паролю здесь не завершится. "
+              "Зайдите в аккаунт в браузере, затем F12 → Application → Cookies → "
+              "instagram.com → скопируйте значение sessionid. Пароль вводить не нужно. "
+              "Ключ даёт полный доступ к аккаунту — не пересылайте его никому.",
+        "en": "For an account with 2FA this is the only path that works: Instagram moved 2FA "
+              "onto a new internal API and the password login here cannot complete. Log into "
+              "the account in a browser, then F12 → Application → Cookies → instagram.com → "
+              "copy the sessionid value. No password needed. This key grants full access to "
+              "the account — never forward it to anyone.",
+        "id": "Untuk akun dengan 2FA ini satu-satunya cara yang berhasil: Instagram "
+              "memindahkan 2FA ke API internal baru dan login kata sandi di sini tidak bisa "
+              "selesai. Masuk ke akun di browser, lalu F12 → Application → Cookies → "
+              "instagram.com → salin nilai sessionid. Tanpa kata sandi. Kunci ini memberi "
+              "akses penuh ke akun — jangan pernah meneruskannya ke siapa pun.",
+    },
     "ch.advanced_json": {
         "ru": "Продвинутый вариант: вставить готовую сессию (Session JSON)",
         "en": "Advanced: paste an existing session (Session JSON)",
