@@ -79,20 +79,27 @@ class AdSyncService:
     async def _match_ads(
         self, client: MetaAdsClient, wanted: dict[str, str],
     ) -> list[dict]:
-        """Walk ads once and match each against the media we still need, cheapest first.
+        """Walk ads once, match each against the media we still need, cheapest tier first.
 
-        Promoting an existing IG post makes dark copies, so the medium a lead saw is not
-        always the one on the ad's permalink. Three pointers are tried per ad:
+        The same ad shows in feed, stories and reels, and Meta renders a SEPARATE IG post per
+        placement — adjacent shortcodes made the same second — while exposing only one of them
+        as the creative's permalink. The medium a lead saw is usually one of the others, which
+        is why permalink matching alone stalls at 45%.
 
+        Tiers, in order:
           1. permalink shortcode      — free, already in the walk
-          2. effective_instagram_media_id — one extra call; resolves on ads_management
-          3. source_instagram_media_id    — one extra call; needs instagram_basic, which the
-             System User does NOT currently hold, so this tier is a no-op until it is added
+          2. effective/source media id — one call per ad; source needs instagram_basic (which
+             the System User now holds, though it resolves +0 here — kept for correctness)
+          3. image_hash               — every placement variant is rendered from ONE source
+             image, so its hash is what the orphan creative and the live ad share
 
-        Tiers 2-3 cost a call per ad, so they only run for ads whose permalink missed AND only
-        while something is still wanted — the walk stops as soon as every medium is matched."""
+        Measured on prod: 1) 45.2%, 3) 55.4%, together 93.6%. The tiers are complementary,
+        not redundant — each catches what the other misses, so both must run.
+        Tiers 2-3 cost extra walks, so they only start if tier 1 left something wanted."""
         rows: list[dict] = []
         pending = dict(wanted)
+        by_hash: dict[str, object] = {}
+        deferred: list = []
 
         def _take(code: str | None, ad) -> bool:
             pk = pending.pop(code, None) if code else None
@@ -106,25 +113,36 @@ class AdSyncService:
             })
             return True
 
-        deferred: list = []
         async for ad in client.iter_ads():
+            # Collect hashes as we go: tier 3 needs them and re-walking ads would double the
+            # Graph cost on an account that throttles after ~20 pages.
+            for image_hash in ad.image_hashes:
+                by_hash.setdefault(image_hash, ad)
             if _take(ad.shortcode, ad):
-                # Check AFTER the match, not at the top of the loop: checking first reads one
-                # more page-worth of ads than needed before noticing there is nothing left.
                 if not pending:
                     break
                 continue
             if ad.effective_media_id or ad.source_media_id:
-                deferred.append(ad)  # needs a lookup — do it only if still unmatched at the end
-        for ad in deferred:
+                deferred.append(ad)
+
+        for ad in deferred:  # tier 2
             if not pending:
                 break
             for media_id in (ad.effective_media_id, ad.source_media_id):
                 if not media_id:
                     continue
-                code = await client.media_shortcode(media_id)
-                if _take(code, ad):
+                if _take(await client.media_shortcode(media_id), ad):
                     break
+
+        if pending and by_hash:  # tier 3 — the one that lifts 45% to ~94%
+            async for creative in client.iter_creatives():
+                if not pending:
+                    break
+                if creative.shortcode not in pending or not creative.image_hash:
+                    continue
+                ad = by_hash.get(creative.image_hash)
+                if ad is not None:
+                    _take(creative.shortcode, ad)
         return rows
 
     async def sync_insights(self, *, today: date | None = None) -> int:

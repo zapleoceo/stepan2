@@ -21,7 +21,13 @@ from app.adapters.db.models import (
     ChannelThread,
     Lead,
 )
-from app.adapters.meta_ads import AdRow, InsightRow, MetaAdsRateLimited
+from app.adapters.meta_ads import (
+    AdRow,
+    CreativeRow,
+    InsightRow,
+    MetaAdsRateLimited,
+    _creative_image_hashes,
+)
 from app.domain.enums import ChannelKind
 from app.modules.ads import repository as repo
 from app.modules.ads.sync import AdSyncService
@@ -32,17 +38,20 @@ PK = "3931661706982573994"
 CODE = "DaQEX3ds8eq"
 
 
-def _ad(ad_id="ad1", *, shortcode=None, effective=None, source=None, campaign=None):
+def _ad(ad_id="ad1", *, shortcode=None, effective=None, source=None, campaign=None,
+        hashes=()):
     return AdRow(ad_id=ad_id, creative_id=f"c-{ad_id}", ad_name=None, adset_id=None,
                  adset_name=None, campaign_id=None, campaign_name=campaign, objective=None,
-                 shortcode=shortcode, effective_media_id=effective, source_media_id=source)
+                 shortcode=shortcode, effective_media_id=effective, source_media_id=source,
+                 image_hashes=tuple(hashes))
 
 
 class FakeClient:
     """Stands in for MetaAdsClient; records what was walked and looked up."""
 
-    def __init__(self, *, ads=None, insights=None, media=None,
+    def __init__(self, *, ads=None, insights=None, media=None, creatives=None,
                  raise_on: str | None = None) -> None:
+        self._creatives = creatives or []
         self._ads = ads or []
         self._insights = insights or []
         self._media = media or {}          # media_id -> shortcode (None = not permitted)
@@ -57,6 +66,13 @@ class FakeClient:
             raise MetaAdsRateLimited("too many calls")
         for row in self._ads:
             self.ads_read += 1
+            yield row
+
+    async def iter_creatives(self, start_url=None):
+        self.walked.append("creatives")
+        if self._raise_on == "creatives":
+            raise MetaAdsRateLimited("too many calls")
+        for row in self._creatives:
             yield row
 
     async def media_shortcode(self, media_id):
@@ -247,3 +263,65 @@ async def test_no_token_means_no_work(db_session) -> None:
     svc = AdSyncService(db_session, bid, _cfg(token="", account=""))
     assert await svc.sync_map() == 0
     assert await svc.sync_insights() == 0
+
+
+# ─── tier 3: image_hash ───────────────────────────────────────────────────────
+# The same ad renders a separate IG post per placement (feed/stories/reels), and Marketing
+# API exposes only one of them. All variants share ONE source image hash — that is the join.
+# Measured on prod: permalink 45.2%, hash 55.4%, both 93.6%.
+
+HASH = "955845f8c9dcd359558aec274a0c7968"   # real hash from the prod pair that proved this
+
+
+@pytest.mark.asyncio
+async def test_matches_via_image_hash_when_the_permalink_is_another_placement(db_session) -> None:
+    """The lead's medium is an orphan creative no ad points at — only the hash links them."""
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(
+        ads=[_ad(shortcode="OTHER_PLACEMENT", campaign="SMM / Engagement", hashes=[HASH])],
+        creatives=[CreativeRow(creative_id="orphan", shortcode=CODE, image_hash=HASH)],
+    )
+    assert await _svc(db_session, bid, client).sync_map() == 1
+    row = (await db_session.execute(AdCreativeMap.__table__.select())).mappings().one()
+    assert (row["media_pk"], row["ad_id"]) == (PK, "ad1")
+    assert row["campaign_name"] == "SMM / Engagement"
+
+
+@pytest.mark.asyncio
+async def test_hash_tier_skipped_when_permalink_already_matched(db_session) -> None:
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad(shortcode=CODE, hashes=[HASH])],
+                        creatives=[CreativeRow("orphan", CODE, HASH)])
+    await _svc(db_session, bid, client).sync_map()
+    assert "creatives" not in client.walked     # tier 1 sufficed — no extra walk billed
+
+
+@pytest.mark.asyncio
+async def test_hash_of_a_different_ad_does_not_match(db_session) -> None:
+    """A wrong hash must leave the medium unmapped, never attach it to the wrong campaign."""
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad(shortcode="OTHER", hashes=["deadbeef"])],
+                        creatives=[CreativeRow("orphan", CODE, HASH)])
+    assert await _svc(db_session, bid, client).sync_map() == 0
+
+
+@pytest.mark.asyncio
+async def test_creative_without_a_hash_is_skipped(db_session) -> None:
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad(shortcode="OTHER", hashes=[HASH])],
+                        creatives=[CreativeRow("orphan", CODE, None)])
+    assert await _svc(db_session, bid, client).sync_map() == 0
+
+
+def test_collects_own_hash_and_every_placement_variant() -> None:
+    """Real asset_feed_spec shape: placement variants live beside the creative's own image."""
+    creative = {
+        "image_hash": "own",
+        "asset_feed_spec": {"images": [{"hash": "v1"}, {"hash": "v2"}, {"hash": "own"}]},
+    }
+    assert _creative_image_hashes(creative) == ("own", "v1", "v2")   # deduped, order-stable
+
+
+def test_collects_nothing_when_there_is_no_image() -> None:
+    assert _creative_image_hashes({}) == ()
+    assert _creative_image_hashes({"asset_feed_spec": {"images": [{"x": 1}]}}) == ()
