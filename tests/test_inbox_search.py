@@ -59,3 +59,24 @@ def test_search_term_is_url_encoded_not_html_escaped() -> None:
 def test_search_combines_with_the_active_filter() -> None:
     html = app_shell("en", "", active_nav="inbox", stage="dormant", q="alice")
     assert "stage=dormant" in html and "q=alice" in html
+
+
+def test_settling_the_thread_list_must_not_re_trigger_the_search() -> None:
+    """filterTi() now issues a request that re-renders #tl. An afterSettle hook on #tl used to
+    call it, so #tl reloaded itself forever: the list flickered, the spinner never went out,
+    and every pass replaceState'd the address bar back to /ui/inbox — so opening a chat lost
+    its own URL. Only real user input may call it."""
+    html = app_shell("en", "", active_nav="inbox")
+    assert "if(t&&t.id==='tl')filterTi();" not in html
+    assert 'oninput="filterTi()"' in html          # user input is still the trigger
+
+
+def test_opening_a_chat_keeps_its_own_url() -> None:
+    # the row pushes the chat URL; nothing may rewrite it back to the plain inbox
+    from datetime import UTC, datetime
+
+    from app.api._ui_html import thread_list_html
+    row = (452, "Alice", "new", datetime.now(UTC).replace(tzinfo=None), "+62811", "c", "alice",
+           None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0, "instagram")
+    row_html = thread_list_html([row], filter_qs="stage=dormant")
+    assert 'hx-push-url="/ui/chat/452?stage=dormant"' in row_html

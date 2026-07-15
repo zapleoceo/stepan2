@@ -1730,6 +1730,10 @@ def app_shell(
         # every older one. Reloading only #tl keeps the input (a sibling, not inside #tl)
         # focused mid-typing; the address bar is kept in sync so the 30s #tl poll and a full
         # reload request the same query.
+        # Call this ONLY from real user input. It issues a request that re-renders #tl, so
+        # calling it from an htmx swap hook (an afterSettle on #tl once did) makes #tl reload
+        # itself forever — a flickering list, and every pass rewrote the address bar back to
+        # /ui/inbox, dropping the open chat out of the URL.
         "var _tiT=null;"
         "function filterTi(){clearTimeout(_tiT);_tiT=setTimeout(doFilterTi,250);}"
         "function doFilterTi(){var i=document.getElementById('ti-q');"
@@ -1775,7 +1779,7 @@ def app_shell(
         # reading history mid-chat; only opening a chat (fresh panel above) jumps to the end.
         # any content swapped into #main (panel or chat) slides the overlay in on mobile
         "if(t&&t.id==='main'&&window.innerWidth<=760){document.body.classList.add('chat-open');document.body.classList.remove('nav-open');}"
-        "if(t&&t.id==='tl')filterTi();});"
+        "});"
         # F5 / direct load: afterSettle never fires, so pin every .msgs to the bottom on load
         "function scrollAllBot(){document.querySelectorAll('.msgs').forEach(function(m){"
         "scrollBot(m);m.querySelectorAll('img').forEach(function(g){"
