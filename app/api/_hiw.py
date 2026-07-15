@@ -11,29 +11,26 @@ mechanics → file paths and production incidents.
 from __future__ import annotations
 
 _CSS = r"""
+/* Same design language as the landing and /whats-new (app/api/_landing.py, _changelog.py):
+   one always-dark palette, Inter for text, Space Grotesk for display, the orange accent.
+   The variable NAMES are kept from this page's own older (light, teal, Georgia) theme so the
+   ~100 component rules below keep working untouched — only the values move to the site's. */
 :root{
-  --bg:#F6F8F5; --surface:#FFFFFF; --ink:#212930; --muted:#5D6B70;
-  --accent:#0E7A6D; --accent-ink:#0A5D53; --accent-soft:rgba(14,122,109,.09);
-  --warn:#9A5B10; --warn-soft:rgba(180,83,9,.10);
-  --line:#E0E6E1; --code-bg:#EDF1EC;
-  --shadow:0 1px 2px rgba(25,40,35,.06),0 6px 20px rgba(25,40,35,.05);
-  --hero-ink:#EAF2EE; --hero-muted:#9AB0AA;
-}
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg:#121A1C; --surface:#192326; --ink:#E4EBE7; --muted:#93A3A2;
-    --accent:#3BCDB8; --accent-ink:#66DECC; --accent-soft:rgba(59,205,184,.12);
-    --warn:#E0A65E; --warn-soft:rgba(224,166,94,.12);
-    --line:#28353A; --code-bg:#202C30;
-    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
-  }
+  --bg:#08090c; --surface:#0e1014; --ink:#f2f4f7; --muted:#9aa3b2;
+  --accent:#ff5c35; --accent-ink:#ff8a63; --accent-soft:rgba(255,92,53,.12);
+  --warn:#ffa94d; --warn-soft:rgba(255,169,77,.12);
+  --line:#20232b; --code-bg:#15171d;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);
+  --hero-ink:#f2f4f7; --hero-muted:#9aa3b2;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --disp:'Space Grotesk',var(--sans);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{transition:none!important;animation:none!important} }
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.62 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.62 var(--sans);-webkit-font-smoothing:antialiased;font-feature-settings:"cv02","cv03","cv04"}
 main{max-width:920px;margin:0 auto;padding:0 20px 96px}
-h1,h2,h3{font-family:Georgia,"Times New Roman",serif;line-height:1.25;text-wrap:balance}
+h1,h2,h3{font-family:var(--disp);line-height:1.25;text-wrap:balance;letter-spacing:-.02em}
 h1{font-size:clamp(30px,5vw,46px);margin:.2em 0 .3em;font-weight:700}
 h2{font-size:26px;margin:0 0 6px}
 h3{font-size:19px;margin:20px 0 8px}
@@ -41,22 +38,22 @@ p{margin:.5em 0}
 a{color:var(--accent-ink)}
 code{font:.86em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code-bg);padding:1px 6px;border-radius:5px;word-break:break-all}
 
-/* hero — deep committed panel on both themes, keynote feel */
-.hero{background:linear-gradient(160deg,#0D1517 0%,#10201F 55%,#0D1B23 100%);color:var(--hero-ink);padding:56px 20px 46px;position:relative;overflow:hidden}
-.hero::after{content:"";position:absolute;inset:auto -20% -60% -20%;height:80%;background:radial-gradient(ellipse at 50% 100%,rgba(59,205,184,.18),transparent 70%);pointer-events:none}
+/* hero — the site's panel tone lifted a step off the page, with the orange glow */
+.hero{background:linear-gradient(160deg,#0e1014 0%,#15171d 55%,#0b0c10 100%);color:var(--hero-ink);padding:56px 20px 46px;position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+.hero::after{content:"";position:absolute;inset:auto -20% -60% -20%;height:80%;background:radial-gradient(ellipse at 50% 100%,var(--accent-soft),transparent 70%);pointer-events:none}
 .hero-in{max-width:880px;margin:0 auto;position:relative}
 .topline{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;margin-bottom:26px}
-.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#5FD6C3;font-weight:700}
+.eyebrow{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:700}
 .hero .lede{font-size:19px;color:var(--hero-muted);max-width:64ch}
-.hero a.back{color:#5FD6C3;font-size:13.5px;text-decoration:none;border:1px solid rgba(95,214,195,.35);border-radius:999px;padding:6px 14px;display:inline-block}
-.hero a.back:hover{background:rgba(95,214,195,.12)}
-.langsw{display:flex;gap:4px;border:1px solid rgba(95,214,195,.35);border-radius:999px;padding:3px}
+.hero a.back{color:var(--accent);font-size:13.5px;text-decoration:none;border:1px solid rgba(255,92,53,.35);border-radius:999px;padding:6px 14px;display:inline-block}
+.hero a.back:hover{background:var(--accent-soft)}
+.langsw{display:flex;gap:4px;border:1px solid rgba(255,92,53,.35);border-radius:999px;padding:3px}
 .langsw a{color:var(--hero-muted);font-size:12.5px;font-weight:700;letter-spacing:.06em;text-decoration:none;padding:4px 12px;border-radius:999px}
-.langsw a.on{background:rgba(95,214,195,.18);color:#5FD6C3}
-.langsw a:hover{color:#5FD6C3}
+.langsw a.on{background:var(--accent-soft);color:var(--accent)}
+.langsw a:hover{color:var(--accent)}
 .stats{display:flex;flex-wrap:wrap;gap:10px;margin:24px 0 4px}
 .stat{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 14px;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
-.stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums;color:#5FD6C3}
+.stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums;color:var(--accent);font-family:var(--disp)}
 .stat span{font-size:12.5px;color:var(--hero-muted)}
 .hint{font-size:14px;color:var(--hero-muted);margin-top:18px;max-width:70ch}
 .hint b{color:var(--hero-ink)}
@@ -1388,9 +1385,14 @@ def hiw_html(lang: str = "en") -> str:
         # inline favicon: avoids the browser's automatic /favicon.ico 404
         '<link rel="icon" href="data:image/svg+xml,'
         "%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E"
-        "%3Crect width='100' height='100' rx='20' fill='%230E7A6D'/%3E"
+        "%3Crect width='100' height='100' rx='20' fill='%23ff5c35'/%3E"
         "%3Ctext x='50' y='72' font-size='62' text-anchor='middle' fill='white' "
-        "font-family='Georgia,serif'%3ES%3C/text%3E%3C/svg%3E\">\n"
+        "font-family='Inter,sans-serif' font-weight='600'%3ES%3C/text%3E%3C/svg%3E\">\n"
+        # same families as the landing / whats-new, so this page reads as part of the site
+        '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+        '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600'
+        '&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">\n'
         f"<title>{_TITLES[lang]}</title>\n"
         f"<style>{_CSS}</style>\n</head>\n<body>"
         f"{body}"
