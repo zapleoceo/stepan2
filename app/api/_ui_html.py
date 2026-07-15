@@ -446,7 +446,12 @@ _CSS = (
     "font-weight:600;cursor:pointer}"
     ".btn-g:hover{background:rgba(255,255,255,.14)}"
     ".htmx-indicator{display:none}"
-    ".htmx-request .htmx-indicator,.htmx-request.htmx-indicator{display:inline-block}"
+    # SELF-match only. The descendant form (.htmx-request .htmx-indicator) meant ANY ancestor
+    # in flight lit up EVERY indicator below it — and htmx.ajax() without a `source` marks
+    # <body>, so a thread-list search/filter made the chat's "Stepan is thinking" spinner
+    # appear out of nowhere. Every indicator here is pointed at by an explicit hx-indicator,
+    # so htmx marks the indicator element itself and nothing needs the descendant match.
+    ".htmx-request.htmx-indicator{display:inline-block}"
     ".msg-prev{max-width:220px;max-height:280px;border-radius:8px;display:block;margin-top:.25rem}"
     ".media-load{width:120px;height:90px;margin-top:.25rem;border-radius:8px;"
     "background:#222a38;display:flex;align-items:center;justify-content:center;"
@@ -1731,7 +1736,9 @@ def app_shell(
         "var q=i?i.value.trim():'';"
         "var p=new URLSearchParams(window.location.search);"
         "if(q)p.set('q',q);else p.delete('q');var qs=p.toString();"
-        "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl'});"
+        # source:i — without it htmx treats <body> as the requesting element and marks it
+        # htmx-request, which used to switch on every indicator on the page.
+        "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl',source:i});"
         "history.replaceState(null,'','/ui/inbox'+(qs?'?'+qs:''));}"
         # Instant connector-chip state: clicking the active chip clears the filter (all neutral);
         # clicking another makes it 'on' and struck-through 'off' on the rest. The hx-get still
@@ -1748,7 +1755,7 @@ def app_shell(
         "var kind=on.length===all.length?'':(on.length===0?'none':on.join(','));"
         "var p=new URLSearchParams(window.location.search);"
         "if(kind)p.set('kind',kind);else p.delete('kind');var qs=p.toString();"
-        "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl'});"
+        "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl',source:btn});"
         "history.replaceState(null,'','/ui/inbox'+(qs?'?'+qs:''));}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
         "function smartScroll(m){if(!m)return;"

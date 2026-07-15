@@ -156,6 +156,37 @@ def test_bubble_hides_translate_button_when_no_caption() -> None:
     assert "trMsg(2,10)" not in html  # no translate button on a caption-less media bubble
 
 
+# ─── the "Stepan is thinking" spinner must only show for ITS OWN request ──────
+
+def test_indicator_css_matches_only_the_indicator_itself() -> None:
+    """A descendant match (.htmx-request .htmx-indicator) let ANY in-flight ancestor light up
+    every spinner below it. htmx.ajax() without a `source` marks <body>, so searching the
+    thread list made the chat's 'Stepan is thinking' spinner sit there permanently."""
+    from app.api._ui_html import app_shell
+    _set_lang("ru")
+    html = app_shell("ru", "", active_nav="inbox")
+    assert ".htmx-request.htmx-indicator{display:inline-block}" in html   # self-match only
+    assert ".htmx-request .htmx-indicator" not in html                    # never the ancestor
+
+
+def test_thread_list_ajax_calls_name_their_source() -> None:
+    # no source -> htmx treats <body> as the requesting element and marks it htmx-request
+    from app.api._ui_html import app_shell
+    _set_lang("ru")
+    html = app_shell("ru", "", active_nav="inbox")
+    assert "{target:'#tl',source:i}" in html      # live search
+    assert "{target:'#tl',source:btn}" in html    # connector chips
+
+
+def test_analyze_button_still_drives_its_own_spinner() -> None:
+    # the spinner must still appear for the request it belongs to
+    from app.api._ui_html import chat_panel_html
+    _set_lang("ru")
+    html = chat_panel_html(7, "Alice", "new", [], [])
+    assert 'hx-indicator="#an-ind-7"' in html
+    assert 'id="an-ind-7" class="htmx-indicator coach-think"' in html
+
+
 # ─── manual media recognition button ──────────────────────────────────────────
 
 def _media_row(mid: int, text: str, kind: str) -> tuple:
