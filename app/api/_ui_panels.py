@@ -1323,15 +1323,30 @@ def _count_cell(aid: str, grp: str, n: int, color: str) -> str:
     return f'<td class="rep-n"{style}><a class="rep-lnk" href="{qs}">{n}</a></td>'
 
 
+def _col_hint(key: str) -> str:
+    """Hover text for a column header, from the '<key>.hint' translation.
+
+    Silent when no hint is defined: t() echoes an unknown key back, so comparing against it
+    is how we tell "no hint" from a real one — a header must never show 'rep.won.hint'."""
+    hint_key = f"{key}.hint"
+    hint = t(hint_key)
+    return "" if hint == hint_key else f' title="{_h.escape(hint)}"'
+
+
 def _ad_funnel_header(cols: list[tuple[str, bool, str, bool]],
                       products: list[tuple[str, str]]) -> str:
     """Two header rows: clickable sort headers + a per-column filter row.
-    cols entries: (label_key, numeric, filter_kind[text|eq|min], align_right)."""
+    cols entries: (label_key, numeric, filter_kind[text|eq|min], align_right).
+
+    Headers carry a hover hint: these columns mix OUR numbers with Meta's, and the two count
+    different things — without saying so, "Переписок 600" next to "Наших лидов 100" reads
+    like a bug rather than the point."""
     ths = ""
     for key, num, _kind, right in cols:
         style = ' style="text-align:right"' if right else ""
         ths += (
-            f'<th class="rep-sort"{style} data-num="{1 if num else 0}"'
+            f'<th class="rep-sort help"{style} data-num="{1 if num else 0}"'
+            f'{_col_hint(key)}'
             f' onclick="repSort(this)">{_h.escape(t(key))}<span class="rep-arr"></span></th>'
         )
     fths = ""
@@ -1368,6 +1383,12 @@ _AD_TREE_CSS = (
     ".adt-m b{color:#e8eef4;font-weight:600}"
     ".adt-c table{margin:0;border-top:1px solid #232b36}"
     ".adt-orph{border-color:#3a2f22}"
+    # A dotted underline is the only affordance a title= tooltip has — without it nobody
+    # discovers the hints, and these columns are the ones that most need explaining.
+    ".help{text-decoration:underline dotted #5c6b7d 1px;text-underline-offset:3px;"
+    "cursor:help}"
+    "th.help{text-decoration:none}"
+    "th.help:hover{text-decoration:underline dotted #5c6b7d 1px;text-underline-offset:3px}"
     "</style>"
 )
 
@@ -1486,7 +1507,8 @@ def _ad_tree_html(
         body += (
             f'<details class="adt-c"><summary>'
             f'<span class="adt-nm" title="{_h.escape(name)}">{_h.escape(name[:60])}</span>'
-            f'<span class="adt-m"><b>{_money(grp["spend"])}</b> · '
+            f'<span class="adt-m help" title="{_h.escape(t("rep.ads_row.hint"))}">'
+            f'<b>{_money(grp["spend"])}</b> · '
             f'{_h.escape(t("rep.ads_leads"))} <b>{grp["leads"]}</b> · '
             f'{_h.escape(t("rep.ads_won"))} <b>{grp["won"]}</b> · '
             f'{_h.escape(t("rep.ads_cpl"))} <b>{_money(cpl)}</b>{blocks}</span>'
@@ -1517,7 +1539,8 @@ def _ad_tree_html(
     # part of the leads reads as complete and would be trusted as such.
     note = (
         f'<div style="font-size:.62rem;color:#8899aa;margin:.15rem 0 .4rem">'
-        f'{_h.escape(t("rep.ads_coverage"))}: {covered:.0f}% ({tot_leads}/{seen_leads})'
+        f'<span class="help" title="{_h.escape(t("rep.ads_coverage.hint"))}">'
+        f'{_h.escape(t("rep.ads_coverage"))}: {covered:.0f}% ({tot_leads}/{seen_leads})</span>'
         f' · {_h.escape(t("rep.ads_total"))} {_money(tot_spend)}{stamp}</div>'
     )
     hdr = (

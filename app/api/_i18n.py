@@ -392,6 +392,87 @@ _TR: dict[str, dict[str, str]] = {
     "rep.ads_campaign": {"ru": "Кампания", "en": "Campaign", "id": "Kampanye"},
     "rep.ads_spend":    {"ru": "Расход", "en": "Spend", "id": "Belanja"},
     "rep.ads_started":  {"ru": "Переписок", "en": "Convos", "id": "Percakapan"},
+    # Column hints, rendered as title= on the header (see _col_hint). They exist because this
+    # table puts Meta's numbers next to ours and the two count DIFFERENT things — the gap is
+    # the insight, but only if the reader knows it is not a bug.
+    "rep.ads_row.hint": {
+        "ru": "Итог по кампании: расход Meta, наши лиды, выигранные и настоящая цена лида "
+              "(расход ÷ наши лиды). Разверните, чтобы увидеть объявления.",
+        "en": "Campaign totals: Meta spend, our leads, won, and the real cost per lead "
+              "(spend ÷ our leads). Expand to see the ads.",
+        "id": "Total kampanye: belanja Meta, lead kami, menang, dan biaya per lead."},
+    "rep.ads_coverage.hint": {
+        "ru": "Доля наших лидов, которых удалось связать с объявлением в рекламном "
+              "кабинете. Остальные — с объявлений, которых в этом кабинете нет, поэтому "
+              "расход по ним неизвестен и в суммы не попадает.",
+        "en": "Share of our leads we could match to an ad in the ad account. The rest come "
+              "from ads that are not in this account, so their spend is unknown and is not "
+              "counted in the totals.",
+        "id": "Bagian lead yang cocok dengan iklan di akun ini."},
+    "rep.ad.hint": {
+        "ru": "Объявление, с которого пришли лиды. Клик по цифрам открывает эти чаты.",
+        "en": "The ad these leads came from. Click a number to open those chats.",
+        "id": "Iklan asal lead ini. Klik angka untuk membuka chat."},
+    "rep.ads_spend.hint": {
+        "ru": "Сколько Meta реально списала за это объявление за выбранный период.",
+        "en": "What Meta actually charged for this ad in the selected period.",
+        "id": "Yang benar-benar ditagih Meta untuk iklan ini."},
+    "rep.ads_started.hint": {
+        "ru": "Счёт Meta: сколько человек открыли переписку. Это ТАПЫ, а не разговоры — "
+              "реклама оптимизируется именно на них, поэтому число льстит. "
+              "С «Наших лидов» не сходится, и не должно.",
+        "en": "Meta's count of people who opened a chat. These are TAPS, not conversations — "
+              "the campaign optimises for them, so the number flatters. It will not "
+              "reconcile with 'Our leads', by design.",
+        "id": "Hitungan Meta: orang yang membuka chat. Ini KETUKAN, bukan percakapan."},
+    "rep.ads_d5.hint": {
+        "ru": "Счёт Meta: дошли до 5-го сообщения. Вот это уже похоже на настоящий "
+              "разговор — трезвая оценка качества, в отличие от «Переписок».",
+        "en": "Meta's count of chats that reached a 5th message — the honest quality "
+              "signal, unlike 'Convos'.",
+        "id": "Hitungan Meta: chat yang mencapai pesan ke-5."},
+    "rep.ads_leads.hint": {
+        "ru": "Наш счёт: лиды, реально лежащие у нас в базе с этого объявления. Меньше "
+              "«Переписок» — Meta считает тапы, мы считаем людей.",
+        "en": "Our count: leads we actually hold from this ad. Lower than 'Convos' — Meta "
+              "counts taps, we count people.",
+        "id": "Hitungan kami: lead nyata dari iklan ini."},
+    "rep.ads_cpl.hint": {
+        "ru": "Расход ÷ наши лиды. Настоящая цена лида — та, что прячется за «ценой "
+              "переписки» от Meta.",
+        "en": "Spend ÷ our leads. The real cost per lead — what Meta's "
+              "cost-per-conversation hides.",
+        "id": "Belanja ÷ lead kami. Biaya per lead sebenarnya."},
+    "rep.ads_cpw.hint": {
+        "ru": "Расход ÷ выигранные лиды. Во сколько обошёлся лид, дошедший до передачи.",
+        "en": "Spend ÷ won leads. What a lead that reached hand-off actually cost.",
+        "id": "Belanja ÷ lead menang."},
+    "rep.total.hint": {
+        "ru": "Всего наших лидов с этого объявления за период.",
+        "en": "All our leads from this ad in the period.",
+        "id": "Semua lead kami dari iklan ini."},
+    "rep.pipeline.hint": {
+        "ru": "Лиды в работе: nurturing, qualifying, presenting, objection.",
+        "en": "Leads in play: nurturing, qualifying, presenting, objection.",
+        "id": "Lead dalam proses."},
+    "rep.won.hint": {
+        "ru": "Дошли до готовности или переданы менеджеру (ready + handed_off).",
+        "en": "Reached ready or were handed off.",
+        "id": "Siap atau diserahkan."},
+    "rep.dormant.hint": {
+        "ru": "Замолчали и не отвечают. Обычно это те самые односложные «Hi».",
+        "en": "Went silent. Usually the one-word 'Hi' crowd.",
+        "id": "Berhenti merespons."},
+    "rep.conv.hint": {
+        "ru": "Выиграно ÷ всего, в процентах.",
+        "en": "Won ÷ total, as a percentage.",
+        "id": "Menang ÷ total, dalam persen."},
+    "rep.ad_product.hint": {
+        "ru": "Какой курс рекламирует объявление. Задаёт оператор — авто-подсказка из "
+              "истории только предлагает, но сама никогда не пишет.",
+        "en": "Which course this ad sells. Operator-set; the history suggestion never "
+              "writes itself.",
+        "id": "Kursus yang diiklankan. Diatur operator."},
     "rep.ads_d3":       {"ru": "До 3-го", "en": "Depth 3", "id": "Kedalaman 3"},
     "rep.ads_d5":       {"ru": "До 5-го", "en": "Depth 5", "id": "Kedalaman 5"},
     "rep.ads_leads":    {"ru": "Наших лидов", "en": "Our leads", "id": "Lead kami"},
