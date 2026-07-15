@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.9.0"
+PROJECT_VERSION = "1.10.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,20 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.10.0", "date": "15 Jul 2026", "tag": "Reporting",
+        "title": "What each ad really costs you",
+        "blurb": "Your reports now show real Meta spend next to your own funnel, ad by ad. "
+                 "Not the headline 'cost per conversation' — the cost of a lead you actually "
+                 "hold, and of a lead that reached a hand-off. The two rarely match: Meta "
+                 "bills for people who tapped, you only bank the ones who talked, and the gap "
+                 "between those columns is where a budget quietly leaks. Meta's own "
+                 "conversation-depth counts sit alongside your stages as a second opinion, "
+                 "and the number of people who blocked you is finally visible. Every table "
+                 "shows how many of its leads it could match to an ad and when the numbers "
+                 "were last synced — a spend report that hides its own gaps is worse than "
+                 "none.",
+    },
     {
         "version": "1.9.0", "date": "15 Jul 2026", "tag": "Selling",
         "title": "Earns the price before naming it",

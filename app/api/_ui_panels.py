@@ -1359,6 +1359,109 @@ def _ad_funnel_html(
     )
 
 
+def _ad_spend_html(
+    rows: list, media_to_ad: dict[str, dict], ad_spend: dict[str, dict],
+    synced_at: object = None, business_id: str = "", account_id: str = "",
+) -> str:
+    """Our per-ad funnel joined to Meta's real spend, one row per ad.
+
+    Two numbers deliberately sit side by side and do NOT reconcile: Meta counts conversations
+    it attributed to the ad, we count leads we actually hold. The gap between them is itself
+    the signal — and "cost per OUR lead" is the number the headline CPM/cost-per-conversation
+    hides, since Meta bills for taps while we only ever bank leads that talk.
+
+    Joins on ad_media_id → ad_creative_map, never on channel_thread.ad_id: that id comes from
+    the private IG API and is in a different id space (Graph answers code 100 for it)."""
+    if not rows or not media_to_ad:
+        return ""
+    per_ad: dict[str, dict] = {}
+    unmatched_leads = 0
+    for _ad_id, ad_media_id, total, pipeline, won, _dormant in rows:
+        mapped = media_to_ad.get(str(ad_media_id or ""))
+        if mapped is None:
+            unmatched_leads += int(total or 0)
+            continue
+        acc = per_ad.setdefault(mapped["ad_id"], {
+            "campaign": mapped.get("campaign_name") or "—",
+            "objective": mapped.get("objective") or "",
+            "leads": 0, "pipeline": 0, "won": 0,
+        })
+        acc["leads"] += int(total or 0)
+        acc["pipeline"] += int(pipeline or 0)
+        acc["won"] += int(won or 0)
+    if not per_ad:
+        return ""
+
+    body = ""
+    tot_spend = tot_leads = tot_started = tot_d5 = 0.0
+    for ad_id, acc in sorted(per_ad.items(), key=lambda kv: -kv[1]["leads"]):
+        m = ad_spend.get(ad_id) or {}
+        spend = float(m.get("spend") or 0.0)
+        started, d3, d5 = (
+            int(m.get("conv_started") or 0), int(m.get("conv_depth_3") or 0),
+            int(m.get("conv_depth_5") or 0))
+        blocks = int(m.get("blocks") or 0)
+        cpl = spend / acc["leads"] if acc["leads"] else 0.0
+        cpw = spend / acc["won"] if acc["won"] else 0.0
+        tot_spend += spend
+        tot_leads += acc["leads"]
+        tot_started += started
+        tot_d5 += d5
+        fb = _fb_ad_url(ad_id, business_id, account_id)
+        name = _h.escape(str(acc["campaign"])[:52])
+        link = f'<a href="{fb}" target="_blank" rel="noopener">{name}</a>' if fb else name
+        body += (
+            f'<tr><td>{link}</td>'
+            f'<td style="text-align:right">${spend:,.2f}</td>'
+            f'<td style="text-align:right">{started or "—"}</td>'
+            f'<td style="text-align:right">{d3 or "—"}</td>'
+            f'<td style="text-align:right;color:#51cf66">{d5 or "—"}</td>'
+            f'<td style="text-align:right">{acc["leads"]}</td>'
+            f'<td style="text-align:right;color:#9b7aff">{acc["won"]}</td>'
+            f'<td style="text-align:right;font-weight:600">'
+            f'{f"${cpl:,.2f}" if cpl else "—"}</td>'
+            f'<td style="text-align:right">{f"${cpw:,.2f}" if cpw else "—"}</td>'
+            f'<td style="text-align:right;color:{"#ff6b6b" if blocks else "#8899aa"}">'
+            f'{blocks or "—"}</td></tr>'
+        )
+    seen_leads = tot_leads + unmatched_leads
+    covered = tot_leads / seen_leads * 100 if seen_leads else 0.0
+    avg_cpl = tot_spend / tot_leads if tot_leads else 0.0
+    stamp = (
+        f' · {_h.escape(t("rep.ads_synced"))} {synced_at:%d.%m %H:%M}'
+        if hasattr(synced_at, "strftime") else ""
+    )
+    # Coverage is on the face of the panel, not in a tooltip: a spend table that silently
+    # omits a third of the leads reads as complete and would be trusted as such.
+    note = (
+        f'<div style="font-size:.62rem;color:#8899aa;margin:.15rem 0 .35rem">'
+        f'{_h.escape(t("rep.ads_coverage"))}: {covered:.0f}%'
+        f' ({int(tot_leads)}/{int(tot_leads + unmatched_leads)}){stamp}</div>'
+    )
+    hdr = (
+        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
+        f'{_h.escape(t("rep.ad_spend"))}</h3>'
+    )
+    heads = ("rep.ads_campaign", "rep.ads_spend", "rep.ads_started", "rep.ads_d3",
+             "rep.ads_d5", "rep.ads_leads", "rep.ads_won", "rep.ads_cpl", "rep.ads_cpw",
+             "rep.ads_blocks")
+    head = "".join(f'<th>{_h.escape(t(k))}</th>' for k in heads)
+    foot = (
+        f'<tr style="border-top:1px solid #2b3440;font-weight:600">'
+        f'<td>{_h.escape(t("rep.ads_total"))}</td>'
+        f'<td style="text-align:right">${tot_spend:,.2f}</td>'
+        f'<td style="text-align:right">{int(tot_started) or "—"}</td><td></td>'
+        f'<td style="text-align:right">{int(tot_d5) or "—"}</td>'
+        f'<td style="text-align:right">{int(tot_leads)}</td><td></td>'
+        f'<td style="text-align:right">{f"${avg_cpl:,.2f}" if avg_cpl else "—"}</td>'
+        f'<td></td><td></td></tr>'
+    )
+    return (
+        f'{hdr}{note}<table class="rep-tbl rep-sortable"><thead><tr>{head}</tr></thead>'
+        f'<tbody>{body}{foot}</tbody></table>'
+    )
+
+
 # Pipeline order for the one-line funnel (side stages shown separately below).
 _FUNNEL_PIPELINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready")
 _FUNNEL_SIDE = ("handed_off", "dormant", "manager")
@@ -1765,6 +1868,9 @@ def reports_panel_html(
     total_leads: int = 0,
     needs_cloud: dict | None = None,
     closed_in_period: int | None = None,
+    media_to_ad: dict[str, dict] | None = None,
+    ad_spend: dict[str, dict] | None = None,
+    ads_synced_at: object = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1858,6 +1964,7 @@ def reports_panel_html(
         f'{_needs_cloud_html(needs_cloud)}'
         f'</div>'
         f'{mini_act}'
+        f'{_ad_spend_html(ad_funnel or [], media_to_ad or {}, ad_spend or {}, ads_synced_at, fb_business_id, fb_account_id)}'  # noqa: E501
         f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'
     )
