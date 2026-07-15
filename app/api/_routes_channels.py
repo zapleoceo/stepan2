@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 from typing import Any
 
@@ -39,6 +40,8 @@ from ._ui_panels import (
     channel_new_form_html,
 )
 from ._ui_settings import channel_settings_html
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -375,6 +378,13 @@ async def _attempt_ig_login(
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind="challenge",
                                         username=user))
     except Exception as exc:
+        # Anything instagrapi raises that is NOT 2FA/challenge lands here and used to be
+        # swallowed into the red box on the operator's screen and nowhere else — leaving the
+        # server logs showing only a bare "[400] POST /accounts/login/" with no reason, so a
+        # failing connect could not be diagnosed without asking the operator to read the
+        # screen. Log the exception TYPE and message (never the password, never the payload).
+        logger.warning("IG login failed channel=%d user=%s: %s: %s",
+                       ch_id, user, type(exc).__name__, str(exc)[:300])
         _ig_flows.pop(fid, None)
         return HTMLResponse(_ch_ig_form(ch_id, error=str(exc)[:200]))
     return await _ig_save(ch_id, cl.get_settings())

@@ -412,6 +412,23 @@ async def test_attempt_ig_login_device_approval_auto_completes_with_no_code_and_
     _ig_flows.pop("fid-dev", None)
 
 
+async def test_unexpected_login_failure_is_logged_not_only_shown_on_screen(caplog) -> None:
+    """A failure that is neither 2FA nor challenge used to go ONLY into the red box on the
+    operator's screen, so the server logs showed a bare '[400] POST /accounts/login/' with no
+    reason and a broken connect could not be diagnosed without asking them to read it out."""
+    import logging
+
+    from app.api._routes_channels import _attempt_ig_login
+
+    cl = _RaisingIGClient(RuntimeError("Please wait a few minutes before you try again."))
+    with caplog.at_level(logging.WARNING):
+        resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="secret", fid="fid-err")  # noqa: S106
+    assert "Please wait a few minutes" in caplog.text
+    assert "RuntimeError" in caplog.text            # the exception TYPE, not just the message
+    assert "secret" not in caplog.text              # never the password
+    assert "Please wait a few minutes" in resp.body.decode()   # still shown to the operator
+
+
 def test_device_poll_backs_off_and_stops_instead_of_hammering_login() -> None:
     """Every poll is a REAL Instagram login call, so the gap must grow and the polling must
     stop — repeated logins are a checkpoint/ban vector. Past the cap the operator gets a
