@@ -63,6 +63,14 @@ def test_hiw_unknown_lang_falls_back_to_english() -> None:
     assert "How Stepan works" in hiw_html("de")
 
 
+def test_hiw_uses_site_style() -> None:
+    html = hiw_html("en")
+    # site-native chrome: brand nav + the landing's fonts + vermilion accent token
+    assert '<nav class="site">' in html and 'class="brand"' in html
+    assert "Space+Grotesk" in html and "family=Inter" in html
+    assert "#ff5c35" in html
+
+
 def test_hiw_is_self_contained_full_page() -> None:
     html = hiw_html()
     assert html.lstrip().lower().startswith("<!doctype html>")
