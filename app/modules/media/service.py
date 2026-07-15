@@ -10,6 +10,7 @@ import logging
 from datetime import timedelta
 from typing import Protocol
 
+from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -34,6 +35,15 @@ _IMAGE_UNAVAILABLE = "🖼 (image — tidak bisa dibaca)"
 # thread isn't frozen indefinitely. Covers "the voice hangs unanswered until the broker is
 # fixed" without hammering a permanently-broken provider forever.
 _MEDIA_RETRY_WINDOW = timedelta(hours=6)
+
+# The cron ticks every 3 minutes, so retrying on every tick meant ~120 submits of the SAME
+# media inside the retry window — and the broker already retries 8 times with its own
+# backoff, so the two layers multiplied (a real incident: one image re-submitted 33 times in
+# 90 minutes while vision was down). Space our own attempts out exponentially instead:
+# 5, 10, 20, 40, 60, 60 ... minutes, so the 6h window costs ~8 attempts, not 120. When the
+# provider recovers, the next due attempt picks the media up as before.
+_MEDIA_RETRY_BASE = timedelta(minutes=5)
+_MEDIA_RETRY_MAX = timedelta(hours=1)
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +86,32 @@ class MediaService:
         return asset
 
     async def pending(self, channel_id: int, limit: int) -> list[Message]:
-        """Messages of this channel still awaiting a media download (capped batch)."""
+        """Messages of this channel still awaiting a media download (capped batch).
+
+        Skips anything whose back-off has not elapsed yet, so a failing item costs one
+        attempt per back-off step instead of one per 3-minute tick."""
         q = (
             select(Message)
             .where(
                 Message.branch_id == self.branch_id,
                 Message.channel_id == channel_id,
                 Message.media_pending.is_(True),  # type: ignore[union-attr]
+                or_(
+                    Message.media_next_try_at.is_(None),  # type: ignore[union-attr]
+                    Message.media_next_try_at <= utc_now(),  # type: ignore[operator]
+                ),
             )
             .limit(limit)
         )
         return list((await self.session.exec(q)).all())
+
+    def _defer(self, msg: Message) -> None:
+        """Transient failure: keep the item flagged, but push the next attempt out
+        exponentially (capped) so we don't stack a retry storm on the broker's own retries."""
+        msg.media_attempts = (msg.media_attempts or 0) + 1
+        step = _MEDIA_RETRY_BASE * (2 ** (msg.media_attempts - 1))
+        msg.media_next_try_at = utc_now() + min(step, _MEDIA_RETRY_MAX)
+        msg.media_pending = True
 
     async def backfill(
         self, channel_id: int, downloader: MediaDownloader, limit: int,
@@ -123,18 +148,23 @@ class MediaService:
                     self.session.add(msg)
                     await self.session.flush()
                     continue
-                except Exception as exc:  # noqa: BLE001 — transient: keep flag, retry next tick
-                    logger.warning("media download failed branch=%d msg=%d: %s",
-                                   self.branch_id, msg.id, exc)
+                except Exception as exc:  # noqa: BLE001 — transient: keep flag, back off, retry
+                    logger.warning("media download failed branch=%d msg=%d (attempt %d): %s",
+                                   self.branch_id, msg.id, (msg.media_attempts or 0) + 1, exc)
+                    self._defer(msg)
+                    self.session.add(msg)
+                    await self.session.flush()
                     continue
             recognized = await self._recognize(msg, stub, transcriber, describer)
             if recognized:
                 await self._recache_translation(msg, translator)
                 msg.media_pending = False
+                msg.media_next_try_at = None
             elif recognized is False and self._retry_window_open(msg):
                 # Recognition failed but the message is still fresh — the broker may be down
-                # or its provider key not yet configured. Keep the flag so we retry next tick.
-                msg.media_pending = True
+                # or its provider key not yet configured. Keep the flag, but back off: the
+                # broker already retries internally, so a per-tick retry here multiplies load.
+                self._defer(msg)
             else:
                 # Nothing can recognize it, or we've retried past the window: stop holding the
                 # thread. The bot answers (asks the lead to type) instead of freezing.
@@ -171,6 +201,7 @@ class MediaService:
             return None
         await self._recache_translation(msg, translator)
         msg.media_pending = False
+        msg.media_next_try_at = None  # recognized — clear any pending back-off
         self.session.add(msg)
         await self.session.flush()
         return msg.text

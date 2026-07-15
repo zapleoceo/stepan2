@@ -303,7 +303,10 @@ async def test_recognition_retry_succeeds_on_a_downloaded_asset(db_session) -> N
     msg = await _media_msg(db_session, bid, cid, ext="v1", kind="audio", url="https://cdn/v.mp4")
     s = MediaService(db_session, bid)
     assert await s.backfill(cid, FakeDownloader(), 20, transcriber=FakeTranscriber(fail=True)) == 1
-    dl = FakeDownloader()  # second tick: must NOT be called again
+    msg.media_next_try_at = None  # the failure backs off; let its window elapse
+    db_session.add(msg)
+    await db_session.flush()
+    dl = FakeDownloader()  # next due attempt: must NOT re-fetch the bytes
     assert await s.backfill(cid, dl, 20, transcriber=FakeTranscriber(text="halo")) == 1
     assert dl.calls == []  # bytes reused, no re-download
     refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
@@ -430,3 +433,86 @@ async def test_recognize_now_refuses_another_branch(db_session) -> None:
     tr = FakeTranscriber()
     assert await MediaService(db_session, bid + 999).recognize_now(msg.id, transcriber=tr) is None
     assert tr.calls == 0
+
+
+# ─── retry back-off: don't stack a storm on the broker's own retries ───
+
+async def test_failed_recognition_backs_off_instead_of_retrying_every_tick(db_session) -> None:
+    """The cron ticks every 3 min; without back-off a broken vision provider got the SAME
+    image re-submitted ~120x per 6h window (33x in 90 min in the real incident), on top of
+    the broker's own 8 retries. Each failure must push the next attempt further out."""
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
+    svc = MediaService(db_session, bid)
+    desc = FakeDescriber(fail=True)
+
+    await svc.backfill(cid, FakeDownloader(), limit=20, describer=desc)
+    fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert fresh.media_pending is True          # still held, will retry later
+    assert fresh.media_attempts == 1
+    first_due = fresh.media_next_try_at
+    assert first_due is not None and first_due > _utcnow()   # not due on the next tick
+
+    # while the back-off is unelapsed the batch skips it entirely — no second submit
+    assert await svc.pending(cid, 20) == []
+    await svc.backfill(cid, FakeDownloader(), limit=20, describer=desc)
+    assert desc.calls == 1                      # NOT re-submitted
+
+
+async def test_backoff_grows_exponentially(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
+    svc = MediaService(db_session, bid)
+    delays = []
+    for _ in range(4):
+        msg.media_next_try_at = None            # simulate the back-off having elapsed
+        db_session.add(msg)
+        await db_session.flush()
+        await svc.backfill(cid, FakeDownloader(), limit=20, describer=FakeDescriber(fail=True))
+        fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+        delays.append(fresh.media_next_try_at - _utcnow())
+    assert [round(d.total_seconds() / 60) for d in delays] == [5, 10, 20, 40]
+
+
+async def test_backoff_is_capped(db_session) -> None:
+    from app.modules.media.service import _MEDIA_RETRY_MAX
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
+    msg.media_attempts = 20                     # deep into a long outage
+    db_session.add(msg)
+    await db_session.flush()
+    await MediaService(db_session, bid).backfill(
+        cid, FakeDownloader(), limit=20, describer=FakeDescriber(fail=True))
+    fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert fresh.media_next_try_at - _utcnow() <= _MEDIA_RETRY_MAX   # never runs away
+
+
+async def test_download_failure_also_backs_off(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="m1")
+    svc = MediaService(db_session, bid)
+    dl = FakeDownloader(fail=True)
+    await svc.backfill(cid, dl, limit=20)
+    fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert fresh.media_pending is True and fresh.media_attempts == 1
+    assert await svc.pending(cid, 20) == []     # CDN isn't hammered every tick either
+
+
+async def test_success_clears_the_backoff(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="i1", kind="image")
+    svc = MediaService(db_session, bid)
+    await svc.backfill(cid, FakeDownloader(), limit=20, describer=FakeDescriber(fail=True))
+    # provider recovers; the next due attempt succeeds and leaves no schedule behind
+    msg.media_next_try_at = None
+    db_session.add(msg)
+    await db_session.flush()
+    await svc.backfill(cid, FakeDownloader(), limit=20, describer=FakeDescriber(text="a receipt"))
+    fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert fresh.media_pending is False and fresh.media_next_try_at is None
+    assert fresh.text == "🖼 a receipt"
