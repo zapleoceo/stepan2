@@ -92,14 +92,35 @@ _NON_TARGET_NUDGE = (
 # words. Prompt rules alone weren't reliable here (thread 2983: the ad opener got the full
 # product pitch on turn one, discovery skipped), so force the warm-up phase deterministically
 # on the FIRST turn, before the lead has said anything of their own.
+#
+# This ONE reply is the highest-leverage message in the funnel: the 3-day audit (2026-07-15)
+# found 160 of 366 ad clicks (44%) never write a single word back. The bare "apa tujuan utama
+# Kakak?" it used to produce is why — the lead pressed a button that PROMISED details, got an
+# interview question instead, and had to compose a sentence about their life goals to continue.
+# So: give a little before asking, prove we're a real campus (this market fears penipuan), and
+# make answering cost one tap — numbered options, not an essay. Still no price/schedule/modules:
+# the pitch waits for a real need (checklist row 1).
 _AD_OPENER_NUDGE = (
     "[System: the lead's ONLY message so far is the ad's prefilled opener (a BUTTON CLICK, not "
-    "their own words) — they tapped an ad, nothing more. Do NOT present the product, its "
-    "features, price, or schedule this turn. Open the DISCOVERY phase: a warm greeting, then "
-    "ONE light question about their goal or what drew them in (e.g. 'apa yang bikin Kakak "
-    "kepikiran belajar ini?' / 'lagi cari skill buat kerja, bisnis, atau pengen tau aja dulu?'). "
-    "Warm-up + one question only — the pitch comes AFTER a real need surfaces. Keep stage "
-    "qualifying. Return the JSON as usual.]"
+    "their own words) — they tapped an ad, nothing more. This single reply decides the whole "
+    "conversation: most ad clicks never write back, so it must feel like a warm human opening a "
+    "chat, not a form. Write it as 2-3 SHORT Instagram-DM bubbles separated by '|||', in "
+    "friendly everyday Bahasa with a few natural emoji, in this shape:\n"
+    "1) Greet warmly + say who you are (MinStep dari IT STEP Academy Jakarta, kampus di Menara "
+    "Sudirman) — that quietly answers 'is this real?'. Use their name ONLY if it looks like a "
+    "real name, never a raw username like 'MENNN08'.\n"
+    "2) ONE short hook: why this topic is worth their time, in THEIR world — what it lets a "
+    "person actually DO. One or two lines, concrete, no hype. This is what they clicked for, so "
+    "do not leave them empty-handed.\n"
+    "3) ONE easy question with 3-4 NUMBERED options (1️⃣ 2️⃣ 3️⃣) covering the usual reasons "
+    "people come (switch career / build their own thing / level up at work / just curious), and "
+    "tell them to simply send the number. Tapping a number is effortless; composing a sentence "
+    "about their goals is not — that gap is where these leads are lost.\n"
+    "⛔ Still NO price, NO schedule, NO module list, NO brochure dump — those come once they "
+    "tell you which way they lean. This holds EVEN THOUGH the button's canned text asks for "
+    "them ('…dan biaya kursusnya', 'ceritakan lebih detail'): that wording is the ad's, not the "
+    "lead's — nobody typed it, so it is not a question and quoting a price at it is answering "
+    "an ad, not a person. Keep stage qualifying. Return the JSON as usual.]"
 )
 
 # Situational nudges — the static prompt already carries these rules (soft-no, budget,
