@@ -796,9 +796,14 @@ def test_two_factor_classification_is_logged_at_a_readable_level(
                         lambda msg, *a, **k: logged.append(msg % a if a else msg))
 
     class _Cl:
-        last_json = {"two_factor_info": {"totp_two_factor_on": True, "sms_two_factor_on": False}}
+        last_json = {"two_factor_info": {
+            "totp_two_factor_on": True, "sms_two_factor_on": False,
+            "obfuscated_phone_number": "+60 *** *** 89"}}
 
     assert rc._two_factor_kind(_Cl()) == "2fa"
     text = " ".join(logged)
     assert "classified as 2fa" in text
     assert "totp=True" in text
+    # where a code that "never arrives" is actually going — masked by Instagram already
+    assert "+60 *** *** 89" in text
+    assert "obfuscated_phone_number" in text          # full key set, to spot unknown signals

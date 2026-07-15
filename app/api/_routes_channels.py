@@ -404,14 +404,18 @@ def _two_factor_kind(cl: Any) -> str:
     if isinstance(last, dict):
         info = last.get("two_factor_info") or {}
     kind = "2fa" if (info.get("totp_two_factor_on") or info.get("sms_two_factor_on")) else "device"
-    # Which branch we picked, and the flags we picked it from. Without this a wrong choice is
-    # invisible: the operator just sees a code box for a push approval (or vice-versa) and the
-    # log shows nothing but "[400] POST /accounts/login/". Flags only — no tokens, no payload.
+    # Which branch we picked, and everything Instagram told us to pick it from. Without this a
+    # wrong choice is invisible: the operator just sees a code box for a push approval (or the
+    # reverse) and the log shows nothing but "[400] POST /accounts/login/".
     # WARNING, not INFO: the API runs at WARNING, and this fires only on an operator-triggered
     # connect (a few a day), so it costs nothing and is worthless if it can't be read.
-    logger.warning("IG 2FA classified as %s (totp=%s sms=%s methods=%s)", kind,
-                   info.get("totp_two_factor_on"), info.get("sms_two_factor_on"),
-                   sorted(k for k in info if k.endswith(("_on", "_enabled"))))
+    # `obfuscated_phone_number` is masked BY Instagram (e.g. "+62 *** *** 89") and is the only
+    # way to see WHICH number a code that "never arrives" is actually being sent to.
+    logger.warning(
+        "IG 2FA classified as %s (totp=%s sms=%s whatsapp=%s trusted_push=%s phone=%s) keys=%s",
+        kind, info.get("totp_two_factor_on"), info.get("sms_two_factor_on"),
+        info.get("whatsapp_two_factor_on"), info.get("pending_trusted_notification"),
+        info.get("obfuscated_phone_number"), sorted(info))
     return kind
 
 
