@@ -30,6 +30,7 @@ from app.adapters.meta_ads import (
 )
 from app.domain.enums import ChannelKind
 from app.modules.ads import repository as repo
+from app.modules.ads.bridge import pk_to_shortcode
 from app.modules.ads.sync import AdSyncService
 from app.modules.settings.service import BranchSettings
 
@@ -38,26 +39,23 @@ PK = "3931661706982573994"
 CODE = "DaQEX3ds8eq"
 
 
-def _ad(ad_id="ad1", *, shortcode=None, effective=None, source=None, campaign=None,
-        hashes=()):
+def _ad(ad_id="ad1", *, shortcode=None, campaign=None, hashes=()):
     return AdRow(ad_id=ad_id, creative_id=f"c-{ad_id}", ad_name=None, adset_id=None,
                  adset_name=None, campaign_id=None, campaign_name=campaign, objective=None,
-                 shortcode=shortcode, effective_media_id=effective, source_media_id=source,
-                 image_hashes=tuple(hashes))
+                 shortcode=shortcode, image_hashes=tuple(hashes))
 
 
 class FakeClient:
     """Stands in for MetaAdsClient; records what was walked and looked up."""
 
-    def __init__(self, *, ads=None, insights=None, media=None, creatives=None,
+    def __init__(self, *, ads=None, insights=None, creatives=None,
                  raise_on: str | None = None) -> None:
         self._creatives = creatives or []
         self._ads = ads or []
         self._insights = insights or []
-        self._media = media or {}          # media_id -> shortcode (None = not permitted)
         self._raise_on = raise_on
         self.ads_read = 0
-        self.media_lookups: list[str] = []
+        self.creatives_read = 0
         self.walked: list[str] = []
 
     async def iter_ads(self, start_url=None):
@@ -73,11 +71,8 @@ class FakeClient:
         if self._raise_on == "creatives":
             raise MetaAdsRateLimited("too many calls")
         for row in self._creatives:
+            self.creatives_read += 1
             yield row
-
-    async def media_shortcode(self, media_id):
-        self.media_lookups.append(media_id)
-        return self._media.get(media_id)
 
     async def iter_insights(self, since, until):
         self.walked.append("insights")
@@ -131,45 +126,6 @@ async def test_matches_on_the_ads_permalink(db_session) -> None:
     row = (await db_session.execute(AdCreativeMap.__table__.select())).mappings().one()
     assert (row["media_pk"], row["ad_id"]) == (PK, "ad1")
     assert row["campaign_name"] == "Vibe Coding / Engagement"
-    assert client.media_lookups == []          # permalink hit — no extra call billed
-
-
-@pytest.mark.asyncio
-async def test_falls_back_to_effective_media_when_permalink_misses(db_session) -> None:
-    """Promoting an existing post makes dark copies, so the lead's medium is often not the one
-    on the ad's permalink. The effective id resolves it on ads_management alone."""
-    bid = await _branch_with_lead(db_session)
-    client = FakeClient(ads=[_ad(shortcode="OTHER", effective="eff-1")], media={"eff-1": CODE})
-    assert await _svc(db_session, bid, client).sync_map() == 1
-    assert client.media_lookups == ["eff-1"]
-
-
-@pytest.mark.asyncio
-async def test_falls_back_to_source_media_last(db_session) -> None:
-    bid = await _branch_with_lead(db_session)
-    client = FakeClient(ads=[_ad(shortcode="OTHER", effective="eff-1", source="src-1")],
-                        media={"eff-1": None, "src-1": CODE})
-    assert await _svc(db_session, bid, client).sync_map() == 1
-    assert client.media_lookups == ["eff-1", "src-1"]
-
-
-@pytest.mark.asyncio
-async def test_without_instagram_basic_source_lookup_just_yields_nothing(db_session) -> None:
-    """The System User holds no instagram_basic today, so source ids resolve to None. That
-    must cap coverage QUIETLY — never raise, never write a row pointing at the wrong ad."""
-    bid = await _branch_with_lead(db_session)
-    client = FakeClient(ads=[_ad(shortcode="OTHER", source="src-1")], media={"src-1": None})
-    assert await _svc(db_session, bid, client).sync_map() == 0
-    assert (await repo.mapped_media_pks(db_session, bid)) == set()
-
-
-@pytest.mark.asyncio
-async def test_lookup_tier_skipped_entirely_once_everything_matched(db_session) -> None:
-    bid = await _branch_with_lead(db_session)
-    client = FakeClient(ads=[_ad("ad-x", shortcode="OTHER", effective="eff-1"),
-                             _ad("ad1", shortcode=CODE)], media={"eff-1": "NOPE"})
-    await _svc(db_session, bid, client).sync_map()
-    assert client.media_lookups == []          # matched on a permalink; deferred tier dropped
 
 
 @pytest.mark.asyncio
@@ -325,3 +281,31 @@ def test_collects_own_hash_and_every_placement_variant() -> None:
 def test_collects_nothing_when_there_is_no_image() -> None:
     assert _creative_image_hashes({}) == ()
     assert _creative_image_hashes({"asset_feed_spec": {"images": [{"x": 1}]}}) == ()
+
+
+@pytest.mark.asyncio
+async def test_hash_tier_runs_even_when_tier_1_matched_something(db_session) -> None:
+    """The prod failure this replaces: a dead middle tier ate the whole run and tier 2 never
+    started, so the walk finished in 49s having added ZERO rows. Tier 1 matching one medium
+    must never stop the hash tier from resolving the others."""
+    bid = await _branch_with_lead(db_session)
+    # a second lead medium, only resolvable by hash
+    other_pk = "3932264179182956279"
+    other_code = pk_to_shortcode(other_pk)
+    lead = Lead(branch_id=bid)
+    db_session.add(lead)
+    await db_session.flush()
+    ch = (await db_session.execute(Channel.__table__.select())).mappings().first()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch["id"],
+                                 external_thread_id="ig-2", ad_media_id=other_pk))
+    await db_session.flush()
+
+    client = FakeClient(
+        ads=[_ad("ad1", shortcode=CODE),                       # tier 1 hits this one
+             _ad("ad2", shortcode="OTHER", hashes=[HASH])],    # tier 2 must still reach this
+        creatives=[CreativeRow("orphan", other_code, HASH)],
+    )
+    assert await _svc(db_session, bid, client).sync_map() == 2
+    got = {r["media_pk"]: r["ad_id"] for r in
+           (await db_session.execute(AdCreativeMap.__table__.select())).mappings().all()}
+    assert got == {PK: "ad1", other_pk: "ad2"}

@@ -79,27 +79,25 @@ class AdSyncService:
     async def _match_ads(
         self, client: MetaAdsClient, wanted: dict[str, str],
     ) -> list[dict]:
-        """Walk ads once, match each against the media we still need, cheapest tier first.
+        """Walk ads, then creatives, matching the media we still need. TWO tiers, both earn
+        their keep — measured on prod (1315 lead-bearing media, full walk):
 
-        The same ad shows in feed, stories and reels, and Meta renders a SEPARATE IG post per
-        placement — adjacent shortcodes made the same second — while exposing only one of them
-        as the creative's permalink. The medium a lead saw is usually one of the others, which
-        is why permalink matching alone stalls at 45%.
+          1. permalink shortcode — 45.2%. Free: it rides along in the ads walk.
+          2. image_hash          — 55.4%. One creatives walk, only if tier 1 left something.
+          together               — 93.6%. Complementary, not redundant: each catches what the
+                                  other misses, so tier 2 runs even though tier 1 found rows.
 
-        Tiers, in order:
-          1. permalink shortcode      — free, already in the walk
-          2. effective/source media id — one call per ad; source needs instagram_basic (which
-             the System User now holds, though it resolves +0 here — kept for correctness)
-          3. image_hash               — every placement variant is rendered from ONE source
-             image, so its hash is what the orphan creative and the live ad share
+        Why the hash works: the same ad shows in feed, stories and reels, and Meta renders a
+        SEPARATE IG post per placement (adjacent shortcodes minted the same second) while
+        admitting to only ONE of them via the creative's permalink. instagrapi gives us the
+        post the lead actually SAW — usually a different variant. Every variant is rendered
+        from one source image, so its hash is what the orphaned creative and the live ad share.
 
-        Measured on prod: 1) 45.2%, 3) 55.4%, together 93.6%. The tiers are complementary,
-        not redundant — each catches what the other misses, so both must run.
-        Tiers 2-3 cost extra walks, so they only start if tier 1 left something wanted."""
+        Cost is two walks, bounded: the ads walk stops early once nothing is pending, and the
+        creatives walk never starts if tier 1 already matched everything."""
         rows: list[dict] = []
         pending = dict(wanted)
         by_hash: dict[str, object] = {}
-        deferred: list = []
 
         def _take(code: str | None, ad) -> bool:
             pk = pending.pop(code, None) if code else None
@@ -114,27 +112,14 @@ class AdSyncService:
             return True
 
         async for ad in client.iter_ads():
-            # Collect hashes as we go: tier 3 needs them and re-walking ads would double the
-            # Graph cost on an account that throttles after ~20 pages.
+            # Harvest hashes during THIS walk — tier 2 needs them, and re-walking ads would
+            # double the Graph cost on an account that throttles after ~20 pages.
             for image_hash in ad.image_hashes:
                 by_hash.setdefault(image_hash, ad)
-            if _take(ad.shortcode, ad):
-                if not pending:
-                    break
-                continue
-            if ad.effective_media_id or ad.source_media_id:
-                deferred.append(ad)
-
-        for ad in deferred:  # tier 2
-            if not pending:
+            if _take(ad.shortcode, ad) and not pending:
                 break
-            for media_id in (ad.effective_media_id, ad.source_media_id):
-                if not media_id:
-                    continue
-                if _take(await client.media_shortcode(media_id), ad):
-                    break
 
-        if pending and by_hash:  # tier 3 — the one that lifts 45% to ~94%
+        if pending and by_hash:
             async for creative in client.iter_creatives():
                 if not pending:
                     break
