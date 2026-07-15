@@ -1,28 +1,38 @@
-"""Marketing API reader — ad creatives, ads and daily insights for one ad account.
+"""Marketing API reader — paged, rate-limit-aware HTTP for one ad account.
 
-Read-only. Two edges matter, and they must be walked SEPARATELY rather than as one nested
-query: `ads?fields=creative{instagram_permalink_url}` silently returns the permalink for only
-part of the ads (measured: 946 of 1145), while the standalone `adcreatives` edge exposes it
-for far more (3414 of 4499). So we walk adcreatives for shortcode→creative_id, walk ads for
-creative_id→ad, and join locally.
+Two edges matter and must be walked SEPARATELY rather than as one nested query: Graph
+silently omits `image_hash` when creative{} is nested under the ads edge (verified: 0 of 5),
+while the standalone adcreatives edge returns it. Row shapes and parsing live in
+meta_ads_rows; this module is transport only.
 
-Rate limits are not hypothetical here: an ad account returns code 80004 ("too many calls to
-this ad-account") after a burst of paging, and it applies to the WHOLE account for a cooldown.
-Every walk therefore raises MetaAdsRateLimited with the cursor it reached, so a caller can
-persist progress and resume instead of restarting 45 pages from scratch.
+Rate limits and 5xx are both routine here, not exceptional:
+* code 80004 ("too many calls to this ad-account") throttles the WHOLE account for a cooldown
+* asset_feed_spec makes an ads page heavy enough that Graph answers 500 partway through
+  pagination at 100/page — hence a smaller page size for that walk
+
+Both surface as MetaAdsError so a caller can keep whatever it already matched instead of
+losing the run to a raw httpx error.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
 from typing import Any
 
 import httpx
 
+from app.adapters.meta_ads_rows import (
+    AdRow,
+    CreativeRow,
+    InsightRow,
+    MetaAdsError,
+    MetaAdsRateLimited,
+    creative_image_hashes,
+    edge_of,
+    parse_insight,
+)
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -31,121 +41,13 @@ _RATE_LIMIT_CODES = {4, 17, 80000, 80003, 80004}
 _PAGE_SIZE = 100
 # asset_feed_spec carries every placement variant, so an ads page is an order of magnitude
 # heavier than a creatives page — Graph answers 500 partway through pagination at 100/page
-# (live: sync aborted on page ~12 and the whole walk was lost). 25 is what survives.
+# (live: the walk died on a later page and the whole run was lost). 25 is what survives.
 _ADS_PAGE_SIZE = 25
 
-
-class MetaAdsError(RuntimeError):
-    """Graph refused the request for a reason that will not fix itself on retry."""
-
-
-class MetaAdsRateLimited(MetaAdsError):
-    """Account-level throttle. `next_url` is where a resumed walk should pick up."""
-
-    def __init__(self, message: str, next_url: str | None = None) -> None:
-        super().__init__(message)
-        self.next_url = next_url
-
-
-@dataclass(frozen=True)
-class CreativeRow:
-    creative_id: str
-    shortcode: str
-    # The source image every placement variant was rendered from — the join key that finally
-    # links an orphan creative (the medium a lead saw) back to the ad that ran it.
-    image_hash: str | None = None
-
-
-@dataclass(frozen=True)
-class AdRow:
-    ad_id: str
-    creative_id: str
-    ad_name: str | None
-    adset_id: str | None
-    adset_name: str | None
-    campaign_id: str | None
-    campaign_name: str | None
-    objective: str | None
-    # The ad's own IG post, parsed from instagram_permalink_url — present on ~1004/1145 ads.
-    shortcode: str | None = None
-    # EVERY source image this ad can render, one per placement variant in asset_feed_spec.
-    # Placement customisation ("same ad in feed, stories and reels") renders a separate IG
-    # post per placement, and Marketing API admits to only ONE of them via the permalink —
-    # the lead usually saw another. The hashes are what all the variants have in common.
-    # Measured on prod: permalink alone 45.2%, hash alone 55.4%, both together 93.6%.
-    #
-    # NOT sourced from creative.image_hash: Graph silently omits that field when creative{}
-    # is nested under the ads edge (verified: 0 of 5 ads carry it, while asset_feed_spec
-    # comes through fine). Only the standalone adcreatives edge returns it — which is exactly
-    # where iter_creatives reads it from.
-    image_hashes: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class InsightRow:
-    ad_id: str
-    day: date
-    spend: Decimal
-    impressions: int
-    reach: int
-    clicks: int
-    conv_started: int
-    conv_depth_2: int
-    conv_depth_3: int
-    conv_depth_5: int
-    blocks: int
-
-
-# Meta's messaging-quality ladder. These are the counterpart to our own lead stages: the
-# headline "conversation started" is what campaigns optimise for and is a vanity number —
-# depth_3/depth_5 are what a real conversation looks like.
-_ACTION_MAP = {
-    "onsite_conversion.messaging_conversation_started_7d": "conv_started",
-    "onsite_conversion.messaging_user_depth_2_message_send": "conv_depth_2",
-    "onsite_conversion.messaging_user_depth_3_message_send": "conv_depth_3",
-    "onsite_conversion.messaging_user_depth_5_message_send": "conv_depth_5",
-    "onsite_conversion.messaging_block": "blocks",
-}
-
-
-def parse_insight(row: dict[str, Any]) -> InsightRow:
-    """One Graph insights row → InsightRow. Pure, so the action-name mapping is testable."""
-    actions = {a.get("action_type"): a.get("value") for a in row.get("actions") or []}
-    counts = {
-        field: int(actions.get(action_type) or 0)
-        for action_type, field in _ACTION_MAP.items()
-    }
-    return InsightRow(
-        ad_id=str(row["ad_id"]),
-        day=date.fromisoformat(row["date_start"]),
-        spend=Decimal(str(row.get("spend") or "0")),
-        impressions=int(row.get("impressions") or 0),
-        reach=int(row.get("reach") or 0),
-        clicks=int(row.get("clicks") or 0),
-        **counts,
-    )
-
-
-def edge_of(url: str) -> str:
-    """Edge name from a Graph URL, for an error message that says WHICH walk broke."""
-    return url.rstrip("/").split("?")[0].rsplit("/", 1)[-1]
-
-
-def _creative_image_hashes(creative: dict[str, Any]) -> tuple[str, ...]:
-    """Every source-image hash an ad creative can render, deduped and order-stable.
-
-    Reads creative.image_hash too, for callers that fetch a creative directly — but nested
-    under the ads edge Graph omits it, so in practice the asset_feed_spec variants are what
-    populate this. Pure, so the shape is testable without Graph."""
-    hashes: list[str] = []
-    own = creative.get("image_hash")
-    if own:
-        hashes.append(str(own))
-    for image in (creative.get("asset_feed_spec") or {}).get("images") or []:
-        value = image.get("hash")
-        if value and str(value) not in hashes:
-            hashes.append(str(value))
-    return tuple(hashes)
+__all__ = [
+    "AdRow", "CreativeRow", "InsightRow", "MetaAdsClient", "MetaAdsError",
+    "MetaAdsRateLimited", "creative_image_hashes", "parse_insight",
+]
 
 
 class MetaAdsClient:
@@ -246,7 +148,7 @@ class MetaAdsClient:
                 campaign_name=campaign.get("name"),
                 objective=campaign.get("objective"),
                 shortcode=shortcode_from_permalink(creative.get("instagram_permalink_url")),
-                image_hashes=_creative_image_hashes(creative),
+                image_hashes=creative_image_hashes(creative),
             )
 
     async def iter_insights(self, since: date, until: date) -> AsyncIterator[InsightRow]:

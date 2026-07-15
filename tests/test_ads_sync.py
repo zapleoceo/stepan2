@@ -27,7 +27,7 @@ from app.adapters.meta_ads import (
     InsightRow,
     MetaAdsError,
     MetaAdsRateLimited,
-    _creative_image_hashes,
+    creative_image_hashes,
 )
 from app.domain.enums import ChannelKind
 from app.modules.ads import repository as repo
@@ -276,12 +276,12 @@ def test_collects_own_hash_and_every_placement_variant() -> None:
         "image_hash": "own",
         "asset_feed_spec": {"images": [{"hash": "v1"}, {"hash": "v2"}, {"hash": "own"}]},
     }
-    assert _creative_image_hashes(creative) == ("own", "v1", "v2")   # deduped, order-stable
+    assert creative_image_hashes(creative) == ("own", "v1", "v2")   # deduped, order-stable
 
 
 def test_collects_nothing_when_there_is_no_image() -> None:
-    assert _creative_image_hashes({}) == ()
-    assert _creative_image_hashes({"asset_feed_spec": {"images": [{"x": 1}]}}) == ()
+    assert creative_image_hashes({}) == ()
+    assert creative_image_hashes({"asset_feed_spec": {"images": [{"x": 1}]}}) == ()
 
 
 @pytest.mark.asyncio
