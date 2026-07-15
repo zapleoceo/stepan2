@@ -12,7 +12,7 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app.api._ui_panels import _ad_funnel_html, admap_cell_inner  # noqa: E402
+from app.api._ui_panels import _ad_tree_html, admap_cell_inner  # noqa: E402
 from app.api.main import app  # noqa: E402
 
 _PRODUCTS = [("vibe_coding", "Vibe Coding"), ("smm_intensive", "SMM Intensive")]
@@ -54,8 +54,8 @@ def test_admap_cell_plain_when_unmapped_no_suggestion() -> None:
 
 def test_ad_funnel_with_products_has_mapping_and_menu() -> None:
     _set_lang()
-    html = _ad_funnel_html(
-        _ROWS, business_id="BID", account_id="ACT",
+    html = _ad_tree_html(
+        _ROWS, {}, {}, None, "BID", "ACT",
         mappings={"AD1": "vibe_coding"}, suggestions={"AD2": "smm_intensive"},
         products=_PRODUCTS)
     assert 'class="admap-sel"' in html              # product column present
@@ -70,19 +70,19 @@ def test_ad_funnel_with_products_has_mapping_and_menu() -> None:
 
 def test_ad_funnel_without_products_is_readonly() -> None:
     _set_lang()
-    html = _ad_funnel_html(_ROWS, products=None)
+    html = _ad_tree_html(_ROWS, {}, {}, products=None)
     assert 'class="admap-sel"' not in html           # no product column cross-branch
     assert '<details class="admenu">' in html        # menu still available
 
 
 def test_ad_funnel_empty_rows_render_nothing() -> None:
-    assert _ad_funnel_html([], products=_PRODUCTS) == ""
+    assert _ad_tree_html([], {}, {}, products=_PRODUCTS) == ""
 
 
 def test_ad_funnel_counts_link_to_filtered_chats() -> None:
     _set_lang()
     # row AD1: total=10, pipeline=4, won=3, dormant=3
-    html = _ad_funnel_html([("AD1", None, 10, 4, 3, 3)], products=_PRODUCTS)
+    html = _ad_tree_html([("AD1", None, 10, 4, 3, 3)], {}, {}, products=_PRODUCTS)
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1">10</a>' in html   # total → all chats
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=pipeline">4</a>' in html
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=won">3</a>' in html
@@ -101,7 +101,7 @@ def test_inbox_grp_filter_shows_group_chip_and_scoped_load() -> None:
 
 def test_ad_funnel_headers_are_sortable() -> None:
     _set_lang()
-    html = _ad_funnel_html(_ROWS, products=_PRODUCTS)
+    html = _ad_tree_html(_ROWS, {}, {}, products=_PRODUCTS)
     assert 'class="rep-sort"' in html
     assert 'onclick="repSort(this)"' in html
     assert 'data-num="1"' in html                    # numeric columns flagged for numeric sort
@@ -110,7 +110,7 @@ def test_ad_funnel_headers_are_sortable() -> None:
 
 def test_ad_funnel_has_per_column_filters() -> None:
     _set_lang()
-    html = _ad_funnel_html(_ROWS, products=_PRODUCTS)
+    html = _ad_tree_html(_ROWS, {}, {}, products=_PRODUCTS)
     assert 'class="rep-fltr"' in html                # filter row present
     assert 'data-f="text"' in html                   # ad-id substring filter
     assert 'data-f="min"' in html                    # numeric ≥ filters
@@ -121,7 +121,7 @@ def test_ad_funnel_has_per_column_filters() -> None:
 
 def test_ad_funnel_readonly_has_sort_and_filter_but_no_product_eq() -> None:
     _set_lang()
-    html = _ad_funnel_html(_ROWS, products=None)
+    html = _ad_tree_html(_ROWS, {}, {}, products=None)
     assert 'class="rep-sort"' in html                # still sortable cross-branch
     assert 'data-f="min"' in html                    # numeric filters still present
     assert 'data-f="eq"' not in html                 # no product column → no product filter

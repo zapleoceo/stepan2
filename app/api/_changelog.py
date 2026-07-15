@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.10.0"
+PROJECT_VERSION = "1.11.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,19 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.11.0", "date": "15 Jul 2026", "tag": "Reporting",
+        "title": "Spend and funnel, one tree",
+        "blurb": "Ad spend and your funnel used to be two tables you had to join by eye. "
+                 "They are now one tree, grouped by campaign — the unit your budget is "
+                 "actually planned in. Open a campaign and you see what it cost and what it "
+                 "brought, ad by ad, with cost per lead you actually hold. Ads we could not "
+                 "match to a campaign are not swept away: they keep their own group, so the "
+                 "lead count never quietly shrinks to make the spend look tidier. The "
+                 "match rate is printed right on the panel — today it is 38%, and the "
+                 "reason is worth knowing: the missing ads are not in the ad account our "
+                 "access points at.",
+    },
     {
         "version": "1.10.0", "date": "15 Jul 2026", "tag": "Reporting",
         "title": "What each ad really costs you",
