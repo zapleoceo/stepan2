@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import AdInsightDaily
-from app.adapters.meta_ads import MetaAdsClient, MetaAdsRateLimited
+from app.adapters.meta_ads import MetaAdsClient, MetaAdsError, MetaAdsRateLimited
 from app.domain.clock import utc_now
 from app.modules.ads import repository as repo
 from app.modules.ads.bridge import pk_to_shortcode
@@ -69,11 +69,7 @@ class AdSyncService:
                                self.branch_id, pk)
         if not wanted:
             return 0
-        try:
-            rows = await self._match_ads(client, wanted)
-        except MetaAdsRateLimited as exc:
-            logger.warning("branch=%s ad map sync throttled: %s", self.branch_id, exc)
-            return 0
+        rows = await self._match_ads(client, wanted)
         return await repo.upsert_creative_map(self.session, self.branch_id, rows)
 
     async def _match_ads(
@@ -111,23 +107,34 @@ class AdSyncService:
             })
             return True
 
-        async for ad in client.iter_ads():
-            # Harvest hashes during THIS walk — tier 2 needs them, and re-walking ads would
-            # double the Graph cost on an account that throttles after ~20 pages.
-            for image_hash in ad.image_hashes:
-                by_hash.setdefault(image_hash, ad)
-            if _take(ad.shortcode, ad) and not pending:
-                break
+        # Each walk keeps whatever it matched before breaking. A throttle or a Graph 5xx
+        # mid-pagination used to discard the entire run (prod: 49s, 0 rows) — a partial map
+        # is strictly better than none, and the rest is retried on the next tick anyway.
+        try:
+            async for ad in client.iter_ads():
+                # Harvest hashes during THIS walk — the hash tier needs them, and re-walking
+                # ads would double the Graph cost on an account that throttles after ~20 pages.
+                for image_hash in ad.image_hashes:
+                    by_hash.setdefault(image_hash, ad)
+                if _take(ad.shortcode, ad) and not pending:
+                    break
+        except MetaAdsError as exc:
+            logger.warning("branch=%s ads walk cut short (%s) — keeping %d matched so far",
+                           self.branch_id, exc, len(rows))
 
         if pending and by_hash:
-            async for creative in client.iter_creatives():
-                if not pending:
-                    break
-                if creative.shortcode not in pending or not creative.image_hash:
-                    continue
-                ad = by_hash.get(creative.image_hash)
-                if ad is not None:
-                    _take(creative.shortcode, ad)
+            try:
+                async for creative in client.iter_creatives():
+                    if not pending:
+                        break
+                    if creative.shortcode not in pending or not creative.image_hash:
+                        continue
+                    ad = by_hash.get(creative.image_hash)
+                    if ad is not None:
+                        _take(creative.shortcode, ad)
+            except MetaAdsError as exc:
+                logger.warning("branch=%s creatives walk cut short (%s) — keeping %d",
+                               self.branch_id, exc, len(rows))
         return rows
 
     async def sync_insights(self, *, today: date | None = None) -> int:
