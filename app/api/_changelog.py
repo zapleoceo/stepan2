@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.7.0"
+PROJECT_VERSION = "1.8.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,17 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.8.0", "date": "15 Jul 2026", "tag": "Straight answers",
+        "title": "Answers the question that was asked",
+        "blurb": "Ask Stepan a plain question and you get a plain answer. \"How much is it?\", "
+                 "\"which days?\", \"how do I sign up?\" are now answered from your own course "
+                 "card in that same reply, with the follow-up question after — never a "
+                 "\"could you be more specific?\" or a counter-question, which is exactly how "
+                 "an interested lead used to slip away. And when someone shares a post or reel "
+                 "that will not open on our side, Stepan says so honestly and asks them to "
+                 "describe it, instead of quietly guessing what it was about.",
+    },
     {
         "version": "1.7.0", "date": "15 Jul 2026", "tag": "Selling",
         "title": "Sells the way people actually decide",
