@@ -968,6 +968,8 @@ _TR: dict[str, dict[str, str]] = {
     "rep.total":   {"ru": "Всего лидов",    "en": "Total leads",  "id": "Total lead"},
     "rep.pipeline":{"ru": "В работе",       "en": "Pipeline",     "id": "Pipeline"},
     "rep.won":     {"ru": "Закрытые",       "en": "Won",          "id": "Berhasil"},
+    "rep.closed_period": {"ru": "Закрыто за период", "en": "Closed in period",
+                          "id": "Ditutup periode ini"},
     "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},
     "rep.dormant": {"ru": "Спящие",         "en": "Dormant",      "id": "Tidak aktif"},
     # Counts a real captured PAIN, not a pass through the 'qualifying' stage (every lead

@@ -1764,6 +1764,7 @@ def reports_panel_html(
     stage_reach: dict[str, int] | None = None,
     total_leads: int = 0,
     needs_cloud: dict | None = None,
+    closed_in_period: int | None = None,
 ) -> str:
     _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
     _won = ("ready", "handed_off")
@@ -1787,6 +1788,12 @@ def reports_panel_html(
         + _kpi("rep.conv", f"{conv}%", "#ffa94d")
         + _kpi("rep.dormant", str(dormant), "#868e96")
     )
+    # 'Won' above counts the CHOSEN COHORT's current stage (leads that started in the window).
+    # This one counts deals actually closed INSIDE the window whenever the lead first wrote —
+    # over 3 days the cohort read 2 while 11 really closed (2026-07-15). Both are true; showing
+    # them side by side stops "sales this period" from being read off the cohort number.
+    if closed_in_period is not None:
+        kpis += _kpi("rep.closed_period", str(closed_in_period), "#51cf66")
     if discovery is not None:
         kpis += (
             _kpi("rep.discovered", f"{discovery.get('pct', 0):g}%", "#4da6ff")

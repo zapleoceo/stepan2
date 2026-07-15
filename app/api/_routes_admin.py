@@ -34,6 +34,7 @@ from ._query import (
     fetch_audience_segment_stage_dist,
     fetch_branch_tz,
     fetch_broker_log,
+    fetch_closed_in_period,
     fetch_discovery_metrics,
     fetch_segment_dist,
     fetch_stage_flow,
@@ -333,6 +334,8 @@ async def reports_panel(
         ad_funnel = await fetch_ad_funnel(session, branch_ids, since=since_dt, until=until_dt)
         discovery = await fetch_discovery_metrics(
             session, branch_ids, since=since_dt, until=until_dt)
+        closed_in_period = await fetch_closed_in_period(
+            session, branch_ids, since=since_dt, until=until_dt)
         if branch_ids and len(branch_ids) == 1:
             fb = (await session.execute(
                 text("SELECT key, value FROM app_setting WHERE branch_id=:b"
@@ -364,6 +367,7 @@ async def reports_panel(
                            products=products, segments=segments,
                            segment_stages=segment_stages, stage_flow=stage_flow,
                            stage_reach=stage_reach, needs_cloud=needs_cloud,
+                           closed_in_period=closed_in_period,
                            total_leads=sum(int(s[2]) for s in segments)))  # (aud, seg, total, won)
 
 

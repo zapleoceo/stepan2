@@ -49,9 +49,11 @@ RELEASES = [
                  "change, so the number lands against something worth paying for — until then "
                  "the pitch waits. What it learns about each lead is now kept only when the "
                  "lead really said it, so the goals and worries on their card are their own "
-                 "words, not the ad's copy or a guess. And your dashboard now counts the leads "
-                 "whose real concern was uncovered, instead of everyone who simply passed "
-                 "through the funnel — a smaller number, and a true one.",
+                 "words, not the ad's copy or a guess. And your dashboard got honest: it now "
+                 "counts the leads whose real concern was uncovered, instead of everyone who "
+                 "simply passed through the funnel, and it shows the deals actually closed in "
+                 "the period you picked alongside the view by lead cohort — so a good week "
+                 "stops reading as a bad one.",
     },
     {
         "version": "1.8.0", "date": "15 Jul 2026", "tag": "Straight answers",
