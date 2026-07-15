@@ -46,6 +46,9 @@ class MetaAdsRateLimited(MetaAdsError):
 class CreativeRow:
     creative_id: str
     shortcode: str
+    # The source image every placement variant was rendered from — the join key that finally
+    # links an orphan creative (the medium a lead saw) back to the ad that ran it.
+    image_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,13 @@ class AdRow:
     shortcode: str | None = None
     effective_media_id: str | None = None
     source_media_id: str | None = None
+    # EVERY source image this ad can render: creative.image_hash plus one per placement
+    # variant in asset_feed_spec. Placement customisation ("same ad in feed, stories, reels")
+    # renders a separate IG post per placement — adjacent shortcodes, created the same second
+    # — and Marketing API exposes only ONE of them as effective_instagram_media_id. The lead
+    # usually saw a different one. The hashes are what they all have in common.
+    # Measured on prod: permalink alone 45.2%, hash alone 55.4%, both together 93.6%.
+    image_hashes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -112,6 +122,21 @@ def parse_insight(row: dict[str, Any]) -> InsightRow:
         clicks=int(row.get("clicks") or 0),
         **counts,
     )
+
+
+def _creative_image_hashes(creative: dict[str, Any]) -> tuple[str, ...]:
+    """Every source-image hash an ad creative can render, deduped and order-stable.
+
+    Pure, so the asset_feed_spec shape is testable without Graph."""
+    hashes: list[str] = []
+    own = creative.get("image_hash")
+    if own:
+        hashes.append(str(own))
+    for image in (creative.get("asset_feed_spec") or {}).get("images") or []:
+        value = image.get("hash")
+        if value and str(value) not in hashes:
+            hashes.append(str(value))
+    return tuple(hashes)
 
 
 class MetaAdsClient:
@@ -164,11 +189,12 @@ class MetaAdsClient:
         from app.modules.ads.bridge import shortcode_from_permalink
 
         async for row in self._walk(
-            "adcreatives", "id,instagram_permalink_url", start_url=start_url,
+            "adcreatives", "id,instagram_permalink_url,image_hash", start_url=start_url,
         ):
             code = shortcode_from_permalink(row.get("instagram_permalink_url"))
             if code:
-                yield CreativeRow(creative_id=str(row["id"]), shortcode=code)
+                yield CreativeRow(creative_id=str(row["id"]), shortcode=code,
+                                  image_hash=row.get("image_hash"))
 
     async def iter_ads(self, start_url: str | None = None) -> AsyncIterator[AdRow]:
         """Walk ads WITH their creative's IG pointers.
@@ -183,7 +209,7 @@ class MetaAdsClient:
             "ads",
             "id,name,adset{id,name},campaign{id,name,objective},"
             "creative{id,instagram_permalink_url,effective_instagram_media_id,"
-            "source_instagram_media_id}",
+            "source_instagram_media_id,image_hash,asset_feed_spec}",
             start_url=start_url,
         ):
             creative = row.get("creative") or {}
@@ -204,6 +230,7 @@ class MetaAdsClient:
                 shortcode=shortcode_from_permalink(creative.get("instagram_permalink_url")),
                 effective_media_id=creative.get("effective_instagram_media_id"),
                 source_media_id=creative.get("source_instagram_media_id"),
+                image_hashes=_creative_image_hashes(creative),
             )
 
     async def media_shortcode(self, media_id: str) -> str | None:

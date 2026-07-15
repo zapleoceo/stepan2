@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.11.0"
+PROJECT_VERSION = "1.12.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,18 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.12.0", "date": "15 Jul 2026", "tag": "Reporting",
+        "title": "Nearly every lead now has a price tag",
+        "blurb": "One ad runs in feed, stories and reels — and Meta quietly renders a "
+                 "separate post for each, so the version a lead actually saw is rarely the "
+                 "one the API admits to. That mismatch meant less than half your leads could "
+                 "be tied to the ad that bought them, and the spend behind the rest simply "
+                 "went unaccounted. Every placement is rendered from the same source image, "
+                 "and that turned out to be the thread that ties them back together. "
+                 "Coverage went from 45% to 94%: the cost of a lead, per campaign, is now "
+                 "computed from nearly all of the money rather than half of it.",
+    },
     {
         "version": "1.11.0", "date": "15 Jul 2026", "tag": "Reporting",
         "title": "Spend and funnel, one tree",
