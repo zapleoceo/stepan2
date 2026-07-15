@@ -412,20 +412,27 @@ async def test_attempt_ig_login_device_approval_auto_completes_with_no_code_and_
     _ig_flows.pop("fid-dev", None)
 
 
-async def test_unexpected_login_failure_is_logged_not_only_shown_on_screen(caplog) -> None:
+async def test_unexpected_login_failure_is_logged_not_only_shown_on_screen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A failure that is neither 2FA nor challenge used to go ONLY into the red box on the
     operator's screen, so the server logs showed a bare '[400] POST /accounts/login/' with no
-    reason and a broken connect could not be diagnosed without asking them to read it out."""
-    import logging
+    reason and a broken connect could not be diagnosed without asking them to read it out.
 
-    from app.api._routes_channels import _attempt_ig_login
+    Spy the module logger directly (same reason as test_config_validate): something in the
+    full suite calls logging.disable(), which short-circuits before caplog ever sees a record.
+    """
+    import app.api._routes_channels as rc
 
+    logged: list[str] = []
+    monkeypatch.setattr(rc.logger, "warning",
+                        lambda msg, *a, **k: logged.append(msg % a if a else msg))
     cl = _RaisingIGClient(RuntimeError("Please wait a few minutes before you try again."))
-    with caplog.at_level(logging.WARNING):
-        resp = await _attempt_ig_login(cl, ch_id=42, user="u", pw="secret", fid="fid-err")  # noqa: S106
-    assert "Please wait a few minutes" in caplog.text
-    assert "RuntimeError" in caplog.text            # the exception TYPE, not just the message
-    assert "secret" not in caplog.text              # never the password
+    resp = await rc._attempt_ig_login(cl, ch_id=42, user="u", pw="secret", fid="fid-err")  # noqa: S106
+    text = " ".join(logged)
+    assert "Please wait a few minutes" in text
+    assert "RuntimeError" in text                   # the exception TYPE, not just the message
+    assert "secret" not in text                     # never the password
     assert "Please wait a few minutes" in resp.body.decode()   # still shown to the operator
 
 
@@ -775,18 +782,23 @@ def test_registry_maps_every_kind_to_its_adapter() -> None:
         assert cls.kind is kind  # class advertises the kind it is registered under
 
 
-async def test_two_factor_classification_is_logged_at_a_readable_level(caplog) -> None:
+def test_two_factor_classification_is_logged_at_a_readable_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The API runs at WARNING, so an INFO line here would never be read. Without this the
     classification is invisible and a code box shown for a push approval (or the reverse)
-    can only be diagnosed by asking the operator what is on their screen."""
-    import logging
+    can only be diagnosed by asking the operator what is on their screen. (Spies the module
+    logger for the same reason as the test above.)"""
+    import app.api._routes_channels as rc
 
-    from app.api._routes_channels import _two_factor_kind
+    logged: list[str] = []
+    monkeypatch.setattr(rc.logger, "warning",
+                        lambda msg, *a, **k: logged.append(msg % a if a else msg))
 
     class _Cl:
         last_json = {"two_factor_info": {"totp_two_factor_on": True, "sms_two_factor_on": False}}
 
-    with caplog.at_level(logging.WARNING):
-        assert _two_factor_kind(_Cl()) == "2fa"
-    assert "classified as 2fa" in caplog.text
-    assert "totp=True" in caplog.text
+    assert rc._two_factor_kind(_Cl()) == "2fa"
+    text = " ".join(logged)
+    assert "classified as 2fa" in text
+    assert "totp=True" in text
