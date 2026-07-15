@@ -19,10 +19,11 @@ from datetime import date, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import AdInsightDaily
-from app.adapters.meta_ads import MetaAdsClient, MetaAdsError, MetaAdsRateLimited
+from app.adapters.meta_ads import MetaAdsClient, MetaAdsRateLimited
 from app.domain.clock import utc_now
 from app.modules.ads import repository as repo
 from app.modules.ads.bridge import pk_to_shortcode
+from app.modules.ads.matcher import AdMatcher
 from app.modules.settings.service import BranchSettings
 
 logger = logging.getLogger(__name__)
@@ -69,73 +70,8 @@ class AdSyncService:
                                self.branch_id, pk)
         if not wanted:
             return 0
-        rows = await self._match_ads(client, wanted)
+        rows = await AdMatcher(client, wanted, self.branch_id).run()
         return await repo.upsert_creative_map(self.session, self.branch_id, rows)
-
-    async def _match_ads(
-        self, client: MetaAdsClient, wanted: dict[str, str],
-    ) -> list[dict]:
-        """Walk ads, then creatives, matching the media we still need. TWO tiers, both earn
-        their keep — measured on prod (1315 lead-bearing media, full walk):
-
-          1. permalink shortcode — 45.2%. Free: it rides along in the ads walk.
-          2. image_hash          — 55.4%. One creatives walk, only if tier 1 left something.
-          together               — 93.6%. Complementary, not redundant: each catches what the
-                                  other misses, so tier 2 runs even though tier 1 found rows.
-
-        Why the hash works: the same ad shows in feed, stories and reels, and Meta renders a
-        SEPARATE IG post per placement (adjacent shortcodes minted the same second) while
-        admitting to only ONE of them via the creative's permalink. instagrapi gives us the
-        post the lead actually SAW — usually a different variant. Every variant is rendered
-        from one source image, so its hash is what the orphaned creative and the live ad share.
-
-        Cost is two walks, bounded: the ads walk stops early once nothing is pending, and the
-        creatives walk never starts if tier 1 already matched everything."""
-        rows: list[dict] = []
-        pending = dict(wanted)
-        by_hash: dict[str, object] = {}
-
-        def _take(code: str | None, ad) -> bool:
-            pk = pending.pop(code, None) if code else None
-            if pk is None:
-                return False
-            rows.append({
-                "media_pk": pk, "shortcode": code, "ad_id": ad.ad_id, "ad_name": ad.ad_name,
-                "adset_id": ad.adset_id, "adset_name": ad.adset_name,
-                "campaign_id": ad.campaign_id, "campaign_name": ad.campaign_name,
-                "objective": ad.objective,
-            })
-            return True
-
-        # Each walk keeps whatever it matched before breaking. A throttle or a Graph 5xx
-        # mid-pagination used to discard the entire run (prod: 49s, 0 rows) — a partial map
-        # is strictly better than none, and the rest is retried on the next tick anyway.
-        try:
-            async for ad in client.iter_ads():
-                # Harvest hashes during THIS walk — the hash tier needs them, and re-walking
-                # ads would double the Graph cost on an account that throttles after ~20 pages.
-                for image_hash in ad.image_hashes:
-                    by_hash.setdefault(image_hash, ad)
-                if _take(ad.shortcode, ad) and not pending:
-                    break
-        except MetaAdsError as exc:
-            logger.warning("branch=%s ads walk cut short (%s) — keeping %d matched so far",
-                           self.branch_id, exc, len(rows))
-
-        if pending and by_hash:
-            try:
-                async for creative in client.iter_creatives():
-                    if not pending:
-                        break
-                    if creative.shortcode not in pending or not creative.image_hash:
-                        continue
-                    ad = by_hash.get(creative.image_hash)
-                    if ad is not None:
-                        _take(creative.shortcode, ad)
-            except MetaAdsError as exc:
-                logger.warning("branch=%s creatives walk cut short (%s) — keeping %d",
-                               self.branch_id, exc, len(rows))
-        return rows
 
     async def sync_insights(self, *, today: date | None = None) -> int:
         """Refresh the rolling insight window for ads our leads came from. Returns rows."""
