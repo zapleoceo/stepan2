@@ -1,9 +1,10 @@
 """AdSyncService: map lead media → Meta ad, and cache daily insights.
 
-The client is faked, so these cover the parts that actually carry risk: that we only ever
-walk Graph when there is unmapped media, that the walk stops early, that a throttle commits
-nothing rather than half a month of spend, and that the rolling window replaces (not merges)
-so a day Meta retracts disappears from our numbers too.
+The client is faked, so these cover what carries risk: that we walk Graph only when there is
+unmapped media, that the walk stops early, that the per-ad lookup tiers are billed only when
+the free permalink misses, that a missing instagram_basic caps coverage QUIETLY instead of
+raising or writing a wrong ad, and that a throttle commits nothing rather than half a month
+of spend.
 """
 from __future__ import annotations
 
@@ -20,10 +21,9 @@ from app.adapters.db.models import (
     ChannelThread,
     Lead,
 )
-from app.adapters.meta_ads import AdRow, CreativeRow, InsightRow, MetaAdsRateLimited
+from app.adapters.meta_ads import AdRow, InsightRow, MetaAdsRateLimited
 from app.domain.enums import ChannelKind
 from app.modules.ads import repository as repo
-from app.modules.ads.bridge import pk_to_shortcode
 from app.modules.ads.sync import AdSyncService
 from app.modules.settings.service import BranchSettings
 
@@ -32,32 +32,36 @@ PK = "3931661706982573994"
 CODE = "DaQEX3ds8eq"
 
 
-class FakeClient:
-    """Stands in for MetaAdsClient; records what was walked so we can assert we did not."""
+def _ad(ad_id="ad1", *, shortcode=None, effective=None, source=None, campaign=None):
+    return AdRow(ad_id=ad_id, creative_id=f"c-{ad_id}", ad_name=None, adset_id=None,
+                 adset_name=None, campaign_id=None, campaign_name=campaign, objective=None,
+                 shortcode=shortcode, effective_media_id=effective, source_media_id=source)
 
-    def __init__(
-        self, *, creatives=None, ads=None, insights=None,
-        raise_on: str | None = None,
-    ) -> None:
-        self._creatives = creatives or []
+
+class FakeClient:
+    """Stands in for MetaAdsClient; records what was walked and looked up."""
+
+    def __init__(self, *, ads=None, insights=None, media=None,
+                 raise_on: str | None = None) -> None:
         self._ads = ads or []
         self._insights = insights or []
+        self._media = media or {}          # media_id -> shortcode (None = not permitted)
         self._raise_on = raise_on
-        self.creatives_read = 0
+        self.ads_read = 0
+        self.media_lookups: list[str] = []
         self.walked: list[str] = []
-
-    async def iter_creatives(self, start_url=None):
-        self.walked.append("creatives")
-        if self._raise_on == "creatives":
-            raise MetaAdsRateLimited("too many calls")
-        for row in self._creatives:
-            self.creatives_read += 1
-            yield row
 
     async def iter_ads(self, start_url=None):
         self.walked.append("ads")
+        if self._raise_on == "ads":
+            raise MetaAdsRateLimited("too many calls")
         for row in self._ads:
+            self.ads_read += 1
             yield row
+
+    async def media_shortcode(self, media_id):
+        self.media_lookups.append(media_id)
+        return self._media.get(media_id)
 
     async def iter_insights(self, since, until):
         self.walked.append("insights")
@@ -104,31 +108,59 @@ def _svc(s, branch_id: int, client) -> AdSyncService:
 
 
 @pytest.mark.asyncio
-async def test_sync_map_resolves_media_to_ad_and_campaign(db_session) -> None:
+async def test_matches_on_the_ads_permalink(db_session) -> None:
     bid = await _branch_with_lead(db_session)
-    client = FakeClient(
-        creatives=[CreativeRow(creative_id="c1", shortcode=CODE)],
-        ads=[AdRow(ad_id="ad1", creative_id="c1", ad_name="Ad 2", adset_id="s1",
-                   adset_name="All 18-35", campaign_id="k1",
-                   campaign_name="Vibe Coding / Engagement", objective="OUTCOME_ENGAGEMENT")],
-    )
+    client = FakeClient(ads=[_ad(shortcode=CODE, campaign="Vibe Coding / Engagement")])
     assert await _svc(db_session, bid, client).sync_map() == 1
-    row = (await db_session.execute(
-        AdCreativeMap.__table__.select())).mappings().one()
+    row = (await db_session.execute(AdCreativeMap.__table__.select())).mappings().one()
     assert (row["media_pk"], row["ad_id"]) == (PK, "ad1")
     assert row["campaign_name"] == "Vibe Coding / Engagement"
-    assert row["shortcode"] == pk_to_shortcode(PK)
+    assert client.media_lookups == []          # permalink hit — no extra call billed
 
 
 @pytest.mark.asyncio
-async def test_sync_map_makes_no_graph_call_when_nothing_unmapped(db_session) -> None:
-    """The steady state must be free — this is what makes a 20-min cadence affordable."""
+async def test_falls_back_to_effective_media_when_permalink_misses(db_session) -> None:
+    """Promoting an existing post makes dark copies, so the lead's medium is often not the one
+    on the ad's permalink. The effective id resolves it on ads_management alone."""
     bid = await _branch_with_lead(db_session)
-    client = FakeClient(
-        creatives=[CreativeRow(creative_id="c1", shortcode=CODE)],
-        ads=[AdRow(ad_id="ad1", creative_id="c1", ad_name=None, adset_id=None,
-                   adset_name=None, campaign_id=None, campaign_name=None, objective=None)],
-    )
+    client = FakeClient(ads=[_ad(shortcode="OTHER", effective="eff-1")], media={"eff-1": CODE})
+    assert await _svc(db_session, bid, client).sync_map() == 1
+    assert client.media_lookups == ["eff-1"]
+
+
+@pytest.mark.asyncio
+async def test_falls_back_to_source_media_last(db_session) -> None:
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad(shortcode="OTHER", effective="eff-1", source="src-1")],
+                        media={"eff-1": None, "src-1": CODE})
+    assert await _svc(db_session, bid, client).sync_map() == 1
+    assert client.media_lookups == ["eff-1", "src-1"]
+
+
+@pytest.mark.asyncio
+async def test_without_instagram_basic_source_lookup_just_yields_nothing(db_session) -> None:
+    """The System User holds no instagram_basic today, so source ids resolve to None. That
+    must cap coverage QUIETLY — never raise, never write a row pointing at the wrong ad."""
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad(shortcode="OTHER", source="src-1")], media={"src-1": None})
+    assert await _svc(db_session, bid, client).sync_map() == 0
+    assert (await repo.mapped_media_pks(db_session, bid)) == set()
+
+
+@pytest.mark.asyncio
+async def test_lookup_tier_skipped_entirely_once_everything_matched(db_session) -> None:
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad("ad-x", shortcode="OTHER", effective="eff-1"),
+                             _ad("ad1", shortcode=CODE)], media={"eff-1": "NOPE"})
+    await _svc(db_session, bid, client).sync_map()
+    assert client.media_lookups == []          # matched on a permalink; deferred tier dropped
+
+
+@pytest.mark.asyncio
+async def test_makes_no_graph_call_when_nothing_unmapped(db_session) -> None:
+    """The steady state must be free — this is what makes a frequent cadence affordable."""
+    bid = await _branch_with_lead(db_session)
+    client = FakeClient(ads=[_ad(shortcode=CODE)])
     await _svc(db_session, bid, client).sync_map()
     client.walked.clear()
     assert await _svc(db_session, bid, client).sync_map() == 0
@@ -136,38 +168,26 @@ async def test_sync_map_makes_no_graph_call_when_nothing_unmapped(db_session) ->
 
 
 @pytest.mark.asyncio
-async def test_sync_map_stops_walking_creatives_once_all_found(db_session) -> None:
+async def test_stops_walking_ads_once_all_found(db_session) -> None:
     bid = await _branch_with_lead(db_session)
-    extra = [CreativeRow(creative_id=f"c{i}", shortcode=f"zz{i}") for i in range(50)]
-    client = FakeClient(
-        creatives=[CreativeRow(creative_id="c1", shortcode=CODE), *extra],
-        ads=[AdRow(ad_id="ad1", creative_id="c1", ad_name=None, adset_id=None,
-                   adset_name=None, campaign_id=None, campaign_name=None, objective=None)],
-    )
+    extra = [_ad(f"ad-{i}", shortcode=f"zz{i}") for i in range(50)]
+    client = FakeClient(ads=[_ad(shortcode=CODE), *extra])
     await _svc(db_session, bid, client).sync_map()
-    assert client.creatives_read == 1  # stopped at the hit, did not read the other 50
+    assert client.ads_read == 1  # stopped at the hit, did not read the other 50
 
 
 @pytest.mark.asyncio
-async def test_sync_map_throttled_adds_nothing(db_session) -> None:
+async def test_map_throttled_adds_nothing(db_session) -> None:
     bid = await _branch_with_lead(db_session)
-    client = FakeClient(raise_on="creatives")
+    client = FakeClient(raise_on="ads")
     assert await _svc(db_session, bid, client).sync_map() == 0
     assert (await repo.mapped_media_pks(db_session, bid)) == set()
 
 
 @pytest.mark.asyncio
-async def test_sync_map_skips_creative_that_no_ad_uses(db_session) -> None:
-    """An orphan creative must leave the media unmapped, not write a row with no ad."""
-    bid = await _branch_with_lead(db_session)
-    client = FakeClient(creatives=[CreativeRow(creative_id="c1", shortcode=CODE)], ads=[])
-    assert await _svc(db_session, bid, client).sync_map() == 0
-
-
-@pytest.mark.asyncio
-async def test_sync_map_tolerates_unusable_media_pk(db_session) -> None:
+async def test_tolerates_unusable_media_pk(db_session) -> None:
     bid = await _branch_with_lead(db_session, media_pk="not-a-pk")
-    client = FakeClient(creatives=[CreativeRow(creative_id="c1", shortcode=CODE)])
+    client = FakeClient(ads=[_ad(shortcode=CODE)])
     assert await _svc(db_session, bid, client).sync_map() == 0
     assert client.walked == []  # bad pk filtered BEFORE any Graph call
 
@@ -175,8 +195,7 @@ async def test_sync_map_tolerates_unusable_media_pk(db_session) -> None:
 @pytest.mark.asyncio
 async def test_sync_insights_keeps_only_our_ads(db_session) -> None:
     bid = await _branch_with_lead(db_session)
-    db_session.add(AdCreativeMap(
-        branch_id=bid, media_pk=PK, shortcode=CODE, ad_id="ad1"))
+    db_session.add(AdCreativeMap(branch_id=bid, media_pk=PK, shortcode=CODE, ad_id="ad1"))
     await db_session.flush()
     ours = InsightRow(ad_id="ad1", day=date(2026, 7, 10), spend=Decimal("12.34"),
                       impressions=100, reach=90, clicks=5, conv_started=8,
@@ -185,8 +204,7 @@ async def test_sync_insights_keeps_only_our_ads(db_session) -> None:
                         impressions=1, reach=1, clicks=1, conv_started=1,
                         conv_depth_2=1, conv_depth_3=1, conv_depth_5=1, blocks=0)
     client = FakeClient(insights=[ours, theirs])
-    written = await _svc(db_session, bid, client).sync_insights(today=date(2026, 7, 15))
-    assert written == 1
+    assert await _svc(db_session, bid, client).sync_insights(today=date(2026, 7, 15)) == 1
     row = (await db_session.execute(AdInsightDaily.__table__.select())).mappings().one()
     assert row["ad_id"] == "ad1"
     assert Decimal(str(row["spend"])) == Decimal("12.34")
