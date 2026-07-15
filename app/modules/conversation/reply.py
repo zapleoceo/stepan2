@@ -679,6 +679,38 @@ class ReplyService:
                     "%s: unparseable smart decision branch=%d thread=%d — skip",
                     workflow, self.branch_id, thread_id)
                 return None
+        # The pain surfaced in THIS very turn, so _NEED_PAYOFF_NUDGE couldn't fire — it reads
+        # the STORED profile, which was still empty when this reply was drafted. That one turn
+        # is exactly where the audit found deals dying: the model hears the pain and answers
+        # with the price list (or a bare "give me your WhatsApp"). Redraft it once, now that we
+        # know a pain landed and no payoff exists. Costs one extra call, once per lead, at the
+        # single highest-stakes beat of the sale; from the next turn the nudge takes over.
+        # is_question (a real '?' / interrogative opener), NOT _is_answerable_question: the
+        # latter fires on bare keywords, and 'tantangannya kurangnya modal' is a PAIN, not a
+        # price question — it must not block the redraft it was meant to trigger.
+        if (decision.reply and decision.pains and not ctx.stored_needs.pains
+                and not (ctx.stored_needs.gains or decision.gains)
+                and not is_question(last_txt)):
+            logger.info(
+                "%s: branch=%d thread=%d first pain caught, no payoff → need-payoff regen",
+                workflow, self.branch_id, thread_id)
+            raw, regen_meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
+                extra_user_msg=_NEED_PAYOFF_NUDGE)
+            try:
+                redrafted = parse_decision(raw)
+            except ValueError:
+                pass  # keep the original draft AND its meta — the regen is discarded
+            else:
+                if redrafted.reply:
+                    from dataclasses import replace  # noqa: PLC0415
+                    # keep what the FIRST draft extracted: the redraft is about the reply TEXT,
+                    # and its own extraction pass can silently drop the pain we just caught
+                    decision = replace(
+                        redrafted,
+                        pains=redrafted.pains or decision.pains,
+                        jobs=redrafted.jobs or decision.jobs)
+                    meta = regen_meta
         if decision.reply:
             prior, ratio = _most_similar_prior(decision.reply, ctx.dialog)
             if ratio >= _DUPLICATE_RATIO:
