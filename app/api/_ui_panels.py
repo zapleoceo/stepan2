@@ -1333,163 +1333,180 @@ def _ad_funnel_header(cols: list[tuple[str, bool, str, bool]],
     return f'<thead><tr>{ths}</tr><tr class="rep-fltr">{fths}</tr></thead>'
 
 
-def _ad_funnel_html(
-    rows: list, business_id: str = "", account_id: str = "", *,
+_AD_TREE_CSS = (
+    "<style>"
+    ".adt{margin:.15rem 0 .5rem}"
+    ".adt-c{border:1px solid #232b36;border-radius:6px;margin-bottom:.3rem;background:#151a21}"
+    ".adt-c>summary{list-style:none;cursor:pointer;padding:.4rem .55rem;display:flex;"
+    "align-items:center;gap:.5rem;font-size:.72rem}"
+    ".adt-c>summary::-webkit-details-marker{display:none}"
+    ".adt-c>summary:hover{background:#1a212a}"
+    ".adt-c>summary::before{content:'\\25B8';color:#5c6b7d;font-size:.6rem;"
+    "transition:transform .12s}"
+    ".adt-c[open]>summary::before{transform:rotate(90deg)}"
+    ".adt-nm{flex:1;color:#e8eef4;font-weight:600;overflow:hidden;text-overflow:ellipsis;"
+    "white-space:nowrap}"
+    ".adt-m{color:#8899aa;white-space:nowrap;font-variant-numeric:tabular-nums}"
+    ".adt-m b{color:#e8eef4;font-weight:600}"
+    ".adt-c table{margin:0;border-top:1px solid #232b36}"
+    ".adt-orph{border-color:#3a2f22}"
+    "</style>"
+)
+
+
+def _money(value: float) -> str:
+    return f"${value:,.2f}" if value else "—"
+
+
+def _ad_tree_html(
+    rows: list, media_to_ad: dict[str, dict], ad_spend: dict[str, dict],
+    synced_at: object = None, business_id: str = "", account_id: str = "", *,
     mappings: dict[str, str] | None = None,
     suggestions: dict[str, str] | None = None,
     products: list[tuple[str, str]] | None = None,
 ) -> str:
-    """Per-ad funnel table: leads from each ad → pipeline / won / conv%, an ad-action menu,
-    and (single-branch only) an operator product-mapping column with a history suggestion.
-    Columns sort on header click and filter via the per-column row (client-side, see JS)."""
+    """Campaign → ad tree: Meta's spend and our funnel on the same line, grouped the way the
+    money is actually budgeted (per campaign), so "what did this campaign cost and what did it
+    bring" is one glance instead of two tables and a manual join.
+
+    Two numbers deliberately do NOT reconcile and are shown side by side: Meta counts taps it
+    attributed, we count leads we hold. Cost-per-OUR-lead is the number Meta's headline
+    cost-per-conversation hides.
+
+    Ads we could not map to a campaign are NOT dropped — they get their own group at the
+    bottom with their funnel and no spend. Dropping them would silently shrink the lead base
+    and make the spend table look more complete than it is."""
     if not rows:
         return ""
     mappings = mappings or {}
     suggestions = suggestions or {}
-    show_map = bool(products)  # product column only when a single branch is in scope
-    hdr = (
-        f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
-        f'{_h.escape(t("rep.ad_funnel"))}</h3>'
-    )
-    body = ""
-    for ad_id, ad_media_id, total, pipeline, won, dormant in rows:
-        total = int(total or 0)
-        won = int(won or 0)
-        conv = round(won / total * 100, 1) if total else 0.0
-        fb = _fb_ad_url(ad_id, business_id, account_id)
-        cell_inner = admap_cell_inner(
-            ad_id, mappings.get(str(ad_id)), suggestions.get(str(ad_id)), products or [])
-        map_cell = (
-            f'<td class="admap" id="admap-{_h.escape(str(ad_id))}">'
-            f'{cell_inner}'
-            f'</td>'
-        ) if show_map else ""
-        aid = _h.escape(str(ad_id))
-        body += (
-            f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb)}</td>'
-            f'{map_cell}'
-            f'{_count_cell(aid, "", total, "")}'
-            f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'
-            f'{_count_cell(aid, "won", won, "#51cf66")}'
-            f'{_count_cell(aid, "dormant", int(dormant or 0), "#868e96")}'
-            f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
-        )
-    cols: list[tuple[str, bool, str, bool]] = [("rep.ad", False, "text", False)]
-    if show_map:
-        cols.append(("rep.ad_product", False, "eq", False))
-    cols += [
-        ("rep.total", True, "min", True), ("rep.pipeline", True, "min", True),
-        ("rep.won", True, "min", True), ("rep.dormant", True, "min", True),
-        ("rep.conv", True, "min", True),
-    ]
-    head = _ad_funnel_header(cols, products or [])
-    return (
-        f'{hdr}<table class="rep-tbl rep-sortable">'
-        f'{head}<tbody>{body}</tbody></table>{_AD_FUNNEL_JS}'
-    )
-
-
-def _ad_spend_html(
-    rows: list, media_to_ad: dict[str, dict], ad_spend: dict[str, dict],
-    synced_at: object = None, business_id: str = "", account_id: str = "",
-) -> str:
-    """Our per-ad funnel joined to Meta's real spend, one row per ad.
-
-    Two numbers deliberately sit side by side and do NOT reconcile: Meta counts conversations
-    it attributed to the ad, we count leads we actually hold. The gap between them is itself
-    the signal — and "cost per OUR lead" is the number the headline CPM/cost-per-conversation
-    hides, since Meta bills for taps while we only ever bank leads that talk.
-
-    Joins on ad_media_id → ad_creative_map, never on channel_thread.ad_id: that id comes from
-    the private IG API and is in a different id space (Graph answers code 100 for it)."""
-    if not rows or not media_to_ad:
-        return ""
-    per_ad: dict[str, dict] = {}
-    unmatched_leads = 0
-    for _ad_id, ad_media_id, total, pipeline, won, _dormant in rows:
-        mapped = media_to_ad.get(str(ad_media_id or ""))
+    show_map = bool(products)
+    groups: dict[str, dict] = {}
+    orphans: list = []
+    for row in rows:
+        mapped = media_to_ad.get(str(row[1] or ""))
         if mapped is None:
-            unmatched_leads += int(total or 0)
+            orphans.append(row)
             continue
-        acc = per_ad.setdefault(mapped["ad_id"], {
-            "campaign": mapped.get("campaign_name") or "—",
-            "objective": mapped.get("objective") or "",
-            "leads": 0, "pipeline": 0, "won": 0,
-        })
-        acc["leads"] += int(total or 0)
-        acc["pipeline"] += int(pipeline or 0)
-        acc["won"] += int(won or 0)
-    if not per_ad:
-        return ""
+        key = mapped.get("campaign_name") or "—"
+        grp = groups.setdefault(key, {"ads": [], "spend": 0.0, "leads": 0, "won": 0,
+                                      "started": 0, "d5": 0, "blocks": 0, "seen": set()})
+        grp["ads"].append((row, mapped))
+        grp["leads"] += int(row[2] or 0)
+        grp["won"] += int(row[4] or 0)
+        # Several media can resolve to ONE ad — count its spend once, not per medium.
+        ad_id = mapped["ad_id"]
+        if ad_id not in grp["seen"]:
+            grp["seen"].add(ad_id)
+            m = ad_spend.get(ad_id) or {}
+            grp["spend"] += float(m.get("spend") or 0.0)
+            grp["started"] += int(m.get("conv_started") or 0)
+            grp["d5"] += int(m.get("conv_depth_5") or 0)
+            grp["blocks"] += int(m.get("blocks") or 0)
+
+    def _ad_rows(items: list, with_spend: bool) -> str:
+        out = ""
+        for row, mapped in items:
+            ad_id, ad_media_id, total, pipeline, won, dormant = row
+            total, won = int(total or 0), int(won or 0)
+            conv = round(won / total * 100, 1) if total else 0.0
+            aid = _h.escape(str(ad_id))
+            cell = admap_cell_inner(
+                ad_id, mappings.get(str(ad_id)), suggestions.get(str(ad_id)), products or [])
+            map_cell = f'<td class="admap" id="admap-{aid}">{cell}</td>' if show_map else ""
+            spend_cells = ""
+            if with_spend:
+                m = ad_spend.get(mapped["ad_id"]) or {}
+                spend = float(m.get("spend") or 0.0)
+                cpl = spend / total if total else 0.0
+                cpw = spend / won if won else 0.0
+                spend_cells = (
+                    f'<td class="rep-n">{_money(spend)}</td>'
+                    f'<td class="rep-n">{int(m.get("conv_started") or 0) or "—"}</td>'
+                    f'<td class="rep-n" style="color:#51cf66">'
+                    f'{int(m.get("conv_depth_5") or 0) or "—"}</td>'
+                    f'<td class="rep-n" style="font-weight:600">{_money(cpl)}</td>'
+                    f'<td class="rep-n">{_money(cpw)}</td>'
+                )
+            fb = _fb_ad_url(mapped["ad_id"] if with_spend else ad_id, business_id, account_id)
+            out += (
+                f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb)}</td>'
+                f'{map_cell}{spend_cells}'
+                f'{_count_cell(aid, "", total, "")}'
+                f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'
+                f'{_count_cell(aid, "won", won, "#51cf66")}'
+                f'{_count_cell(aid, "dormant", int(dormant or 0), "#868e96")}'
+                f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
+            )
+        return out
+
+    def _head(with_spend: bool) -> str:
+        """Sort + per-column filters survive the regrouping: campaigns answer "where did the
+        money go", but finding one ad inside a big campaign still needs them.
+        Entries: (label_key, numeric, filter_kind[text|eq|min], align_right)."""
+        cols: list[tuple[str, bool, str, bool]] = [("rep.ad", False, "text", False)]
+        if show_map:
+            cols.append(("rep.ad_product", False, "eq", False))
+        if with_spend:
+            cols += [
+                ("rep.ads_spend", True, "min", True), ("rep.ads_started", True, "min", True),
+                ("rep.ads_d5", True, "min", True), ("rep.ads_cpl", True, "min", True),
+                ("rep.ads_cpw", True, "min", True),
+            ]
+        cols += [
+            ("rep.total", True, "min", True), ("rep.pipeline", True, "min", True),
+            ("rep.won", True, "min", True), ("rep.dormant", True, "min", True),
+            ("rep.conv", True, "min", True),
+        ]
+        return _ad_funnel_header(cols, products or [])
 
     body = ""
-    tot_spend = tot_leads = tot_started = tot_d5 = 0.0
-    for ad_id, acc in sorted(per_ad.items(), key=lambda kv: -kv[1]["leads"]):
-        m = ad_spend.get(ad_id) or {}
-        spend = float(m.get("spend") or 0.0)
-        started, d3, d5 = (
-            int(m.get("conv_started") or 0), int(m.get("conv_depth_3") or 0),
-            int(m.get("conv_depth_5") or 0))
-        blocks = int(m.get("blocks") or 0)
-        cpl = spend / acc["leads"] if acc["leads"] else 0.0
-        cpw = spend / acc["won"] if acc["won"] else 0.0
-        tot_spend += spend
-        tot_leads += acc["leads"]
-        tot_started += started
-        tot_d5 += d5
-        fb = _fb_ad_url(ad_id, business_id, account_id)
-        name = _h.escape(str(acc["campaign"])[:52])
-        link = f'<a href="{fb}" target="_blank" rel="noopener">{name}</a>' if fb else name
+    for name, grp in sorted(groups.items(), key=lambda kv: -kv[1]["spend"]):
+        cpl = grp["spend"] / grp["leads"] if grp["leads"] else 0.0
+        blocks = (
+            f' · <span style="color:#ff6b6b">{grp["blocks"]}</span>' if grp["blocks"] else "")
         body += (
-            f'<tr><td>{link}</td>'
-            f'<td style="text-align:right">${spend:,.2f}</td>'
-            f'<td style="text-align:right">{started or "—"}</td>'
-            f'<td style="text-align:right">{d3 or "—"}</td>'
-            f'<td style="text-align:right;color:#51cf66">{d5 or "—"}</td>'
-            f'<td style="text-align:right">{acc["leads"]}</td>'
-            f'<td style="text-align:right;color:#9b7aff">{acc["won"]}</td>'
-            f'<td style="text-align:right;font-weight:600">'
-            f'{f"${cpl:,.2f}" if cpl else "—"}</td>'
-            f'<td style="text-align:right">{f"${cpw:,.2f}" if cpw else "—"}</td>'
-            f'<td style="text-align:right;color:{"#ff6b6b" if blocks else "#8899aa"}">'
-            f'{blocks or "—"}</td></tr>'
+            f'<details class="adt-c"><summary>'
+            f'<span class="adt-nm" title="{_h.escape(name)}">{_h.escape(name[:60])}</span>'
+            f'<span class="adt-m"><b>{_money(grp["spend"])}</b> · '
+            f'{_h.escape(t("rep.ads_leads"))} <b>{grp["leads"]}</b> · '
+            f'{_h.escape(t("rep.ads_won"))} <b>{grp["won"]}</b> · '
+            f'{_h.escape(t("rep.ads_cpl"))} <b>{_money(cpl)}</b>{blocks}</span>'
+            f'</summary><table class="rep-tbl rep-sortable">{_head(True)}'
+            f'<tbody>{_ad_rows(grp["ads"], True)}</tbody></table></details>'
         )
-    seen_leads = tot_leads + unmatched_leads
+    if orphans:
+        n = sum(int(r[2] or 0) for r in orphans)
+        body += (
+            f'<details class="adt-c adt-orph"><summary>'
+            f'<span class="adt-nm">{_h.escape(t("rep.ads_unmatched"))}</span>'
+            f'<span class="adt-m">{_h.escape(t("rep.ads_leads"))} <b>{n}</b> · '
+            f'{_h.escape(t("rep.ads_no_spend"))}</span></summary>'
+            f'<table class="rep-tbl rep-sortable">{_head(False)}'
+            f'<tbody>{_ad_rows([(r, {}) for r in orphans], False)}</tbody></table></details>'
+        )
+    if not body:
+        return ""
+    tot_leads = sum(g["leads"] for g in groups.values())
+    tot_spend = sum(g["spend"] for g in groups.values())
+    seen_leads = tot_leads + sum(int(r[2] or 0) for r in orphans)
     covered = tot_leads / seen_leads * 100 if seen_leads else 0.0
-    avg_cpl = tot_spend / tot_leads if tot_leads else 0.0
     stamp = (
         f' · {_h.escape(t("rep.ads_synced"))} {synced_at:%d.%m %H:%M}'
         if hasattr(synced_at, "strftime") else ""
     )
-    # Coverage is on the face of the panel, not in a tooltip: a spend table that silently
-    # omits a third of the leads reads as complete and would be trusted as such.
+    # Coverage on the face of the panel, not in a tooltip: a spend view that silently omits
+    # part of the leads reads as complete and would be trusted as such.
     note = (
-        f'<div style="font-size:.62rem;color:#8899aa;margin:.15rem 0 .35rem">'
-        f'{_h.escape(t("rep.ads_coverage"))}: {covered:.0f}%'
-        f' ({int(tot_leads)}/{int(tot_leads + unmatched_leads)}){stamp}</div>'
+        f'<div style="font-size:.62rem;color:#8899aa;margin:.15rem 0 .4rem">'
+        f'{_h.escape(t("rep.ads_coverage"))}: {covered:.0f}% ({tot_leads}/{seen_leads})'
+        f' · {_h.escape(t("rep.ads_total"))} {_money(tot_spend)}{stamp}</div>'
     )
     hdr = (
         f'<h3 style="font-size:.78rem;color:#8899aa;margin:1rem 0 .35rem">'
-        f'{_h.escape(t("rep.ad_spend"))}</h3>'
+        f'{_h.escape(t("rep.ad_tree"))}</h3>'
     )
-    heads = ("rep.ads_campaign", "rep.ads_spend", "rep.ads_started", "rep.ads_d3",
-             "rep.ads_d5", "rep.ads_leads", "rep.ads_won", "rep.ads_cpl", "rep.ads_cpw",
-             "rep.ads_blocks")
-    head = "".join(f'<th>{_h.escape(t(k))}</th>' for k in heads)
-    foot = (
-        f'<tr style="border-top:1px solid #2b3440;font-weight:600">'
-        f'<td>{_h.escape(t("rep.ads_total"))}</td>'
-        f'<td style="text-align:right">${tot_spend:,.2f}</td>'
-        f'<td style="text-align:right">{int(tot_started) or "—"}</td><td></td>'
-        f'<td style="text-align:right">{int(tot_d5) or "—"}</td>'
-        f'<td style="text-align:right">{int(tot_leads)}</td><td></td>'
-        f'<td style="text-align:right">{f"${avg_cpl:,.2f}" if avg_cpl else "—"}</td>'
-        f'<td></td><td></td></tr>'
-    )
-    return (
-        f'{hdr}{note}<table class="rep-tbl rep-sortable"><thead><tr>{head}</tr></thead>'
-        f'<tbody>{body}{foot}</tbody></table>'
-    )
+    return f'{hdr}{note}<div class="adt">{body}</div>{_AD_TREE_CSS}{_AD_FUNNEL_JS}'
 
 
 # Pipeline order for the one-line funnel (side stages shown separately below).
@@ -1994,8 +2011,7 @@ def reports_panel_html(
         f'{_needs_cloud_html(needs_cloud)}'
         f'</div>'
         f'{mini_act}'
-        f'{_ad_spend_html(ad_funnel or [], media_to_ad or {}, ad_spend or {}, ads_synced_at, fb_business_id, fb_account_id)}'  # noqa: E501
-        f'{_ad_funnel_html(ad_funnel or [], fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
+        f'{_ad_tree_html(ad_funnel or [], media_to_ad or {}, ad_spend or {}, ads_synced_at, fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'
     )
 

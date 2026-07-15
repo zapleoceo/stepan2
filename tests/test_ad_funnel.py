@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead
 from app.api._query import fetch_ad_funnel
-from app.api._ui_panels import _ad_funnel_html
+from app.api._ui_panels import _ad_tree_html
 from app.domain.enums import ChannelKind, Stage
 
 
@@ -92,11 +92,11 @@ async def test_ad_funnel_branch_scoped(db_session) -> None:
 def test_ad_funnel_html_renders_link_and_conv() -> None:
     from app.api._i18n import _lang
     _lang.set("en")
-    html = _ad_funnel_html([("act_123", "9988", 4, 2, 1, 1)])
+    html = _ad_tree_html([("act_123", "9988", 4, 2, 1, 1)], {}, {})
     assert "act_123" in html
     assert "facebook.com/ads/library/?id=act_123" in html  # Ad Library, not Ads Manager
     assert "25.0%" in html  # 1 won / 4 total
-    assert _ad_funnel_html([]) == ""
+    assert _ad_tree_html([], {}, {}) == ""
 
 
 def test_ad_link_opens_the_ad_library_by_id() -> None:
@@ -104,8 +104,8 @@ def test_ad_link_opens_the_ad_library_by_id() -> None:
     regardless of which ad account owns it, unlike an Ads Manager account-scoped deep link."""
     from app.api._i18n import _lang
     _lang.set("en")
-    html = _ad_funnel_html([("120255671613970771", None, 3, 1, 1, 0)],
-                           business_id="949920286532207", account_id="1000480912055519")
+    html = _ad_tree_html([("120255671613970771", None, 3, 1, 1, 0)], {}, {},
+                          None, "949920286532207", "1000480912055519")
     assert "facebook.com/ads/library/?id=120255671613970771" in html
     assert "adsmanager.facebook.com" not in html   # account-scoped deep link abandoned
     assert "selected_ad_ids" not in html
