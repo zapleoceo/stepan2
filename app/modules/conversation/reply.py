@@ -152,6 +152,24 @@ _MINOR_NUDGE = (
     "the parent can review (mention the 10% student discount). Positive, no pressure. Return "
     "the JSON as usual.]"
 )
+# The lead asked a DIRECT answerable question in their OWN words (price, schedule, how to
+# enrol, certificate…). The most expensive live failure in the 3-day audit (2026-07-15): the
+# model replies with the clarify stub ('boleh sebutkan lebih spesifik' — 39 of its 41 uses
+# landed on a real question) or counters with 'apa tujuan Kakak?' instead of answering. Its
+# own reason log admits it: "лид спросил цену, но мы задаём уточняющий вопрос". The
+# ANSWER-FIRST prompt rule exists but loses at 26k-char scale, so pin it to the exact turn.
+# The ad prefill (a button click, which must NOT get a price) is handled upstream by
+# _AD_OPENER_NUDGE; the explicit guard here covers a lead who taps the ad twice.
+_ANSWER_FIRST_NUDGE = (
+    "[System: the lead just asked a DIRECT question in their OWN words. ANSWER IT IN THIS "
+    "REPLY, up front, with the concrete fact from the product card (price → the real number; "
+    "schedule → the actual date; how to enrol → the real steps). Do NOT ask them to be more "
+    "specific, and do NOT answer with a discovery question instead — a lead who asks and gets "
+    "a counter-question leaves. If the fact is genuinely NOT in the knowledge base, say so "
+    "honestly in one line and set needs_manager=true — never invent it, never stall with a "
+    "generic 'let me check' filler. After the answer you may add ONE short question. Return "
+    "the JSON as usual.]"
+)
 
 # A live reply that repeats a question already asked in this thread — same failure mode
 # followup.py guards against (chat 1830), but on the live-reply path, which had NO dedup
@@ -559,6 +577,9 @@ class ReplyService:
                 extra_user_msg = _MINOR_NUDGE
             elif _SOFT_NO_RE.search(last_txt):
                 extra_user_msg = _SOFT_NO_NUDGE
+            elif _is_answerable_question(last_txt) and not _AD_TEMPLATE_RE.search(last_txt):
+                # A real question outranks budget/discovery framing: answer it, then qualify.
+                extra_user_msg = _ANSWER_FIRST_NUDGE
             elif _LOW_BUDGET_RE.search(last_txt):
                 extra_user_msg = _LOW_BUDGET_NUDGE
             elif not ctx.stored_needs.captured() and inbound_count > _DISCOVERY_TURN_CAP:

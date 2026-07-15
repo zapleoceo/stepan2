@@ -10,10 +10,39 @@ from cryptography.fernet import Fernet  # noqa: E402
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
 from app.modules.conversation.reply import (  # noqa: E402
+    _AD_TEMPLATE_RE,
     _LOW_BUDGET_RE,
     _MINOR_RE,
     _SOFT_NO_RE,
+    _is_answerable_question,
 )
+
+
+def _answer_first_fires(text: str) -> bool:
+    """The exact gate used in decide(): a real question, but never the ad prefill."""
+    return _is_answerable_question(text) and not _AD_TEMPLATE_RE.search(text)
+
+
+def test_answer_first_fires_on_real_questions() -> None:
+    # every one of these is a live 3-day-audit case that got the clarify stub instead
+    for s in ["Berbayar berapa", "Biaya nya berapa?", "apakah dibayar",
+              "Modal hp bisa ga sih min", "untuk jadwalnya hari apa aja ya biasanya?",
+              "Untuk ikut serta caranya gimana ya kak?", "sertifikatnya BNSP kan kak?",
+              "ini gratis atau ada biaya nya kak"]:
+        assert _answer_first_fires(s), s
+
+
+def test_answer_first_never_fires_on_ad_prefill() -> None:
+    # the ad button click mentions 'biaya' but must NOT get a price — _AD_OPENER_NUDGE owns it
+    for s in ["Halo, saya ingin tahu detail program SMM dan biaya kursusnya 😊",
+              "💻 Ceritakan lebih detail tentang program kursusnya",
+              "🐍 Ceritakan lebih detail tentang program kursus Python"]:
+        assert not _answer_first_fires(s), s
+
+
+def test_answer_first_ignores_non_questions() -> None:
+    for s in ["oke makasih", "iya kak", "Mantap"]:
+        assert not _answer_first_fires(s), s
 
 
 def test_soft_no_detects_polite_refusals() -> None:
