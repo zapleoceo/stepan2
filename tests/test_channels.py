@@ -773,3 +773,20 @@ def test_registry_maps_every_kind_to_its_adapter() -> None:
     }
     for kind, cls in REGISTRY.items():
         assert cls.kind is kind  # class advertises the kind it is registered under
+
+
+async def test_two_factor_classification_is_logged_at_a_readable_level(caplog) -> None:
+    """The API runs at WARNING, so an INFO line here would never be read. Without this the
+    classification is invisible and a code box shown for a push approval (or the reverse)
+    can only be diagnosed by asking the operator what is on their screen."""
+    import logging
+
+    from app.api._routes_channels import _two_factor_kind
+
+    class _Cl:
+        last_json = {"two_factor_info": {"totp_two_factor_on": True, "sms_two_factor_on": False}}
+
+    with caplog.at_level(logging.WARNING):
+        assert _two_factor_kind(_Cl()) == "2fa"
+    assert "classified as 2fa" in caplog.text
+    assert "totp=True" in caplog.text

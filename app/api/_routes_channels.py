@@ -365,6 +365,8 @@ async def _attempt_ig_login(
         return HTMLResponse(_ch_ig_form(ch_id, step="2fa", flow_id=fid, kind=kind,
                                         username=user, attempt=attempt))
     except ChallengeRequired as exc:
+        logger.warning("IG challenge channel=%d manual=%s: %s", ch_id,
+                       _is_manual_challenge(exc), str(exc)[:300])
         if _is_manual_challenge(exc):
             _ig_flows[fid] = {"client": cl, "channel_id": ch_id, "kind": "manual",
                               "username": user, "password": pw}
@@ -401,9 +403,16 @@ def _two_factor_kind(cl: Any) -> str:
     last = getattr(cl, "last_json", None)
     if isinstance(last, dict):
         info = last.get("two_factor_info") or {}
-    if info.get("totp_two_factor_on") or info.get("sms_two_factor_on"):
-        return "2fa"
-    return "device"
+    kind = "2fa" if (info.get("totp_two_factor_on") or info.get("sms_two_factor_on")) else "device"
+    # Which branch we picked, and the flags we picked it from. Without this a wrong choice is
+    # invisible: the operator just sees a code box for a push approval (or vice-versa) and the
+    # log shows nothing but "[400] POST /accounts/login/". Flags only — no tokens, no payload.
+    # WARNING, not INFO: the API runs at WARNING, and this fires only on an operator-triggered
+    # connect (a few a day), so it costs nothing and is worthless if it can't be read.
+    logger.warning("IG 2FA classified as %s (totp=%s sms=%s methods=%s)", kind,
+                   info.get("totp_two_factor_on"), info.get("sms_two_factor_on"),
+                   sorted(k for k in info if k.endswith(("_on", "_enabled"))))
+    return kind
 
 
 async def _channel_geo(session: Any, ch_id: int) -> tuple[str, int]:
