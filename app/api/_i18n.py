@@ -970,8 +970,10 @@ _TR: dict[str, dict[str, str]] = {
     "rep.won":     {"ru": "Закрытые",       "en": "Won",          "id": "Berhasil"},
     "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},
     "rep.dormant": {"ru": "Спящие",         "en": "Dormant",      "id": "Tidak aktif"},
-    "rep.discovered": {"ru": "Выявлено до презент.", "en": "Discovered 1st",
-                       "id": "Gali dulu"},
+    # Counts a real captured PAIN, not a pass through the 'qualifying' stage (every lead
+    # crosses that, so the old wording read ~87% while only ~65% had any pain at all).
+    "rep.discovered": {"ru": "С болью до презент.", "en": "Pain captured",
+                       "id": "Pain tergali"},
     "rep.disc_len": {"ru": "Ср. глубина выявл.", "en": "Avg discovery msgs",
                      "id": "Rata2 gali"},
     "rep.msgs_tile": {"ru": "Сообщений исх/вх", "en": "Msgs out/in",

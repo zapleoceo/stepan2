@@ -486,13 +486,44 @@ async def fetch_branch_tz(session: AsyncSession, branch_ids: list[int]) -> dict[
     return {bid: int(offset) for bid, offset in rows}
 
 
+async def fetch_closed_in_period(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> int:
+    """Leads actually CLOSED inside the window — dated by the ready/handed_off transition.
+
+    Every other KPI on the panel is a cohort metric (scoped by lead.created_at), which is the
+    right lens for "how did the leads we got this week behave" but answers a different question
+    than "how much did we sell this week". Over 3 days that read 2 while 11 leads really closed:
+    9 of them had started their conversation before the window, so the cohort filter hid them
+    (2026-07-15). Both numbers are true; the panel now shows this one next to the cohort's."""
+    q = (
+        select(func.count(func.distinct(StageEvent.lead_id)))
+        .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
+        .where(StageEvent.to_stage.in_(("ready", "handed_off")))  # type: ignore[attr-defined]
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(StageEvent.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(StageEvent.created_at < until)  # type: ignore[attr-defined]
+    return int((await session.execute(q)).scalar_one() or 0)
+
+
 async def fetch_discovery_metrics(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
 ) -> dict[str, float | int]:
-    """Discovery-before-presentation KPIs from stage_event: of leads that reached
-    'presenting', how many had a 'qualifying' (discovery) event first, and the average
-    number of inbound messages before the first presentation. Portable (SQLite + Postgres).
+    """Discovery-before-presentation KPIs: of leads that reached 'presenting', how many had a
+    real PAIN captured, and the average number of inbound messages before the first
+    presentation. Portable (SQLite + Postgres).
+
+    'discovered' counts a non-empty pains list on the lead's needs profile — NOT a pass through
+    the 'qualifying' stage. Stage-based counting read 87% while only 65% of those leads had any
+    pain at all (3-day audit, 2026-07-15): qualifying is the default stage every lead crosses,
+    so the old KPI measured the funnel's plumbing and always looked healthy. The needs JSON is
+    matched textually ('"pains": []' = empty) to stay portable across SQLite and Postgres.
 
     since/until scope by the lead's conversation-start date, joined in via `l` — the same
     window as the rest of the reports panel, so a date filter affects this KPI too."""
@@ -519,12 +550,12 @@ async def fetch_discovery_metrics(
         "  JOIN message m ON m.thread_id = ct.id AND m.direction='in' AND m.occurred_at < fp.t"
         "  GROUP BY fp.lead_id)"
         " SELECT (SELECT count(*) FROM fp) AS reached,"
-        "  (SELECT count(*) FROM fp WHERE lead_id IN ("
-        "     SELECT se.lead_id FROM stage_event se JOIN fp f2 ON f2.lead_id=se.lead_id"
-        "     WHERE se.to_stage=:qual AND se.created_at <= f2.t)) AS discovered,"
+        "  (SELECT count(*) FROM fp JOIN lead l2 ON l2.id = fp.lead_id"
+        "     WHERE l2.needs LIKE '%\"pains\":%' AND l2.needs NOT LIKE '%\"pains\": []%')"
+        "   AS discovered,"
         "  (SELECT avg(cnt) FROM dl) AS avg_msgs"
     )
-    params.update(pres="presenting", qual="qualifying")
+    params.update(pres="presenting")
     row = (await session.execute(text(sql), params)).first()
     reached = int(row[0] or 0) if row else 0
     discovered = int(row[1] or 0) if row else 0

@@ -28,7 +28,7 @@ from app.ports.notify import NotifierPort
 from . import guard
 from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
-from .needs import merge_needs, parse_needs
+from .needs import is_question, lead_grounded, merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .routing import FAST, SMART, parse_smart_stages, pick_capability
 
@@ -124,6 +124,20 @@ _SOFT_NO_NUDGE = (
     "or just ask permission to follow up later ('boleh aku kabari kalau ada info baru?'). "
     "Never repeat an offer you already made. Return the JSON as usual.]"
 )
+# A pain is on the table but the lead has never said what they actually want to ACHIEVE.
+# This is SPIN's need-payoff beat, and it is exactly where the 3-day audit (2026-07-15) found
+# deals dying: the model catches the first pain and answers it with the price list — even when
+# the pain IS money ("kurangnya modal dan ragu untuk memulai" → "total biayanya Rp 1.882.955").
+# The gate (NeedsProfile.captured) already refuses to call that 'presenting'; this walks the
+# model to the gain instead of pitching into a half-built need.
+_NEED_PAYOFF_NUDGE = (
+    "[System: the lead has voiced a PAIN, but has never said what they actually want to "
+    "ACHIEVE — no gain captured yet. Do NOT present the product and do NOT quote a price this "
+    "turn (a price on a half-built need is where leads go quiet). Acknowledge the pain in one "
+    "short line, then ask ONE question about the outcome they want — e.g. 'kalau nanti Kakak "
+    "sudah bisa itu, yang paling berubah apa?' / 'idealnya hasil yang Kakak harapkan seperti "
+    "apa?'. The pitch comes only after they name that payoff. Return the JSON as usual.]"
+)
 _LOW_BUDGET_RE = re.compile(
     r"\b(?:nggak|ngga|ndak|tidak|tdk|gak|ga|gk|belum)\s*(?:ada|punya)?\s*"
     r"(?:duit|uang|modal|biaya|dana|ongkos)"
@@ -194,6 +208,19 @@ _UNSEEN_MEDIA_NUDGE = (
 # ANSWER-FIRST prompt rule exists but loses at 26k-char scale, so pin it to the exact turn.
 # The ad prefill (a button click, which must NOT get a price) is handled upstream by
 # _AD_OPENER_NUDGE; the explicit guard here covers a lead who taps the ad twice.
+# Pain captured, payoff not yet. The 3-day audit found discovery breaks EXACTLY where it
+# starts working: the model catches the first pain and fires the price block on the very next
+# reply — even when the pain IS the money ("kurangnya modal dan ragu untuk memulai" → "total
+# biayanya Rp 1.882.955"). Both full SPIN cycles in the audit died that way. NEED-PAYOFF is a
+# prompt rule already; pin it to the turn where it matters (checklist row 2, thread 2903).
+_NEED_PAYOFF_NUDGE = (
+    "[System: you have captured the lead's PAIN but not yet the GAIN they want. Do NOT present "
+    "the product, its features or its price this turn — the payoff has to land first, or the "
+    "price arrives with nothing to weigh it against. Ask ONE short question about the result "
+    "they want ('kalau nanti Kakak udah bisa X, apa yang paling berubah buat Kakak?' / 'pengen "
+    "hasil akhirnya kayak gimana?'), grounded in the pain they just named. Return the JSON as "
+    "usual.]"
+)
 _ANSWER_FIRST_NUDGE = (
     "[System: the lead just asked a DIRECT question in their OWN words. ANSWER IT IN THIS "
     "REPLY, up front, with the concrete fact from the product card (price → the real number; "
@@ -619,6 +646,9 @@ class ReplyService:
                 extra_user_msg = _ANSWER_FIRST_NUDGE
             elif _LOW_BUDGET_RE.search(last_txt):
                 extra_user_msg = _LOW_BUDGET_NUDGE
+            elif ctx.stored_needs.pains and not ctx.stored_needs.gains:
+                # Pain on the table, payoff missing — ask for the gain before any pitch/price.
+                extra_user_msg = _NEED_PAYOFF_NUDGE
             elif not ctx.stored_needs.captured() and inbound_count > _DISCOVERY_TURN_CAP:
                 extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
         raw, meta = await engine.complete(
@@ -728,8 +758,17 @@ class ReplyService:
             # job+gain out of the course name in the template (thread 2912: one template click
             # → "menjadi ahli keamanan siber" appeared in the needs cloud).
             if _lead_spoke_own_words(ctx.dialog):
-                merged = merge_needs(ctx.stored_needs, decision.jobs, decision.pains,
-                                     decision.gains, decision.discovery_complete)
+                # …and only what's actually GROUNDED in those words. The ad prefill is excluded
+                # from the lead's "own words" here too, so its copy can't become a need; a pain
+                # that is merely the lead's own question ("ini ai ya?") is dropped as well.
+                own = " ".join(
+                    m.text or "" for m in ctx.dialog
+                    if m.direction == "in" and not _AD_TEMPLATE_RE.search(m.text or ""))
+                jobs = lead_grounded(decision.jobs, own)
+                gains = lead_grounded(decision.gains, own)
+                pains = [p for p in lead_grounded(decision.pains, own) if not is_question(p)]
+                merged = merge_needs(ctx.stored_needs, jobs, pains, gains,
+                                     decision.discovery_complete)
                 lead.needs = merged.to_json()
                 self.session.add(lead)
         return decision

@@ -28,10 +28,17 @@ class NeedsProfile:
 
     def captured(self) -> bool:
         """Discovery has actually collected the emotional layer — the gate to stop warming up
-        and present. The model sets discovery_complete=true PREMATURELY (thread 1081: the flag
-        true with pains=[]), which skips warm-up and leaves needs uncollected, so the flag only
-        counts when a PAIN is on the table. A pain-less 'complete' is not complete."""
-        return self.has_needs() or (self.discovery_complete and bool(self.pains))
+        and present. Requires a PAIN and a GAIN, i.e. exactly has_needs().
+
+        discovery_complete used to bypass the gain half (flag + any pain was enough). Two live
+        failures killed that shortcut: the model sets the flag PREMATURELY with pains=[] (thread
+        1081 — a pain-less 'complete' is not complete), and when it does catch a pain it flips
+        the flag on that very turn and dumps the price with gains still empty — the 3-day audit
+        (2026-07-15) found discovery breaking exactly where it starts working, answering
+        'kurangnya modal dan ragu untuk memulai' with 'total Rp 1.882.955'. The flag is the
+        model's own opinion; the pain+gain pair is evidence. _NEED_PAYOFF_NUDGE walks it from
+        one to the other, and _DISCOVERY_TURN_CAP still releases a non-yielding lead."""
+        return self.has_needs()
 
     def to_json(self) -> str:
         return json.dumps({
@@ -128,6 +135,39 @@ def _dedup_near(items: list[str]) -> list[str]:
             kept.append(s)
             sets.append(toks)
     return kept[:_MAX_PER_LIST]
+
+
+# A "pain" that is really just the lead's own QUESTION — the model files "ini ai ya?" (are you
+# a bot?), "smm itu apa?" or "berbayar?" as a captured pain, which then satisfies the
+# presentation gate and pollutes the needs cloud (3-day audit, 2026-07-15).
+_QUESTION_START_RE = re.compile(
+    r"^\s*(apa|apakah|gimana|bagaimana|berapa|kapan|kenapa|mengapa|bisa|boleh|ada)\b",
+    re.IGNORECASE)
+# Indonesian just as often puts the question word LAST — "smm itu apa", "harganya berapa",
+# "mulainya kapan" — so an end-anchored check is needed too, not only a leading one.
+_QUESTION_END_RE = re.compile(
+    r"\b(apa|apakah|gimana|bagaimana|berapa|kapan|kenapa|mengapa)\s*\??\s*$", re.IGNORECASE)
+
+
+def is_question(s: str) -> bool:
+    t = (s or "").strip()
+    return (t.endswith("?") or bool(_QUESTION_START_RE.match(t))
+            or bool(_QUESTION_END_RE.search(t)))
+
+
+def lead_grounded(items: list[str], lead_text: str) -> list[str]:
+    """Keep only entries that share a content word with what the LEAD ACTUALLY WROTE.
+
+    The model invents needs out of thin air — the ad creative's own copy ("upgrade skill",
+    "ubah online time jadi peluang karier") filed as the lead's jobs though they never typed a
+    word, or "serangan siber" read into a joke about a girlfriend. `lead_text` must exclude the
+    ad prefill: a button click is not the lead speaking. Deliberately loose (ONE shared content
+    word is enough) so honest rewording survives — "tidak paham coding" for "ga ngerti coding"
+    still shares 'coding'."""
+    lead_toks = _content_tokens(lead_text)
+    if not lead_toks:
+        return []  # lead said nothing of their own — nothing can be grounded in it
+    return [s for s in items if _content_tokens(s) & lead_toks]
 
 
 def _clean(value: object) -> list[str]:

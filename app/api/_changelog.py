@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.8.0"
+PROJECT_VERSION = "1.9.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,18 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.9.0", "date": "15 Jul 2026", "tag": "Selling",
+        "title": "Earns the price before naming it",
+        "blurb": "When a lead finally admits what is holding them back, Stepan no longer "
+                 "answers with the price list. It first asks what they actually want to "
+                 "change, so the number lands against something worth paying for — until then "
+                 "the pitch waits. What it learns about each lead is now kept only when the "
+                 "lead really said it, so the goals and worries on their card are their own "
+                 "words, not the ad's copy or a guess. And your dashboard now counts the leads "
+                 "whose real concern was uncovered, instead of everyone who simply passed "
+                 "through the funnel — a smaller number, and a true one.",
+    },
     {
         "version": "1.8.0", "date": "15 Jul 2026", "tag": "Straight answers",
         "title": "Answers the question that was asked",

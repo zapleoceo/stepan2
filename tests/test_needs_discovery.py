@@ -14,6 +14,8 @@ from app.modules.conversation import ReplyService
 from app.modules.conversation.decision import Decision, parse_decision
 from app.modules.conversation.needs import (
     NeedsProfile,
+    is_question,
+    lead_grounded,
     merge_needs,
     needs_summary,
     parse_needs,
@@ -59,6 +61,27 @@ def test_distinct_needs_not_collapsed() -> None:
         "pains": ["takut buang waktu", "ga punya laptop"],
         "gains": ["gaji lebih tinggi"], "discovery_complete": False}))
     assert len(stored.jobs) == 2 and len(stored.pains) == 2     # genuinely different → kept
+
+
+def test_lead_grounded_drops_needs_the_lead_never_voiced() -> None:
+    said = "aku pengen bisa bikin konten yang menarik"
+    # ad-creative copy the lead never typed (thread 3049) must not survive
+    assert lead_grounded(["upgrade skill", "ubah online time jadi peluang karier"], said) == []
+    # "serangan siber" read into a joke (thread 3099)
+    assert lead_grounded(["cewek gampang kecolongan serangan siber"], said) == []
+    # honest rewording still survives — shares 'konten'
+    assert lead_grounded(["susah bikin konten"], said) == ["susah bikin konten"]
+
+
+def test_lead_grounded_empty_when_lead_said_nothing() -> None:
+    assert lead_grounded(["menjadi ahli keamanan siber"], "") == []
+
+
+def test_is_question_rejects_pains_that_are_just_questions() -> None:
+    for s in ["ini ai ya?", "smm itu apa", "berapa harganya?", "apakah berbayar"]:
+        assert is_question(s), s
+    for s in ["takut ga kekejar", "belum punya laptop", "ga ada modal"]:
+        assert not is_question(s), s
 
 
 def test_needs_summary_and_roundtrip() -> None:
@@ -158,8 +181,11 @@ async def test_gate_allows_presenting_when_lead_already_has_needs(db_session) ->
     b = Branch(name="T", lang="id")
     db_session.add(b)
     await db_session.flush()
+    # captured() now needs BOTH halves: a pain with no gain is still mid-discovery (the
+    # _NEED_PAYOFF_NUDGE turn), so the stored profile here carries the pain AND the gain.
     lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING,
-                needs='{"jobs":["job"],"pains":["cost"],"gains":[],"discovery_complete":true}')
+                needs='{"jobs":["job"],"pains":["cost"],"gains":["a dev job"],'
+                      '"discovery_complete":true}')
     db_session.add(lead)
     await db_session.flush()
     svc = _svc(db_session, b.id)
@@ -191,8 +217,11 @@ async def test_decide_persists_captured_needs(db_session) -> None:
     th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
     db_session.add(th)
     await db_session.flush()
+    # the lead's OWN words must carry the needs — lead_grounded() drops anything invented on
+    # top of them (ad copy, a pain read into a joke), so the fixture says what it reports
     db_session.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="m1",
-                           direction="in", sent_by="lead", text="how much is vibe coding?",
+                           direction="in", sent_by="lead",
+                           text="i tried before and gave up, i want a real job",
                            occurred_at=_NOW))
     await db_session.flush()
 
@@ -287,8 +316,13 @@ async def test_discovery_metrics(db_session) -> None:
     db_session.add(b)
     await db_session.flush()
     ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
-    good = Lead(branch_id=b.id)   # discovered before presenting
-    bad = Lead(branch_id=b.id)    # jumped straight to presenting
+    # 'discovered' = a real PAIN on the profile, not a pass through the qualifying stage:
+    # every lead crosses qualifying, so the stage-based count always read healthy (~87%)
+    # while most of those leads had no pain at all.
+    good = Lead(branch_id=b.id, needs='{"jobs": [], "pains": ["takut gagal"], "gains": [],'
+                                      ' "discovery_complete": true}')
+    bad = Lead(branch_id=b.id, needs='{"jobs": ["kerja"], "pains": [], "gains": [],'
+                                     ' "discovery_complete": false}')  # presented with no pain
     db_session.add_all([ch, good, bad])
     await db_session.flush()
     tg = ChannelThread(lead_id=good.id, channel_id=ch.id, external_thread_id="g")
