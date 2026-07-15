@@ -9,13 +9,23 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
-from app.modules.conversation.reply import (  # noqa: E402
-    _AD_TEMPLATE_RE,
-    _LOW_BUDGET_RE,
-    _MINOR_RE,
-    _SOFT_NO_RE,
-    _is_answerable_question,
-    _unseen_media_in_turn,
+from app.modules.conversation.situations import (  # noqa: E402
+    AD_TEMPLATE_RE as _AD_TEMPLATE_RE,
+)
+from app.modules.conversation.situations import (
+    LOW_BUDGET_RE as _LOW_BUDGET_RE,
+)
+from app.modules.conversation.situations import (
+    MINOR_RE as _MINOR_RE,
+)
+from app.modules.conversation.situations import (
+    SOFT_NO_RE as _SOFT_NO_RE,
+)
+from app.modules.conversation.situations import (
+    is_answerable_question as _is_answerable_question,
+)
+from app.modules.conversation.situations import (
+    unseen_media_in_turn as _unseen_media_in_turn,
 )
 
 
@@ -117,3 +127,49 @@ def test_minor_does_not_collide_with_one_day_class() -> None:
     for s in ["kelas 1 hari itu berapa?", "yang 5 jam aja", "kelas online bisa?",
               "kelas 1 hari cocok buat coba"]:
         assert not _MINOR_RE.search(s), s
+
+
+# ─── pick_nudge: the ONE priority chain, incl. conflict combos ───
+
+from app.modules.conversation.needs import NeedsProfile  # noqa: E402
+from app.modules.conversation.situations import (  # noqa: E402
+    ANSWER_FIRST_NUDGE,
+    ANSWER_FIRST_TIGHT_BUDGET_NUDGE,
+    DISCOVERY_TURN_CAP,
+    NEED_PAYOFF_NUDGE,
+    SOFT_NO_NUDGE,
+    SOFT_NO_WITH_QUESTION_NUDGE,
+    pick_nudge,
+)
+
+_SPOKE = [_M("in", "aku mau belajar coding kak")]  # the lead has real words on record
+
+
+def _pick(last_txt: str, needs: NeedsProfile | None = None, n: int = 2) -> str | None:
+    return pick_nudge(lead_type="warm", dialog=[*_SPOKE, _M("in", last_txt)],
+                      last_txt=last_txt, stored_needs=needs or NeedsProfile(),
+                      inbound_count=n)
+
+
+def test_combo_soft_no_with_question_answers_then_eases_off() -> None:
+    # 'nanti dulu… tapi berapa harganya?' — neither half may be dropped: answer, then ease.
+    got = _pick("nanti dulu deh kak, tapi berapa sih harganya?")
+    assert got == SOFT_NO_WITH_QUESTION_NUDGE
+    # a plain stall without a question keeps the pure soft-no handling
+    assert _pick("nanti dulu deh kak") == SOFT_NO_NUDGE
+
+
+def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
+    # 'ga ada modal, berapa biayanya?' — honest number + the affordable entry beside it
+    got = _pick("ga ada modal kak, berapa biayanya?")
+    assert got == ANSWER_FIRST_TIGHT_BUDGET_NUDGE
+    assert _pick("berapa biayanya kak?") == ANSWER_FIRST_NUDGE
+
+
+def test_need_payoff_respects_discovery_cap() -> None:
+    # pain with no gain asks for the payoff — but only until the cap releases the lead;
+    # past it the discovery-cap nudge presents on what we have (no endless interrogation)
+    needs = NeedsProfile(pains=["takut gagal"], gains=[])
+    assert _pick("oke kak", needs=needs, n=2) == NEED_PAYOFF_NUDGE
+    past_cap = _pick("oke kak", needs=needs, n=DISCOVERY_TURN_CAP + 1)
+    assert past_cap is not None and past_cap != NEED_PAYOFF_NUDGE  # falls to discovery-cap

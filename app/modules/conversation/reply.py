@@ -31,6 +31,24 @@ from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F40
 from .needs import is_question, lead_grounded, merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .routing import FAST, SMART, parse_smart_stages, pick_capability
+from .situations import (
+    AD_TEMPLATE_RE as _AD_TEMPLATE_RE,
+)
+from .situations import (
+    DISCOVERY_TURN_CAP as _DISCOVERY_TURN_CAP,
+)
+from .situations import (
+    NEED_PAYOFF_NUDGE as _NEED_PAYOFF_NUDGE,
+)
+from .situations import (
+    is_answerable_question as _is_answerable_question,
+)
+from .situations import (
+    lead_spoke_own_words as _lead_spoke_own_words,
+)
+from .situations import (
+    pick_nudge as _pick_situational_nudge,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,203 +72,6 @@ _MANAGER_HANDOFF_CLOSING = (
 _READY_HANDOFF_CLOSING = (
     "Siap Kak! Pendaftaran Kakak aku teruskan ke tim ya - nanti dihubungi via telepon atau "
     "WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) untuk langkah pembayaran & jadwal 🙏"
-)
-# After this many lead turns the discovery gate stops forcing more questions and presents on
-# what we have — the escape hatch for a lead who won't voice a pain. Was 2 (too aggressive:
-# the ad-opener burns turn 1, so the bot could present after a single real message, skipping
-# warm-up and collecting no pain — thread 1081); 4 gives discovery real room. The bot still
-# stops the moment a pain surfaces (NeedsProfile.captured()), so this is only the ceiling.
-_DISCOVERY_TURN_CAP = 4
-# A static KB rule alone wasn't reliable (live testing kept seeing a 3rd-4th discovery
-# question) — this is injected into the prompt AT THE EXACT TURN the cap is exceeded, the
-# same mechanism the reply-guard uses for its correction nudge, so it lands as an immediate
-# instruction rather than competing with the rest of a large static prompt.
-_DISCOVERY_CAP_NUDGE = (
-    "[System: you have already asked discovery questions for {n} turns without the lead "
-    "voicing a clear need — do NOT ask another discovery question this turn. If they asked "
-    "something directly, answer it now with the fact from the product card. Otherwise "
-    "present the best-fit product: ONE concrete value line tied to what they've told you, "
-    "then a light next step. Lead with the full price/DP breakdown ONLY if they explicitly "
-    "asked about price/payment or signaled they want to enroll — a lead asking how to solve "
-    "their problem (not how much it costs) gets a value answer, not a price dump; save the "
-    "full price for when they ask or the conversation clearly calls for it. Return the JSON "
-    "as usual.]"
-)
-# A lead the model itself has already classified non_target (wrong audience, off-topic,
-# trolling, selling us something) but that keeps getting re-engaged turn after turn — the
-# live example was thread 2027, a domain seller the bot kept trying to pitch Vibe Coding to
-# across many turns. Once that classification has already stuck from an EARLIER turn, wrap
-# up instead of continuing the sales motion.
-_NON_TARGET_NUDGE = (
-    "[System: this lead was already classified non_target (wrong audience / off-topic / "
-    "not interested in our programs) in an earlier turn and is still off-topic. Do NOT "
-    "keep pitching or asking discovery questions — write ONE short, polite closing line "
-    "and stop there; only re-engage if THEY bring up a real interest in one of our "
-    "programs. Return the JSON as usual.]"
-)
-# The lead's only message so far is the ad's prefilled opener — a button click, not their
-# words. Prompt rules alone weren't reliable here (thread 2983: the ad opener got the full
-# product pitch on turn one, discovery skipped), so force the warm-up phase deterministically
-# on the FIRST turn, before the lead has said anything of their own.
-#
-# This ONE reply is the highest-leverage message in the funnel: the 3-day audit (2026-07-15)
-# found 160 of 366 ad clicks (44%) never write a single word back. The bare "apa tujuan utama
-# Kakak?" it used to produce is why — the lead pressed a button that PROMISED details, got an
-# interview question instead, and had to compose a sentence about their life goals to continue.
-# So: give a little before asking, prove we're a real campus (this market fears penipuan), and
-# make answering cost one tap — numbered options, not an essay. Still no price/schedule/modules:
-# the pitch waits for a real need (checklist row 1).
-_AD_OPENER_NUDGE = (
-    "[System: the lead's ONLY message so far is the ad's prefilled opener (a BUTTON CLICK, not "
-    "their own words) — they tapped an ad, nothing more. This single reply decides the whole "
-    "conversation: most ad clicks never write back, so it must feel like a warm human opening a "
-    "chat, not a form. Write it as 2-3 SHORT Instagram-DM bubbles separated by '|||', in "
-    "friendly everyday Bahasa with a few natural emoji, in this shape:\n"
-    "1) Greet warmly + say who you are (MinStep dari IT STEP Academy Jakarta, kampus di Menara "
-    "Sudirman) — that quietly answers 'is this real?'. Use their name ONLY if it looks like a "
-    "real name, never a raw username like 'MENNN08'.\n"
-    "2) ONE short hook: why this topic is worth their time, in THEIR world — what it lets a "
-    "person actually DO. One or two lines, concrete, no hype. This is what they clicked for, so "
-    "do not leave them empty-handed.\n"
-    "3) ONE easy question with 3-4 NUMBERED options (1️⃣ 2️⃣ 3️⃣) covering the usual reasons "
-    "people come (switch career / build their own thing / level up at work / just curious), and "
-    "tell them to simply send the number. Tapping a number is effortless; composing a sentence "
-    "about their goals is not — that gap is where these leads are lost.\n"
-    "⛔ Still NO price, NO schedule, NO module list, NO brochure dump — those come once they "
-    "tell you which way they lean. This holds EVEN THOUGH the button's canned text asks for "
-    "them ('…dan biaya kursusnya', 'ceritakan lebih detail'): that wording is the ad's, not the "
-    "lead's — nobody typed it, so it is not a question and quoting a price at it is answering "
-    "an ad, not a person. Keep stage qualifying. Return the JSON as usual.]"
-)
-
-# Situational nudges — the static prompt already carries these rules (soft-no, budget,
-# minors), but a 100-dialog audit (2026-07-15) showed the model follows them UNRELIABLY at
-# 26k-char prompt scale (it kept pushing DP after 'nanti', priced full courses to unemployed
-# leads, pitched DP straight at school kids). Same fix as the discovery-cap/ad-opener nudges:
-# detect the situation deterministically and inject ONE short instruction at the exact turn.
-# Fire at most one (priority minor > soft-no > budget > discovery-cap) to stay token-light.
-_SOFT_NO_RE = re.compile(
-    r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|pikir[- ]?(pikir\s*)?(dulu|lagi)|mikir\s*dulu|"
-    r"nabung\s*dulu|belum\s*(ada|punya|siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
-    r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
-    r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
-    r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",
-    re.IGNORECASE)
-_SOFT_NO_NUDGE = (
-    "[System: the lead just softly declined or stalled — a polite Indonesian 'not now' "
-    "('nanti/pikir dulu/insyaallah/belum ada biaya/lain kali' or 'tanya keluarga dulu'), "
-    "usually a real 'no' wrapped to save face. Do NOT push price, DP, scarcity or a new "
-    "pitch this turn — that makes them ghost. Acknowledge sincerely, give a graceful out, and "
-    "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster) "
-    "or just ask permission to follow up later ('boleh aku kabari kalau ada info baru?'). "
-    "Never repeat an offer you already made. Return the JSON as usual.]"
-)
-# A pain is on the table but the lead has never said what they actually want to ACHIEVE.
-# This is SPIN's need-payoff beat, and it is exactly where the 3-day audit (2026-07-15) found
-# deals dying: the model catches the first pain and answers it with the price list — even when
-# the pain IS money ("kurangnya modal dan ragu untuk memulai" → "total biayanya Rp 1.882.955").
-# The gate (NeedsProfile.captured) already refuses to call that 'presenting'; this walks the
-# model to the gain instead of pitching into a half-built need.
-_NEED_PAYOFF_NUDGE = (
-    "[System: the lead has voiced a PAIN, but has never said what they actually want to "
-    "ACHIEVE — no gain captured yet. Do NOT present the product and do NOT quote a price this "
-    "turn (a price on a half-built need is where leads go quiet). Acknowledge the pain in one "
-    "short line, then ask ONE question about the outcome they want — e.g. 'kalau nanti Kakak "
-    "sudah bisa itu, yang paling berubah apa?' / 'idealnya hasil yang Kakak harapkan seperti "
-    "apa?'. The pitch comes only after they name that payoff. Return the JSON as usual.]"
-)
-_LOW_BUDGET_RE = re.compile(
-    r"\b(?:nggak|ngga|ndak|tidak|tdk|gak|ga|gk|belum)\s*(?:ada|punya)?\s*"
-    r"(?:duit|uang|modal|biaya|dana|ongkos)"
-    r"|ga\s*sanggup|(?:nggak|ngga|ndak|gak|ga|gk)\s*mampu|"
-    r"mahal\s*(banget|amat|bgt|bener|sekali)|kemahalan|"
-    r"gratis(an|in)?|belum\s*(kerja|ada\s*penghasilan)|nganggur|pengangguran|"
-    r"butuh\s*(kerja|duit|uang|kerjaan)|lagi\s*bokek",
-    re.IGNORECASE)
-_LOW_BUDGET_NUDGE = (
-    "[System: the lead signaled tight or no budget (no money, unemployed, 'mahal banget', "
-    "'gratisan', 'ga sanggup'). Do NOT lead with the full course price or a DP request. "
-    "Acknowledge honestly, then offer the CHEAPEST real entry FIRST (1-day Skill Booster / "
-    "mini course, or the free Open House) as the main path; mention the full program only as "
-    "a 'later, once you've tried it' option. Never guarantee income or 'balik modal'. Return "
-    "the JSON as usual.]"
-)
-_MINOR_RE = re.compile(
-    r"\b(smp|sma|smk|mts)\b|kelas\s*(10|11|12|sepuluh|sebelas|dua\s*belas)\b|"
-    r"masih\s*sekolah|anak\s*(saya|sy|ku|nya)\b|umur\s*1[0-7]\b|\b1[0-7]\s*(tahun|thn)\b",
-    re.IGNORECASE)
-_MINOR_NUDGE = (
-    "[System: the lead looks school-age / a minor (SMP/SMA/SMK, 'kelas 10-12', 'masih "
-    "sekolah', or a parent asking for a child). The PARENT is the payer and decision-maker. "
-    "Do NOT push DP or price straight at the student. Encourage them warmly and pivot to "
-    "involving a parent — invite them to bring a parent to the free Open House, or offer info "
-    "the parent can review (mention the 10% student discount). Positive, no pressure. Return "
-    "the JSON as usual.]"
-)
-# The lead sent something the bot genuinely CANNOT read: a reel/post IG won't hand over
-# ("Message unavailable · This content may have been deleted by its owner…"), a bare share
-# that carries only an account handle and no caption, or an image/voice the broker never
-# described (vision/transcription keys aren't configured, so 🖼 media / 🎤 voice stay raw).
-# The model treats the placeholder as if it were the lead's words: thread 3058 answered the
-# clarify stub, thread 3035 invented a drama-streaming app out of a shared reel. ~5/day.
-_UNSEEN_MEDIA_RE = re.compile(
-    r"message unavailable|deleted by its owner|hidden by their privacy"
-    r"|^(?:🖼\s*media|🎤\s*voice|🎬\s*reel|📖\s*story|📎\s*attachment|🔗\s*link)$"
-    r"|^[📷🎬📖👤]\s*\S+$",  # bare share: icon + handle, no caption to read
-    re.IGNORECASE)
-
-
-def _unseen_media_in_turn(dialog) -> bool:  # noqa: ANN001
-    """Did the lead's CURRENT turn (everything since our last send) include content we can't
-    read? The placeholder is often not the last message — thread 3058 sent the unavailable
-    reel, then 'Like2 ders' — so checking only the last inbound would miss it."""
-    for m in reversed(dialog):
-        if m.direction == "out":
-            break
-        if m.direction == "in" and _UNSEEN_MEDIA_RE.search((m.text or "").strip()):
-            return True
-    return False
-
-
-_UNSEEN_MEDIA_NUDGE = (
-    "[System: the lead sent something you CANNOT see — a shared post/reel/story, an image or "
-    "a voice note whose content never reached you (deleted, private, or just not readable on "
-    "your side). You only received a placeholder, NOT the content itself. Do NOT guess what it "
-    "showed, do NOT invent a topic from the account name, and do NOT reply with a generic "
-    "clarifier. Say plainly and warmly that it doesn't open on your side, and ask them to tell "
-    "you in their own words what it was about or what they want to know. Return the JSON as "
-    "usual.]"
-)
-# The lead asked a DIRECT answerable question in their OWN words (price, schedule, how to
-# enrol, certificate…). The most expensive live failure in the 3-day audit (2026-07-15): the
-# model replies with the clarify stub ('boleh sebutkan lebih spesifik' — 39 of its 41 uses
-# landed on a real question) or counters with 'apa tujuan Kakak?' instead of answering. Its
-# own reason log admits it: "лид спросил цену, но мы задаём уточняющий вопрос". The
-# ANSWER-FIRST prompt rule exists but loses at 26k-char scale, so pin it to the exact turn.
-# The ad prefill (a button click, which must NOT get a price) is handled upstream by
-# _AD_OPENER_NUDGE; the explicit guard here covers a lead who taps the ad twice.
-# Pain captured, payoff not yet. The 3-day audit found discovery breaks EXACTLY where it
-# starts working: the model catches the first pain and fires the price block on the very next
-# reply — even when the pain IS the money ("kurangnya modal dan ragu untuk memulai" → "total
-# biayanya Rp 1.882.955"). Both full SPIN cycles in the audit died that way. NEED-PAYOFF is a
-# prompt rule already; pin it to the turn where it matters (checklist row 2, thread 2903).
-_NEED_PAYOFF_NUDGE = (
-    "[System: you have captured the lead's PAIN but not yet the GAIN they want. Do NOT present "
-    "the product, its features or its price this turn — the payoff has to land first, or the "
-    "price arrives with nothing to weigh it against. Ask ONE short question about the result "
-    "they want ('kalau nanti Kakak udah bisa X, apa yang paling berubah buat Kakak?' / 'pengen "
-    "hasil akhirnya kayak gimana?'), grounded in the pain they just named. Return the JSON as "
-    "usual.]"
-)
-_ANSWER_FIRST_NUDGE = (
-    "[System: the lead just asked a DIRECT question in their OWN words. ANSWER IT IN THIS "
-    "REPLY, up front, with the concrete fact from the product card (price → the real number; "
-    "schedule → the actual date; how to enrol → the real steps). Do NOT ask them to be more "
-    "specific, and do NOT answer with a discovery question instead — a lead who asks and gets "
-    "a counter-question leaves. If the fact is genuinely NOT in the knowledge base, say so "
-    "honestly in one line and set needs_manager=true — never invent it, never stall with a "
-    "generic 'let me check' filler. After the answer you may add ONE short question. Return "
-    "the JSON as usual.]"
 )
 
 # A live reply that repeats a question already asked in this thread — same failure mode
@@ -286,49 +107,6 @@ def _content_words(text: str) -> set[str]:
     the overlap reflects shared CONTENT, not shared grammar."""
     return {w for w in _WORD_RE.findall((text or "").lower()) if len(w) >= 3}
 
-
-# A concrete, answerable question from the lead — a "?" or a question/money/enroll keyword. The
-# CLARIFY_FALLBACK ("sebutkan lebih spesifik") is only right for a VAGUE lead message; asking a
-# lead who WAS specific to be more specific is dismissive (sim of thread 2977: "Apakah harus
-# modal?" got clarify instead of "the course is paid, Rp X").
-# Concrete keywords only — NOT the bare "gimana/how", which is the vague dead-end the
-# clarify→escalate loop is meant to catch (a lead typing just "terus gimana" has nothing
-# specific to answer). An explicit "?" still counts, so "gimana caranya?" is answered.
-_ANSWERABLE_Q_RE = re.compile(
-    r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
-    r"cicilan|daftar|syarat|sertif|bnsp|online|offline|jadwal|lokasi|durasi)\b",
-    re.IGNORECASE)
-
-
-def _is_answerable_question(text: str) -> bool:
-    return bool(_ANSWERABLE_Q_RE.search(text or ""))
-
-
-# The click-to-message ad prefill families — a button click, not the lead's own words. Two
-# canned openers seen at scale (2026-07: 609 threads on the second family alone, all identical
-# down to the 😊): "💻 Ceritakan lebih detail tentang program …" and "Halo, saya ingin tahu
-# detail program X dan biaya kursusnya 😊". Only the FIRST was matched before, so the biggest
-# prefill slipped through as if the lead had typed it (thread 3005: the bot front-loaded the
-# pitch instead of opening discovery). An emoji prefix is tolerated.
-_AD_TEMPLATE_RE = re.compile(
-    r"^[^a-zA-Z]*(ceritakan lebih detail tentang program"
-    r"|(halo[\s,]*)?(saya |aku )?ingin tahu detail program)",
-    re.IGNORECASE)
-
-
-def _lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
-    """True once ANY inbound is something the lead actually typed/said — not an ad's
-    prefilled opener and not an unresolved media placeholder."""
-    for m in dialog:
-        if m.direction != "in":
-            continue
-        text = (m.text or "").strip()
-        if not text or _AD_TEMPLATE_RE.match(text):
-            continue
-        if text in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
-            continue
-        return True
-    return False
 
 
 def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: ANN001
@@ -644,34 +422,15 @@ class ReplyService:
             last_inbound=last_in.text if last_in is not None else "", mode=mode,
             smart_stages=smart_stages, inbound_count=inbound_count,
             guard_regen_count=lead.guard_regen_count if lead is not None else 0)
-        extra_user_msg = None
-        if lead is not None and lead.lead_type == "non_target":
-            # lead.lead_type reflects the PRIOR turn's classification (persisted in
-            # _apply_decision below) — reaching here means the model already called this
-            # non_target once and the lead is back for another round; don't re-engage.
-            extra_user_msg = _NON_TARGET_NUDGE
-        elif not _lead_spoke_own_words(ctx.dialog):
-            # Only the ad's prefilled opener so far — force warm-up + discovery, not a pitch.
-            extra_user_msg = _AD_OPENER_NUDGE
-        else:
-            last_txt = (last_in.text if last_in is not None else "") or ""
-            if _unseen_media_in_turn(ctx.dialog):
-                # Can't read what they sent — nothing else in this turn matters.
-                extra_user_msg = _UNSEEN_MEDIA_NUDGE
-            elif _MINOR_RE.search(last_txt):
-                extra_user_msg = _MINOR_NUDGE
-            elif _SOFT_NO_RE.search(last_txt):
-                extra_user_msg = _SOFT_NO_NUDGE
-            elif _is_answerable_question(last_txt) and not _AD_TEMPLATE_RE.search(last_txt):
-                # A real question outranks budget/discovery framing: answer it, then qualify.
-                extra_user_msg = _ANSWER_FIRST_NUDGE
-            elif _LOW_BUDGET_RE.search(last_txt):
-                extra_user_msg = _LOW_BUDGET_NUDGE
-            elif ctx.stored_needs.pains and not ctx.stored_needs.gains:
-                # Pain on the table, payoff missing — ask for the gain before any pitch/price.
-                extra_user_msg = _NEED_PAYOFF_NUDGE
-            elif not ctx.stored_needs.captured() and inbound_count > _DISCOVERY_TURN_CAP:
-                extra_user_msg = _DISCOVERY_CAP_NUDGE.format(n=inbound_count)
+        # Situational steering — detectors, nudges, priorities and their conflict combos all
+        # live in situations.pick_nudge (one chain, one owner; see that module's docstring).
+        last_txt = (last_in.text if last_in is not None else "") or ""
+        extra_user_msg = _pick_situational_nudge(
+            lead_type=lead.lead_type if lead is not None else None,
+            dialog=ctx.dialog,
+            last_txt=last_txt,
+            stored_needs=ctx.stored_needs,
+            inbound_count=inbound_count)
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
             extra_user_msg=extra_user_msg)

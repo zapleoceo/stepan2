@@ -70,7 +70,7 @@ async def test_ad_opener_only_forces_discovery_not_a_pitch(db_session) -> None:
     """Thread 2983: the lead's only message was the ad's prefilled opener (a button click) and
     the bot pitched the product on turn one. The ad-opener nudge must be injected so it warms
     up + asks a discovery question instead."""
-    from app.modules.conversation.reply import _AD_OPENER_NUDGE
+    from app.modules.conversation.situations import AD_OPENER_NUDGE as _AD_OPENER_NUDGE
 
     bid, tid = await _thread_with_texts(
         db_session, ["💻 Ceritakan lebih detail tentang program kursusnya"])
@@ -81,7 +81,7 @@ async def test_ad_opener_only_forces_discovery_not_a_pitch(db_session) -> None:
 
 
 async def test_no_ad_opener_nudge_once_lead_speaks_own_words(db_session) -> None:
-    from app.modules.conversation.reply import _AD_OPENER_NUDGE
+    from app.modules.conversation.situations import AD_OPENER_NUDGE as _AD_OPENER_NUDGE
 
     bid, tid = await _thread_with_texts(
         db_session, ["💻 Ceritakan lebih detail tentang program kursusnya", "apa itu coding?"])

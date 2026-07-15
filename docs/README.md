@@ -13,6 +13,7 @@ Stepan-1.
 | [broker-log.md](broker-log.md) | Лог вызовов брокера: что логируется, поля, страница `/settings/log`, ретенция |
 | [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
+| [reply-pipeline.md](reply-pipeline.md) | Ведение лида по ходам: слои пайплайна, ситуативные нуджи (`situations.py`) с приоритетами и комбо, гейты, фолоапы |
 | [dialogue-qa-checklist.md](dialogue-qa-checklist.md) | **Регрессия диалогов**: чеклист найденных-и-починенных ошибок + как прогонять sim (только на ClodeCouch, branch 8). Обновляется при каждой новой ошибке |
 | [ad-attribution-and-reports.md](ad-attribution-and-reports.md) | Атрибуция рекламы, авто-привязка продукта (`ad_product_map`), провенанс `product_source` |
 | [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |

@@ -25,13 +25,13 @@ from .reply import (
     _BUBBLE_GAP_S,
     _DUPLICATE_RATIO,
     _REPEAT_CORRECTION,
-    _is_answerable_question,
     _most_similar_prior,
     _split_bubbles,
     guard_decision,
     raise_manager_alert,
 )
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
+from .situations import is_answerable_question as _is_answerable_question
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService

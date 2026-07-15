@@ -1,0 +1,292 @@
+"""Situational dialogue steering — one module owns "what special turn is this?".
+
+The static 26k-char prompt carries every sales rule, but live audits (100 dialogs on
+2026-07-15, 169 more the same week) showed the model follows them UNRELIABLY at that scale:
+it pushed DP after a polite 'nanti', priced full courses to unemployed leads, pitched DP at
+school kids, and answered a direct question with a clarify stub. The reliable pattern is a
+deterministic detector + ONE short instruction injected at the exact turn (same mechanism as
+the reply-guard correction). All of those detectors and nudges live HERE, and `pick_nudge`
+is the single priority chain — previously they were inlined in reply.py, where two parallel
+edits once defined the same nudge twice and conflicts between rules went unnoticed.
+
+Priority (first match wins, at most one nudge per turn — token-light by design):
+  non-target > ad-opener > unseen-media > minor > soft-no > answer-first > low-budget
+  > need-payoff > discovery-cap
+Two documented COMBOS soften rule conflicts instead of dropping one side:
+  soft-no + a real question  → answer briefly, then ease off (never leave a question hanging)
+  answer-first + tight budget → answer the price honestly, cheapest entry beside it
+"""
+from __future__ import annotations
+
+import re
+
+from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
+
+# After this many lead turns the discovery gate stops forcing more questions and presents on
+# what we have — the escape hatch for a lead who won't voice a pain/gain. Was 2 (too
+# aggressive: the ad-opener burns turn 1 — thread 1081); 4 gives discovery real room. Used by
+# both the stage gate (reply._stage_for) and the need-payoff/discovery-cap nudges below, so a
+# non-yielding lead is released by BOTH at the same turn — they used to disagree, leaving the
+# need-payoff nudge blocking the pitch forever after the gate had already let go.
+DISCOVERY_TURN_CAP = 4
+
+# ─── detectors ───────────────────────────────────────────────────────────────
+
+# The click-to-message ad prefill families — a button click, not the lead's own words. Two
+# canned openers seen at scale (2026-07: 609 threads on the second family alone): "💻
+# Ceritakan lebih detail tentang program …" and "Halo, saya ingin tahu detail program X dan
+# biaya kursusnya 😊". An emoji prefix is tolerated. Nothing here may ever be treated as the
+# lead speaking: not for needs, not for answer-first, not for a price.
+AD_TEMPLATE_RE = re.compile(
+    r"^[^a-zA-Z]*(ceritakan lebih detail tentang program"
+    r"|(halo[\s,]*)?(saya |aku )?ingin tahu detail program)",
+    re.IGNORECASE)
+
+# A concrete, answerable question from the lead — a "?" or a question/money/enroll keyword.
+# Concrete keywords only — NOT the bare "gimana/how", which is the vague dead-end the
+# clarify→escalate loop is meant to catch. An explicit "?" still counts ("gimana caranya?").
+ANSWERABLE_Q_RE = re.compile(
+    r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
+    r"cicilan|daftar|syarat|sertif|bnsp|online|offline|jadwal|lokasi|durasi)\b",
+    re.IGNORECASE)
+
+# A polite Indonesian 'not now' — usually a real 'no' wrapped to save face (gengsi). Pushing
+# price/DP through it is the single biggest ghost-maker found in the audits.
+SOFT_NO_RE = re.compile(
+    r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|pikir[- ]?(pikir\s*)?(dulu|lagi)|mikir\s*dulu|"
+    r"nabung\s*dulu|belum\s*(ada|punya|siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
+    r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
+    r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
+    r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",
+    re.IGNORECASE)
+
+# Money is tight / no income — the full-course price must not lead (UMR context: the course
+# is ~3 monthly salaries; the cheap 1-day entries exist exactly for this).
+LOW_BUDGET_RE = re.compile(
+    r"\b(?:nggak|ngga|ndak|tidak|tdk|gak|ga|gk|belum)\s*(?:ada|punya)?\s*"
+    r"(?:duit|uang|modal|biaya|dana|ongkos)"
+    r"|ga\s*sanggup|(?:nggak|ngga|ndak|gak|ga|gk)\s*mampu|"
+    r"mahal\s*(banget|amat|bgt|bener|sekali)|kemahalan|"
+    r"gratis(an|in)?|belum\s*(kerja|ada\s*penghasilan)|nganggur|pengangguran|"
+    r"butuh\s*(kerja|duit|uang|kerjaan)|lagi\s*bokek",
+    re.IGNORECASE)
+
+# School-age lead OR a parent asking for their child — either way the PARENT pays and decides.
+# ('kelas 10-12' is a school grade; 'kelas 1 hari' is a course format — the \b keeps them apart.)
+MINOR_RE = re.compile(
+    r"\b(smp|sma|smk|mts)\b|kelas\s*(10|11|12|sepuluh|sebelas|dua\s*belas)\b|"
+    r"masih\s*sekolah|anak\s*(saya|sy|ku|nya)\b|umur\s*1[0-7]\b|\b1[0-7]\s*(tahun|thn)\b",
+    re.IGNORECASE)
+
+# Content the bot genuinely CANNOT read: a reel/post IG won't hand over, a bare share that
+# carries only an account handle, or an image/voice the broker never described.
+UNSEEN_MEDIA_RE = re.compile(
+    r"message unavailable|deleted by its owner|hidden by their privacy"
+    r"|^(?:🖼\s*media|🎤\s*voice|🎬\s*reel|📖\s*story|📎\s*attachment|🔗\s*link)$"
+    r"|^[📷🎬📖👤]\s*\S+$",  # bare share: icon + handle, no caption to read
+    re.IGNORECASE)
+
+
+def is_answerable_question(text: str) -> bool:
+    return bool(ANSWERABLE_Q_RE.search(text or ""))
+
+
+def lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
+    """True once ANY inbound is something the lead actually typed/said — not an ad's
+    prefilled opener and not an unresolved media placeholder."""
+    for m in dialog:
+        if m.direction != "in":
+            continue
+        text = (m.text or "").strip()
+        if not text or AD_TEMPLATE_RE.match(text):
+            continue
+        if text in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
+            continue
+        return True
+    return False
+
+
+def unseen_media_in_turn(dialog) -> bool:  # noqa: ANN001
+    """Did the lead's CURRENT turn (everything since our last send) include content we can't
+    read? The placeholder is often not the last message — thread 3058 sent the unavailable
+    reel, then 'Like2 ders' — so checking only the last inbound would miss it."""
+    for m in reversed(dialog):
+        if m.direction == "out":
+            break
+        if m.direction == "in" and UNSEEN_MEDIA_RE.search((m.text or "").strip()):
+            return True
+    return False
+
+
+# ─── nudges (one short [System: …] block, injected at the exact turn) ─────────
+
+NON_TARGET_NUDGE = (
+    "[System: this lead was already classified non_target (wrong audience / off-topic / "
+    "not interested in our programs) in an earlier turn and is still off-topic. Do NOT "
+    "keep pitching or asking discovery questions — write ONE short, polite closing line "
+    "and stop there; only re-engage if THEY bring up a real interest in one of our "
+    "programs. Return the JSON as usual.]"
+)
+
+# The single highest-leverage message in the funnel: 44% of ad clicks never write a word
+# back, and the bare "apa tujuan utama Kakak?" this used to produce is why — the lead pressed
+# a button that PROMISED details, got an interview question, and had to compose an essay
+# about their goals to continue. Give a little, prove we're a real campus (penipuan fear),
+# and make answering cost one tap.
+AD_OPENER_NUDGE = (
+    "[System: the lead's ONLY message so far is the ad's prefilled opener (a BUTTON CLICK, not "
+    "their own words) — they tapped an ad, nothing more. This single reply decides the whole "
+    "conversation: most ad clicks never write back, so it must feel like a warm human opening a "
+    "chat, not a form. Write it as 2-3 SHORT Instagram-DM bubbles separated by '|||', in "
+    "friendly everyday Bahasa with a few natural emoji, in this shape:\n"
+    "1) Greet warmly + say who you are (MinStep dari IT STEP Academy Jakarta, kampus di Menara "
+    "Sudirman) — that quietly answers 'is this real?'. Use their name ONLY if it looks like a "
+    "real name, never a raw username like 'MENNN08'.\n"
+    "2) ONE short hook: why this topic is worth their time, in THEIR world — what it lets a "
+    "person actually DO. One or two lines, concrete, no hype. This is what they clicked for, so "
+    "do not leave them empty-handed.\n"
+    "3) ONE easy question with 3-4 NUMBERED options (1️⃣ 2️⃣ 3️⃣) covering the usual reasons "
+    "people come (switch career / build their own thing / level up at work / just curious), and "
+    "tell them to simply send the number. Tapping a number is effortless; composing a sentence "
+    "about their goals is not — that gap is where these leads are lost.\n"
+    "⛔ Still NO price, NO schedule, NO module list, NO brochure dump — those come once they "
+    "tell you which way they lean. This holds EVEN THOUGH the button's canned text asks for "
+    "them ('…dan biaya kursusnya', 'ceritakan lebih detail'): that wording is the ad's, not the "
+    "lead's — nobody typed it, so it is not a question and quoting a price at it is answering "
+    "an ad, not a person. Keep stage qualifying. Return the JSON as usual.]"
+)
+
+UNSEEN_MEDIA_NUDGE = (
+    "[System: the lead sent something you CANNOT see — a shared post/reel/story, an image or "
+    "a voice note whose content never reached you (deleted, private, or just not readable on "
+    "your side). You only received a placeholder, NOT the content itself. Do NOT guess what it "
+    "showed, do NOT invent a topic from the account name, and do NOT reply with a generic "
+    "clarifier. Say plainly and warmly that it doesn't open on your side, and ask them to tell "
+    "you in their own words what it was about or what they want to know. Return the JSON as "
+    "usual.]"
+)
+
+MINOR_NUDGE = (
+    "[System: this turn involves a school-age person (SMP/SMA/SMK, 'kelas 10-12', 'masih "
+    "sekolah') — either the lead themselves, or a PARENT asking for their child. The parent is "
+    "the payer and decision-maker in both cases, so never push DP or the full price at a "
+    "student. If the LEAD is the student: encourage them warmly, mention the 10% student "
+    "discount, and suggest coming to the free Open House with a parent. If the lead is the "
+    "PARENT: talk to them as the decision-maker directly — what their child would learn and "
+    "the Open House to see it live; answer their questions normally (a parent asking the price "
+    "may hear it honestly). Positive, no pressure. Return the JSON as usual.]"
+)
+
+SOFT_NO_NUDGE = (
+    "[System: the lead just softly declined or stalled — a polite Indonesian 'not now' "
+    "('nanti/pikir dulu/insyaallah/belum ada biaya/lain kali' or 'tanya keluarga dulu'), "
+    "usually a real 'no' wrapped to save face. Do NOT push price, DP, scarcity or a new "
+    "pitch this turn — that makes them ghost. Acknowledge sincerely, give a graceful out, and "
+    "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster) "
+    "or just ask permission to follow up later ('boleh aku kabari kalau ada info baru?'). "
+    "Never repeat an offer you already made. Return the JSON as usual.]"
+)
+
+# COMBO: the same message stalls AND asks something real ('nanti dulu deh… eh tapi berapa
+# harganya?'). Dropping either half loses: an unanswered question is the most expensive leak
+# in the audit, and pushing past a soft-no is the biggest ghost-maker. So: answer, then ease.
+SOFT_NO_WITH_QUESTION_NUDGE = (
+    "[System: the lead softly declined ('nanti/pikir dulu/…') AND asked a real question in "
+    "the same message. Answer the question first — short, honest, the concrete fact from the "
+    "product card — because leaving it hanging is how leads are lost. Then ease off exactly as "
+    "a soft-no deserves: no pitch, no DP, no scarcity, no counter-question about their goals; "
+    "close warmly with a graceful out or 'boleh aku kabari kalau ada info baru?'. Return the "
+    "JSON as usual.]"
+)
+
+ANSWER_FIRST_NUDGE = (
+    "[System: the lead just asked a DIRECT question in their OWN words. ANSWER IT IN THIS "
+    "REPLY, up front, with the concrete fact from the product card (price → the real number; "
+    "schedule → the actual date; how to enrol → the real steps). Do NOT ask them to be more "
+    "specific, and do NOT answer with a discovery question instead — a lead who asks and gets "
+    "a counter-question leaves. If the fact is genuinely NOT in the knowledge base, say so "
+    "honestly in one line and set needs_manager=true — never invent it, never stall with a "
+    "generic 'let me check' filler. After the answer you may add ONE short question. Return "
+    "the JSON as usual.]"
+)
+
+# COMBO: a real question asked BY someone who just signalled no money ('ga ada modal, berapa
+# biayanya?'). Answer-first alone would quote the full course price cold; budget-first alone
+# would dodge the question. Do both: the honest number, with the affordable entry beside it.
+ANSWER_FIRST_TIGHT_BUDGET_NUDGE = (
+    "[System: the lead asked a DIRECT question AND signalled tight/no budget in the same "
+    "message. Answer the question honestly with the real fact (never dodge a price question), "
+    "but put the CHEAPEST real entry right beside it as the main path — the 1-day Skill "
+    "Booster / mini course or the free Open House — so the answer doesn't read as 'this is "
+    "not for you'. No DP push, never guarantee income. Return the JSON as usual.]"
+)
+
+LOW_BUDGET_NUDGE = (
+    "[System: the lead signaled tight or no budget (no money, unemployed, 'mahal banget', "
+    "'gratisan', 'ga sanggup'). Do NOT lead with the full course price or a DP request. "
+    "Acknowledge honestly, then offer the CHEAPEST real entry FIRST (1-day Skill Booster / "
+    "mini course, or the free Open House) as the main path; mention the full program only as "
+    "a 'later, once you've tried it' option. Never guarantee income or 'balik modal'. Return "
+    "the JSON as usual.]"
+)
+
+# SPIN's need-payoff beat — the audits found discovery breaking EXACTLY where it starts
+# working: the model catches the first pain and fires the price block on the very next reply,
+# even when the pain IS the money ('kurangnya modal dan ragu' → 'total Rp 1.882.955').
+NEED_PAYOFF_NUDGE = (
+    "[System: you have captured the lead's PAIN but not yet the GAIN they want. Do NOT present "
+    "the product, its features or its price this turn — the payoff has to land first, or the "
+    "price arrives with nothing to weigh it against. Acknowledge the pain in one short line, "
+    "then ask ONE question about the result they want ('kalau nanti Kakak udah bisa X, apa "
+    "yang paling berubah buat Kakak?' / 'pengen hasil akhirnya kayak gimana?'), grounded in "
+    "the pain they just named. Return the JSON as usual.]"
+)
+
+DISCOVERY_CAP_NUDGE = (
+    "[System: you have already asked discovery questions for {n} turns without the lead "
+    "voicing a clear need — do NOT ask another discovery question this turn. If they asked "
+    "something directly, answer it now with the fact from the product card. Otherwise "
+    "present the best-fit product: ONE concrete value line tied to what they've told you, "
+    "then a light next step. Lead with the full price/DP breakdown ONLY if they explicitly "
+    "asked about price/payment or signaled they want to enroll — a lead asking how to solve "
+    "their problem (not how much it costs) gets a value answer, not a price dump; save the "
+    "full price for when they ask or the conversation clearly calls for it. Return the JSON "
+    "as usual.]"
+)
+
+
+def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
+    """The ONE situational nudge for this turn, or None — the whole priority chain in one
+    place so rule conflicts are resolved here, deliberately, instead of by accident of
+    ordering scattered through reply.py.
+
+    Order rationale: non-target and the ad-opener describe the CONVERSATION (they preempt
+    everything); unseen-media means we can't even trust the text we're reacting to; minor
+    changes who we're selling to; soft-no / answer-first / budget react to the current
+    message (with combos where they collide); need-payoff and the discovery cap steer the
+    funnel and go last. need-payoff respects DISCOVERY_TURN_CAP — past the cap the stage gate
+    has already released the lead, and holding the pitch hostage to a gain question forever
+    contradicts it (a non-yielding lead gets the value pitch, not a fifth question)."""
+    if lead_type == "non_target":
+        # the model already classified this lead non_target on a PRIOR turn — wrap up.
+        return NON_TARGET_NUDGE
+    if not lead_spoke_own_words(dialog):
+        return AD_OPENER_NUDGE
+    if unseen_media_in_turn(dialog):
+        return UNSEEN_MEDIA_NUDGE  # can't read their turn — nothing else can be trusted
+    if MINOR_RE.search(last_txt):
+        return MINOR_NUDGE
+    asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
+    if SOFT_NO_RE.search(last_txt):
+        return SOFT_NO_WITH_QUESTION_NUDGE if asks else SOFT_NO_NUDGE
+    if asks:
+        if LOW_BUDGET_RE.search(last_txt):
+            return ANSWER_FIRST_TIGHT_BUDGET_NUDGE
+        return ANSWER_FIRST_NUDGE
+    if LOW_BUDGET_RE.search(last_txt):
+        return LOW_BUDGET_NUDGE
+    if stored_needs.pains and not stored_needs.gains and inbound_count <= DISCOVERY_TURN_CAP:
+        return NEED_PAYOFF_NUDGE
+    if not stored_needs.captured() and inbound_count > DISCOVERY_TURN_CAP:
+        return DISCOVERY_CAP_NUDGE.format(n=inbound_count)
+    return None
