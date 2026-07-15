@@ -6,6 +6,7 @@ layer (a single scoped() helper), never ad-hoc per query. No business logic here
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import BigInteger, Index, LargeBinary, String, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
@@ -203,6 +204,59 @@ class AdProductMap(SQLModel, table=True):
     product_slug: str
     updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
     updated_by: str | None = Field(default=None)
+
+
+class AdCreativeMap(SQLModel, table=True):
+    """Мост IG media pk (приватный API) → объявление Marketing API.
+
+    Строка НЕИЗМЕНЯЕМА: permalink креатива не меняется, значит связь media→ad верна всегда.
+    Поэтому ре-синка нет — карта только дополняется новыми объявлениями (инкрементально или
+    по требованию, когда пришёл лид с неизвестным media_pk).
+
+    Джойнить надо именно по media_pk: channel_thread.ad_id из instagrapi лежит в другом
+    id-пространстве и на Graph отдаёт code 100."""
+    __tablename__ = "ad_creative_map"
+    __table_args__ = (UniqueConstraint("branch_id", "media_pk", name="uq_admap_branch_media"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    media_pk: str = Field(index=True, description="IG media pk = channel_thread.ad_media_id")
+    shortcode: str
+    ad_id: str = Field(index=True, description="Marketing API ad id")
+    ad_name: str | None = Field(default=None)
+    adset_id: str | None = Field(default=None)
+    adset_name: str | None = Field(default=None)
+    campaign_id: str | None = Field(default=None)
+    campaign_name: str | None = Field(default=None)
+    objective: str | None = Field(default=None)
+    synced_at: datetime = Field(default_factory=_utcnow)
+
+
+class AdInsightDaily(SQLModel, table=True):
+    """Метрики объявления за один день — скользящий ETL-кэш Marketing API.
+
+    Гранулярность день: любой диапазон дат в отчёте = локальный SUM, без похода в Graph.
+    Meta правит атрибуцию ~7 дней, поэтому свежие дни перетягиваются, старые заморожены."""
+    __tablename__ = "ad_insight_daily"
+    __table_args__ = (
+        UniqueConstraint("branch_id", "ad_id", "day", name="uq_adinsight_branch_ad_day"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    ad_id: str = Field(index=True)
+    day: date = Field(index=True)
+    spend: Decimal = Field(default=Decimal("0"), max_digits=12, decimal_places=2)
+    impressions: int = Field(default=0)
+    reach: int = Field(default=0)
+    clicks: int = Field(default=0)
+    # Лестница качества переписки от самой Meta — встречная оценка к нашим стадиям лида.
+    conv_started: int = Field(default=0)
+    conv_depth_2: int = Field(default=0)
+    conv_depth_3: int = Field(default=0)
+    conv_depth_5: int = Field(default=0)
+    blocks: int = Field(default=0)
+    synced_at: datetime = Field(default_factory=_utcnow)
 
 
 class AppSetting(SQLModel, table=True):
