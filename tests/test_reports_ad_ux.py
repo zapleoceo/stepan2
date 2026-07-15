@@ -102,7 +102,7 @@ def test_inbox_grp_filter_shows_group_chip_and_scoped_load() -> None:
 def test_ad_funnel_headers_are_sortable() -> None:
     _set_lang()
     html = _ad_tree_html(_ROWS, {}, {}, products=_PRODUCTS)
-    assert 'class="rep-sort"' in html
+    assert 'class="rep-sort help"' in html
     assert 'onclick="repSort(this)"' in html
     assert 'data-num="1"' in html                    # numeric columns flagged for numeric sort
     assert "function repSort" in html                # inline handler shipped with the fragment
@@ -122,7 +122,7 @@ def test_ad_funnel_has_per_column_filters() -> None:
 def test_ad_funnel_readonly_has_sort_and_filter_but_no_product_eq() -> None:
     _set_lang()
     html = _ad_tree_html(_ROWS, {}, {}, products=None)
-    assert 'class="rep-sort"' in html                # still sortable cross-branch
+    assert 'class="rep-sort help"' in html                # still sortable cross-branch
     assert 'data-f="min"' in html                    # numeric filters still present
     assert 'data-f="eq"' not in html                 # no product column → no product filter
 
