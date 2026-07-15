@@ -155,6 +155,42 @@ def test_bubble_hides_translate_button_when_no_caption() -> None:
     assert "trMsg(2,10)" not in html  # no translate button on a caption-less media bubble
 
 
+# ─── manual media recognition button ──────────────────────────────────────────
+
+def _media_row(mid: int, text: str, kind: str) -> tuple:
+    return (mid, "in", "lead", text, datetime.now(UTC).replace(tzinfo=None),
+            None, None, None, 77, kind, True, False)
+
+
+def test_bubble_offers_recognize_on_unrecognized_voice() -> None:
+    from app.api._ui_html import _bubble
+    _set_lang("en")
+    html = _bubble(_media_row(5, "🎤 voice", "audio"), 10)
+    assert 'hx-post="/ui/chat/media/5/recognize"' in html
+    assert ">Recognize<" in html.replace("</i> ", ">")   # offers a first attempt
+
+
+def test_bubble_offers_recognize_after_the_backfill_gave_up() -> None:
+    # the 'no transcript' fallback is still un-recognized: offer a fresh attempt, not a re-run
+    from app.api._ui_html import _bubble
+    _set_lang("en")
+    html = _bubble(_media_row(6, "🎤 (voice — no transcript)", "audio"), 10)
+    assert "Recognize again" not in html and "/ui/chat/media/6/recognize" in html
+
+
+def test_bubble_offers_rerun_once_recognized() -> None:
+    from app.api._ui_html import _bubble
+    _set_lang("en")
+    html = _bubble(_media_row(7, "🎤 halo kak saya mau daftar", "audio"), 10)
+    assert "Recognize again" in html
+
+
+def test_bubble_has_no_recognize_button_for_video() -> None:
+    from app.api._ui_html import _bubble
+    _set_lang("en")
+    assert "/recognize" not in _bubble(_media_row(8, "clip", "video"), 10)
+
+
 # ─── funnel filter → shareable /ui/inbox?stage=X URL ──────────────────────────
 
 def test_funnel_html_highlights_active_and_pushes_inbox_url() -> None:

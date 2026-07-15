@@ -148,6 +148,33 @@ class MediaService:
                         self.branch_id, channel_id, done)
         return done
 
+    async def recognize_now(
+        self, message_id: int, *,
+        transcriber: Transcriber | None = None,
+        describer: ImageDescriber | None = None,
+        translator: LLMPort | None = None,
+    ) -> str | None:
+        """Recognize ONE already-downloaded attachment on demand (the chat's manual button).
+
+        Unlike backfill this ignores media_pending, so it also rescues media the cron gave up
+        on (or never retried after an old failure), and it can re-run on media that already
+        has a transcript. Returns the new message text, or None when there is nothing to work
+        with (no stub, no bytes, or no recognizer for this kind). Never releases the media
+        hold on failure — a manual attempt surfaces the error instead of silently giving up."""
+        msg = await self.session.get(Message, message_id)
+        if msg is None or msg.branch_id != self.branch_id:
+            return None
+        stub = await self._media_stub(message_id)
+        if stub is None or stub.data is None:
+            return None  # bytes not downloaded yet — the backfill owns fetching them
+        if not await self._recognize(msg, stub, transcriber, describer):
+            return None
+        await self._recache_translation(msg, translator)
+        msg.media_pending = False
+        self.session.add(msg)
+        await self.session.flush()
+        return msg.text
+
     async def _recache_translation(self, msg: Message, translator: LLMPort | None) -> None:
         """The transcript/caption just replaced the placeholder, so any cached tr_text is a
         translation of the OLD placeholder — drop it. Then translate the real content into the

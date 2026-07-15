@@ -28,6 +28,7 @@ from app.modules.conversation.translate import (
     translate_text,
 )
 from app.modules.knowledge.repository import ProductRepo
+from app.modules.media.service import MediaService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import get_settings
 
@@ -259,6 +260,35 @@ async def chat_bubble(mid: int, request: Request) -> HTMLResponse:
     if row is None or is_branch_forbidden(row.branch_id, allowed):
         return HTMLResponse("", status_code=404)
     return HTMLResponse(_bubble(row, row.thread_id, row.lead_seen_at))
+
+
+@router.post("/chat/media/{mid}/recognize", response_class=HTMLResponse)
+async def chat_media_recognize(mid: int, request: Request) -> HTMLResponse:
+    """Manually send one attachment to the broker for recognition (voice → transcript,
+    image → caption) and write the result into the message text, so Stepan reads it on the
+    next turn like any other message. Rescues media the backfill gave up on. Re-renders the
+    bubble in place; on failure the bubble comes back unchanged with a flash."""
+    apply_lang(request)
+    allowed = writable_branch_ids(request)  # mutates the transcript → WRITE role required
+    async with session_scope() as session:
+        row = await fetch_message(session, mid)
+        if row is None or is_branch_forbidden(row.branch_id, allowed):
+            return HTMLResponse("", status_code=404)
+        broker = BrokerLLM()
+        svc = MediaService(session, row.branch_id)
+        try:
+            new_text = await svc.recognize_now(
+                mid, transcriber=broker, describer=broker, translator=broker)
+        except Exception as exc:  # noqa: BLE001 — broker/scope error → keep the bubble, tell the user
+            _log.warning("manual media recognize failed mid=%s: %s", mid, exc)
+            new_text = None
+        fresh = await fetch_message(session, mid)
+    if fresh is None:
+        return HTMLResponse("", status_code=404)
+    html = _bubble(fresh, fresh.thread_id, fresh.lead_seen_at)
+    if new_text is None:
+        html += f'<div class="mrec-err">{_h.escape(t("chat.recognize_failed"))}</div>'
+    return HTMLResponse(html)
 
 
 @router.get("/media/{asset_id}")

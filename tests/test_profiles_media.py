@@ -363,3 +363,70 @@ async def test_backfill_clears_flag_when_no_stub(db_session) -> None:
     assert dl.calls == []
     refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
     assert refreshed.media_pending is False  # nothing to fetch — don't loop forever
+
+
+# ─── manual recognition (the chat's "Recognize" button) ───
+
+async def _downloaded_msg(s, bid, cid, *, kind="audio", text=None, data=b"AUDIO") -> Message:
+    """A message whose bytes we already hold but that was never recognized — exactly the
+    state the old broken voice path left behind (media_pending cleared, placeholder text)."""
+    m = await _media_msg(s, bid, cid, ext="mm", kind=kind, pending=False, stub=False)
+    if text is not None:
+        m.text = text
+    s.add(MediaAsset(branch_id=bid, message_id=m.id, kind=kind, url="u", data=data))
+    await s.flush()
+    return m
+
+
+async def test_recognize_now_transcribes_media_the_backfill_gave_up_on(db_session) -> None:
+    # media_pending is False, so backfill() will never look at it again — only the manual
+    # button can rescue it. This is the chat-1807 case.
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _downloaded_msg(db_session, bid, cid)
+    tr = FakeTranscriber(text="halo kak saya mau daftar")
+    out = await MediaService(db_session, bid).recognize_now(msg.id, transcriber=tr)
+    assert tr.calls == 1
+    assert out == "🎤 halo kak saya mau daftar"
+    fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert fresh.text == "🎤 halo kak saya mau daftar"   # Stepan reads this next turn
+    assert fresh.media_pending is False
+
+
+async def test_recognize_now_captions_an_image(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _downloaded_msg(db_session, bid, cid, kind="image", data=b"JPG")
+    d = FakeDescriber(text="a payment receipt for 500k")
+    out = await MediaService(db_session, bid).recognize_now(msg.id, describer=d)
+    assert out == "🖼 a payment receipt for 500k"
+
+
+async def test_recognize_now_without_bytes_is_a_noop(db_session) -> None:
+    # bytes are the backfill's job; the manual button only recognizes what we already hold
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="m1", kind="audio", pending=False)
+    tr = FakeTranscriber()
+    assert await MediaService(db_session, bid).recognize_now(msg.id, transcriber=tr) is None
+    assert tr.calls == 0
+
+
+async def test_recognize_now_failure_keeps_the_placeholder(db_session) -> None:
+    # a manual attempt must NOT release the hold / rewrite the text — it surfaces the error
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _downloaded_msg(db_session, bid, cid)
+    tr = FakeTranscriber(fail=True)
+    assert await MediaService(db_session, bid).recognize_now(msg.id, transcriber=tr) is None
+    fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert fresh.text == "🎤 voice"
+
+
+async def test_recognize_now_refuses_another_branch(db_session) -> None:
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _downloaded_msg(db_session, bid, cid)
+    tr = FakeTranscriber()
+    assert await MediaService(db_session, bid + 999).recognize_now(msg.id, transcriber=tr) is None
+    assert tr.calls == 0

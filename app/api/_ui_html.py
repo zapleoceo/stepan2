@@ -450,6 +450,12 @@ _CSS = (
     ".media-load{width:120px;height:90px;margin-top:.25rem;border-radius:8px;"
     "background:#222a38;display:flex;align-items:center;justify-content:center;"
     "color:#6b7685;font-size:1rem}"
+    ".mrec{margin-top:.3rem;display:inline-flex;align-items:center;gap:.32rem;"
+    "background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.13);"
+    "color:#9fb0c4;font-size:.66rem;padding:.2rem .5rem;border-radius:6px;cursor:pointer}"
+    ".mrec:hover{background:rgba(255,255,255,.12);color:#e8eef6}"
+    ".mrec[disabled]{opacity:.5;cursor:progress}"
+    ".mrec-err{margin-top:.25rem;font-size:.66rem;color:#ff8787}"
     ".rcpt{opacity:.55;font-size:.7rem}.rcpt.seen{color:#4da3ff;opacity:.95}"
     ".pres.on{color:#51cf66}.ti-fl{color:#6b7685;font-size:.62rem}"
     ".ti-br{color:#8b98a5;font-size:.6rem;margin-left:.3rem;"
@@ -916,6 +922,9 @@ def thread_list_html(
 
 _LINK_RE = re.compile(r"(https?://[^\s<]+)")
 _MEDIA_PH = {"🖼 media", "🎤 voice", "GIF", "🖼 медиа", "🎤 голосовое"}
+# Text the backfill leaves when it gives up recognizing — still "not recognized" for the
+# manual button (offer a fresh attempt, not a re-run).
+_MEDIA_FAILED = {"🎤 (voice — no transcript)", "🖼 (image — tidak bisa dibaca)"}
 
 
 def _linkify(text: str) -> str:
@@ -936,6 +945,24 @@ def _media_html(media_id: int, media_kind: str | None) -> str:
     return (
         f'<a href="{src}" target="_blank" rel="noreferrer">'
         f'<img class="msg-prev" src="{src}" loading="lazy" alt=""></a>'
+    )
+
+
+def _recognize_btn_html(mid: int, media_kind: str | None, recognized: bool) -> str:
+    """Send this attachment to the broker for recognition on demand. Shown on voice/images
+    whose bytes we hold: the backfill can give up (broker down, an old failure it never
+    retried) and leave a bare placeholder, and only a human can decide it's worth another
+    call. The transcript/caption lands in the message text, so Stepan reads it next turn."""
+    if media_kind not in ("audio", "image"):
+        return ""
+    label = t("chat.recognize_again") if recognized else t("chat.recognize")
+    icon = "fa-rotate" if recognized else "fa-wand-magic-sparkles"
+    hint = _h.escape(t("chat.recognize_hint"))
+    return (
+        f'<button class="mrec" hx-post="/ui/chat/media/{mid}/recognize"'
+        f' hx-target="#bb-{mid}" hx-swap="outerHTML" hx-disabled-elt="this"'
+        f' title="{hint}">'
+        f'<i class="fa-solid {icon}"></i> {_h.escape(label)}</button>'
     )
 
 
@@ -980,10 +1007,14 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
     time_str = _fmt_time(ts)
     ready = bool(media_id and media_ready)
-    caption = "" if (ready and str(text or "").strip() in _MEDIA_PH) else _linkify(text)
+    raw = str(text or "").strip()
+    caption = "" if (ready and raw in _MEDIA_PH) else _linkify(text)
     att = ""
     if ready:
         att += _media_html(int(media_id), media_kind)
+        # Un-recognized media still shows its placeholder text (or the 'gave up' fallback).
+        att += _recognize_btn_html(
+            int(mid), media_kind, recognized=raw not in _MEDIA_PH and raw not in _MEDIA_FAILED)
     elif media_id and media_pending:
         att += _media_pending_html(int(mid))
     att += _link_preview_html(link_url, preview_url)

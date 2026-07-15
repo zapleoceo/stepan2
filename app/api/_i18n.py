@@ -490,6 +490,20 @@ _TR: dict[str, dict[str, str]] = {
     "chat.del_confirm": {"ru": "Удалить?", "en": "Delete?", "id": "Hapus?"},
     "chat.loaded":      {"ru": "Контекст загружен", "en": "Context loaded",
                          "id": "Konteks dimuat"},
+    "chat.recognize":   {"ru": "Распознать", "en": "Recognize", "id": "Kenali"},
+    "chat.recognize_again": {"ru": "Распознать заново", "en": "Recognize again",
+                             "id": "Kenali ulang"},
+    "chat.recognize_hint": {
+        "ru": "Отправить в брокер: голос → текст, картинка → описание. Результат попадёт "
+              "в чат, и Степан учтёт его в следующем ответе.",
+        "en": "Send to the broker: voice → text, image → description. The result lands in "
+              "the chat and Stepan uses it in its next reply.",
+        "id": "Kirim ke broker: suara → teks, gambar → deskripsi. Hasilnya masuk ke chat "
+              "dan dipakai Stepan di balasan berikutnya."},
+    "chat.recognize_failed": {
+        "ru": "Не удалось распознать — брокер недоступен или формат не поддержан",
+        "en": "Recognition failed — the broker is unavailable or the format is unsupported",
+        "id": "Gagal mengenali — broker tidak tersedia atau format tidak didukung"},
     "log.stage_change": {"ru": "Стадия: {from} → {to}", "en": "Stage: {from} → {to}",
                          "id": "Tahap: {from} → {to}"},
     "product.none":     {"ru": "— без продукта —", "en": "— no product —",
