@@ -61,21 +61,18 @@ class AdRow:
     campaign_id: str | None
     campaign_name: str | None
     objective: str | None
-    # Three ways an ad points at an IG post, in descending order of usefulness to us:
-    #   shortcode   — parsed from instagram_permalink_url; free, present on ~1004/1145 ads
-    #   effective_media_id — the post as DELIVERED; resolvable to a shortcode with ads_management
-    #   source_media_id    — the ORIGINAL post a boost was made from; needs instagram_basic
-    # Promoting an existing IG post makes dark copies, so the medium a lead actually saw may
-    # be any of the three. Matching only the permalink caps coverage at ~45%.
+    # The ad's own IG post, parsed from instagram_permalink_url — present on ~1004/1145 ads.
     shortcode: str | None = None
-    effective_media_id: str | None = None
-    source_media_id: str | None = None
-    # EVERY source image this ad can render: creative.image_hash plus one per placement
-    # variant in asset_feed_spec. Placement customisation ("same ad in feed, stories, reels")
-    # renders a separate IG post per placement — adjacent shortcodes, created the same second
-    # — and Marketing API exposes only ONE of them as effective_instagram_media_id. The lead
-    # usually saw a different one. The hashes are what they all have in common.
+    # EVERY source image this ad can render, one per placement variant in asset_feed_spec.
+    # Placement customisation ("same ad in feed, stories and reels") renders a separate IG
+    # post per placement, and Marketing API admits to only ONE of them via the permalink —
+    # the lead usually saw another. The hashes are what all the variants have in common.
     # Measured on prod: permalink alone 45.2%, hash alone 55.4%, both together 93.6%.
+    #
+    # NOT sourced from creative.image_hash: Graph silently omits that field when creative{}
+    # is nested under the ads edge (verified: 0 of 5 ads carry it, while asset_feed_spec
+    # comes through fine). Only the standalone adcreatives edge returns it — which is exactly
+    # where iter_creatives reads it from.
     image_hashes: tuple[str, ...] = ()
 
 
@@ -127,7 +124,9 @@ def parse_insight(row: dict[str, Any]) -> InsightRow:
 def _creative_image_hashes(creative: dict[str, Any]) -> tuple[str, ...]:
     """Every source-image hash an ad creative can render, deduped and order-stable.
 
-    Pure, so the asset_feed_spec shape is testable without Graph."""
+    Reads creative.image_hash too, for callers that fetch a creative directly — but nested
+    under the ads edge Graph omits it, so in practice the asset_feed_spec variants are what
+    populate this. Pure, so the shape is testable without Graph."""
     hashes: list[str] = []
     own = creative.get("image_hash")
     if own:
@@ -208,8 +207,7 @@ class MetaAdsClient:
         async for row in self._walk(
             "ads",
             "id,name,adset{id,name},campaign{id,name,objective},"
-            "creative{id,instagram_permalink_url,effective_instagram_media_id,"
-            "source_instagram_media_id,image_hash,asset_feed_spec}",
+            "creative{id,instagram_permalink_url,asset_feed_spec}",
             start_url=start_url,
         ):
             creative = row.get("creative") or {}
@@ -228,27 +226,8 @@ class MetaAdsClient:
                 campaign_name=campaign.get("name"),
                 objective=campaign.get("objective"),
                 shortcode=shortcode_from_permalink(creative.get("instagram_permalink_url")),
-                effective_media_id=creative.get("effective_instagram_media_id"),
-                source_media_id=creative.get("source_instagram_media_id"),
                 image_hashes=_creative_image_hashes(creative),
             )
-
-    async def media_shortcode(self, media_id: str) -> str | None:
-        """IG media id → shortcode, or None when this token may not read that media.
-
-        effective_instagram_media_id resolves on ads_management alone (it is an ad object).
-        source_instagram_media_id is an IG-owned post and needs instagram_basic — WITHOUT that
-        permission this returns None, which is why coverage is capped rather than broken."""
-        url = f"{self._base}/{media_id}"
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            try:
-                payload = await self._get(client, url, {"fields": "shortcode"})
-            except MetaAdsRateLimited:
-                raise
-            except MetaAdsError:
-                return None  # not visible to this token — expected, not a failure
-        code = payload.get("shortcode")
-        return str(code) if code else None
 
     async def iter_insights(self, since: date, until: date) -> AsyncIterator[InsightRow]:
         """Daily per-ad insights over [since, until]. time_increment=1 → one row per day."""
