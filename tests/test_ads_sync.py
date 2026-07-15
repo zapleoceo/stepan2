@@ -25,6 +25,7 @@ from app.adapters.meta_ads import (
     AdRow,
     CreativeRow,
     InsightRow,
+    MetaAdsError,
     MetaAdsRateLimited,
     _creative_image_hashes,
 )
@@ -309,3 +310,36 @@ async def test_hash_tier_runs_even_when_tier_1_matched_something(db_session) -> 
     got = {r["media_pk"]: r["ad_id"] for r in
            (await db_session.execute(AdCreativeMap.__table__.select())).mappings().all()}
     assert got == {PK: "ad1", other_pk: "ad2"}
+
+
+# ─── the prod failure this guards ─────────────────────────────────────────────
+# Graph answers 500 partway through the ads walk when asset_feed_spec is requested at 100
+# rows/page. The raw HTTPStatusError escaped every handler, killed the walk and threw away
+# every row already matched — 49s of work, 0 rows written, visible only in a traceback.
+
+class _DyingClient(FakeClient):
+    """Yields some ads, then the walk dies the way Graph made it die in prod."""
+
+    async def iter_ads(self, start_url=None):
+        self.walked.append("ads")
+        for row in self._ads:
+            self.ads_read += 1
+            yield row
+        raise MetaAdsError("graph 500 on ads")
+
+
+@pytest.mark.asyncio
+async def test_a_walk_that_dies_midway_keeps_what_it_already_matched(db_session) -> None:
+    bid = await _branch_with_lead(db_session)
+    client = _DyingClient(ads=[_ad(shortcode=CODE, campaign="SMM")])
+    assert await _svc(db_session, bid, client).sync_map() == 1   # not 0
+    row = (await db_session.execute(AdCreativeMap.__table__.select())).mappings().one()
+    assert row["media_pk"] == PK
+
+
+@pytest.mark.asyncio
+async def test_a_dying_walk_does_not_raise_out_of_sync_map(db_session) -> None:
+    """It must degrade to a partial map, never crash the branch's job."""
+    bid = await _branch_with_lead(db_session)
+    client = _DyingClient(ads=[])
+    assert await _svc(db_session, bid, client).sync_map() == 0

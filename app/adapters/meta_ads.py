@@ -13,6 +13,7 @@ persist progress and resume instead of restarting 45 pages from scratch.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -28,6 +29,10 @@ logger = logging.getLogger(__name__)
 
 _RATE_LIMIT_CODES = {4, 17, 80000, 80003, 80004}
 _PAGE_SIZE = 100
+# asset_feed_spec carries every placement variant, so an ads page is an order of magnitude
+# heavier than a creatives page — Graph answers 500 partway through pagination at 100/page
+# (live: sync aborted on page ~12 and the whole walk was lost). 25 is what survives.
+_ADS_PAGE_SIZE = 25
 
 
 class MetaAdsError(RuntimeError):
@@ -121,6 +126,11 @@ def parse_insight(row: dict[str, Any]) -> InsightRow:
     )
 
 
+def edge_of(url: str) -> str:
+    """Edge name from a Graph URL, for an error message that says WHICH walk broke."""
+    return url.rstrip("/").split("?")[0].rsplit("/", 1)[-1]
+
+
 def _creative_image_hashes(creative: dict[str, Any]) -> tuple[str, ...]:
     """Every source-image hash an ad creative can render, deduped and order-stable.
 
@@ -154,12 +164,12 @@ class MetaAdsClient:
 
     async def _walk(
         self, edge: str, fields: str, extra: dict[str, str] | None = None,
-        start_url: str | None = None,
+        start_url: str | None = None, page_size: int = _PAGE_SIZE,
     ) -> AsyncIterator[dict[str, Any]]:
         """Yield every row of an edge, following paging.next to exhaustion."""
         url = start_url or f"{self._base}/{self._account}/{edge}"
         params: dict[str, str] | None = {
-            "fields": fields, "limit": str(_PAGE_SIZE), **(extra or {})}
+            "fields": fields, "limit": str(page_size), **(extra or {})}
         if start_url:  # a resumed cursor URL already carries its query string
             params = None
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -173,15 +183,25 @@ class MetaAdsClient:
     async def _get(
         self, client: httpx.AsyncClient, url: str, params: dict[str, str] | None,
     ) -> dict[str, Any]:
-        response = await client.get(
-            url, params=params, headers={"Authorization": f"Bearer {self._token}"})
-        if response.status_code == 400:
-            error = (response.json().get("error") or {})
-            if error.get("code") in _RATE_LIMIT_CODES:
-                raise MetaAdsRateLimited(str(error.get("message")), next_url=url)
-            raise MetaAdsError(str(error.get("message")))
-        response.raise_for_status()
-        return response.json()
+        """One page. 5xx is retried, then surfaces as MetaAdsError — never as a raw httpx
+        error: an uncaught HTTPStatusError killed the whole walk in prod and discarded every
+        row already matched, silently (49s, 0 rows, the reason only visible in a traceback)."""
+        for attempt in range(3):
+            response = await client.get(
+                url, params=params, headers={"Authorization": f"Bearer {self._token}"})
+            if response.status_code == 400:
+                error = (response.json().get("error") or {})
+                if error.get("code") in _RATE_LIMIT_CODES:
+                    raise MetaAdsRateLimited(str(error.get("message")), next_url=url)
+                raise MetaAdsError(str(error.get("message")))
+            if response.status_code >= 500:
+                if attempt == 2:
+                    raise MetaAdsError(f"graph {response.status_code} on {edge_of(url)}")
+                await asyncio.sleep(2 * (attempt + 1))
+                continue
+            response.raise_for_status()
+            return response.json()
+        raise MetaAdsError("unreachable")  # pragma: no cover
 
     async def iter_creatives(self, start_url: str | None = None) -> AsyncIterator[CreativeRow]:
         """Creatives that carry an IG permalink; the rest cannot be joined and are skipped."""
@@ -208,7 +228,7 @@ class MetaAdsClient:
             "ads",
             "id,name,adset{id,name},campaign{id,name,objective},"
             "creative{id,instagram_permalink_url,asset_feed_spec}",
-            start_url=start_url,
+            start_url=start_url, page_size=_ADS_PAGE_SIZE,
         ):
             creative = row.get("creative") or {}
             creative_id = creative.get("id")
