@@ -631,3 +631,24 @@ def test_stale_dates_does_not_flag_today(db_session=None) -> None:
 
     today = date(2026, 7, 16)
     assert not guard.stale_dates("Batchnya 16 Juli, masih bisa daftar!", today)
+
+
+def test_whatsapp_delivery_offers_catches_number_then_send_document() -> None:
+    # thread S5: "boleh aku minta nomor WA Kakak biar aku bisa kirim brosur lengkapnya?"
+    assert guard.whatsapp_delivery_offers(
+        "boleh aku minta nomor WA Kakak biar aku bisa kirim brosur lengkap Skill Booster-nya?")
+    assert guard.whatsapp_delivery_offers("minta nomor whatsapp ya kak, nanti aku kirimkan silabus")
+    # a plain contact-ask for a real hand-off (no document promise) stays allowed
+    assert not guard.whatsapp_delivery_offers("boleh aku minta nomor WhatsApp Kakak dulu ya?")
+    assert not guard.whatsapp_delivery_offers("nanti tim kami hubungi via WhatsApp ya Kak")
+
+
+def test_answer_dont_escalate_correction_forbids_escalation_and_phone_ask() -> None:
+    """Thread 2733/S2: the model escalated on 'berapa biayanya?' and, with no phone on file,
+    the phone gate turned that into a repeated 'give me your WhatsApp' stub. The reply flow
+    force-answers first; the correction it sends must forbid both escalation and the phone-ask
+    (the end-to-end behaviour is exercised by the regression sim)."""
+    c = guard.ANSWER_DONT_ESCALATE_CORRECTION.lower()
+    assert "needs_manager" in c and "not" in c
+    assert "phone" in c
+    assert "knowledge base" in c  # answer must come from the KB, not a stall

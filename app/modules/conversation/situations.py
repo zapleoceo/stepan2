@@ -45,9 +45,13 @@ AD_TEMPLATE_RE = re.compile(
 # A concrete, answerable question from the lead — a "?" or a question/money/enroll keyword.
 # Concrete keywords only — NOT the bare "gimana/how", which is the vague dead-end the
 # clarify→escalate loop is meant to catch. An explicit "?" still counts ("gimana caranya?").
+# 'online'/'offline' are deliberately NOT bare keywords: they read as a FORMAT ANSWER as often
+# as a question ("online dari rumah" — thread 4086 — is the lead picking a format, not asking
+# anything), and treating that as an answerable question fired answer-first, which the model
+# filled with the full price. With a real '?' they still count (the \? alternation).
 ANSWERABLE_Q_RE = re.compile(
     r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
-    r"cicilan|daftar|syarat|sertif|bnsp|online|offline|jadwal|lokasi|durasi)\b",
+    r"cicilan|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi)\b",
     re.IGNORECASE)
 
 # A polite Indonesian 'not now' — usually a real 'no' wrapped to save face (gengsi). Pushing
@@ -307,6 +311,22 @@ FOLLOWUP_PRODUCT_DISCIPLINE = (
     "which program they want, ask — never guess a new one each attempt.]"
 )
 
+# The engaged lead who hasn't revealed a pain yet AND didn't ask the price. The model's reflex
+# is to fill the silence with the fee — thread 4086: a lead who only picked "online dari rumah"
+# got the full Rp 15.030.000 total unprompted and went quiet. A price dropped before there's a
+# reason to pay it is just a number to balk at. Steer to ONE discovery question instead. Stops
+# on its own once a pain is captured (need-payoff takes over) or past the discovery cap
+# (discovery-cap presents what we have). Never fires when the lead DID ask — answer-first owns
+# that (a direct price question gets the price).
+DISCOVER_BEFORE_PRICE_NUDGE = (
+    "[System: this lead is engaged but hasn't told you a single pain or goal yet, and they did "
+    "NOT ask for the price. Do NOT quote the fee, the monthly figure, or the total now — a price "
+    "dropped before there's a reason to pay it just becomes a number they balk at. Ask ONE warm, "
+    "specific question about what they want to achieve or what's getting in their way, so the "
+    "price later lands against something worth paying for. (If they DO ask the price outright, "
+    "answer it — this only applies while they haven't.)]"
+)
+
 DISCOVERY_CAP_NUDGE = (
     "[System: you have already asked discovery questions for {n} turns without the lead "
     "voicing a clear need — do NOT ask another discovery question this turn. If they asked "
@@ -406,6 +426,8 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         return LOW_BUDGET_NUDGE
     if stored_needs.pains and not stored_needs.gains and inbound_count <= DISCOVERY_TURN_CAP:
         return NEED_PAYOFF_NUDGE
+    if not stored_needs.pains and inbound_count <= DISCOVERY_TURN_CAP:
+        return DISCOVER_BEFORE_PRICE_NUDGE
     if not stored_needs.captured() and inbound_count > DISCOVERY_TURN_CAP:
         return DISCOVERY_CAP_NUDGE.format(n=inbound_count)
     return None

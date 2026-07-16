@@ -570,6 +570,29 @@ class ReplyService:
                         "(ratio=%.2f) → clarify", workflow, self.branch_id, thread_id,
                         post_guard_ratio)
                     decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
+        # ANSWER an answerable question rather than phone-gate it. When the model escalates on a
+        # concrete, answerable question and we have no phone, the phone gate below would swallow
+        # that question under a "give me your WhatsApp" stub — re-sent verbatim each time the
+        # lead re-asked (thread 2733/S2: "how much?" → "when?" → "I want to register" all got
+        # the identical contact-ask, never an answer; premature_manager_handoff missed it
+        # because the price wasn't in the retrieved context that turn). Force one KB answer
+        # first; only if it STILL escalates does the contact-ask below stand.
+        if decision.needs_manager and lead is not None and not lead.phone_e164 \
+                and not (decision.phone or "").strip() \
+                and _is_answerable_question(last_in_txt) \
+                and not _AD_TEMPLATE_RE.search(last_in_txt):
+            from dataclasses import replace  # noqa: PLC0415, F401
+            raw, regen_meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+                extra_user_msg=guard.ANSWER_DONT_ESCALATE_CORRECTION)
+            try:
+                answered = parse_decision(raw)
+            except ValueError:
+                answered = None
+            if answered is not None and answered.reply and not answered.needs_manager \
+                    and not _deterministic_issues(
+                        answered.reply, engine.last_context, _lead_spoke_own_words(ctx.dialog)):
+                decision, meta = answered, regen_meta
         # PHONE BEFORE HAND-OFF (hard gate): never mute the bot and hand a contact-less lead to
         # a manager who then has no way to reach them (lead 2757 went to MANAGER with a NULL
         # phone; the SAFE_FALLBACK path sets needs_manager, bypassing the prompt's soft rule).

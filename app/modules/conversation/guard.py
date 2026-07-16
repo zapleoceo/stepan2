@@ -138,7 +138,12 @@ def impossible_capability_offers(reply: str) -> list[str]:
 # instead of only the lie that follows it.
 _WHATSAPP_DELIVERY_RE = re.compile(
     r"\bkirim(?:in|kan)?\b[^.!?\n]{0,80}\b(?:via|lewat|ke)\s+(?:wa|whatsapp)\b"
-    r"|\b(?:via|lewat|ke)\s+(?:wa|whatsapp)\b[^.!?\n]{0,80}\bkirim(?:in|kan)?\b",
+    r"|\b(?:via|lewat|ke)\s+(?:wa|whatsapp)\b[^.!?\n]{0,80}\bkirim(?:in|kan)?\b"
+    # "your WA number so I can send you the brochure/file" — the bot promising to deliver a
+    # DOCUMENT to WhatsApp (thread S5). Kept narrow: it needs both a WA-number ask AND a
+    # send-a-document verb, so a plain "boleh minta nomor WA?" for a real hand-off is untouched.
+    r"|\bnomor\s+(?:wa|whatsapp)\b[^.!?\n]{0,80}\bkirim(?:in|kan)?\b[^.!?\n]{0,40}"
+    r"\b(?:brosur|file|dokumen|silabus|pdf|materi|modul)\b",
     re.IGNORECASE)
 
 
@@ -320,6 +325,15 @@ SAFE_FALLBACK = (
 # Used when the model wants a manager hand-off but we have no phone/WhatsApp for the lead:
 # ask for the contact first (a manager can't follow up on a contact-less lead), keeping the
 # bot on. Only a later turn WITH a phone actually mutes the bot and escalates.
+ANSWER_DONT_ESCALATE_CORRECTION = (
+    "[System: the lead just asked a concrete, answerable question (a price, schedule, or how to "
+    "sign up). Answer it DIRECTLY from the product catalog / knowledge base in this reply. Do "
+    "NOT set needs_manager and do NOT ask for a phone number instead of answering — that reads "
+    "as stonewalling (thread 2733: 'how much?' / 'when?' / 'I want to register' each got an "
+    "identical 'give me your WhatsApp' and never an answer). Only if the fact is genuinely "
+    "absent from the knowledge base may you escalate, and then name exactly what is missing.]"
+)
+
 ASK_PHONE_BEFORE_HANDOFF = (
     "Biar tim kami bisa bantu Kakak lebih lanjut, boleh aku minta nomor WhatsApp Kakak "
     "dulu ya? 🙏")

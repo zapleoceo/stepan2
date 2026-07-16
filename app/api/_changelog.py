@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.14.0"
+PROJECT_VERSION = "1.15.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,21 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.15.0", "date": "16 Jul 2026", "tag": "Conversation",
+        "title": "Answers the question in front of it",
+        "blurb": "Three ways a good conversation used to stall, closed. A client who asked a "
+                 "plain question — how much, which days, how do I sign up — and happened to "
+                 "have no number on file could get the same 'send me your WhatsApp' back "
+                 "every time instead of an answer; now the question gets answered from the "
+                 "catalogue first, and the number is asked for alongside, not in place of it. "
+                 "A client who only says how they'd like to study — online, from home — no "
+                 "longer gets the full price dropped on them before anyone has asked what "
+                 "they're actually after; the course price waits until it has something to "
+                 "stand against. And an offer to send a brochure over WhatsApp, which the bot "
+                 "can't actually do, is caught the same way its other impossible promises "
+                 "already were.",
+    },
     {
         "version": "1.14.0", "date": "16 Jul 2026", "tag": "Conversation",
         "title": "The rules that cost you money are no longer optional",

@@ -235,3 +235,27 @@ def test_auto_reply_does_not_count_as_the_lead_speaking() -> None:
     assert not lead_spoke_own_words([_M("in", ad), _M("out", "hai"), _M("in", auto)])
     # …but one real word from the lead flips it
     assert lead_spoke_own_words([_M("in", ad), _M("in", auto), _M("in", "berapa harganya?")])
+
+
+# ─── discover before price (thread 4086) ───
+
+from app.modules.conversation.situations import DISCOVER_BEFORE_PRICE_NUDGE  # noqa: E402
+
+
+def test_discover_before_price_fires_for_engaged_lead_without_a_pain() -> None:
+    # lead picked a format ("online dari rumah") — engaged, but no pain and no price question
+    got = _pick("online dari rumah", n=2)
+    assert got is not None and DISCOVER_BEFORE_PRICE_NUDGE in got
+
+
+def test_discover_before_price_yields_to_a_direct_price_question() -> None:
+    # they DID ask — answer-first wins, no discover-first steer
+    got = _pick("berapa biayanya kak?", n=2)
+    assert ANSWER_FIRST_NUDGE in got and DISCOVER_BEFORE_PRICE_NUDGE not in got
+
+
+def test_discover_before_price_yields_once_a_pain_is_captured() -> None:
+    # pain on record → need-payoff owns it, not the pre-pain discovery steer
+    needs = NeedsProfile(pains=["followers stuck"], gains=[])
+    got = _pick("oke kak", needs=needs, n=2)
+    assert NEED_PAYOFF_NUDGE in got and DISCOVER_BEFORE_PRICE_NUDGE not in got
