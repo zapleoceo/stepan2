@@ -232,6 +232,23 @@ class AdCreativeMap(SQLModel, table=True):
     synced_at: datetime = Field(default_factory=_utcnow)
 
 
+class AdMediaMiss(SQLModel, table=True):
+    """Медиа лида, которому не нашлось объявления, и когда пробовали в последний раз.
+
+    Без этого синк каждые 20 минут заново обходил каталог ради шести мёртвых медиа и ловил
+    троттл на весь аккаунт — тот самый лимит, за счёт которого находятся НОВЫЕ объявления.
+    Ретрай экспоненциальный: медиум, который лишь показался мёртвым (троттл, креатив ещё не
+    доехал), получит новый шанс — просто не на каждом тике."""
+    __tablename__ = "ad_media_miss"
+    __table_args__ = (UniqueConstraint("branch_id", "media_pk", name="uq_admiss_branch_media"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    media_pk: str = Field(index=True)
+    attempts: int = Field(default=0)
+    last_try_at: datetime = Field(default_factory=_utcnow)
+
+
 class AdInsightDaily(SQLModel, table=True):
     """Метрики объявления за один день — скользящий ETL-кэш Marketing API.
 
