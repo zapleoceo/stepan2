@@ -33,7 +33,7 @@ def _row(ad_id="ad1", day=TODAY, spend="1.00"):
 # ─── misses ───────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_a_completed_hunt_that_finds_nothing_records_the_miss(db_session) -> None:
+async def test_a_hunt_that_finds_nothing_records_the_attempt(db_session) -> None:
     bid = await _branch_with_lead(db_session)
     client = FakeClient(ads=[_ad(shortcode="SOMETHING_ELSE")])
     assert await _svc(db_session, bid, client).sync_map() == 0
@@ -65,21 +65,48 @@ async def test_a_stale_miss_is_hunted_again(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_walk_cut_short_blames_nothing(db_session) -> None:
-    """A throttle proves nothing about media the walk never reached — recording a miss there
-    would punish the media for OUR rate limit and delay them for hours."""
+async def test_a_throttled_hunt_still_backs_off(db_session) -> None:
+    """The deadlock this replaces: recording the attempt only after a COMPLETE hunt meant a
+    throttled hunt recorded nothing — and hunting these media IS what earns the throttle, so
+    the same futile walk ran every 20 minutes forever (live: 87s, 0 rows, empty miss table).
+    The stamp says "we just tried", which is true however the hunt ended."""
     from app.adapters.meta_ads import MetaAdsError
 
     class _Dying(FakeClient):
         async def iter_ads(self, start_url=None):
             self.walked.append("ads")
             if True:  # noqa: SIM108 — keeps this an async GENERATOR, not a coroutine
-                raise MetaAdsError("graph 500")
+                raise MetaAdsError("too many calls")
             yield  # pragma: no cover
 
     bid = await _branch_with_lead(db_session)
     assert await _svc(db_session, bid, _Dying()).sync_map() == 0
-    assert (await db_session.execute(AdMediaMiss.__table__.select())).first() is None
+    miss = (await db_session.execute(AdMediaMiss.__table__.select())).mappings().one()
+    assert (miss["media_pk"], miss["attempts"]) == (PK, 1)
+
+
+@pytest.mark.asyncio
+async def test_repeated_throttles_back_off_further(db_session) -> None:
+    """Each futile hunt must widen the gap, or the loop merely runs slower."""
+    from app.adapters.meta_ads import MetaAdsError
+
+    class _Dying(FakeClient):
+        async def iter_ads(self, start_url=None):
+            self.walked.append("ads")
+            if True:  # noqa: SIM108
+                raise MetaAdsError("too many calls")
+            yield  # pragma: no cover
+
+    bid = await _branch_with_lead(db_session)
+    await _svc(db_session, bid, _Dying()).sync_map()
+    # pretend the first backoff elapsed, then fail again
+    row = (await db_session.execute(
+        AdMediaMiss.__table__.select())).mappings().one()
+    await db_session.execute(AdMediaMiss.__table__.update().values(
+        last_try_at=utc_now() - timedelta(days=3)))
+    await _svc(db_session, bid, _Dying()).sync_map()
+    after = (await db_session.execute(AdMediaMiss.__table__.select())).mappings().one()
+    assert after["attempts"] == row["attempts"] + 1
 
 
 @pytest.mark.asyncio

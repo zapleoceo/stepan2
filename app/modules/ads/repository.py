@@ -112,8 +112,8 @@ def _miss_due_at(attempts: int, last_try: datetime) -> datetime:
 
 
 async def media_to_skip(session: AsyncSession, branch_id: int) -> set[str]:
-    """Media whose retry is not due yet — excluded from the hunt so the Graph budget goes to
-    media that can actually resolve (including newly launched ads)."""
+    """Media whose retry is not due yet — excluded so the Graph budget goes to media that can
+    actually resolve, above all a newly launched ad nobody has mapped yet."""
     rows = (await session.execute(
         select(AdMediaMiss.media_pk, AdMediaMiss.attempts, AdMediaMiss.last_try_at)
         .where(AdMediaMiss.branch_id == branch_id)
@@ -122,8 +122,13 @@ async def media_to_skip(session: AsyncSession, branch_id: int) -> set[str]:
     return {pk for pk, attempts, last_try in rows if _miss_due_at(attempts, last_try) > now}
 
 
-async def record_misses(session: AsyncSession, branch_id: int, media_pks: Iterable[str]) -> int:
-    """Bump the attempt counter for media that a completed hunt did not resolve."""
+async def record_hunt_attempt(
+    session: AsyncSession, branch_id: int, media_pks: Iterable[str],
+) -> int:
+    """Bump the attempt counter for media we are about to hunt.
+
+    Stamped up-front so the backoff holds even when the hunt is throttled — the case that
+    matters most, since hunting is what earns the throttle."""
     pks = list(media_pks)
     if not pks:
         return 0
@@ -147,8 +152,10 @@ async def record_misses(session: AsyncSession, branch_id: int, media_pks: Iterab
     return len(pks)
 
 
-async def clear_miss(session: AsyncSession, branch_id: int, media_pks: Iterable[str]) -> None:
-    """A medium that resolved must not keep a stale miss row holding it back later."""
+async def clear_hunt_attempts(
+    session: AsyncSession, branch_id: int, media_pks: Iterable[str],
+) -> None:
+    """A medium that resolved must not keep a stale attempt row holding it back later."""
     pks = list(media_pks)
     if pks:
         await session.execute(delete(AdMediaMiss).where(
