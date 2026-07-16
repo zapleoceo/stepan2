@@ -79,11 +79,19 @@ class AdSyncService:
                                self.branch_id, pk)
         if not wanted:
             return 0
-        rows, missed = await AdMatcher(client, wanted, self.branch_id).run()
-        if missed:
-            await repo.record_misses(self.session, self.branch_id, missed)
+        # Stamp the attempt BEFORE hunting, not after. Recording it afterwards only when the
+        # hunt COMPLETED sounds more principled — "never blame a medium for our throttle" —
+        # but it deadlocks in production: hunting these media IS what earns the throttle, so
+        # the hunt never completes, nothing is ever recorded, and the same futile walk runs
+        # every 20 minutes forever (live: 87s, 0 rows, throttled, miss table empty).
+        #
+        # The stamp does not claim the medium is dead. It claims we just tried — which is
+        # exactly what the backoff needs to know, and is true regardless of how the hunt
+        # ended. Finding the medium clears it, so a successful hunt costs nothing.
+        await repo.record_hunt_attempt(self.session, self.branch_id, wanted.values())
+        rows = await AdMatcher(client, wanted, self.branch_id).run()
         if rows:
-            await repo.clear_miss(self.session, self.branch_id,
+            await repo.clear_hunt_attempts(self.session, self.branch_id,
                                   [r["media_pk"] for r in rows])
         return await repo.upsert_creative_map(self.session, self.branch_id, rows)
 

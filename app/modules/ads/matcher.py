@@ -37,19 +37,12 @@ class AdMatcher:
         self._pending = dict(wanted)
         self._by_hash: dict[str, AdRow] = {}
         self._rows: list[dict] = []
-        self._cut = False
 
-    async def run(self) -> tuple[list[dict], set[str]]:
-        """Returns (rows, media_pks that stayed unresolved after a COMPLETE hunt).
-
-        The misses are only meaningful if both walks actually finished — a walk cut short by
-        a throttle proves nothing about the media it never reached, so `cut_short` suppresses
-        them rather than blaming media for our own rate limit."""
+    async def run(self) -> list[dict]:
         await self._by_permalink()
         if self._pending and self._by_hash:
             await self._by_image_hash()
-        missed = set(self._pending.values()) if not self._cut else set()
-        return self._rows, missed
+        return self._rows
 
     def _take(self, shortcode: str | None, ad: AdRow) -> bool:
         media_pk = self._pending.pop(shortcode, None) if shortcode else None
@@ -91,6 +84,5 @@ class AdMatcher:
             self._cut_short("creatives", exc)
 
     def _cut_short(self, walk: str, exc: MetaAdsError) -> None:
-        self._cut = True
         logger.warning("branch=%s %s walk cut short (%s) — keeping %d matched, %d still pending",
                        self._branch_id, walk, exc, len(self._rows), len(self._pending))
