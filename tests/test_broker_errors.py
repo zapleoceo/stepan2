@@ -16,6 +16,7 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 from app.adapters.llm import broker as broker_mod  # noqa: E402
+from app.adapters.llm.broker import BrokerUnavailable  # noqa: E402
 
 
 class _FakeResp:
@@ -198,16 +199,30 @@ async def test_describe_image_submits_vision_job_with_multimodal_content(monkeyp
 # ── error paths ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("status", [502, 503])
-async def test_chat_submit_5xx_raises_and_logs_failure(monkeypatch, status: int) -> None:
+async def test_chat_submit_5xx_raises_broker_unavailable_and_logs_failure(
+    monkeypatch, status: int,
+) -> None:
+    # A gateway 502/503 is the broker being DOWN → raise BrokerUnavailable so the worker can
+    # trip the breaker (an ordinary 4xx/500 stays a plain error — see the test below).
     client = _JobClient([_FakeResp({}, status=status)])
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
     calls = _capture_log(monkeypatch)
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(BrokerUnavailable) as ei:
         await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply",
                           thread_id=1, branch_id=2)
+    assert isinstance(ei.value.__cause__, httpx.HTTPStatusError)  # original preserved
     assert len(calls) == 1 and calls[0]["ok"] is False
     assert calls[0]["err"].startswith(str(status))
     assert "upstream unavailable" in calls[0]["err"]
+
+
+async def test_chat_submit_500_stays_a_plain_error_not_broker_unavailable(monkeypatch) -> None:
+    # a 500 is a per-request failure, not the gateway being down — must NOT trip the breaker
+    client = _JobClient([_FakeResp({}, status=500)])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    _capture_log(monkeypatch)
+    with pytest.raises(httpx.HTTPStatusError):
+        await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
 
 
 async def test_chat_submit_invalid_json_raises_and_logs_failure(monkeypatch) -> None:
@@ -243,9 +258,11 @@ async def test_chat_poll_error_status_raises_and_logs_failure(monkeypatch) -> No
 async def test_chat_submit_read_timeout_raises_and_logs_failure(monkeypatch) -> None:
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _TimeoutClient())
     calls = _capture_log(monkeypatch)
-    with pytest.raises(httpx.ReadTimeout):
+    # a read timeout reaching the broker is also "gateway down" → BrokerUnavailable
+    with pytest.raises(BrokerUnavailable) as ei:
         await _llm().chat([{"role": "user", "content": "hi"}], capability="chat:smart",
                           workflow="reply", thread_id=7, branch_id=3)
+    assert isinstance(ei.value.__cause__, httpx.ReadTimeout)
     assert len(calls) == 1 and calls[0]["ok"] is False
     assert calls[0]["err"].startswith("ReadTimeout")
     assert "elapsed_ms" in calls[0]["meta"]
@@ -384,7 +401,8 @@ async def test_done_job_with_null_text_is_ok_empty(monkeypatch) -> None:
 
 
 async def test_poll_gives_up_after_too_many_transient_errors(monkeypatch) -> None:
-    """More than _POLL_MAX_ERRORS consecutive poll errors → re-raise (don't poll forever)."""
+    """More than _POLL_MAX_ERRORS consecutive poll errors = a flapping gateway → give up as
+    BrokerUnavailable (don't poll forever) so the fleet backs off, not just this job."""
     class _AlwaysFlakyPoll(_JobClient):
         def __init__(self) -> None:
             super().__init__([_job(1)])
@@ -394,7 +412,7 @@ async def test_poll_gives_up_after_too_many_transient_errors(monkeypatch) -> Non
 
     monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: _AlwaysFlakyPoll())
     calls = _capture_log(monkeypatch)
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(BrokerUnavailable):
         await _llm().chat([{"role": "user", "content": "hi"}], workflow="reply")
     assert calls[-1]["ok"] is False
 

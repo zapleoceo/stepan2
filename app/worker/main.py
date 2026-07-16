@@ -20,7 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
-from app.adapters.llm.broker import BrokerLLM
+from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
 from app.domain.enums import SessionStatus
@@ -34,7 +34,7 @@ from app.modules.leads.ingest import IngestService
 from app.modules.settings.service import get_settings
 from app.ports.notify import NotifierPort
 
-from . import wiring
+from . import breaker, wiring
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +155,7 @@ async def _platform_agent_on(session: AsyncSession) -> bool:
 
 async def _fan_out_per_branch(
     ctx: dict[str, Any], job_name: str, *, gate_platform: bool = False,
+    gate_broker: bool = False,
 ) -> int:
     """Dispatch one arq job per active branch, so branches run CONCURRENTLY (bounded by
     worker_max_jobs) and INDEPENDENTLY — a slow or failing branch holds a single job slot
@@ -165,6 +166,15 @@ async def _fan_out_per_branch(
     when the next tick fires does not stack a second job (same idempotency trick as the
     reply:{thread_id} id). gate_platform short-circuits the whole fan-out when the kill switch
     is OFF, so an operator flipping it mid-incident stops new work immediately."""
+    if gate_broker and (redis := ctx.get("redis")) is not None:
+        # The chat broker is down (a reply job just tripped the breaker). Skip the whole
+        # broker-dependent fan-out for the cooldown instead of stampeding every awaiting
+        # thread into the same dead gateway. Reopens on its own when the cooldown lapses.
+        open_s = await breaker.seconds_open(redis)
+        if open_s > 0:
+            logger.warning("broker breaker open ~%.0fs — skip %s for all branches",
+                           open_s, job_name)
+            return 0
     async with session_scope() as session:
         if gate_platform and not await _platform_agent_on(session):
             logger.info("platform agent OFF — skip %s for all branches", job_name)
@@ -183,7 +193,8 @@ async def _fan_out_per_branch(
 async def reply_pending(ctx: dict[str, Any]) -> int:
     """Top dispatcher: fan out one reply_pending_branch job per branch (branch-independent),
     gated by the platform kill switch."""
-    return await _fan_out_per_branch(ctx, "reply_pending_branch", gate_platform=True)
+    return await _fan_out_per_branch(ctx, "reply_pending_branch", gate_platform=True,
+                                     gate_broker=True)
 
 
 async def reply_pending_branch(ctx: dict[str, Any], branch_id: int) -> int:
@@ -268,6 +279,13 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                 branch_id, thread_id, "queued" if queued else "skipped",
                 time.time() - started, getattr(llm, "calls", 0))
             return queued
+    except BrokerUnavailable as exc:
+        # The gateway is down, not this thread's fault — open the breaker so the next tick's
+        # fan-out is skipped instead of every awaiting thread re-hitting the dead broker.
+        await breaker.trip(redis)
+        logger.warning("reply branch=%d thread=%d: broker down (%s) — breaker tripped",
+                       branch_id, thread_id, exc)
+        return False
     except Exception:
         logger.exception("reply failed branch=%d thread=%d after %d broker calls",
                          branch_id, thread_id, getattr(llm, "calls", 0))
@@ -290,7 +308,8 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
     due-thread loop shared one open transaction that only committed at the very end, so a
     timeout kill silently discarded every follow-up already generated earlier in that same
     cycle — broker calls could log ok=True and still never reach the outbox (2026-07-07)."""
-    return await _fan_out_per_branch(ctx, "schedule_followups_branch", gate_platform=True)
+    return await _fan_out_per_branch(ctx, "schedule_followups_branch", gate_platform=True,
+                                     gate_broker=True)
 
 
 async def schedule_followups_branch(ctx: dict[str, Any], branch_id: int) -> int:

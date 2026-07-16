@@ -44,6 +44,9 @@ class _FakeRedis:
     async def zrem(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
         return 1
 
+    async def get(self, *a, **k):  # noqa: ANN002, ANN003, ANN201 — breaker read (never tripped here)
+        return None
+
 
 async def _wire(monkeypatch, b, thread_ids):  # noqa: ANN001
     async def _platform_on(_s):

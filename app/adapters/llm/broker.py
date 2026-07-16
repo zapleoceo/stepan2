@@ -25,6 +25,26 @@ from app.config import settings
 
 _log = logging.getLogger(__name__)
 
+
+class BrokerUnavailable(Exception):
+    """The broker GATEWAY is unreachable (502/503/504 or a connection error) — the broker
+    itself is down, not this one request being malformed. Subclasses Exception so existing
+    `except Exception` callers still catch it, but lets the worker distinguish "the broker is
+    down, back the whole fleet off" from an ordinary per-request failure and trip the breaker."""
+
+
+_GATEWAY_DOWN_STATUS = frozenset({502, 503, 504})
+
+
+def _is_gateway_down(exc: Exception) -> bool:
+    """True when exc means the broker gateway is unreachable — a 502/503/504 or a
+    connect/read/pool timeout — as opposed to a per-request error (bad body, job status=error,
+    a single slow job hitting its budget), which must NOT freeze the fleet."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _GATEWAY_DOWN_STATUS
+    return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
+                            httpx.PoolTimeout, httpx.RemoteProtocolError))
+
 # Vision prompt for a lead's image (screenshot of a price/schedule, a payment proof, a
 # product photo, a competitor's offer, …). Read any text verbatim and describe the rest
 # concisely — this becomes the lead's message the reply model then answers.
@@ -193,6 +213,8 @@ class BrokerLLM:
             await _log_call(capability, workflow or "chat", thread_id, branch_id,
                             {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
                             ok=False, error=_err_text(exc))
+            if _is_gateway_down(exc) and not isinstance(exc, BrokerUnavailable):
+                raise BrokerUnavailable(str(exc)[:200]) from exc
             raise
         await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
         return reply_text, meta
@@ -217,7 +239,10 @@ class BrokerLLM:
                 # A transient poll error (502/timeout) must NOT discard a running job.
                 poll_errors += 1
                 if poll_errors > _POLL_MAX_ERRORS:
-                    raise
+                    # Repeated poll failures = the gateway is flapping, not this job being
+                    # slow → signal the breaker so the fleet backs off.
+                    raise BrokerUnavailable(
+                        f"{capability} job {job_id}: {poll_errors} poll errors") from exc
                 _log.warning("%s poll error %d/%d job=%s: %s",
                              capability, poll_errors, _POLL_MAX_ERRORS, job_id, exc)
                 if time.perf_counter() > deadline:
