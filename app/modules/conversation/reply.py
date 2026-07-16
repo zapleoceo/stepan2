@@ -245,6 +245,7 @@ def _deterministic_issues(reply: str, context: str, lead_spoke: bool = True) -> 
         *guard.whatsapp_delivery_offers(reply),
         *guard.price_before_lead_spoke(reply, lead_spoke),
         *guard.stale_dates(reply),
+        *guard.booster_wrong_duration(reply),
     ]
 
 

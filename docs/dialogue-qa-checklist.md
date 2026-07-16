@@ -72,6 +72,7 @@ occurred_at` и прогони список через `sim.say(8, ...)`.
 | 31 | Лид назвал только **формат** («online dari rumah»), боль/цель не собраны | Держать прогрев — `DISCOVER_BEFORE_PRICE_NUDGE` спрашивает цель/боль; НЕ давать полный прайс. «online/offline» без «?» — формат-ответ, не вопрос (не answer-first) | Полный прайс (15 juta) после одного выбора формата, discovery пропущен | 4086 |
 | 32 | Модель ставит `needs_manager` на **отвечаемый вопрос** (цена/расписание/запись), телефона нет | Форс-ответ из KB (`ANSWER_DONT_ESCALATE_CORRECTION`) перед фраз-гейтом; телефон-стаб только если реген всё равно эскалирует | Дословный повтор «дай WhatsApp» на «berapa?»/«kapan?»/«mau daftar» без ответа | 2733 |
 | 33 | «minta nomor WA … biar kirim brosur/file» | Гвард ловит как ложную доставку (бот не шлёт файлы в WA); просто просьба контакта для хэндофа — ок | Обещание «aku kirim brosur via WA» | S5 |
+| 34 | Skill Booster с длительностью в неделях/месяцах | `booster_wrong_duration` → regen (все бустеры = 1 день; 2 недели только у SMM Intensive) | Выдуманный «Python Skill Booster 2 minggu» (нет цены → is_risky не сработал) | 2864 |
 
 Детекторы/нуджи/приоритеты живут в `app/modules/conversation/situations.py` (один модуль,
 одна цепочка `pick_nudge`); архитектура хода — [reply-pipeline.md](reply-pipeline.md).

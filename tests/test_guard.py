@@ -664,3 +664,17 @@ def test_normalize_address_forces_kakak_over_kamu() -> None:
     # already-correct text is untouched; 'kamu' as a substring of another word is not caught
     assert guard.normalize_address("Kakak bisa daftar sekarang") == "Kakak bisa daftar sekarang"
     assert guard.normalize_address("kamuflase warna") == "kamuflase warna"
+
+
+def test_booster_wrong_duration_flags_invented_multiweek_booster() -> None:
+    # thread 2864, verbatim — a Python Skill Booster invented as a 2-week course
+    assert guard.booster_wrong_duration(
+        "kami punya Python Skill Booster 2 minggu yang fokus bikin script prediksi kripto")
+    assert guard.booster_wrong_duration(
+        "aku cek dulu detail Python Skill Booster 2 minggu yang fokus bikin script")
+    assert guard.booster_wrong_duration("Data Analyst Skill Booster 3 bulan")
+    # the real booster (1 day) and a legit comparison must NOT be flagged
+    assert not guard.booster_wrong_duration("Python Skill Booster 1 hari (5 jam), Rp 500.000")
+    assert not guard.booster_wrong_duration(
+        "Ada Skill Booster 1 hari, atau SMM Intensive yang 2 minggu")
+    assert not guard.booster_wrong_duration("SMM Intensive 2 minggu, 3x per minggu")

@@ -188,6 +188,23 @@ def stale_dates(reply: str, today: date | None = None) -> list[str]:
     return out
 
 
+# Every Skill Booster is a 1-day (5-hour) taster. Thread 2864: the model invented a "Python
+# Skill Booster 2 minggu" — conflating the booster line with SMM Intensive's 2-week length,
+# and inventing a crypto-script focus — offered as a cheaper alternative. It carried no price
+# or link, so is_risky never routed it to the grounding verify and it shipped twice. A booster
+# named with ANY week/month duration is always a fabrication (only SMM Intensive is 2 weeks;
+# everything else is 1 day or 4-9 months), so catch it deterministically. Tight window so a
+# legitimate "Skill Booster 1 hari, atau SMM Intensive 2 minggu" comparison isn't flagged.
+_BOOSTER_DURATION_RE = re.compile(
+    r"\bbooster\b[^.!?\n]{0,15}\b\d+\s*(?:minggu|bulan)\b", re.IGNORECASE)
+
+
+def booster_wrong_duration(reply: str) -> list[str]:
+    m = _BOOSTER_DURATION_RE.search(reply or "")
+    return [f"Skill Booster given a week/month length — boosters are 1 day: {m.group(0)}"] \
+        if m else []
+
+
 def price_before_lead_spoke(reply: str, lead_spoke: bool) -> list[str]:
     """A number quoted to a lead who has still only ever tapped an ad button.
 
