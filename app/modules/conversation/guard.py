@@ -325,6 +325,20 @@ SAFE_FALLBACK = (
 # Used when the model wants a manager hand-off but we have no phone/WhatsApp for the lead:
 # ask for the contact first (a manager can't follow up on a contact-less lead), keeping the
 # bot on. Only a later turn WITH a phone actually mutes the bot and escalates.
+# The persona addresses the lead as "Kakak" (warm-polite), but the model drifts to the
+# familiar "kamu" mid-conversation — threads 4091/4060/2733/2816 mix both in one chat, which
+# reads as two different people talking. "kamu" and "Kakak" are grammatically interchangeable
+# as a second-person address, so a straight substitution is safe and needs no regen (a prompt
+# rule alone didn't hold — the drift is in the model's default register). Applied per bubble.
+_KAMU_RE = re.compile(r"\bkamu\b", re.IGNORECASE)
+
+
+def normalize_address(text: str) -> str:
+    """Force the persona's address form: the familiar 'kamu' → 'Kakak' (always capitalised,
+    the way an ID honorific is written). Leaves everything else untouched."""
+    return _KAMU_RE.sub("Kakak", text or "")
+
+
 ANSWER_DONT_ESCALATE_CORRECTION = (
     "[System: the lead just asked a concrete, answerable question (a price, schedule, or how to "
     "sign up). Answer it DIRECTLY from the product catalog / knowledge base in this reply. Do "

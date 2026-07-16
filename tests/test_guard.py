@@ -652,3 +652,15 @@ def test_answer_dont_escalate_correction_forbids_escalation_and_phone_ask() -> N
     assert "needs_manager" in c and "not" in c
     assert "phone" in c
     assert "knowledge base" in c  # answer must come from the KB, not a stall
+
+
+def test_normalize_address_forces_kakak_over_kamu() -> None:
+    # threads 4091/4060/2733: the model drifts to the familiar "kamu" mid-chat
+    assert guard.normalize_address("SMM itu bikin kamu bisa kelola brand") == \
+        "SMM itu bikin Kakak bisa kelola brand"
+    assert guard.normalize_address("proyek yang akan kamu kerjakan, Kamu akan punya portfolio") == \
+        "proyek yang akan Kakak kerjakan, Kakak akan punya portfolio"
+    assert guard.normalize_address("membantu praktik kamu 😊") == "membantu praktik Kakak 😊"
+    # already-correct text is untouched; 'kamu' as a substring of another word is not caught
+    assert guard.normalize_address("Kakak bisa daftar sekarang") == "Kakak bisa daftar sekarang"
+    assert guard.normalize_address("kamuflase warna") == "kamuflase warna"

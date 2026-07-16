@@ -174,7 +174,7 @@ def _clean_bubble(text: str) -> str:
     content (so 'Rp 500.000 - 600.000' is untouched)."""
     cleaned = _MD_ARTIFACT_RE.sub("", text or "")
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return cleaned.strip()
+    return guard.normalize_address(cleaned.strip())
 
 
 def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
