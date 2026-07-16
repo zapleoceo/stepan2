@@ -14,6 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.ads import AdMappingService
+from app.modules.conversation.situations import is_auto_reply
 from app.modules.notifications.alerts import AlertService
 from app.ports.channel import InboundMessage
 from app.ports.notify import NotifierPort
@@ -195,18 +196,28 @@ class IngestService:
         ):
             thread.lead_seen_at = inbound.lead_seen_at
         if thread.last_in_at is None or inbound.occurred_at > thread.last_in_at:
-            was_off = not lead.agent_enabled  # capture BEFORE _revive_bot may flip it back on
-            thread.last_in_at = inbound.occurred_at
+            # The 24h IG window really did open — that's a channel fact, true even for a
+            # robot. Everything else below treats the inbound as THE LEAD, so an auto-reply
+            # must stop here: thread 2503's auto-responder made last_in_at > last_out_at, so
+            # the thread read as "lead spoke last" — Stepan answered the robot and the
+            # follow-up cycle reset to zero. It's stored as a message either way (history).
             thread.window_until = inbound.occurred_at + WINDOW
-            await self._reset_followup_cycle(thread)
-            self._revive_bot(lead, thread)
-            # Only ping "Bot is OFF" when the bot STAYS off after the revive attempt — i.e. a
-            # human-led (manager/ready/handed_off) or blocked lead the bot won't answer. A
-            # dormant lead that just got revived (agent_enabled flipped back ON) WILL be
-            # answered this tick, so the old "was_off" ping was a stale, misleading alert
-            # ("Bot is OFF" arriving right before the bot replied — thread 2121).
-            if was_off and not lead.agent_enabled:
-                await self._notify_bot_off(lead, thread, inbound.text)
+            if is_auto_reply(inbound.text or ""):
+                logger.info(
+                    "ingest: branch=%d thread=%d inbound is the lead's own auto-responder "
+                    "— not treating it as the lead speaking", self.branch_id, thread.id)
+            else:
+                was_off = not lead.agent_enabled  # BEFORE _revive_bot may flip it back on
+                thread.last_in_at = inbound.occurred_at
+                await self._reset_followup_cycle(thread)
+                self._revive_bot(lead, thread)
+                # Only ping "Bot is OFF" when the bot STAYS off after the revive attempt —
+                # i.e. a human-led (manager/ready/handed_off) or blocked lead the bot won't
+                # answer. A dormant lead that just got revived (agent_enabled flipped back
+                # ON) WILL be answered this tick, so the old "was_off" ping was a stale,
+                # misleading alert ("Bot is OFF" right before the bot replied — thread 2121).
+                if was_off and not lead.agent_enabled:
+                    await self._notify_bot_off(lead, thread, inbound.text)
         if inbound.product_hint and thread.product_slug is None:
             thread.product_slug = inbound.product_hint
             thread.product_source = "ad"

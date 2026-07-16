@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import UTC, date, datetime
 
 from app.ports.llm import LLMPort
 
@@ -145,6 +146,58 @@ def whatsapp_delivery_offers(reply: str) -> list[str]:
     """A promise to send anything over WhatsApp — always false, Stepan has no WhatsApp
     channel and can only reply inside this Instagram DM thread."""
     return [m.group(0) for m in _WHATSAPP_DELIVERY_RE.finditer(reply or "")]
+
+
+_ID_MONTHS = {
+    "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6, "juli": 7,
+    "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12,
+}
+_ID_DATE_RE = re.compile(
+    r"\b(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|"
+    r"oktober|november|desember)\b",
+    re.IGNORECASE)
+# A KB card's date outlives the date. Cards carry no year, so a bare "11 Juli" is read as
+# this year — except when that reading puts it far in the past, which almost always means
+# next year's intake (a December reply naming "5 Januari").
+_NEXT_INTAKE_HORIZON_DAYS = 180
+
+
+def stale_dates(reply: str, today: date | None = None) -> list[str]:
+    """A date being offered that has already passed.
+
+    Thread 3912 (2026-07-16): Stepan pitched the Social Media Content Bootcamp's "batch 11
+    Juli" on the 15th and 16th — the batch was gone. The price he quoted was right and the
+    card backed him up; the card itself had simply expired, and nothing anywhere noticed.
+    Facts in the KB are trusted absolutely, so the one class of fact that rots on its own
+    needs a clock, not a proofreader."""
+    now = today or datetime.now(UTC).date()
+    out = []
+    for m in _ID_DATE_RE.finditer(reply or ""):
+        try:
+            when = date(now.year, _ID_MONTHS[m.group(2).lower()], int(m.group(1)))
+        except ValueError:
+            continue  # 31 Februari and friends — not a date, not our problem
+        gone = (now - when).days
+        if 0 < gone <= _NEXT_INTAKE_HORIZON_DAYS:
+            out.append(f"date already past: {m.group(0)} (was {gone}d ago)")
+    return out
+
+
+def price_before_lead_spoke(reply: str, lead_spoke: bool) -> list[str]:
+    """A number quoted to a lead who has still only ever tapped an ad button.
+
+    This was a prompt rule (AD_OPENER_NUDGE / FOLLOWUP_SILENT_CLICKER_EXTRA) and the prompt
+    lost. Threads 4064/4065 (2026-07-16): the opener obeyed it perfectly — three short
+    bubbles, no price — and the follow-up an hour later opened with the full Rp 13.000.000.
+    The nudge WAS delivered (one broker call, no regen); the cheap follow-up model simply
+    disregarded it. Anything the model can silently drop belongs here instead: quoting the
+    price to someone who never said a word is the most expensive move Stepan makes, so it
+    can't rest on the model's goodwill."""
+    if lead_spoke:
+        return []
+    hit = _PRICE_RE.search(reply or "")
+    return [f"price quoted to a lead who has never spoken their own words: {hit.group(0)}"] \
+        if hit else []
 
 
 # Threads 2045/1996: the lead showed clear irritation at being re-contacted ("Sok asik

@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.13.0"
+PROJECT_VERSION = "1.14.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,21 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.14.0", "date": "16 Jul 2026", "tag": "Conversation",
+        "title": "The rules that cost you money are no longer optional",
+        "blurb": "A client who has only tapped your ad and not said a word yet should never "
+                 "be answered with a price — it's the fastest way to lose them. Stepan was "
+                 "asked not to, and mostly obliged, but 'mostly' isn't a rule: an hour after "
+                 "a textbook opener, a follow-up would sometimes lead with the full figure. "
+                 "So the ban stopped being a request and became a check he cannot get "
+                 "around. The same treatment went to dates: a course card outlives the "
+                 "course, and he was still offering a batch that had already started — now "
+                 "anything already in the past is caught before it's sent. He also stays on "
+                 "the program a conversation is actually about instead of trying a different "
+                 "one each nudge, and he no longer holds conversations with other "
+                 "businesses' auto-responders.",
+    },
     {
         "version": "1.13.0", "date": "16 Jul 2026", "tag": "Conversation",
         "title": "Texts like a person, not a brochure",

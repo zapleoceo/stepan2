@@ -545,3 +545,89 @@ async def test_guard_regen_without_a_situation_sends_the_bare_correction(db_sess
         db_session, bid, _settings_urls_only(), None, engine, _FakeCtx("linknya mana kak?"),
         thread_id=1, lang="id", workflow="reply", bill=False, decision=decision, meta={})
     assert engine.sent and not engine.sent[0].endswith("\n")
+
+
+def test_price_before_lead_spoke_flags_only_the_silent_clicker() -> None:
+    assert guard.price_before_lead_spoke("Investasinya Rp 13.000.000", lead_spoke=False)
+    assert guard.price_before_lead_spoke("cuma 750 ribu aja Kak", lead_spoke=False)
+    # the same number is perfectly fine once the lead has actually asked something
+    assert not guard.price_before_lead_spoke("Investasinya Rp 13.000.000", lead_spoke=True)
+    # a priceless opener to a clicker is exactly what we want — never flag it
+    assert not guard.price_before_lead_spoke(
+        "Hai Kak! Aku MinStep dari IT STEP Academy 😊 Kakak tertarik karena apa?",
+        lead_spoke=False)
+    # "gratis" is not a price — an Open House invite must stay allowed
+    assert not guard.price_before_lead_spoke(
+        "Kita ada Open House gratis tiap Kamis, tertarik?", lead_spoke=False)
+
+
+async def test_guard_regenerates_a_price_quoted_to_a_lead_who_never_spoke(db_session) -> None:
+    """Threads 4064/4065 (2026-07-16): the lead only ever tapped the ad button. The opener
+    obeyed the no-price rule; the follow-up an hour later led with Rp 13.000.000 anyway. The
+    nudge was delivered and the cheap model ignored it — so the rule can't live in the prompt
+    alone. Deterministic gate: no price until the lead says something of their own."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    context = "> Quick facts — Vibe Coding: Rp 13.000.000, cicilan 4x."
+    engine = _FakeEngine(
+        context,
+        json.dumps({"reply": "Hai Kak! Dalam ~4 bulan Kakak bisa bikin aplikasi sendiri "
+                             "pakai AI 😊 Kakak tertarik buat karier atau proyek pribadi?",
+                    "stage": "qualifying"}),
+    )
+    ctx = _FakeCtx("💻 Ceritakan lebih detail tentang program kursusnya")  # the ad button
+    decision = parse_decision(json.dumps({
+        "reply": "Program Vibe Coding berbayar Rp13.000.000 (atau 4×3.250.000 tanpa bunga).",
+        "stage": "qualifying"}))
+
+    fixed, _meta = await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="followup", bill=False, decision=decision, meta={})
+    assert "13.000.000" not in fixed.reply, "a silent clicker must not be quoted a price"
+    assert "aplikasi" in fixed.reply  # the regen's priceless draft is what ships
+
+
+async def test_guard_leaves_a_price_alone_once_the_lead_has_spoken(db_session) -> None:
+    """The gate must not fire on the normal case — a lead who asked deserves the number."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    engine = _FakeEngine("> Quick facts — Vibe Coding: Rp 13.000.000.")  # no regen scripted
+    ctx = _FakeCtx("berapa harganya kak?")
+    decision = parse_decision(json.dumps({
+        "reply": "Vibe Coding Rp 13.000.000 ya Kak 😊", "stage": "qualifying"}))
+    fixed, _meta = await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={})
+    assert fixed.reply == "Vibe Coding Rp 13.000.000 ya Kak 😊"
+
+
+def test_stale_dates_flags_a_batch_that_already_started() -> None:
+    from datetime import date
+
+    today = date(2026, 7, 16)
+    # thread 3912, verbatim: the Social Media Content Bootcamp card still said "batch 11 Juli"
+    assert guard.stale_dates("Ada bootcamp 1 hari, batch 11 Juli, Rp 750.000", today)
+    assert guard.stale_dates("Kelasnya mulai 1 Juni ya Kak", today)
+
+
+def test_stale_dates_allows_upcoming_and_next_year_intakes() -> None:
+    from datetime import date
+
+    today = date(2026, 7, 16)
+    assert not guard.stale_dates("Batch berikutnya 25 Juli ya Kak", today)  # still ahead
+    assert not guard.stale_dates("Kelas mulai 3 Agustus", today)
+    # a bare "5 Januari" in July means NEXT January — the card just carries no year
+    assert not guard.stale_dates("Batch berikutnya 5 Januari", today)
+    assert not guard.stale_dates("Kelas 2 minggu, 3 sesi per minggu", today)  # no date at all
+    assert not guard.stale_dates("31 Februari", today)  # not a real date
+
+
+def test_stale_dates_does_not_flag_today(db_session=None) -> None:
+    from datetime import date
+
+    today = date(2026, 7, 16)
+    assert not guard.stale_dates("Batchnya 16 Juli, masih bisa daftar!", today)

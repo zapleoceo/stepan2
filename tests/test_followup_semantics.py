@@ -664,3 +664,24 @@ async def test_awaiting_reply_respects_agent_toggle_and_pending(db_session) -> N
     db_session.add(Outbox(branch_id=bid, thread_id=tid, text="queued", source="agent"))
     await db_session.flush()
     assert tid not in await threads_awaiting_reply(db_session, bid)
+
+
+async def test_followup_is_told_an_angle_is_not_a_different_product(db_session) -> None:
+    """Thread 2503: the lead typed "It" and went quiet; the next four follow-ups pitched
+    Open House, Vibe Coding, Graphic Design and Skill Booster — one program each. The nudge's
+    own "CHANGE THE ANGLE each attempt" was being read as "change the product"."""
+    from app.modules.conversation.situations import FOLLOWUP_PRODUCT_DISCIPLINE
+
+    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
+    captured: list[str] = []
+
+    class _CaptureLLM(FakeLLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            captured.append(messages[-1]["content"] if messages else "")
+            return await super().chat(messages, **kw)
+
+    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=None)
+    assert await svc.run() == 1
+    assert any(FOLLOWUP_PRODUCT_DISCIPLINE.strip() in c for c in captured), \
+        "every follow-up must carry the stay-on-this-product rule"

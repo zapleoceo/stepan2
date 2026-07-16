@@ -232,7 +232,7 @@ async def raise_manager_alert(
         )
 
 
-def _deterministic_issues(reply: str, context: str) -> list[str]:
+def _deterministic_issues(reply: str, context: str, lead_spoke: bool = True) -> list[str]:
     """Every KB-context-free check — no LLM call needed, always on regardless of
     reply_guard mode. Re-run on a regenerated draft too, so a still-broken reply is caught
     before it ships rather than trusted on faith."""
@@ -243,6 +243,8 @@ def _deterministic_issues(reply: str, context: str) -> list[str]:
         *guard.impossible_capability_offers(reply),
         *guard.wrong_channel_claims(reply),
         *guard.whatsapp_delivery_offers(reply),
+        *guard.price_before_lead_spoke(reply, lead_spoke),
+        *guard.stale_dates(reply),
     ]
 
 
@@ -325,7 +327,8 @@ async def guard_decision(
             # are strictly better than the original unexplained hand-off.
             if fixed is not None and fixed.reply:
                 decision, meta = fixed, regen_meta
-    issues = _deterministic_issues(decision.reply, context)
+    lead_spoke = _lead_spoke_own_words(ctx.dialog)
+    issues = _deterministic_issues(decision.reply, context, lead_spoke)
     # Skip the LLM verify when the reply's only risk is a price that string-matches the KB —
     # the single most common verify trigger, and a pure repetition of a grounded fact.
     if mode == "full" and guard.is_risky(decision.reply) \
@@ -351,7 +354,8 @@ async def guard_decision(
     # Only the deterministic checks are re-verified (an LLM re-verify would double cost);
     # a still-broken draft means we can't trust it → hand off.
     from dataclasses import replace  # noqa: PLC0415
-    remaining = _deterministic_issues(fixed.reply, context) if fixed.reply else ["empty reply"]
+    remaining = (_deterministic_issues(fixed.reply, context, lead_spoke)
+                 if fixed.reply else ["empty reply"])
     if not remaining:
         return fixed, regen_meta
     # A still-doubled-up question after the regen is a style slip, not a fabrication risk —
@@ -360,7 +364,7 @@ async def guard_decision(
     # lebih detail" got a full hand-off purely because the regen ALSO asked two questions).
     if all("question mark" in issue for issue in remaining):
         trimmed = guard.truncate_to_one_question(fixed.reply)
-        if not _deterministic_issues(trimmed, context):
+        if not _deterministic_issues(trimmed, context, lead_spoke):
             return replace(fixed, reply=trimmed), regen_meta
     logger.error("guard: branch=%d thread=%d unfixable violation → hand-off",
                  branch_id, thread_id)

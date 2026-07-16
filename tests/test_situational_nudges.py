@@ -202,3 +202,36 @@ def test_need_payoff_respects_discovery_cap() -> None:
     assert NEED_PAYOFF_NUDGE in _pick("oke kak", needs=needs, n=2)
     past_cap = _pick("oke kak", needs=needs, n=DISCOVERY_TURN_CAP + 1)
     assert past_cap is not None and NEED_PAYOFF_NUDGE not in past_cap  # falls to discovery-cap
+
+
+# ─── the lead's own auto-responder is not the lead ───
+
+from app.modules.conversation.situations import (  # noqa: E402
+    is_auto_reply,
+    lead_spoke_own_words,
+)
+
+
+def test_auto_reply_detects_business_autoresponders() -> None:
+    # thread 2503, verbatim — Stepan answered this robot and reset the follow-up cycle
+    assert is_auto_reply("Halo, terima kasih sudah menghubungi kami. Kami sudah menerima "
+                         "pesan Anda dan menghargai upaya Anda menghubungi kami.")
+    assert is_auto_reply("Ini pesan otomatis, kami akan segera balas secepatnya")
+    assert is_auto_reply("Thank you for contacting us! We received your message.")
+
+
+def test_auto_reply_ignores_a_human_saying_thanks() -> None:
+    # a real lead thanking US must never be mistaken for a robot — that would freeze the
+    # thread's timer and let the price gate stay shut on someone who actually spoke
+    for s in ["makasih kak infonya", "terima kasih ya kak 😊", "oke terima kasih",
+              "terima kasih sudah menjelaskan"]:
+        assert not is_auto_reply(s), s
+
+
+def test_auto_reply_does_not_count_as_the_lead_speaking() -> None:
+    ad = "💻 Ceritakan lebih detail tentang program kursusnya"
+    auto = "Halo, terima kasih sudah menghubungi kami. Kami sudah menerima pesan Anda."
+    # clicker + their robot = still nobody has spoken → price stays locked
+    assert not lead_spoke_own_words([_M("in", ad), _M("out", "hai"), _M("in", auto)])
+    # …but one real word from the lead flips it
+    assert lead_spoke_own_words([_M("in", ad), _M("in", auto), _M("in", "berapa harganya?")])

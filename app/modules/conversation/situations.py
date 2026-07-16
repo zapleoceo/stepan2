@@ -91,14 +91,35 @@ def is_answerable_question(text: str) -> bool:
     return bool(ANSWERABLE_Q_RE.search(text or ""))
 
 
+# A business account's own auto-responder, not a human. Thread 2503: "Halo, terima kasih
+# sudah menghubungi kami. Kami sudah menerima pesan Anda..." arrived as an inbound; Stepan
+# took it for the lead speaking, reset the follow-up cycle and politely asked the robot about
+# its goals. An auto-reply is not a reply: it must neither restart the timer nor earn an
+# answer, and it certainly doesn't unlock the price (that's what lead_spoke_own_words gates).
+AUTO_REPLY_RE = re.compile(
+    r"(terima kasih (?:sudah|telah) menghubungi (?:kami|kita)"
+    r"|kami (?:sudah|telah) menerima pesan"
+    r"|pesan (?:ini )?otomatis|balasan otomatis"
+    r"|akan (?:segera )?(?:kami )?balas secepatnya"
+    r"|thank you for (?:contacting|reaching out)"
+    r"|we (?:have )?received your message"
+    r"|this is an? automated|auto[- ]reply)",
+    re.IGNORECASE)
+
+
+def is_auto_reply(text: str) -> bool:
+    """The inbound is the lead's own auto-responder firing, not the lead."""
+    return bool(AUTO_REPLY_RE.search((text or "").strip()))
+
+
 def lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
     """True once ANY inbound is something the lead actually typed/said — not an ad's
-    prefilled opener and not an unresolved media placeholder."""
+    prefilled opener, not an unresolved media placeholder, and not their own auto-responder."""
     for m in dialog:
         if m.direction != "in":
             continue
         text = (m.text or "").strip()
-        if not text or AD_TEMPLATE_RE.match(text):
+        if not text or AD_TEMPLATE_RE.match(text) or is_auto_reply(text):
             continue
         if text in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
             continue
@@ -266,10 +287,24 @@ FOLLOWUP_SILENT_CLICKER_EXTRA = (
 # for. That is exactly what gets an IG account reported — and leads did say so out loud
 # ("Berisik Luh DM in gua mulu", "Jangan suka spam bangke", "Spam").
 FOLLOWUP_BREVITY_SUFFIX = (
-    "\n[System addition: this nudge is UNPROMPTED — the lead did not ask for it. Keep it "
-    "SHORT: ONE bubble, 1-2 sentences, ~150 characters. A long unprompted block reads as spam "
-    "and gets accounts reported. One light question OR one concrete fact — never both, never a "
-    "recap of the offer.]"
+    "\n[System addition: this nudge is UNPROMPTED — the lead did not ask for it. Default to "
+    "ONE bubble, 1-2 sentences: a long unprompted block reads as spam and gets accounts "
+    "reported. Say ONE thing — one light question or one concrete fact, not a recap of the "
+    "offer. Brevity never wins over being right, though: if the honest version of that one "
+    "thing needs another line, take the line — cutting it into something misleading or "
+    "half-true is far worse than being long.]"
+)
+
+# "Change the angle each attempt" (FOLLOWUP_NUDGE) reads to the model as "change the
+# PRODUCT". Thread 2503: the lead typed "It" and went quiet, and the next four follow-ups
+# pitched four different programs — Open House, then Vibe Coding, then Graphic Design, then
+# Skill Booster. That is a catalogue being read aloud, not a salesperson working a lead.
+FOLLOWUP_PRODUCT_DISCIPLINE = (
+    "\n[System addition: a new ANGLE means a new reason to care — a different pain, proof, "
+    "or an easier next step. It does NOT mean a different program. Stay on the program this "
+    "thread is already about. Two exceptions: the lead said it doesn't fit, or price is the "
+    "sticking point and you're offering a cheaper entry to the SAME goal. If you don't know "
+    "which program they want, ask — never guess a new one each attempt.]"
 )
 
 DISCOVERY_CAP_NUDGE = (
@@ -303,7 +338,9 @@ FORMAT_MIRROR_SUFFIX = (
     "paragraphs. Mirror that register: 1-2 SHORT bubbles, no wall of text (this is an "
     "Instagram DM, not a brochure — a 400-char block reads as a leaflet and gets skimmed or "
     "ignored). If you must state 2+ facts, put each on its OWN line so it's skimmable. Emoji "
-    "as you already do — natural, not decorative. One question max.]"
+    "as you already do — natural, not decorative. One question max. This is about register, "
+    "NOT about withholding: if they asked something, answer it fully and accurately even if "
+    "that runs long — a short wrong answer is worse than a long right one.]"
 )
 
 

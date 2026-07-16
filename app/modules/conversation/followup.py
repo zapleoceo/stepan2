@@ -34,6 +34,7 @@ from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .situations import (
     AD_TEMPLATE_RE,
     FOLLOWUP_BREVITY_SUFFIX,
+    FOLLOWUP_PRODUCT_DISCIPLINE,
     FOLLOWUP_SILENT_CLICKER_EXTRA,
     lead_spoke_own_words,
     with_situation,
@@ -210,6 +211,7 @@ class FollowupService:
         cap = pick_capability(workflow="followup", stage=None, lead_type=None,
                               last_inbound="", mode=mode, followup_attempt=sent_so_far)
         nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
+        nudge += FOLLOWUP_PRODUCT_DISCIPLINE
         if not lead_spoke_own_words(ctx.dialog):
             # a button click is not the lead speaking — no price/pitch in their follow-ups
             nudge += FOLLOWUP_SILENT_CLICKER_EXTRA
