@@ -120,7 +120,9 @@ async def test_decide_returns_decision_from_fake_llm(db_session):
     assert decision.product_slug == "vibe"
     assert llm.json_required is True  # require_json_schema flowed through
     assert llm.seen[0]["role"] == "system"
-    assert llm.seen[-1]["content"] == "halo"  # dialog turn included
+    # dialog turn included — not necessarily last: a situational/format nudge is appended
+    # after it on purpose, so the model reads the instruction closest to its own turn
+    assert any(m["content"] == "halo" for m in llm.seen)
 
 
 async def test_decide_none_without_dialog(db_session):

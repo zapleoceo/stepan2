@@ -133,6 +133,7 @@ def test_minor_does_not_collide_with_one_day_class() -> None:
 
 from app.modules.conversation.needs import NeedsProfile  # noqa: E402
 from app.modules.conversation.situations import (  # noqa: E402
+    AD_OPENER_NUDGE,
     ANSWER_FIRST_NUDGE,
     ANSWER_FIRST_TIGHT_BUDGET_NUDGE,
     DISCOVERY_TURN_CAP,
@@ -154,22 +155,50 @@ def _pick(last_txt: str, needs: NeedsProfile | None = None, n: int = 2) -> str |
 def test_combo_soft_no_with_question_answers_then_eases_off() -> None:
     # 'nanti dulu… tapi berapa harganya?' — neither half may be dropped: answer, then ease.
     got = _pick("nanti dulu deh kak, tapi berapa sih harganya?")
-    assert got == SOFT_NO_WITH_QUESTION_NUDGE
+    assert SOFT_NO_WITH_QUESTION_NUDGE in got
     # a plain stall without a question keeps the pure soft-no handling
-    assert _pick("nanti dulu deh kak") == SOFT_NO_NUDGE
+    assert SOFT_NO_NUDGE in _pick("nanti dulu deh kak")
 
 
 def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
     # 'ga ada modal, berapa biayanya?' — honest number + the affordable entry beside it
     got = _pick("ga ada modal kak, berapa biayanya?")
-    assert got == ANSWER_FIRST_TIGHT_BUDGET_NUDGE
-    assert _pick("berapa biayanya kak?") == ANSWER_FIRST_NUDGE
+    assert ANSWER_FIRST_TIGHT_BUDGET_NUDGE in got
+    assert ANSWER_FIRST_NUDGE in _pick("berapa biayanya kak?")
+
+
+def test_format_mirror_rides_on_top_of_the_situation() -> None:
+    # formatting is orthogonal to the situation: the answer-first instruction must survive,
+    # with the length anchor appended — not replaced by it (that would re-open the worst leak)
+    got = _pick("berapa biayanya kak?")
+    assert ANSWER_FIRST_NUDGE in got and "characters" in got
+
+
+def test_format_mirror_fires_alone_when_no_situation() -> None:
+    # an ordinary short reply has no special situation, but still must not get a wall of text
+    got = _pick("oke kak")
+    assert got is not None and "one-liners" in got
+
+
+def test_format_mirror_skips_the_numbered_opener() -> None:
+    # AD_OPENER's 3-bubble numbered opener is deliberate — the mirror must not fight it
+    ad = "🐍 Ceritakan lebih detail tentang program kursus Python"
+    got = pick_nudge(lead_type=None, dialog=[_M("in", ad)], last_txt=ad,
+                     stored_needs=NeedsProfile(), inbound_count=1)
+    assert got == AD_OPENER_NUDGE  # untouched, no suffix
+
+
+def test_format_mirror_lets_a_long_message_get_a_fuller_answer() -> None:
+    essay = ("saya sudah lama tertarik dengan coding karena menurut saya kemampuan berpikir "
+             "kritis itu penting sekali untuk karier saya ke depan dan juga bisnis keluarga")
+    got = _pick(essay)
+    assert got is None or "one-liners" not in got
 
 
 def test_need_payoff_respects_discovery_cap() -> None:
     # pain with no gain asks for the payoff — but only until the cap releases the lead;
     # past it the discovery-cap nudge presents on what we have (no endless interrogation)
     needs = NeedsProfile(pains=["takut gagal"], gains=[])
-    assert _pick("oke kak", needs=needs, n=2) == NEED_PAYOFF_NUDGE
+    assert NEED_PAYOFF_NUDGE in _pick("oke kak", needs=needs, n=2)
     past_cap = _pick("oke kak", needs=needs, n=DISCOVERY_TURN_CAP + 1)
-    assert past_cap is not None and past_cap != NEED_PAYOFF_NUDGE  # falls to discovery-cap
+    assert past_cap is not None and NEED_PAYOFF_NUDGE not in past_cap  # falls to discovery-cap

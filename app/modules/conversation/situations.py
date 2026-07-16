@@ -272,7 +272,52 @@ DISCOVERY_CAP_NUDGE = (
 )
 
 
+# Below this the lead is chatting in one-liners, not writing — mirror them. Measured on 7 days
+# of live branch-1 traffic (2026-07-15): leads average 49 chars, p90 62. 100 covers ~all of
+# them while leaving a lead who wrote a real paragraph free to get a fuller answer back.
+_ONE_LINER_CHARS = 100
+
+# The bot is NOT emoji-dry — it out-emojis both leads and human managers (0.55 vs 0.60 vs 0.51
+# per message; 47% vs 42% vs 29% of messages). What it actually gets wrong is VOLUME and shape:
+# 636 chars across 2.4 bubbles per turn against the lead's 49 (a 13× gap, up to 7 bubbles), and
+# only 8% of its messages carry a line break vs 18% for a human manager — i.e. a wall of text
+# where the market chats in short lines. "Keep it short" already exists in the 26k prompt and
+# loses there, so anchor it to the lead's ACTUAL message length at this turn. Appended to
+# whatever situational nudge fired (formatting is orthogonal to the situation), never replacing
+# one — and never applied to AD_OPENER_NUDGE, whose 3-bubble numbered opener is deliberate.
+FORMAT_MIRROR_SUFFIX = (
+    "\n[System: the lead's message was {n} characters — they chat in one-liners, not "
+    "paragraphs. Mirror that register: 1-2 SHORT bubbles, no wall of text (this is an "
+    "Instagram DM, not a brochure — a 400-char block reads as a leaflet and gets skimmed or "
+    "ignored). If you must state 2+ facts, put each on its OWN line so it's skimmable. Emoji "
+    "as you already do — natural, not decorative. One question max.]"
+)
+
+
+def format_suffix(last_txt: str, nudge: str | None) -> str:
+    """The length-mirror instruction for this turn, or '' when it doesn't apply."""
+    if nudge is AD_OPENER_NUDGE:
+        return ""  # the numbered opener is meant to be 2-3 bubbles — don't fight it
+    n = len((last_txt or "").strip())
+    if not n or n > _ONE_LINER_CHARS:
+        return ""  # they wrote a real paragraph — a fuller answer is fair
+    return FORMAT_MIRROR_SUFFIX.format(n=n)
+
+
 def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
+    """The steering block for this turn: ONE situational nudge (priority chain below) plus the
+    length-mirror suffix when the lead is chatting in one-liners. Returns None only when
+    neither applies."""
+    nudge = _pick_situation(
+        lead_type=lead_type, dialog=dialog, last_txt=last_txt,
+        stored_needs=stored_needs, inbound_count=inbound_count)
+    suffix = format_suffix(last_txt, nudge)
+    if not suffix:
+        return nudge
+    return (nudge + suffix) if nudge else suffix.lstrip("\n")
+
+
+def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
     """The ONE situational nudge for this turn, or None — the whole priority chain in one
     place so rule conflicts are resolved here, deliberately, instead of by accident of
     ordering scattered through reply.py.
