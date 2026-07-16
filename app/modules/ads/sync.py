@@ -19,7 +19,7 @@ from datetime import date, timedelta
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import AdInsightDaily
-from app.adapters.meta_ads import MetaAdsClient, MetaAdsRateLimited
+from app.adapters.meta_ads import MetaAdsClient, MetaAdsError, MetaAdsRateLimited
 from app.domain.clock import utc_now
 from app.modules.ads import repository as repo
 from app.modules.ads.bridge import pk_to_shortcode
@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 # Meta revises messaging attribution for ~7 days; 14 gives margin without re-pulling history.
 INSIGHT_WINDOW_DAYS = 14
+# How far back the spend history is worth having, and how much of it to claim per nightly
+# run. Chunked because one long time_range is exactly the kind of heavy page Graph answers
+# 500 to — and because an account-wide throttle would otherwise cost the whole backfill.
+BACKFILL_FLOOR_DAYS = 365
+BACKFILL_CHUNK_DAYS = 30
 
 
 class AdSyncService:
@@ -58,6 +63,10 @@ class AdSyncService:
         if client is None:
             return 0
         wanted_pks = await repo.unmapped_media_pks(self.session, self.branch_id)
+        # Media whose retry is not due: hunting them again costs a full catalogue walk and
+        # ends in a throttle, spending the very budget a new ad needs to be found with.
+        skip = await repo.media_to_skip(self.session, self.branch_id)
+        wanted_pks = [pk for pk in wanted_pks if pk not in skip]
         if not wanted_pks:
             return 0
         # shortcode → media_pk, so a creative row can be recognised as one we asked for.
@@ -70,7 +79,12 @@ class AdSyncService:
                                self.branch_id, pk)
         if not wanted:
             return 0
-        rows = await AdMatcher(client, wanted, self.branch_id).run()
+        rows, missed = await AdMatcher(client, wanted, self.branch_id).run()
+        if missed:
+            await repo.record_misses(self.session, self.branch_id, missed)
+        if rows:
+            await repo.clear_miss(self.session, self.branch_id,
+                                  [r["media_pk"] for r in rows])
         return await repo.upsert_creative_map(self.session, self.branch_id, rows)
 
     async def sync_insights(self, *, today: date | None = None) -> int:
@@ -101,3 +115,46 @@ class AdSyncService:
             logger.warning("branch=%s ad insight sync throttled: %s", self.branch_id, exc)
             return 0
         return await repo.replace_insights(self.session, self.branch_id, since, rows)
+
+    async def backfill_insights(self, *, today: date | None = None) -> int:
+        """Claim one older chunk of spend history. Returns rows written.
+
+        Days older than the rolling window are FROZEN — Meta stopped revising them — so this
+        only ever inserts, never re-fetches. Without it the panel lies: it lets an operator
+        pick 30 days, shows 30 days of leads against 14 days of spend, and halves the cost
+        per lead into a number that looks perfectly plausible.
+
+        Runs at night: it is the one job here that is allowed to be slow and greedy, and at
+        night it competes with nothing for the account's rate limit."""
+        client = self._client()
+        if client is None:
+            return 0
+        now = today or utc_now().date()
+        floor = now - timedelta(days=BACKFILL_FLOOR_DAYS)
+        oldest = await repo.oldest_insight_day(self.session, self.branch_id)
+        if oldest is None:
+            return 0  # nothing cached yet — the rolling window seeds first
+        if oldest <= floor:
+            return 0  # history claimed back to the floor; nothing left to do
+        until = oldest - timedelta(days=1)
+        since = max(floor, until - timedelta(days=BACKFILL_CHUNK_DAYS))
+        wanted = set(await repo.ad_ids_for_leads(self.session, self.branch_id))
+        if not wanted:
+            return 0
+        stamp = utc_now()
+        rows: list[AdInsightDaily] = []
+        try:
+            async for row in client.iter_insights(since, until):
+                if row.ad_id in wanted:
+                    rows.append(AdInsightDaily(
+                        branch_id=self.branch_id, ad_id=row.ad_id, day=row.day,
+                        spend=row.spend, impressions=row.impressions, reach=row.reach,
+                        clicks=row.clicks, conv_started=row.conv_started,
+                        conv_depth_2=row.conv_depth_2, conv_depth_3=row.conv_depth_3,
+                        conv_depth_5=row.conv_depth_5, blocks=row.blocks, synced_at=stamp,
+                    ))
+        except MetaAdsError as exc:
+            logger.warning("branch=%s insight backfill %s..%s cut short: %s",
+                           self.branch_id, since, until, exc)
+            return 0
+        return await repo.insert_insights(self.session, self.branch_id, rows)

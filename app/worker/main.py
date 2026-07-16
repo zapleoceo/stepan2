@@ -548,6 +548,30 @@ async def sync_ads_branch(ctx: dict[str, Any], branch_id: int) -> int:
     return mapped
 
 
+async def backfill_ads(ctx: dict[str, Any]) -> int:
+    """Fan out the nightly spend-history backfill, one job per branch."""
+    return await _fan_out_per_branch(ctx, "backfill_ads_branch")
+
+
+async def backfill_ads_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Claim one older chunk of Meta spend history for this branch.
+
+    Separate from sync_ads on purpose. sync_ads must stay fast and frequent — a new lead's ad
+    should be mapped within the tick, and its rolling window keeps today's spend current. The
+    backfill is the opposite: slow, greedy, and only worth doing where it competes with
+    nothing for the account's rate limit. Hence 02:40 UTC, and one chunk per night rather
+    than a year in one go."""
+    from app.modules.ads.sync import AdSyncService  # noqa: PLC0415
+    from app.modules.settings.service import get_settings  # noqa: PLC0415
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            return await AdSyncService(session, branch_id, cfg).backfill_insights()
+    except Exception:
+        logger.exception("ad insight backfill failed branch=%d", branch_id)
+        return 0
+
+
 async def refresh_profiles(ctx: dict[str, Any]) -> int:
     """Refresh IG follower/following stats for stale active-funnel leads (TTL ~6h).
 
@@ -707,7 +731,7 @@ class WorkerSettings:
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
-        reindex_knowledge, aggregate_needs, sync_ads,
+        reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
         # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
@@ -715,7 +739,7 @@ class WorkerSettings:
         ingest_branch, reply_pending_branch, send_outbox_branch, schedule_followups_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
-        sync_ads_branch,
+        sync_ads_branch, backfill_ads_branch,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
         # timeout re-dispatches next tick rather than immediately re-hitting the same slow broker
         # and double-billing). keep_result=0 is the worker default — a killed/failed reply job
@@ -769,6 +793,11 @@ class WorkerSettings:
         # attribution lags ~7 days, so a faster cadence would buy nothing but 429s. Costs zero
         # Graph calls when no new ad appeared and no lead media is unmapped.
         cron(sync_ads, minute={3, 23, 43}, second=20, run_at_startup=False),
+        # Spend history backfill at 02:40 UTC (~09:40 Jakarta — after the night, before the
+        # working day). One chunk per run: it walks a long time_range and would otherwise eat
+        # the account throttle that sync_ads needs to discover newly launched ads. Stops by
+        # itself once history reaches the floor, so on most nights this is a no-op.
+        cron(backfill_ads, hour={2}, minute={40}, second=0, run_at_startup=False),
     ]
     on_startup = _on_startup
     redis_settings = _redis_settings()

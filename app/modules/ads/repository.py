@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import AdCreativeMap, AdInsightDaily, ChannelThread, Lead
+from app.adapters.db.models import (
+    AdCreativeMap,
+    AdInsightDaily,
+    AdMediaMiss,
+    ChannelThread,
+    Lead,
+)
 from app.domain.clock import utc_now
 
 
@@ -94,3 +100,90 @@ async def last_synced_at(session: AsyncSession, branch_id: int) -> datetime | No
     return (await session.execute(
         select(func.max(AdInsightDaily.synced_at)).where(AdInsightDaily.branch_id == branch_id)
     )).scalar_one_or_none()
+
+
+# Retry a miss after 2^attempts hours, capped — a medium that looked dead because of a
+# throttle deserves another try; one that truly has no ad should stop costing a walk.
+_MISS_BACKOFF_CAP_H = 24
+
+
+def _miss_due_at(attempts: int, last_try: datetime) -> datetime:
+    return last_try + timedelta(hours=min(2 ** attempts, _MISS_BACKOFF_CAP_H))
+
+
+async def media_to_skip(session: AsyncSession, branch_id: int) -> set[str]:
+    """Media whose retry is not due yet — excluded from the hunt so the Graph budget goes to
+    media that can actually resolve (including newly launched ads)."""
+    rows = (await session.execute(
+        select(AdMediaMiss.media_pk, AdMediaMiss.attempts, AdMediaMiss.last_try_at)
+        .where(AdMediaMiss.branch_id == branch_id)
+    )).all()
+    now = utc_now()
+    return {pk for pk, attempts, last_try in rows if _miss_due_at(attempts, last_try) > now}
+
+
+async def record_misses(session: AsyncSession, branch_id: int, media_pks: Iterable[str]) -> int:
+    """Bump the attempt counter for media that a completed hunt did not resolve."""
+    pks = list(media_pks)
+    if not pks:
+        return 0
+    existing = {
+        row.media_pk: row for row in (await session.execute(
+            select(AdMediaMiss).where(
+                AdMediaMiss.branch_id == branch_id, AdMediaMiss.media_pk.in_(pks))
+        )).scalars().all()
+    }
+    now = utc_now()
+    for pk in pks:
+        row = existing.get(pk)
+        if row is None:
+            session.add(AdMediaMiss(branch_id=branch_id, media_pk=pk, attempts=1,
+                                    last_try_at=now))
+        else:
+            row.attempts += 1
+            row.last_try_at = now
+            session.add(row)
+    await session.flush()
+    return len(pks)
+
+
+async def clear_miss(session: AsyncSession, branch_id: int, media_pks: Iterable[str]) -> None:
+    """A medium that resolved must not keep a stale miss row holding it back later."""
+    pks = list(media_pks)
+    if pks:
+        await session.execute(delete(AdMediaMiss).where(
+            AdMediaMiss.branch_id == branch_id, AdMediaMiss.media_pk.in_(pks)))
+
+
+async def oldest_insight_day(session: AsyncSession, branch_id: int) -> date | None:
+    """How far back the spend cache reaches. None = nothing cached yet.
+
+    The reports panel lets an operator pick any date range, but a rolling window only holds
+    the recent days — so a 30-day view would show 30 days of leads against 14 days of spend
+    and quietly halve the cost per lead. This is what the backfill walks backwards from."""
+    return (await session.execute(
+        select(func.min(AdInsightDaily.day)).where(AdInsightDaily.branch_id == branch_id)
+    )).scalar_one_or_none()
+
+
+async def insert_insights(
+    session: AsyncSession, branch_id: int, rows: Iterable[AdInsightDaily],
+) -> int:
+    """Insert backfilled days. Insert-only, never delete: these days are older than Meta's
+    revision horizon, so re-fetching them would only risk losing what we already hold."""
+    have = {
+        (ad_id, day) for ad_id, day in (await session.execute(
+            select(AdInsightDaily.ad_id, AdInsightDaily.day)
+            .where(AdInsightDaily.branch_id == branch_id)
+        )).all()
+    }
+    added = 0
+    for row in rows:
+        if (row.ad_id, row.day) in have:
+            continue
+        session.add(row)
+        have.add((row.ad_id, row.day))
+        added += 1
+    if added:
+        await session.flush()
+    return added
