@@ -36,6 +36,7 @@ from .situations import (
     FOLLOWUP_BREVITY_SUFFIX,
     FOLLOWUP_SILENT_CLICKER_EXTRA,
     lead_spoke_own_words,
+    with_situation,
 )
 from .situations import (
     is_answerable_question as _is_answerable_question,
@@ -250,7 +251,8 @@ class FollowupService:
                 (m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
             raw, meta = await engine.complete(
                 ctx, thread_id, lang=lang, workflow="followup", capability=SMART,
-                extra_user_msg=_REPEAT_CORRECTION.format(prior=prior, last_in=last_in))
+                extra_user_msg=with_situation(
+                    _REPEAT_CORRECTION.format(prior=prior, last_in=last_in), nudge))
             try:
                 decision = parse_decision(raw)
             except ValueError:
@@ -262,7 +264,8 @@ class FollowupService:
                 return False
         decision, meta = await guard_decision(
             self.session, self.branch_id, self.settings, self.llm,
-            engine, ctx, thread_id, lang, "followup", True, decision, meta)
+            engine, ctx, thread_id, lang, "followup", True, decision, meta,
+            situational=nudge)
         if not decision.reply:
             return False
         # guard_decision can regenerate the draft too (for an UNRELATED violation elsewhere

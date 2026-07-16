@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.12.0"
+PROJECT_VERSION = "1.13.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,19 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.13.0", "date": "16 Jul 2026", "tag": "Conversation",
+        "title": "Texts like a person, not a brochure",
+        "blurb": "A lead types four words; Stepan was answering with four hundred characters. "
+                 "On Instagram that reads as a leaflet, and a leaflet gets skimmed or "
+                 "reported — several leads said so in as many words. He now matches the "
+                 "register he's given: a one-line question gets a one-line answer, and a lead "
+                 "who writes a paragraph still gets the full one. The nudges he sends into "
+                 "quiet chats are held shorter still, because nobody asked for those — they "
+                 "were quietly the longest messages he sent, and there were more of them than "
+                 "live replies. The numbered opener that greets a fresh ad click is left "
+                 "alone: its three bubbles are doing a job.",
+    },
     {
         "version": "1.12.0", "date": "15 Jul 2026", "tag": "Reporting",
         "title": "Nearly every lead now has a price tag",

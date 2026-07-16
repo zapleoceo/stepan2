@@ -266,8 +266,10 @@ class _FakeEngine:
     def __init__(self, context: str, *regen_replies: str) -> None:
         self.last_context = context
         self._q = list(regen_replies)
+        self.sent: list[str] = []  # every extra_user_msg the guard sent into a regen
 
     async def complete(self, ctx, thread_id, lang, workflow, **kw):  # noqa: ANN001, ANN003
+        self.sent.append(kw.get("extra_user_msg") or "")
         raw = self._q.pop(0)
         return raw, {"model": "fake", "cost_usd": 0.0}
 
@@ -496,3 +498,50 @@ async def test_pipeline_skips_llm_verify_for_grounded_price(db_session) -> None:
         db_session, bid, None, _NoVerifyLLM(), engine, ctx, thread_id=1, lang="id",
         workflow="reply", bill=False, decision=decision, meta={})
     assert fixed.reply == "Harganya Rp 700.000 offline ya Kak 😊"  # untouched, no verify
+
+
+async def test_guard_regen_still_carries_the_turns_situational_nudge(db_session) -> None:
+    """Thread 4092 (2026-07-16): a lead whose ONLY message was the ad button got a correct
+    no-price opener; guard regenerated it for naming a product absent from the KB, and the
+    regen — no longer told the lead had never spoken — answered the button click with the
+    full price and DP. A regen re-answers the SAME turn, so the nudge must ride along."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+    from app.modules.conversation.situations import AD_OPENER_NUDGE
+
+    bid = await _branch(db_session)
+    context = "> Quick facts — SMM Intensive Course: Rp 1.882.955, DP Rp 500.000."
+    engine = _FakeEngine(
+        context,
+        json.dumps({"reply": "Halo Kak! Di SMM Intensive Course kamu belajar strategi "
+                             "konten yang jualan 😊 Kamu lagi cari buat bisnis atau karier?",
+                    "stage": "qualifying"}),
+    )
+    decision = parse_decision(json.dumps({
+        "reply": f"Di kelas SMM kami kamu belajar banyak! Cek {_FAKE_LINK}",
+        "stage": "qualifying"}))
+    ctx = _FakeCtx("Halo, saya ingin tahu detail program SMM dan biaya kursusnya")
+
+    await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, ctx, thread_id=1, lang="id",
+        workflow="reply", bill=False, decision=decision, meta={},
+        situational=AD_OPENER_NUDGE)
+    assert engine.sent, "the fabrication should have triggered a regen"
+    assert any(AD_OPENER_NUDGE in s for s in engine.sent), \
+        "the regen dropped the situational nudge — it would re-answer the turn blind"
+
+
+async def test_guard_regen_without_a_situation_sends_the_bare_correction(db_session) -> None:
+    """Most turns have no situation; the correction must not grow a stray trailing newline."""
+    from app.modules.conversation.decision import parse_decision
+    from app.modules.conversation.reply import guard_decision
+
+    bid = await _branch(db_session)
+    engine = _FakeEngine("> Quick facts — nothing relevant.",
+                         json.dumps({"reply": "Aku cek dulu ya Kak", "stage": "qualifying"}))
+    decision = parse_decision(json.dumps({
+        "reply": "Cek di https://bukan-punya-kita.example ya", "stage": "qualifying"}))
+    await guard_decision(
+        db_session, bid, _settings_urls_only(), None, engine, _FakeCtx("linknya mana kak?"),
+        thread_id=1, lang="id", workflow="reply", bill=False, decision=decision, meta={})
+    assert engine.sent and not engine.sent[0].endswith("\n")

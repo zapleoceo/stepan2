@@ -49,6 +49,9 @@ from .situations import (
 from .situations import (
     pick_nudge as _pick_situational_nudge,
 )
+from .situations import (
+    with_situation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +256,7 @@ def _bump_guard_regen_count(lead: Lead) -> None:
 async def guard_decision(
     session: AsyncSession, branch_id: int, branch_settings: BranchSettings | None,
     llm: LLMPort, engine: DecisionEngine, ctx, thread_id: int, lang: str, workflow: str,
-    bill: bool, decision: Decision, meta: dict,
+    bill: bool, decision: Decision, meta: dict, situational: str | None = None,
 ) -> tuple[Decision, dict]:
     """Block fabricated facts and a handful of conversation-quality failures: ungrounded
     links, false delivery claims, more than one question in a turn, impossible capability
@@ -262,6 +265,14 @@ async def guard_decision(
     hand-off — never send the violation. Off when reply_guard='off'. Shared by live replies
     AND follow-up nudges.
 
+    `situational` is the turn's nudge (situations.pick_nudge), re-attached to every
+    correction: a regen re-answers the SAME turn, so dropping it silently un-does the
+    situational layer at the worst moment. Thread 4092 (2026-07-16) is the live proof — the
+    first draft correctly greeted an ad-clicker with no price, got regenerated for naming a
+    product that isn't in the KB, and the regen — no longer told this lead had never spoken
+    — answered a button click with the full price and DP. Exactly incident 3926 through
+    another door.
+
     Returns (decision, meta) — meta is the regen's broker-log line when a regen
     happened, else the meta passed in unchanged."""
     mode = branch_settings.reply_guard if branch_settings is not None else "full"
@@ -269,6 +280,9 @@ async def guard_decision(
         return decision, meta
     context = engine.last_context
     regenerated = False
+
+    def _correct(correction: str) -> str:
+        return with_situation(correction, situational)
     if decision.needs_manager:
         # Mutually exclusive, most-specific-first: a price question already answered in KB
         # gets the targeted correction; anything else with no stated reason gets the generic
@@ -282,7 +296,7 @@ async def guard_decision(
             regenerated = True
             raw, regen_meta = await engine.complete(
                 ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
-                extra_user_msg=guard.MANAGER_HANDOFF_CORRECTION)
+                extra_user_msg=_correct(guard.MANAGER_HANDOFF_CORRECTION))
             try:
                 fixed = parse_decision(raw)
             except ValueError:
@@ -301,7 +315,7 @@ async def guard_decision(
             regenerated = True
             raw, regen_meta = await engine.complete(
                 ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
-                extra_user_msg=guard.UNEXPLAINED_HANDOFF_CORRECTION)
+                extra_user_msg=_correct(guard.UNEXPLAINED_HANDOFF_CORRECTION))
             try:
                 fixed = parse_decision(raw)
             except ValueError:
@@ -327,7 +341,7 @@ async def guard_decision(
                    branch_id, thread_id, issues[:3])
     raw, regen_meta = await engine.complete(
         ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
-        extra_user_msg=guard.CORRECTION.format(issues="; ".join(issues[:5])))
+        extra_user_msg=_correct(guard.CORRECTION.format(issues="; ".join(issues[:5]))))
     try:
         fixed = parse_decision(raw)
     except ValueError:
@@ -499,8 +513,10 @@ class ReplyService:
                     workflow, self.branch_id, thread_id, ratio)
                 raw, regen_meta = await engine.complete(
                     ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
-                    extra_user_msg=_REPEAT_CORRECTION.format(
-                        prior=prior, last_in=last_in.text if last_in is not None else ""))
+                    extra_user_msg=with_situation(
+                        _REPEAT_CORRECTION.format(
+                            prior=prior, last_in=last_in.text if last_in is not None else ""),
+                        extra_user_msg))
                 try:
                     decision = parse_decision(raw)
                     meta = regen_meta  # adopt the regen's broker line only when its reply is used
@@ -508,7 +524,8 @@ class ReplyService:
                     pass  # keep the original draft AND its meta — the regen is discarded
         decision, meta = await guard_decision(
             self.session, self.branch_id, self.settings, self.llm,
-            engine, ctx, thread_id, lang, workflow, bill, decision, meta)
+            engine, ctx, thread_id, lang, workflow, bill, decision, meta,
+            situational=extra_user_msg)
         # guard_decision's own regen (for an UNRELATED violation) is never re-checked against
         # dialog history, so it can silently reintroduce the exact duplicate rejected above —
         # same precedent as followup.py. A live reply can't just drop the send like a nudge

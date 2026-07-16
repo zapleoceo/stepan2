@@ -317,6 +317,13 @@ def format_suffix(last_txt: str, nudge: str | None) -> str:
     return FORMAT_MIRROR_SUFFIX.format(n=n)
 
 
+def with_situation(correction: str, situational: str | None) -> str:
+    """Re-attach the turn's nudge to a correction. Every regen re-answers the SAME turn, so a
+    correction that travels alone silently un-does the situational layer at the worst possible
+    moment — see guard_decision's docstring for the live case (thread 4092)."""
+    return f"{correction}\n{situational}" if situational else correction
+
+
 def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
     """The steering block for this turn: ONE situational nudge (priority chain below) plus the
     length-mirror suffix when the lead is chatting in one-liners. Returns None only when
