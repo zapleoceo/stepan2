@@ -25,6 +25,7 @@ class _FakeRedis:
         self.calls: list[tuple] = []
         self._inflight = inflight or set()
         self._zcard = zcard
+        self._flags: dict[str, str] = {}
 
     async def enqueue_job(self, fn, *args, _job_id=None, **kw):  # noqa: ANN001, ANN002, ANN003
         self.calls.append((fn, args, _job_id))
@@ -44,8 +45,15 @@ class _FakeRedis:
     async def zrem(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
         return 1
 
-    async def get(self, *a, **k):  # noqa: ANN002, ANN003, ANN201 — breaker read (never tripped here)
-        return None
+    # broker-guard flag (breaker.trip/clear/is_open)
+    async def set(self, key, value, ex=None):  # noqa: ANN001
+        self._flags[key] = value
+
+    async def delete(self, key):  # noqa: ANN001
+        self._flags.pop(key, None)
+
+    async def get(self, key):  # noqa: ANN001
+        return self._flags.get(key)
 
 
 async def _wire(monkeypatch, b, thread_ids):  # noqa: ANN001
@@ -81,6 +89,25 @@ async def test_dispatches_one_job_per_awaiting_thread(db_session, monkeypatch) -
         ("generate_one_reply", (b.id, 10), "reply:10"),
         ("generate_one_reply", (b.id, 11), "reply:11"),
     ]
+
+
+async def test_broker_guard_open_dispatches_only_a_canary(db_session, monkeypatch) -> None:
+    """With the broker guard open, the whole backlog must NOT stampede the dead broker — only
+    ONE canary is dispatched. Its call clears the guard on success (or re-trips on failure), so
+    a healed broker resumes the full fleet within a tick — no fixed cooldown, no idle."""
+    from app.worker import breaker
+
+    b = Branch(name="Q", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    await _wire(monkeypatch, b, [10, 11, 12, 13])
+    redis = _FakeRedis()
+    await breaker.trip(redis)
+
+    n = await worker_main.reply_pending_branch({"redis": redis}, b.id)
+
+    assert n == 1
+    assert redis.calls == [("generate_one_reply", (b.id, 10), "reply:10")]  # canary only
 
 
 async def test_deduped_thread_is_not_counted(db_session, monkeypatch) -> None:

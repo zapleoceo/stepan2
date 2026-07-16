@@ -166,15 +166,12 @@ async def _fan_out_per_branch(
     when the next tick fires does not stack a second job (same idempotency trick as the
     reply:{thread_id} id). gate_platform short-circuits the whole fan-out when the kill switch
     is OFF, so an operator flipping it mid-incident stops new work immediately."""
-    if gate_broker and (redis := ctx.get("redis")) is not None:
-        # The chat broker is down (a reply job just tripped the breaker). Skip the whole
-        # broker-dependent fan-out for the cooldown instead of stampeding every awaiting
-        # thread into the same dead gateway. Reopens on its own when the cooldown lapses.
-        open_s = await breaker.seconds_open(redis)
-        if open_s > 0:
-            logger.warning("broker breaker open ~%.0fs — skip %s for all branches",
-                           open_s, job_name)
-            return 0
+    if gate_broker and (redis := ctx.get("redis")) is not None and await breaker.is_open(redis):
+        # Proactive work (follow-ups) — skip entirely while the broker looks down; it is not
+        # urgent and the reply canary will clear the guard within a tick when the broker heals.
+        # (The reply path does NOT use this: it sends a canary instead, see reply_pending_branch.)
+        logger.warning("broker guard open — skip %s for all branches", job_name)
+        return 0
     async with session_scope() as session:
         if gate_platform and not await _platform_agent_on(session):
             logger.info("platform agent OFF — skip %s for all branches", job_name)
@@ -193,8 +190,7 @@ async def _fan_out_per_branch(
 async def reply_pending(ctx: dict[str, Any]) -> int:
     """Top dispatcher: fan out one reply_pending_branch job per branch (branch-independent),
     gated by the platform kill switch."""
-    return await _fan_out_per_branch(ctx, "reply_pending_branch", gate_platform=True,
-                                     gate_broker=True)
+    return await _fan_out_per_branch(ctx, "reply_pending_branch", gate_platform=True)
 
 
 async def reply_pending_branch(ctx: dict[str, Any], branch_id: int) -> int:
@@ -221,6 +217,13 @@ async def reply_pending_branch(ctx: dict[str, Any], branch_id: int) -> int:
     except Exception:
         logger.exception("reply_pending: branch=%s dispatch failed, skipping", branch_id)
         return 0
+    if thread_ids and await breaker.is_open(redis):
+        # The broker looked down last tick. Don't stampede it with the whole backlog — send
+        # ONE canary. Its call either succeeds (clearing the guard, so the next tick runs the
+        # full fleet) or fails (re-tripping). The rest wait one tick, not a fixed cooldown.
+        logger.warning("branch %s: broker guard open — 1 canary reply (%d awaiting)",
+                       branch_id, len(thread_ids))
+        thread_ids = thread_ids[:1]
     enqueued = 0
     for thread_id in thread_ids:
         job = await redis.enqueue_job(
@@ -268,6 +271,11 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
             )
             started = time.time()
             decision = await reply.decide(thread_id)
+            if getattr(llm, "calls", 0) > 0:
+                # The broker answered (decide made a call and didn't raise gateway-down) — clear
+                # the guard so the whole fleet resumes next tick. Recovery reopens us, not a
+                # timer: a key rotation that heals the broker restores full speed immediately.
+                await breaker.clear(redis)
             if decision is None:
                 logger.info(
                     "reply branch=%d thread=%d held in %.1fs (%d broker calls, no reply)",
@@ -280,10 +288,10 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                 time.time() - started, getattr(llm, "calls", 0))
             return queued
     except BrokerUnavailable as exc:
-        # The gateway is down, not this thread's fault — open the breaker so the next tick's
-        # fan-out is skipped instead of every awaiting thread re-hitting the dead broker.
+        # The gateway is down, not this thread's fault — trip the guard so the next tick sends
+        # ONE canary instead of the whole backlog. Cleared the instant any call succeeds.
         await breaker.trip(redis)
-        logger.warning("reply branch=%d thread=%d: broker down (%s) — breaker tripped",
+        logger.warning("reply branch=%d thread=%d: broker down (%s) — guard tripped",
                        branch_id, thread_id, exc)
         return False
     except Exception:
