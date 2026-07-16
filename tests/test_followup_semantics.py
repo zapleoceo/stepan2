@@ -299,6 +299,58 @@ async def test_followup_to_silent_clicker_carries_no_price_constraint(db_session
         "silent-clicker follow-up must carry the no-price constraint"
 
 
+async def test_followup_to_a_lead_who_spoke_is_held_to_one_short_bubble(db_session) -> None:
+    """Follow-ups are the longest thing the bot sends and nobody asked for them (measured
+    2026-07-16: 316 chars avg vs 162 for live replies, and MORE of them). Unlike live replies
+    they never went through pick_nudge, so the format mirror never reached them."""
+    from app.modules.conversation.situations import FOLLOWUP_BREVITY_SUFFIX
+
+    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
+    captured: list[str] = []
+
+    class _CaptureLLM(FakeLLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            captured.append(messages[-1]["content"] if messages else "")
+            return await super().chat(messages, **kw)
+
+    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=None)
+    assert await svc.run() == 1
+    assert any(FOLLOWUP_BREVITY_SUFFIX.strip() in c for c in captured), \
+        "an unprompted follow-up must carry the brevity constraint"
+
+
+async def test_silent_clicker_followup_keeps_its_menu_instead_of_brevity(db_session) -> None:
+    """The clicker nudge asks for a short numbered menu — brevity would fight it, the same way
+    the format mirror steps aside for AD_OPENER_NUDGE in live replies."""
+    from app.adapters.db.models import Message
+    from app.modules.conversation.situations import (
+        FOLLOWUP_BREVITY_SUFFIX,
+        FOLLOWUP_SILENT_CLICKER_EXTRA,
+    )
+
+    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
+    msg = (await db_session.exec(select(Message).where(Message.thread_id == tid,
+                                                       Message.direction == "in"))).first()
+    msg.text = _AD_PREFILL
+    db_session.add(msg)
+    await db_session.flush()
+
+    captured: list[str] = []
+
+    class _CaptureLLM(FakeLLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            captured.append(messages[-1]["content"] if messages else "")
+            return await super().chat(messages, **kw)
+
+    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=None)
+    assert await svc.run() == 1
+    assert any(FOLLOWUP_SILENT_CLICKER_EXTRA.strip() in c for c in captured)
+    assert not any(FOLLOWUP_BREVITY_SUFFIX.strip() in c for c in captured), \
+        "the two length rules must never stack — they contradict each other"
+
+
 async def test_followup_drops_nudge_still_duplicate_after_guard_regen(db_session) -> None:
     """Live case (thread 2087, 2026-07-08): the dedup check runs BEFORE guard_decision, so
     it only sees the FIRST draft. If that draft is fresh (passes dedup) but guard flags an

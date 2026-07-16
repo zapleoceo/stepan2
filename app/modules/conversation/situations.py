@@ -259,6 +259,19 @@ FOLLOWUP_SILENT_CLICKER_EXTRA = (
     "and 'cukup balas angkanya'. Return the JSON as usual.]"
 )
 
+# A follow-up is UNPROMPTED — nobody asked for it — so its length rule is stricter than the
+# live-reply mirror and doesn't depend on the lead's last message (they're silent by
+# definition). Measured 2026-07-16: follow-ups average 316 chars against live replies' 162 and
+# outnumber them (593 vs 407 in 30h), i.e. the longest bot messages are the ones nobody asked
+# for. That is exactly what gets an IG account reported — and leads did say so out loud
+# ("Berisik Luh DM in gua mulu", "Jangan suka spam bangke", "Spam").
+FOLLOWUP_BREVITY_SUFFIX = (
+    "\n[System addition: this nudge is UNPROMPTED — the lead did not ask for it. Keep it "
+    "SHORT: ONE bubble, 1-2 sentences, ~150 characters. A long unprompted block reads as spam "
+    "and gets accounts reported. One light question OR one concrete fact — never both, never a "
+    "recap of the offer.]"
+)
+
 DISCOVERY_CAP_NUDGE = (
     "[System: you have already asked discovery questions for {n} turns without the lead "
     "voicing a clear need — do NOT ask another discovery question this turn. If they asked "

@@ -33,6 +33,7 @@ from .reply import (
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .situations import (
     AD_TEMPLATE_RE,
+    FOLLOWUP_BREVITY_SUFFIX,
     FOLLOWUP_SILENT_CLICKER_EXTRA,
     lead_spoke_own_words,
 )
@@ -211,6 +212,10 @@ class FollowupService:
         if not lead_spoke_own_words(ctx.dialog):
             # a button click is not the lead speaking — no price/pitch in their follow-ups
             nudge += FOLLOWUP_SILENT_CLICKER_EXTRA
+        else:
+            # …and that clicker nudge asks for a short numbered menu, so its length is earned;
+            # every other follow-up has no such excuse.
+            nudge += FOLLOWUP_BREVITY_SUFFIX
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow="followup",
             extra_user_msg=nudge, capability=cap,
