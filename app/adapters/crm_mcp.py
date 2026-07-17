@@ -59,6 +59,55 @@ class CrmMcpReader:
                                             "clientId": crm_id, "perPage": 50})
                 return self._derive(crm_id, (history or {}).get("data") or [])
 
+    async def list_missed_out_calls(
+        self, url: str, days: int = 3, max_pages: int = 3,
+    ) -> list[tuple[str, str]]:
+        """Phones the branch tried to call and never reached in the last `days`:
+        out-calls with billsec ≤ 10s (missed / voicemail-bounce), minus any phone that
+        ALSO had an answered call in the window. Newest missed attempt first. Returns []
+        on any failure — the rescue job just skips a cycle."""
+        try:
+            async with asyncio.timeout(settings().crm_mcp_timeout_s * 2):
+                return await self._list_missed(url, days, max_pages)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("crm mcp calls list failed: %s", str(exc)[:200])
+            return []
+
+    async def _list_missed(self, url: str, days: int, max_pages: int) -> list[tuple[str, str]]:
+        from mcp.client.session import ClientSession  # noqa: PLC0415
+        from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
+
+        now = datetime.now(UTC)
+        args_base = {
+            "cityAlias": self.city_alias,
+            "dateFrom": (now - timedelta(days=days)).date().isoformat(),
+            "dateTo": now.date().isoformat(),
+            "perPage": 100,
+        }
+        answered: set[str] = set()
+        missed: dict[str, str] = {}
+        async with streamablehttp_client(url) as (read, write, _):
+            async with ClientSession(read, write) as s:
+                await s.initialize()
+                for page in range(1, max_pages + 1):
+                    data = await self._call(s, "crm_calls_list", {**args_base, "page": page})
+                    rows = (data or {}).get("data") or []
+                    if not rows:
+                        break
+                    for x in rows:
+                        if x.get("call_type") != "out":
+                            continue
+                        phone = str(x.get("number_to") or "").strip()
+                        if not phone:
+                            continue
+                        at = str(x.get("date_call") or "")
+                        if int(x.get("billsec") or 0) > 10:
+                            answered.add(phone)
+                        elif at > missed.get(phone, ""):
+                            missed[phone] = at
+        return sorted(((p, at) for p, at in missed.items() if p not in answered),
+                      key=lambda kv: kv[1], reverse=True)
+
     @staticmethod
     async def _call(s, tool: str, args: dict) -> dict | None:  # noqa: ANN001
         res = await s.call_tool(tool, args)

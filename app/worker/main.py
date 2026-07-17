@@ -544,6 +544,24 @@ async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
     return synced
 
 
+async def crm_rescue(ctx: dict[str, Any]) -> int:
+    """Hourly (work hours only, enforced in the service): pick up leads the CRM's phone
+    calls couldn't reach and have Stepan continue them in chat. Capped to a trickle per
+    run; every send still passes the outbox caps and the CRM gate."""
+    from app.modules.crm.rescue import CrmRescueService  # noqa: PLC0415
+    total = 0
+    async with session_scope() as session:
+        branches = await wiring.active_branches(session)
+    for branch in branches:
+        assert branch.id is not None
+        try:
+            async with session_scope() as session:
+                total += await CrmRescueService(session, branch.id, BrokerLLM()).run()
+        except Exception:
+            logger.exception("crm rescue failed branch=%d", branch.id)
+    return total
+
+
 async def sync_ads(ctx: dict[str, Any]) -> int:
     """Fan out the Meta ad map + insight sync, one job per branch.
 
@@ -811,7 +829,7 @@ class WorkerSettings:
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
-        daily_digest,
+        daily_digest, crm_rescue,
         reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
@@ -858,6 +876,9 @@ class WorkerSettings:
              run_at_startup=False),
         # CRM push every 5 minutes (only branches with crm_enabled + webhook URL)
         cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
+        # Rescue of CRM missed-call leads: hourly, work hours only (service-enforced),
+        # ≤2 leads per tick — a steady trickle through the 262-lead no-answer backlog.
+        cron(crm_rescue, minute={42}, second=30, run_at_startup=False),
         # Profile stats refresh every 30 minutes (heavy, TTL-gated, capped batch)
         cron(refresh_profiles, minute={0, 30}, second=15, run_at_startup=False),
         # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)

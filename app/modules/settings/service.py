@@ -57,6 +57,9 @@ class BranchSettings:
     # sources lead state from the CRM MCP instead of the REST contract.
     crm_mcp_url: str = ""
     crm_mcp_city_alias: str = "jakarta"
+    # Rescue of CRM missed-call leads (Stepan DMs leads the phone couldn't reach) — off
+    # until a branch explicitly opts in.
+    crm_rescue_enabled: bool = False
     # 'hybrid' → route cheap turns to chat:fast, keep chat:smart for money moments;
     # 'off' → always chat:smart (pre-optimisation behaviour). See conversation.routing.
     reply_routing: str = "hybrid"
@@ -200,6 +203,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_read_secret=raw.get("crm_read_secret", ""),
         crm_mcp_url=raw.get("crm_mcp_url", ""),
         crm_mcp_city_alias=raw.get("crm_mcp_city_alias", "jakarta"),
+        crm_rescue_enabled=_b(raw, "crm_rescue_enabled"),
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
         reply_routing=raw.get("reply_routing", "hybrid"),
