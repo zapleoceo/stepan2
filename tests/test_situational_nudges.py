@@ -164,13 +164,15 @@ def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
     # 'ga ada modal, berapa biayanya?' — honest number + the affordable entry beside it
     got = _pick("ga ada modal kak, berapa biayanya?")
     assert ANSWER_FIRST_TIGHT_BUDGET_NUDGE in got
-    assert ANSWER_FIRST_NUDGE in _pick("berapa biayanya kak?")
+    # a price question with no budget signal is NOT the tight-budget combo (it gets the
+    # framed price answer instead — see the price-no-pain tests below)
+    assert ANSWER_FIRST_TIGHT_BUDGET_NUDGE not in _pick("berapa biayanya kak?")
 
 
 def test_format_mirror_rides_on_top_of_the_situation() -> None:
     # formatting is orthogonal to the situation: the answer-first instruction must survive,
     # with the length anchor appended — not replaced by it (that would re-open the worst leak)
-    got = _pick("berapa biayanya kak?")
+    got = _pick("jadwalnya hari apa kak?")
     assert ANSWER_FIRST_NUDGE in got and "characters" in got
 
 
@@ -248,10 +250,13 @@ def test_discover_before_price_fires_for_engaged_lead_without_a_pain() -> None:
     assert got is not None and DISCOVER_BEFORE_PRICE_NUDGE in got
 
 
-def test_discover_before_price_yields_to_a_direct_price_question() -> None:
-    # they DID ask — answer-first wins, no discover-first steer
-    got = _pick("berapa biayanya kak?", n=2)
+def test_discover_before_price_yields_to_a_direct_question() -> None:
+    # they DID ask — answer-first wins, no discover-first steer (a non-price ask keeps the
+    # plain answer-first; a price ask gets the framed variant, tested separately below)
+    got = _pick("jadwalnya hari apa kak?", n=2)
     assert ANSWER_FIRST_NUDGE in got and DISCOVER_BEFORE_PRICE_NUDGE not in got
+    # a price ask must also never fall back to the discover-first steer — they asked
+    assert DISCOVER_BEFORE_PRICE_NUDGE not in _pick("berapa biayanya kak?", n=2)
 
 
 def test_discover_before_price_yields_once_a_pain_is_captured() -> None:
@@ -275,3 +280,32 @@ def test_auto_reply_detects_the_english_away_message() -> None:
     assert is_auto_reply("Thanks for your message, we'll get back to you")
     assert is_auto_reply("Thank you for your message, we will get back to you shortly")
     assert not is_auto_reply("makasih kak, message nya udah aku baca")
+
+
+# ─── price question with no pain on record (the 71%-ghost leak) ───
+
+from app.modules.conversation.situations import ANSWER_PRICE_NO_PAIN_NUDGE  # noqa: E402
+
+
+def test_price_question_without_a_pain_gets_the_framed_answer() -> None:
+    got = _pick("berapa biayanya kak?", n=2)
+    assert ANSWER_PRICE_NO_PAIN_NUDGE in got
+    assert "DP" in got  # must lead with the smallest step, not the total
+
+
+def test_price_question_once_a_pain_is_known_uses_plain_answer_first() -> None:
+    # pain on record → the number has something to stand against; normal answer-first
+    needs = NeedsProfile(pains=["followers stuck"], gains=["naik order"])
+    got = _pick("berapa biayanya kak?", needs=needs, n=2)
+    assert ANSWER_FIRST_NUDGE in got and ANSWER_PRICE_NO_PAIN_NUDGE not in got
+
+
+def test_non_price_question_is_unaffected() -> None:
+    got = _pick("jadwalnya hari apa kak?", n=2)
+    assert ANSWER_FIRST_NUDGE in got and ANSWER_PRICE_NO_PAIN_NUDGE not in got
+
+
+def test_tight_budget_price_question_still_wins() -> None:
+    # 'ga ada modal, berapa biayanya?' keeps the cheap-entry combo, not the generic framing
+    got = _pick("ga ada modal kak, berapa biayanya?", n=2)
+    assert ANSWER_FIRST_TIGHT_BUDGET_NUDGE in got

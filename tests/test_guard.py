@@ -678,3 +678,16 @@ def test_booster_wrong_duration_flags_invented_multiweek_booster() -> None:
     assert not guard.booster_wrong_duration(
         "Ada Skill Booster 1 hari, atau SMM Intensive yang 2 minggu")
     assert not guard.booster_wrong_duration("SMM Intensive 2 minggu, 3x per minggu")
+
+
+def test_promised_handoff_detects_a_stated_team_takeover() -> None:
+    # thread 1230: the bot said this, never set needs_manager, and kept nudging the lead
+    assert guard.promised_handoff(
+        "Siap Kak! Data sudah aku teruskan ke tim, mereka akan hubungi Kakak via WhatsApp "
+        "dalam 1x24 jam")
+    assert guard.promised_handoff("Tim kami akan hubungi Kakak di jam kerja ya")
+    assert guard.promised_handoff("Nanti akan dihubungi langsung oleh tim kami")
+    # "let me check with the team" is NOT a hand-off promise — SAFE_FALLBACK owns that path
+    assert not guard.promised_handoff(
+        "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak")
+    assert not guard.promised_handoff("Kelas kami dipandu mentor praktisi dari tim kami")

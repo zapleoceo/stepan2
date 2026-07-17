@@ -574,6 +574,18 @@ class ReplyService:
                         "(ratio=%.2f) → clarify", workflow, self.branch_id, thread_id,
                         post_guard_ratio)
                     decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
+        # KEEP A HAND-OFF PROMISE. If the reply tells the lead a human is taking over, a human
+        # must actually be notified — otherwise the bot promises a call, nobody gets the lead,
+        # and the follow-up cycle keeps nudging the person it just handed off (thread 1230).
+        # Set before the phone gate so a promise made without a contact still routes correctly.
+        if decision.reply and not decision.needs_manager \
+                and guard.promised_handoff(decision.reply):
+            from dataclasses import replace  # noqa: PLC0415, F811
+            logger.info(
+                "guard: branch=%d thread=%d reply promises a hand-off → escalate for real",
+                self.branch_id, thread_id)
+            decision = replace(decision, needs_manager=True,
+                               kb_gap=decision.kb_gap or guard.GUARD_HANDOFF_REASON)
         # ANSWER an answerable question rather than phone-gate it. When the model escalates on a
         # concrete, answerable question and we have no phone, the phone gate below would swallow
         # that question under a "give me your WhatsApp" stub — re-sent verbatim each time the

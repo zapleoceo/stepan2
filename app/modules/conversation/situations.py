@@ -324,6 +324,32 @@ FOLLOWUP_PRODUCT_DISCIPLINE = (
 # on its own once a pain is captured (need-payoff takes over) or past the discovery cap
 # (discovery-cap presents what we have). Never fires when the lead DID ask — answer-first owns
 # that (a direct price question gets the price).
+# The single biggest measured leak (100-thread funnel, 2026-07-16): a price was quoted in 65
+# chats and in 46 of them (71%) the lead never wrote again. Pain was on record in only 18% of
+# chats while a price went out in 65% — so the number lands on someone whose problem we never
+# learned, and a bare figure with nothing behind it is just something to reject. Refusing to
+# answer is NOT the fix (they asked, and the ad's own button invites the price question) —
+# what changes is the framing around the number.
+PRICE_QUESTION_RE = re.compile(
+    r"\b(berapa|harga|biaya|tarif|cicilan|angsuran|murah|mahal|gratis|bayar|berbayar|modal)\b",
+    re.IGNORECASE)
+
+ANSWER_PRICE_NO_PAIN_NUDGE = (
+    "[System: the lead is asking about the price and you have NOT learned a single pain or "
+    "goal from them yet. ANSWER HONESTLY — they asked, never dodge — but do NOT ship a bare "
+    "total: measured over 100 live chats, 71% of leads who got a naked number never wrote "
+    "again. Frame it instead:\n"
+    "1) Lead with the SMALLEST real step from the card — the DP that secures a seat — not the "
+    "full figure.\n"
+    "2) Put the easy-payment facts right beside it (interest-free instalments, QRIS/transfer) "
+    "— only what the card actually says.\n"
+    "3) Keep the full total present and honest, but as context, not the headline.\n"
+    "4) Close with ONE short question that opens WHY they're asking — what they want the "
+    "skill for, or what isn't working now — so the number has something to stand against.\n"
+    "Facts strictly from the card. NEVER invent a discount, a deadline, a seat count or any "
+    "urgency that isn't written there.]"
+)
+
 DISCOVER_BEFORE_PRICE_NUDGE = (
     "[System: this lead is engaged but hasn't told you a single pain or goal yet, and they did "
     "NOT ask for the price. Do NOT quote the fee, the monthly figure, or the total now — a price "
@@ -427,6 +453,10 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
     if asks:
         if LOW_BUDGET_RE.search(last_txt):
             return ANSWER_FIRST_TIGHT_BUDGET_NUDGE
+        # A price question from someone whose pain we still don't know is where the funnel
+        # actually dies (71% never reply to a bare number) — answer it, but framed.
+        if PRICE_QUESTION_RE.search(last_txt) and not stored_needs.pains:
+            return ANSWER_PRICE_NO_PAIN_NUDGE
         return ANSWER_FIRST_NUDGE
     if LOW_BUDGET_RE.search(last_txt):
         return LOW_BUDGET_NUDGE

@@ -356,6 +356,27 @@ def normalize_address(text: str) -> str:
     return _KAMU_RE.sub("Kakak", text or "")
 
 
+# The bot telling the lead a HUMAN is taking over is a promise that must be kept. Thread 1230:
+# "Data sudah aku teruskan ke tim, mereka akan hubungi Kakak via WhatsApp dalam 1×24 jam" — but
+# needs_manager stayed false, so no human was ever notified, the bot stayed on, and it kept
+# nudging the lead it had just handed off ("Eh iya Kak, jadi kepikiran lagi nih..."). If the
+# reply says a human is coming, the escalation must actually fire (which also mutes the bot and
+# stops the follow-up cycle). Deliberately narrow: only a stated hand-off, not "let me check"
+# (SAFE_FALLBACK already sets needs_manager itself).
+_HANDOFF_PROMISE_RE = re.compile(
+    r"\b(?:data|nomor|kontak)\b[^.!?\n]{0,30}\b(?:sudah|udah|telah)\b[^.!?\n]{0,20}"
+    r"\b(?:teruskan|diteruskan|catat)\b"
+    r"|\btim\s+(?:kami\s+)?(?:akan|bakal)\s+(?:hubungi|kontak|menghubungi)\b"
+    r"|\bakan\s+dihubungi\b[^.!?\n]{0,25}\btim\b",
+    re.IGNORECASE)
+
+
+def promised_handoff(reply: str) -> bool:
+    """The reply tells the lead a human/team will contact them — so a human must really be
+    notified and the bot must stop nudging."""
+    return bool(_HANDOFF_PROMISE_RE.search(reply or ""))
+
+
 ANSWER_DONT_ESCALATE_CORRECTION = (
     "[System: the lead just asked a concrete, answerable question (a price, schedule, or how to "
     "sign up). Answer it DIRECTLY from the product catalog / knowledge base in this reply. Do "
