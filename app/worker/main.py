@@ -700,6 +700,56 @@ async def reindex_knowledge_branch(ctx: dict[str, Any], branch_id: int) -> int:
         return 0
 
 
+_DIGEST_THREADS = 300
+
+
+async def daily_digest(ctx: dict[str, Any]) -> int:
+    """Ship the dialogue digest to whoever the branch put in `digest_tg_id`. Read-only
+    analytics (no IG writes) → not kill-switch gated. Runs after aggregate_needs so the
+    needs cloud in the file is the freshly-classified one."""
+    return await _fan_out_per_branch(ctx, "daily_digest_branch")
+
+
+async def daily_digest_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's digest → Telegram, as a file (all dialogs blow past sendMessage's 4096).
+    Recipient is a niche per-branch setting read directly, so it stays out of the settings
+    schema/UI (same precedent as _platform_agent_on)."""
+    from sqlalchemy import text  # noqa: PLC0415
+
+    from app.modules.reports.daily_digest import build_digest  # noqa: PLC0415
+
+    async with session_scope() as session:
+        row = (await session.execute(text(
+            "SELECT value FROM app_setting WHERE branch_id = :b AND key = 'digest_tg_id'"),
+            {"b": branch_id})).first()
+        chat_raw = (row[0] or "").strip() if row else ""
+        if not chat_raw:
+            return 0  # not configured for this branch — nothing to do
+        markdown = await build_digest(session, branch_id, limit=_DIGEST_THREADS)
+    token = settings().tg_bot_token
+    if not token:
+        logger.warning("daily_digest: branch=%d no bot token — skipped", branch_id)
+        return 0
+    try:
+        chat_id = int(chat_raw)
+    except ValueError:
+        logger.warning("daily_digest: branch=%d digest_tg_id=%r is not an id", branch_id,
+                       chat_raw)
+        return 0
+    day = datetime.now(UTC).date().isoformat()
+    status = await TelegramNotifier(
+        bot_token=token, group_chat_id=chat_id,
+    ).send_document(
+        filename=f"stepan-dialogs-branch{branch_id}-{day}.md",
+        content=markdown,
+        caption=f"Выгрузка диалогов за {day} — филиал {branch_id}, "
+                f"последние {_DIGEST_THREADS} чатов.",
+        chat_id=chat_id,
+    )
+    logger.info("daily_digest: branch=%d → chat=%s %s", branch_id, chat_id, status)
+    return 1 if status == "ok" else 0
+
+
 async def aggregate_needs(ctx: dict[str, Any]) -> int:
     """Nightly (midnight Jakarta) needs-cloud pass for ALL branches: incrementally classify
     leads whose needs changed onto the branch's stable taxonomy, then snapshot the day's
@@ -758,6 +808,7 @@ class WorkerSettings:
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, reply_pending, send_outbox, schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
+        daily_digest,
         reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
@@ -766,6 +817,7 @@ class WorkerSettings:
         ingest_branch, reply_pending_branch, send_outbox_branch, schedule_followups_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
+        daily_digest_branch,
         sync_ads_branch, backfill_ads_branch,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
         # timeout re-dispatches next tick rather than immediately re-hitting the same slow broker
@@ -815,6 +867,8 @@ class WorkerSettings:
         # Needs-cloud aggregation once a day at 17:00 UTC = 00:00 WIB (midnight Jakarta), all
         # branches. Incremental + analytics-only, so it's cheap and safe to run platform-wide.
         cron(aggregate_needs, hour={17}, minute={0}, second=0, run_at_startup=False),
+        # after aggregate_needs, so the needs cloud in the file is the fresh one
+        cron(daily_digest, hour={17}, minute={30}, second=0, run_at_startup=False),
         # Meta ad map + insights every 20 min. Deliberately slow: Meta throttles an ad account
         # account-wide after a burst (code 80004 — hit live while building this), and its own
         # attribution lags ~7 days, so a faster cadence would buy nothing but 429s. Costs zero

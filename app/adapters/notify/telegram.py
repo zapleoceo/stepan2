@@ -61,6 +61,33 @@ class TelegramNotifier:
             return "topic_gone"
         return "failed"
 
+    async def send_document(
+        self, *, filename: str, content: str, caption: str = "",
+        chat_id: int | None = None,
+    ) -> SendStatus:
+        """Upload a text file. A digest of every dialog blows past sendMessage's 4096 chars,
+        so it ships as an attachment with the summary as the caption. `chat_id` overrides the
+        notifier's group (the digest goes to a person, alerts go to the branch group)."""
+        import httpx  # lazy: same reason as _call
+
+        try:
+            url = f"{self._base}/bot{self._token}/sendDocument"
+            data = {"chat_id": str(chat_id if chat_id is not None else self._chat_id),
+                    "caption": caption[:1024], "parse_mode": "HTML"}
+            files = {"document": (filename, content.encode("utf-8"), "text/markdown")}
+            async with httpx.AsyncClient(timeout=120) as client:  # a big file needs headroom
+                response = await client.post(url, data=data, files=files)
+            body = response.json()
+        except Exception as exc:
+            logger.warning("telegram sendDocument failed (chat=%s): %s",
+                           chat_id or self._chat_id, exc)
+            return "failed"
+        if body.get("ok"):
+            return "ok"
+        logger.warning("telegram sendDocument rejected (chat=%s): %s",
+                       chat_id or self._chat_id, body.get("description"))
+        return "failed"
+
     async def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         """POST to the Bot API; return the parsed body (even on HTTP 4xx so callers can read
         `description`), or None on a transport error. Never raises — a missed ping is not fatal."""
