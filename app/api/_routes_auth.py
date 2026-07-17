@@ -1,6 +1,7 @@
 """Auth routes — Telegram Login widget page, login callback, logout."""
 from __future__ import annotations
 
+import html as _h
 import logging
 
 from fastapi import APIRouter, Request
@@ -61,7 +62,11 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
             is_super=is_super, branch_ids=branch_ids, writable_branch_ids=writable,
         )
 
-    resp = RedirectResponse(url="/ui/inbox", status_code=303)
+    # Land the cookie on a 200 HTML page that then redirects, NOT on the 303 itself: many
+    # mobile in-app WebViews (Telegram's browser, older Android WebView) drop a Set-Cookie that
+    # rides a 3xx response, so the very next request arrived with no session and bounced back to
+    # /login — an endless login loop on phones while desktop worked (real report 2026-07-17).
+    resp = HTMLResponse(_post_login_html("/ui/inbox"))
     resp.set_cookie(
         SESSION_COOKIE, token, max_age=SESSION_MAX_AGE_S,
         httponly=True, samesite="lax", secure=True,
@@ -100,6 +105,23 @@ def _login_html(bot_username: str) -> str:
         'p{color:#9aa7b4}</style></head><body><div class="card">'
         '<h1>Stepan 2</h1><p>Sign in with Telegram to continue</p>'
         f'{widget}</div></body></html>'
+    )
+
+
+def _post_login_html(dest: str) -> str:
+    """A 200 page whose ONLY job is to let the browser commit the just-set session cookie,
+    then navigate on. location.replace keeps the transient page out of history; the meta
+    refresh is the fallback if JS is off, and the link is the fallback if both fail."""
+    d = _h.escape(dest)
+    return (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0;url={d}">'
+        f'{_FAVICON}<title>Signing in…</title>'
+        '<style>body{background:#0f1117;color:#9aa7b4;font-family:system-ui,sans-serif;'
+        'margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center}'
+        'a{color:#4da6ff}</style></head><body>'
+        f'<p>Signing in… <a href="{d}">continue</a></p>'
+        f'<script>location.replace({d!r})</script></body></html>'
     )
 
 

@@ -135,11 +135,16 @@ async def test_tg_login_mints_super_admin_session(db_session, monkeypatch) -> No
     db_session.add(Membership(user_id=u.id, branch_id=None, role=Role.SUPER_ADMIN))
     await db_session.flush()
 
-    sess, _ = await _run_tg_login(db_session, monkeypatch, 169510539)
+    sess, resp = await _run_tg_login(db_session, monkeypatch, 169510539)
     assert sess is not None
     assert sess["sa"] is True           # super_admin claim
     assert sess["br"] == []             # no branch confinement
     assert sess["uid"] == u.id
+    # The cookie must ride a 200 HTML page, NOT a 3xx: mobile in-app WebViews drop a
+    # Set-Cookie on a redirect, which looped phone logins back to /login forever.
+    assert resp.status_code == 200
+    body = resp.body.decode()
+    assert "/ui/inbox" in body and "location.replace" in body
 
 
 async def test_tg_login_viewer_gets_no_write(db_session, monkeypatch) -> None:
