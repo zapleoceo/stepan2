@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
-from app.adapters.db.models import AppSetting, Branch  # noqa: E402
+from app.adapters.db.models import AppSetting, Branch, KnowledgeDoc  # noqa: E402
 from app.modules.conversation.sim import SimService  # noqa: E402
 from app.modules.settings.service import invalidate  # noqa: E402
 
@@ -59,6 +59,8 @@ async def _full_branch(s) -> int:
     b = Branch(name="ID", lang="id")
     s.add(b)
     await s.flush()
+    s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
+        content="Pembayaran: DP Rp 500.000 via transfer BCA atau QRIS."))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="full"))  # tier-2 LLM verify ON
     await s.flush()
     invalidate(b.id)

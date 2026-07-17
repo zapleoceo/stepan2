@@ -304,3 +304,66 @@ async def test_coach_edit_makes_branch_need_reindex(db_session) -> None:
     doc = await KnowledgeRepo(db_session, bid).by_slug("playbook_price")
     assert "13,000,000" in doc.content                       # content changed
     assert await branch_needs_reindex(db_session, bid) is True  # → RAG rebuilds next tick
+
+
+async def test_watermark_comes_from_content_clock_not_wall_clock(db_session) -> None:
+    """A UI edit stamps updated_at with the DB clock; the old wall-clock watermark could
+    run AHEAD of it and hide the edit forever (live incident 2026-07-17)."""
+    from datetime import timedelta
+
+    from sqlalchemy import select as _select
+
+    from app.adapters.db.models import KnowledgeDoc, _utcnow
+    from app.modules.knowledge.reindex import _indexed_at
+
+    bid = await _seed(db_session)
+    past = _utcnow() - timedelta(hours=2)
+    for model in (KnowledgeDoc, Product):
+        for row in (await db_session.execute(
+                _select(model).where(model.branch_id == bid))).scalars():
+            row.updated_at = past
+            db_session.add(row)
+    doc = (await db_session.execute(
+        _select(KnowledgeDoc).where(KnowledgeDoc.slug == "playbook_price"))).scalars().first()
+    await db_session.flush()
+    await reindex_branch(db_session, bid, _BagLLM())
+    mark = await _indexed_at(db_session, bid)
+    assert mark is not None and mark <= _utcnow() - timedelta(hours=1)  # data clock, not now()
+    # an edit stamped 1h ago (later than the data watermark, earlier than wall-clock now)
+    # must be visible — under the old wall-clock watermark it was silently swallowed
+    doc.updated_at = _utcnow() - timedelta(hours=1)
+    db_session.add(doc)
+    await db_session.flush()
+    assert await branch_needs_reindex(db_session, bid) is True
+
+
+async def test_restore_revision_bumps_updated_at_so_the_watcher_sees_it(db_session) -> None:
+    from datetime import timedelta
+
+    from sqlalchemy import select as _select
+
+    from app.adapters.db.models import KnowledgeDoc, _utcnow
+    from app.modules.knowledge.history import record_revision, restore_revision
+
+    bid = await _seed(db_session)
+    doc = (await db_session.execute(
+        _select(KnowledgeDoc).where(KnowledgeDoc.slug == "playbook_price"))).scalars().first()
+    await record_revision(
+        db_session, branch_id=bid, entity_type="doc", slug=doc.slug,
+        old_content=doc.content, new_content="restored body", actor="test")
+    await db_session.flush()
+    from sqlalchemy import text as _text
+    rev_id = (await db_session.execute(_text(
+        "SELECT id FROM knowledge_revision ORDER BY id DESC LIMIT 1"))).scalar()
+    await reindex_branch(db_session, bid, _BagLLM())
+    assert await branch_needs_reindex(db_session, bid) is False
+    before = _utcnow() - timedelta(seconds=1)
+    out = await restore_revision(db_session, bid, rev_id, actor="test")
+    assert out == ("doc", doc.slug)
+    await db_session.flush()
+    db_session.expire_all()
+    doc2 = (await db_session.execute(
+        _select(KnowledgeDoc).where(KnowledgeDoc.slug == "playbook_price"))).scalars().first()
+    assert doc2.content == "restored body"
+    assert doc2.updated_at is not None and doc2.updated_at >= before
+    assert await branch_needs_reindex(db_session, bid) is True

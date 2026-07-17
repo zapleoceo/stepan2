@@ -11,7 +11,14 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
 from sqlalchemy import func, select  # noqa: E402
 
-from app.adapters.db.models import Branch, Channel, Lead, Message, Outbox  # noqa: E402
+from app.adapters.db.models import (  # noqa: E402
+    Branch,
+    Channel,
+    KnowledgeDoc,
+    Lead,
+    Message,
+    Outbox,
+)
 from app.modules.conversation.sim import SimService  # noqa: E402
 
 
@@ -35,6 +42,8 @@ async def _branch(s) -> int:
     b = Branch(name="ID", lang="id")
     s.add(b)
     await s.flush()
+    s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
+        content="Pembayaran: DP Rp 500.000 via transfer BCA atau QRIS."))
     return b.id
 
 

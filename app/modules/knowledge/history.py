@@ -6,7 +6,7 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import KnowledgeRevision
+from app.adapters.db.models import KnowledgeRevision, _utcnow
 
 
 async def record_revision(
@@ -55,19 +55,23 @@ async def restore_revision(
         return None
     entity_type, slug, content = rev[0], rev[1], rev[2] or ""
     # entity_type comes from our own row, mapped to a whitelisted table name (not user input)
+    # updated_at MUST bump here: a raw UPDATE bypasses the ORM's onupdate, and a restore
+    # that leaves the old timestamp is invisible to the reindex watcher — the restored
+    # content then never reaches the RAG index (bug found 2026-07-17).
     if entity_type == "product":
         sel = ("SELECT content FROM product WHERE slug=:slug"
                " AND (:bid IS NULL OR branch_id=:bid)")
-        upd = ("UPDATE product SET content=:c, updated_by=:a WHERE slug=:slug"
-               " AND (:bid IS NULL OR branch_id=:bid)")
+        upd = ("UPDATE product SET content=:c, updated_by=:a, updated_at=:ts"
+               " WHERE slug=:slug AND (:bid IS NULL OR branch_id=:bid)")
     else:
         sel = ("SELECT content FROM knowledge_doc WHERE slug=:slug"
                " AND (:bid IS NULL OR branch_id=:bid)")
-        upd = ("UPDATE knowledge_doc SET content=:c, updated_by=:a WHERE slug=:slug"
-               " AND (:bid IS NULL OR branch_id=:bid)")
+        upd = ("UPDATE knowledge_doc SET content=:c, updated_by=:a, updated_at=:ts"
+               " WHERE slug=:slug AND (:bid IS NULL OR branch_id=:bid)")
     old = (await session.execute(text(sel), {"slug": slug, "bid": branch_id})).first()
     await session.execute(
-        text(upd), {"c": content, "a": actor, "slug": slug, "bid": branch_id})
+        text(upd), {"c": content, "a": actor, "slug": slug, "bid": branch_id,
+                    "ts": _utcnow()})
     await record_revision(session, branch_id=branch_id, entity_type=entity_type, slug=slug,
                           old_content=old[0] if old else None, new_content=content, actor=actor)
     return entity_type, slug

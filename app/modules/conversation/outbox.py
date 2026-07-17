@@ -63,10 +63,11 @@ class OutboxSender:
 
     async def send_next(self, thread_id: int) -> Outbox | None:
         """Pick the oldest due line (scheduled_at ≤ now) and send it, unless capped."""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        await self._sweep_stale_claims(thread_id, now)
         row = await self.outbox.oldest_pending(thread_id)
         if row is None:
             return None
-        now = datetime.now(UTC).replace(tzinfo=None)
         if row.scheduled_at > now:
             return None  # not due yet — respect reply delay
         thread = await self.threads.by_id(thread_id)
@@ -112,6 +113,17 @@ class OutboxSender:
             if skipped is not None:
                 return skipped
 
+        # Claim the row in its OWN committed step before the network call. The IG send and
+        # the bookkeeping used to share one transaction: anything crashing AFTER a successful
+        # send rolled the row back to 'pending' and the next tick delivered the same text
+        # again (threads 2697/4122, 2026-07-17: identical bubbles ~80s apart, one outbox
+        # row). A committed 'sending' row is invisible to oldest_pending, so no tick can
+        # re-send it; if the final status never lands, the sweep marks it failed — an
+        # unknown outcome is never retried (a possible lost line beats a certain duplicate).
+        row.status = "sending"
+        row.sent_at = now  # claim timestamp — the stale-claim sweep keys off it
+        self.session.add(row)
+        await self.session.commit()
         await self._humanize(thread.external_thread_id)
         result = await self.channel.send_text(thread.external_thread_id, row.text)
         if result.ok:
@@ -127,6 +139,7 @@ class OutboxSender:
             )
         elif _is_soft_block(result.error) and row.attempts < _MAX_SOFT_BLOCK_ATTEMPTS:
             row.status = "pending"  # transient (challenge/rate) — back off, don't drop
+            row.sent_at = None  # the claim stamp is not a delivery time
             row.scheduled_at = now + _RETRY_AFTER
             row.error = result.error
             row.attempts += 1
@@ -142,6 +155,7 @@ class OutboxSender:
                     self.branch_id, thread_id, row.attempts, result.error,
                 )
             row.status = "failed"
+            row.sent_at = None  # the claim stamp is not a delivery time
             row.error = result.error
             logger.warning(
                 "send failed branch=%d thread=%d: %s", self.branch_id, thread_id, result.error
@@ -159,6 +173,19 @@ class OutboxSender:
         self.session.add(row)
         await self.session.flush()
         return row
+
+    async def _sweep_stale_claims(self, thread_id: int, now: datetime) -> None:
+        """A row stuck in 'sending' means we crashed between the IG call and the final
+        status — the message may or may not have reached the lead. Never resend it (the
+        duplicate is the worse failure); after 10 minutes mark it failed so the queue moves
+        on and the error is visible in the UI."""
+        from sqlalchemy import update  # noqa: PLC0415
+        await self.session.execute(
+            update(Outbox)
+            .where(Outbox.thread_id == thread_id, Outbox.status == "sending",
+                   Outbox.sent_at < now - timedelta(minutes=10))
+            .values(status="failed",
+                    error="crashed mid-send — outcome unknown, not retried"))
 
     async def _crm_gate(self, thread, row: Outbox) -> Outbox | None:
         """Consult the CRM before sending: a `hold` verdict skips this line (won't

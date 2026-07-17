@@ -315,6 +315,19 @@ class FollowupService:
             await raise_manager_alert(
                 self.session, self.branch_id, self.notifier, self.llm,
                 thread_id, ctx.lead.id, decision, ctx.lead.phone_e164)
+        # A follow-up nobody asked for must never ship a canned stub. SAFE_FALLBACK ("I'll
+        # check with the team") answers a question the lead never asked (thread 1230,
+        # 2026-07-17: sent into a 14-day silence), the clarify menu clarifies nothing, and
+        # an unprompted hand-off promise strands the lead waiting for a call. The alert (if
+        # genuinely due) is already raised above — the text itself has no value: burn the
+        # step instead of sending it.
+        if decision.reply.strip() in (guard.SAFE_FALLBACK, guard.CLARIFY_FALLBACK) \
+                or guard.promised_handoff(decision.reply):
+            logger.warning(
+                "followup: branch=%d thread=%d canned stub / hand-off promise as a nudge — "
+                "dropped, step burned", self.branch_id, thread_id)
+            await self._burn_dry_step(thread_id, now)
+            return False
         meta_line = _fmt_llm_meta(meta)
         for i, bubble in enumerate(_split_bubbles(decision.reply)):
             await self.outbox.add(Outbox(

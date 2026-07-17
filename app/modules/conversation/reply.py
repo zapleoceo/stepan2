@@ -235,10 +235,13 @@ async def raise_manager_alert(
         )
 
 
-def _deterministic_issues(reply: str, context: str, lead_spoke: bool = True) -> list[str]:
+def _deterministic_issues(
+    reply: str, context: str, lead_spoke: bool = True, lead_words: str = "",
+) -> list[str]:
     """Every KB-context-free check — no LLM call needed, always on regardless of
     reply_guard mode. Re-run on a regenerated draft too, so a still-broken reply is caught
-    before it ships rather than trusted on faith."""
+    before it ships rather than trusted on faith. `lead_words` is everything the lead has
+    typed in their own words (ad prefill excluded) — the payment-details gate needs it."""
     return [
         *guard.ungrounded_urls(reply, context),
         *guard.false_delivery_claims(reply),
@@ -249,7 +252,17 @@ def _deterministic_issues(reply: str, context: str, lead_spoke: bool = True) -> 
         *guard.price_before_lead_spoke(reply, lead_spoke),
         *guard.stale_dates(reply),
         *guard.booster_wrong_duration(reply),
+        *guard.premature_payment_details(reply, lead_words),
+        *guard.invented_price_no_card(reply, context),
     ]
+
+
+def _own_words(dialog) -> str:  # noqa: ANN001
+    """Everything the lead typed themselves — the ad's prefilled opener is a button click,
+    not their words, so it never counts."""
+    return " ".join(
+        m.text or "" for m in dialog
+        if m.direction == "in" and not _AD_TEMPLATE_RE.search(m.text or ""))
 
 
 def _bump_guard_regen_count(lead: Lead) -> None:
@@ -332,7 +345,8 @@ async def guard_decision(
             if fixed is not None and fixed.reply:
                 decision, meta = fixed, regen_meta
     lead_spoke = _lead_spoke_own_words(ctx.dialog)
-    issues = _deterministic_issues(decision.reply, context, lead_spoke)
+    lead_words = _own_words(ctx.dialog)
+    issues = _deterministic_issues(decision.reply, context, lead_spoke, lead_words)
     # Skip the LLM verify when the reply's only risk is a price that string-matches the KB —
     # the single most common verify trigger, and a pure repetition of a grounded fact.
     if mode == "full" and guard.is_risky(decision.reply) \
@@ -358,7 +372,7 @@ async def guard_decision(
     # Only the deterministic checks are re-verified (an LLM re-verify would double cost);
     # a still-broken draft means we can't trust it → hand off.
     from dataclasses import replace  # noqa: PLC0415
-    remaining = (_deterministic_issues(fixed.reply, context, lead_spoke)
+    remaining = (_deterministic_issues(fixed.reply, context, lead_spoke, lead_words)
                  if fixed.reply else ["empty reply"])
     if not remaining:
         return fixed, regen_meta
@@ -368,7 +382,7 @@ async def guard_decision(
     # lebih detail" got a full hand-off purely because the regen ALSO asked two questions).
     if all("question mark" in issue for issue in remaining):
         trimmed = guard.truncate_to_one_question(fixed.reply)
-        if not _deterministic_issues(trimmed, context, lead_spoke):
+        if not _deterministic_issues(trimmed, context, lead_spoke, lead_words):
             return replace(fixed, reply=trimmed), regen_meta
     logger.error("guard: branch=%d thread=%d unfixable violation → hand-off",
                  branch_id, thread_id)
@@ -612,7 +626,8 @@ class ReplyService:
             if answered is not None and answered.reply \
                     and not guard.promised_handoff(answered.reply) \
                     and not _deterministic_issues(
-                        answered.reply, engine.last_context, _lead_spoke_own_words(ctx.dialog)):
+                        answered.reply, engine.last_context,
+                        _lead_spoke_own_words(ctx.dialog), _own_words(ctx.dialog)):
                 if answered.needs_manager:
                     answered = replace(answered, needs_manager=False,
                                        manager_question=None, kb_gap=None)
@@ -915,7 +930,12 @@ class ReplyService:
         """A repeatedly-off-topic non_target lead: the model's polite closing line is already
         queued this turn — now wind the funnel down to DORMANT (bot off, follow-up timer
         cleared) so a wrong-audience lead stops occupying the active queue. Softer than
-        _hard_stop (no explicit stop demand); a fresh inbound with real interest revives it."""
+        _hard_stop (no explicit stop demand); a fresh inbound with real interest revives it.
+
+        A human gets ONE ping about the close — no phone required (the usual phone gate is
+        for deals; a troll won't give a number and shouldn't be asked for one). 2026-07
+        audit: money-beggars and spammers (threads 4237/4113/2707) kept getting pitches for
+        days because nobody ever saw them; the owner decided: alert + go silent."""
         thread.next_followup_at = None
         self.session.add(thread)
         if lead.stage != Stage.DORMANT:
@@ -925,6 +945,17 @@ class ReplyService:
                 actor="bot", reason="non_target",
             ))
             lead.stage = Stage.DORMANT
+            try:
+                await AlertService(
+                    self.session, self.branch_id, self._notifier, llm=self.llm,
+                ).raise_alert(
+                    lead_id=lead.id, kind="non_target",
+                    summary_en="Non-target lead closed — bot went silent",
+                    summary_ru="Нецелевой лид: бот закрыл диалог и замолчал. "
+                               "Гляньте на всякий случай — вдруг это живой клиент.",
+                    thread_id=thread.id, lead_phone=lead.phone_e164)
+            except Exception:
+                logger.warning("non_target close alert failed lead=%s", lead.id, exc_info=True)
         lead.agent_enabled = False
         self.session.add(lead)
         logger.info("branch=%d lead=%d non_target → dormant, bot off", self.branch_id, lead.id)

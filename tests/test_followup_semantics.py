@@ -13,6 +13,7 @@ from app.adapters.db.models import (
     Branch,
     Channel,
     ChannelThread,
+    KnowledgeDoc,
     Lead,
     Message,
     Outbox,
@@ -77,6 +78,8 @@ async def _world(
     branch = Branch(name="T", lang="id")
     s.add(branch)
     await s.flush()
+    s.add(KnowledgeDoc(branch_id=branch.id, slug="payment_policy",
+        content="Pembayaran: DP Rp 500.000 via BCA/QRIS. Tiket event Rp 100.000."))
     for k, v in (settings or {
         "followup_enabled": "true", "quiet_start": "0", "quiet_end": "0",
         "hourly_cap": "0", "daily_cap": "0",
@@ -533,9 +536,15 @@ async def test_followup_nudge_goes_through_the_reply_guard(db_session) -> None:
     invalidate(bid)
     fake_link = "https://lab.itstep.id/cybersecurity-practice?access=HANDAYANI2024"
     payload = json.dumps({"reply": f"cek di {fake_link} ya", "stage": "qualifying"})
-    assert await _svc(db_session, bid, llm=FakeLLM(payload)).run() == 1
+    # The guard catches the link, the regen (same fake LLM) can't fix it, and the resulting
+    # canned SAFE_FALLBACK is NOT worth sending as an unsolicited nudge - the whole send is
+    # dropped and the schedule step burned (thread 1230: "I'll check with the team" fired
+    # into a 14-day silence with no question asked).
+    assert await _svc(db_session, bid, llm=FakeLLM(payload)).run() == 0
     row = await _pending(db_session, tid)
-    assert row is not None and fake_link not in row.text  # guard scrubbed the fabricated link
+    assert row is None  # nothing queued at all - never the fabricated link, never the stub
+    await db_session.refresh(thread)
+    assert thread.followups_sent >= 1  # the step was burned, not left due to loop forever
 
 
 async def test_followup_splits_bubbles_like_a_normal_reply(db_session) -> None:

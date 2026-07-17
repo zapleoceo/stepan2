@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
-from app.adapters.db.models import Branch  # noqa: E402
+from app.adapters.db.models import Branch, KnowledgeDoc  # noqa: E402
 from app.modules.conversation.sim_persona import PERSONAS, run_persona  # noqa: E402
 
 
@@ -38,6 +38,8 @@ async def test_persona_runs_a_dialogue_and_ends(db_session) -> None:
     b = Branch(name="SIM", lang="id")
     db_session.add(b)
     await db_session.flush()
+    db_session.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
+        content="Pembayaran: DP Rp 500.000. Vibe Coding 13 juta."))
 
     out = await run_persona(db_session, b.id, "hot_ready", "p1", _DualLLM(), max_turns=4)
     assert out["ok"] and out["ended"] and out["reason"] == "lead_ended"

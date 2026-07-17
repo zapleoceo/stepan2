@@ -73,8 +73,16 @@ async def branch_needs_reindex(session: AsyncSession, branch_id: int) -> bool:
 
 
 async def reindex_branch(session: AsyncSession, branch_id: int, llm: LLMPort) -> int:
-    """Rebuild the branch index and advance its watermark. Returns chunks stored."""
-    started = _utcnow()
+    """Rebuild the branch index and advance its watermark. Returns chunks stored.
+
+    The watermark is max(updated_at) of the content as read at the START of the rebuild —
+    the same values `_last_edit` compares against — NEVER the worker's wall clock. The two
+    clocks live in different processes (UI edits stamp updated_at with Postgres NOW(), the
+    worker's _utcnow() is Python), and any skew between them let the wall-clock watermark
+    run AHEAD of real edits, after which `branch_needs_reindex` returned False forever and
+    a stale index lived on silently (live incident, 2026-07-17: a KB edit never reached
+    RAG until a manual force)."""
+    covered = await _last_edit(session, branch_id)
     rag = RagService(session, branch_id, llm)
     stored = await rag.reindex()
     if rag.incomplete:
@@ -83,5 +91,5 @@ async def reindex_branch(session: AsyncSession, branch_id: int, llm: LLMPort) ->
         logger.warning("reindex branch=%d incomplete (%d chunks) — watermark not advanced,"
                        " will retry", branch_id, stored)
         return stored
-    await _set_watermark(session, branch_id, started)
+    await _set_watermark(session, branch_id, covered or _utcnow())
     return stored

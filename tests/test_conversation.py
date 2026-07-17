@@ -9,7 +9,15 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message, Outbox
+from app.adapters.db.models import (
+    Branch,
+    Channel,
+    ChannelThread,
+    KnowledgeDoc,
+    Lead,
+    Message,
+    Outbox,
+)
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import Decision, OutboxSender, ReplyService
 from app.modules.conversation.repository import OutboxRepo
@@ -78,6 +86,8 @@ async def _branch(s, name: str = "Jakarta", lang: str = "id") -> int:
     b = Branch(name=name, lang=lang)
     s.add(b)
     await s.flush()
+    s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
+        content="Pembayaran: DP Rp 500.000 via transfer BCA atau QRIS."))
     return b.id
 
 

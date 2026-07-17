@@ -277,13 +277,42 @@ _PRICE_QUESTION_RE = re.compile(
 # answerable how-to-pay / how-to-enrol question with the answer already in context.
 # No trailing \b — Indonesian suffixes (daftar→daftarnya, bayar→bayarnya) would break it.
 _ENROLL_PAY_RE = re.compile(
-    r"\b(bayar|pembayaran|transfer|rekening|dp\b|booking|daftar|register|enroll|"
-    r"mau (?:ikut|gabung))",
+    r"\b(bayar|pembayaran|transfer|rekening|no\.?\s*rek|norek|qris|dp\b|booking|daftar|"
+    r"register|enroll|mau (?:ikut|gabung))",
     re.IGNORECASE)
 # Payment facts present in the KB context — a bank account number, transfer/QR/DP methods.
 _PAY_FACT_RE = re.compile(
     r"\b(rekening|bca|no\.?\s*rek|transfer|qris?|\bdp\b|cicilan|paylater|"
     r"kartu (?:kredit|debit))\b", re.IGNORECASE)
+
+
+def premature_payment_details(reply: str, lead_words: str) -> list[str]:
+    """Bank account details in the reply while the lead never asked to pay/enrol. Thread
+    4114: 'saya mau kerja' from a schoolkid got the BCA account and a DP instruction for a
+    course they never chose — that's not a close, it's a screenshot waiting to happen."""
+    txt = reply or ""
+    if not re.search(r"\b(bca|rekening|norek|no\.?\s*rek)\b", txt, re.IGNORECASE):
+        return []
+    digits = re.sub(r"(?<=\d)[ .\-](?=\d)", "", txt)
+    if not re.search(r"\d{8,}", digits):
+        return []  # payment methods in prose are fine — only the account number is gated
+    if _ENROLL_PAY_RE.search(lead_words or ""):
+        return []
+    return ["bank account details offered before the lead ever asked to pay or enrol - "
+            "remove them; close on the value and the next step instead"]
+
+
+def invented_price_no_card(reply: str, context: str) -> list[str]:
+    """A money figure in the reply while the retrieved context contains no prices AT ALL —
+    there is nothing the number could have come from, so it is invented (sim 2026-07-17:
+    'Rp 7.000.000' for SMM Intensive, real price 1.882.955, on a turn whose context missed
+    the card; live thread 4188 quoted 26 juta for a 13.36 juta course the same way)."""
+    if not _canonical_prices(reply or ""):
+        return []
+    if _canonical_prices(context or "", liberal=True):
+        return []  # context has figures — grounding/verify owns the matching
+    return ["a money figure appears in the reply but the knowledge context contains no "
+            "price at all - never state a number you cannot see; say you'll confirm it"]
 
 
 def premature_manager_handoff(last_inbound: str, context: str) -> bool:
@@ -392,11 +421,14 @@ ASK_PHONE_BEFORE_HANDOFF = (
 
 # Used when a live reply keeps converging onto a near-duplicate after a guard regen. That's
 # a style dead-end (the model can't rephrase), NOT a knowledge gap — summoning a manager here
-# wastes a human on an answerable thread (threads 2541/2566, false SMM escalations). Ask the
-# lead to narrow down instead, and leave needs_manager to the model's own call.
+# wastes a human on an answerable thread (threads 2541/2566, false SMM escalations). The old
+# open-ended "sebutkan lebih spesifik" read as a brush-off and fired on the most engaged
+# leads (2026-07 audit of 300 threads: ~24 hit it — on emotions, on agreements, even right
+# after a phone was given). A numbered menu turns the dead-end into a one-tap next step.
 CLARIFY_FALLBACK = (
-    "Biar aku bisa kasih info yang paling pas, boleh Kakak sebutkan lebih spesifik "
-    "yang mau Kakak tahu? 🙏")
+    "Biar nggak muter-muter, Kakak mau tahu yang mana dulu? 🙏\n"
+    "1️⃣ Biaya & cicilan\n2️⃣ Jadwal & durasi\n3️⃣ Materi yang dipelajari\n"
+    "4️⃣ Cara daftar\nKirim nomornya aja ya 😊")
 
 # Reason stamped onto a GUARD-forced hand-off (not the model's own needs_manager). Without
 # it the alert falsely reads "лид запросил менеджера" and the chat log falls back to the

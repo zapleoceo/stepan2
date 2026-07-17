@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from app.adapters.db.models import AppSetting, Branch
+from app.adapters.db.models import AppSetting, Branch, KnowledgeDoc
 from app.modules.conversation import guard
 from app.modules.conversation.sim import SimService
 from app.modules.settings.service import invalidate
@@ -37,6 +37,8 @@ async def _branch(s) -> int:
     b = Branch(name="ID", lang="id")
     s.add(b)
     await s.flush()
+    s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
+        content="Pembayaran: DP Rp 500.000. SMM Intensive total Rp 1.882.955."))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="urls"))
     await s.flush()
     invalidate(b.id)

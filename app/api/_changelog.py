@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.18.0"
+PROJECT_VERSION = "1.19.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,25 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.19.0", "date": "17 Jul 2026", "tag": "Selling",
+        "title": "Closes at the checkout, never invents a number",
+        "blurb": "An audit of 300 live conversations found the moments Stepan lost real "
+                 "buyers — and this release closes them. A client who asks where to send "
+                 "the money now gets the payment details, the amount and a confirmation "
+                 "step in one message (one buyer literally asked for the bank account and "
+                 "got a sales pitch instead). The reverse is now impossible too: bank "
+                 "details never go to someone who hasn't asked to pay, and a price can "
+                 "never be a made-up number — if the real figure isn't in front of him, "
+                 "Stepan says he'll confirm it rather than guessing. The dead-end reply "
+                 "'could you be more specific?' became a tappable menu of the four things "
+                 "people actually want: price, schedule, curriculum, how to enrol. "
+                 "Freeloaders and spammers get a polite close and a quiet note to the "
+                 "team instead of days of pitching. And two delivery bugs are gone: the "
+                 "same message can no longer arrive twice in a row, and a follow-up can "
+                 "no longer say 'let me check with the team' to someone who asked "
+                 "nothing.",
+    },
     {
         "version": "1.18.0", "date": "17 Jul 2026", "tag": "Selling",
         "title": "A price question gets a price",

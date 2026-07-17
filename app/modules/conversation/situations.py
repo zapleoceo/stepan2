@@ -334,6 +334,24 @@ PRICE_QUESTION_RE = re.compile(
     r"\b(berapa|harga|biaya|tarif|cicilan|angsuran|murah|mahal|gratis|bayar|berbayar|modal)\b",
     re.IGNORECASE)
 
+# The lead is asking HOW/WHERE to pay — the strongest buying signal there is. Thread 2821:
+# "No rek min" (give me the account number) got a certificate pitch and two WhatsApp asks
+# instead of the payment details; the buyer walked at the checkout.
+PAYMENT_INTENT_RE = re.compile(
+    r"no\.?\s*rek|norek|rekening|qris|virtual\s*account|"
+    r"(cara|gimana|ke\s*mana|kemana)\s*(nya)?\s*(bayar|transfer)|"
+    r"mau\s+(bayar|transfer)|bayar\s+ke|transfer\s+ke",
+    re.IGNORECASE)
+
+PAYMENT_INTENT_NUDGE = (
+    "[System: the lead is asking HOW or WHERE to pay — that is a BUYING signal; this turn "
+    "closes the deal. Do NOT pitch, do NOT ask a discovery question, and NEVER answer with a "
+    "bare 'give me your WhatsApp'. In this reply: confirm the product and the exact amount "
+    "(the DP first if the card has one), give the real payment options from the payment "
+    "policy (bank transfer and QRIS), ask for their WhatsApp number so the team can confirm "
+    "the payment, and say what happens right after they pay. Facts only from the KB.]"
+)
+
 ANSWER_PRICE_NO_PAIN_NUDGE = (
     "[System: the lead is asking about the price and you have NOT learned a single pain or "
     "goal from them yet. ANSWER HONESTLY — they asked, never dodge — but do NOT ship a bare "
@@ -447,6 +465,8 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         return UNSEEN_MEDIA_NUDGE  # can't read their turn — nothing else can be trusted
     if MINOR_RE.search(last_txt):
         return MINOR_NUDGE
+    if PAYMENT_INTENT_RE.search(last_txt) and not AD_TEMPLATE_RE.search(last_txt):
+        return PAYMENT_INTENT_NUDGE  # a buyer at the checkout outranks every other signal
     asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
     if SOFT_NO_RE.search(last_txt):
         return SOFT_NO_WITH_QUESTION_NUDGE if asks else SOFT_NO_NUDGE

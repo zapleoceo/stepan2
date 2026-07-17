@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # open-house RSVP is a 📆, a manager question is a ❓).
 _KIND_ICON = {
     "ready_deal": "🔥", "ready_openhouse": "📆", "needs_manager": "❓",
-    "bot_off_message": "🔇",
+    "bot_off_message": "🔇", "non_target": "🚫",
 }
 # Short language label shown before each summary block.
 _LANG_LABEL = {"id": "Bahasa", "en": "En", "ru": "Ru", "ms": "Melayu"}
