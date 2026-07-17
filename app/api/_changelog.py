@@ -43,7 +43,7 @@ COMING_NEXT = {
 RELEASES = [
     {
         "version": "1.20.0", "date": "17 Jul 2026", "tag": "Integration",
-        "title": "Two-way CRM sync is live — and it rescues the leads your phone can't reach",
+        "title": "Two-way CRM sync is live — and it rescues the leads your phone can’t reach",
         "blurb": "Stepan now reads your CRM before every message he sends. A client whose "
                  "contract is already signed, or who spoke to a manager this week, is left "
                  "alone — automatically, no list to maintain. And the same wire works the "
