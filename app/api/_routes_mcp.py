@@ -67,6 +67,16 @@ class _SimSayReq(BaseModel):
     message: str
 
 
+class _SimKeyReq(BaseModel):
+    branch_id: int
+    session_key: str
+
+
+class _SimPersonaReq(_SimKeyReq):
+    persona: str
+    max_turns: int = 3
+
+
 def _op_response(res: ops.LeadOpResult) -> dict:
     if not res.ok:
         raise HTTPException(status_code=400, detail=res.detail)
@@ -142,3 +152,28 @@ async def sim_say(
     async with session_scope() as session:
         return await SimService(session, BrokerLLM()).say(
             req.branch_id, req.session_key, req.message)
+
+
+@router.post("/sim_reset")
+async def sim_reset(
+    req: _SimKeyReq, authorization: str | None = Header(default=None),
+) -> dict:
+    """Wipe a sandbox conversation so the next sim_say starts fresh. Sandbox only."""
+    authz = await _auth(authorization)
+    _effective_branch(authz, req.branch_id)
+    async with session_scope() as session:
+        return await SimService(session, BrokerLLM()).reset(req.branch_id, req.session_key)
+
+
+@router.post("/sim_persona")
+async def sim_persona(
+    req: _SimPersonaReq, authorization: str | None = Header(default=None),
+) -> dict:
+    """Auto-dialogue: an LLM plays a lead archetype against the real reply engine for up
+    to max_turns turns. Bounded + resumable via session_key. Sandbox only."""
+    authz = await _auth(authorization)
+    _effective_branch(authz, req.branch_id)
+    from app.modules.conversation.sim_persona import run_persona  # noqa: PLC0415
+    async with session_scope() as session:
+        return await run_persona(session, req.branch_id, req.persona, req.session_key,
+                                 BrokerLLM(), max_turns=req.max_turns)

@@ -95,5 +95,30 @@ async def sim_say(branch_id: int, session_key: str, message: str) -> dict:
         "branch_id": branch_id, "session_key": session_key, "message": message})
 
 
+@mcp.tool()
+async def sim_reset(branch_id: int, session_key: str) -> dict:
+    """Wipe a sim conversation so the next sim_say starts fresh (clears its messages and
+    resets the sandbox lead's needs/stage). Only affects the sandbox, never real leads."""
+    return await _post("/mcp/sim_reset", {
+        "branch_id": branch_id, "session_key": session_key})
+
+
+@mcp.tool()
+async def sim_persona(
+    branch_id: int, persona: str, session_key: str, max_turns: int = 3,
+) -> dict:
+    """Run an auto-dialogue: an LLM plays a lead of a given archetype and talks to Stepan
+    (the real reply engine) up to max_turns turns, then returns the transcript + what the
+    engine decided (stage, captured jobs/pains/gains, ready/handoff). Bounded + resumable —
+    call again with the same session_key to continue until `ended` is true.
+
+    Personas: hot_ready, budget_student, skeptic_diy, confused_explorer, career_switcher,
+    freelancer_upskill, parent_for_child, corporate_bulk, ghoster_busy, wrong_fit.
+    Use a SIM/test branch_id (not a live branch). Fully sandboxed; nothing reaches Instagram."""
+    return await _post("/mcp/sim_persona", {
+        "branch_id": branch_id, "persona": persona, "session_key": session_key,
+        "max_turns": max_turns})
+
+
 if __name__ == "__main__":
     mcp.run()
