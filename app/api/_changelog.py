@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.16.0"
+PROJECT_VERSION = "1.17.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,21 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.17.0", "date": "17 Jul 2026", "tag": "Integration",
+        "title": "Plugs into your CRM — and into your team’s AI assistant",
+        "blurb": "Stepan now speaks MCP — the open standard AI assistants use to plug into "
+                 "other systems — and the wire runs both ways. Your team can work him from "
+                 "Claude or any MCP-capable assistant in plain language: who is this lead, "
+                 "show me the whole conversation, grade this chat against our knowledge base, "
+                 "this one bought — close it, we couldn’t reach them by phone — pick it back "
+                 "up in chat. Access is per person and revocable in a click: a reviewer gets "
+                 "a key that can only ever read, and any key can be pinned to a single "
+                 "branch, so nobody sees or moves what they shouldn’t. On the other side of "
+                 "the wire Stepan now connects out to a CRM that speaks MCP — we are live "
+                 "against one, working from its real client cards, calls and contracts "
+                 "instead of a nightly export.",
+    },
     {
         "version": "1.16.0", "date": "16 Jul 2026", "tag": "Selling",
         "title": "A polite no is a later, not a dead end",
