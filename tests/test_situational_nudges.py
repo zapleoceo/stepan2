@@ -267,3 +267,11 @@ def test_soft_no_detects_the_fikir_spelling_and_suffixes() -> None:
     for s in ["Nanti saya fikirkan lagi ya kak", "saya pikirkan dulu ya",
               "aku fikir dulu deh", "mikirin dulu ya kak"]:
         assert _SOFT_NO_RE.search(s), s
+
+
+def test_auto_reply_detects_the_english_away_message() -> None:
+    # the exact phrasing the decision contract calls out — the detector missed it, so an
+    # English auto-responder was still treated as the lead speaking
+    assert is_auto_reply("Thanks for your message, we'll get back to you")
+    assert is_auto_reply("Thank you for your message, we will get back to you shortly")
+    assert not is_auto_reply("makasih kak, message nya udah aku baca")
