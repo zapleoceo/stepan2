@@ -694,3 +694,30 @@ async def test_followup_is_told_an_angle_is_not_a_different_product(db_session) 
     assert await svc.run() == 1
     assert any(FOLLOWUP_PRODUCT_DISCIPLINE.strip() in c for c in captured), \
         "every follow-up must carry the stay-on-this-product rule"
+
+
+async def test_followup_reopens_with_the_leads_own_need(db_session) -> None:
+    """A follow-up that names the lead's own captured pain/goal re-engages better than a
+    generic 'masih tertarik?'. The anchor text must be the lead's stored phrase, verbatim."""
+    from app.adapters.db.models import Lead
+    from app.modules.conversation.situations import FOLLOWUP_NEED_ANCHOR
+
+    bid, tid, lead, _thread = await _world(db_session, timer_due=True)
+    row = await db_session.get(Lead, lead.id)
+    row.needs = '{"jobs": [], "pains": ["followers mentok di 800"], "gains": []}'
+    db_session.add(row)
+    await db_session.flush()
+
+    captured: list[str] = []
+
+    class _CaptureLLM(FakeLLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            captured.append(messages[-1]["content"] if messages else "")
+            return await super().chat(messages, **kw)
+
+    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
+                          _cfg(), notifier=None)
+    assert await svc.run() == 1
+    assert any("followers mentok di 800" in c for c in captured), \
+        "the follow-up must re-open with the lead's own captured need"
+    assert any(FOLLOWUP_NEED_ANCHOR.split("{need}")[0].strip()[:20] in c for c in captured)

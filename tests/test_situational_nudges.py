@@ -323,3 +323,31 @@ def test_soft_no_ignores_positive_interest() -> None:
     for s in ["saya tertarik banget", "tertarik kak mau daftar", "minat dong",
               "iya berminat sekali kak"]:
         assert not _SOFT_NO_RE.search(s), s
+
+
+# ─── present-and-close: discovery done → move, capture WA (levers 1+4) ───
+
+from app.modules.conversation.situations import PRESENT_AND_CLOSE_NUDGE  # noqa: E402
+
+
+def test_present_and_close_fires_once_pain_and_gain_are_captured() -> None:
+    needs = NeedsProfile(pains=["followers stuck"], gains=["dapat klien"])
+    got = _pick("oke kak", needs=needs, n=3)
+    assert got is not None and PRESENT_AND_CLOSE_NUDGE in got
+    assert "WA" in got  # must capture contact so a ghosting lead stays reachable
+
+
+def test_present_and_close_yields_to_a_live_question() -> None:
+    # they asked something → answer-first owns the turn, not the close nudge
+    needs = NeedsProfile(pains=["followers stuck"], gains=["dapat klien"])
+    got = _pick("jadwalnya hari apa kak?", needs=needs, n=3)
+    assert ANSWER_FIRST_NUDGE in got and PRESENT_AND_CLOSE_NUDGE not in got
+
+
+def test_present_and_close_does_not_fire_before_discovery_is_done() -> None:
+    # pain but no gain → still need-payoff, not the close
+    got = _pick("oke kak", needs=NeedsProfile(pains=["takut gagal"], gains=[]), n=2)
+    assert PRESENT_AND_CLOSE_NUDGE not in (got or "")
+    # nothing captured → discover-first, not the close
+    got2 = _pick("oke kak", needs=NeedsProfile(), n=2)
+    assert PRESENT_AND_CLOSE_NUDGE not in (got2 or "")

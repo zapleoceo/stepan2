@@ -434,6 +434,26 @@ ANSWER_PRICE_NO_PAIN_NUDGE = (
     "urgency that isn't written there.]"
 )
 
+# The gap the funnel dies in: a warm lead whose pain AND gain we already hold, who isn't
+# asking anything and hasn't shouted "I'm in" — no nudge fired, so the model freewheeled into
+# a passive pitch and asked no contact. Measured: 71% ghost after a price, most with NO contact
+# left behind, and only 2% of engaged leads ever advance. Once discovery is DONE, stop digging
+# and MOVE: present against their own words, close assumptively (take the step yourself, not a
+# yes/no), and capture the WhatsApp so a lead who then goes quiet is still reachable by a human.
+PRESENT_AND_CLOSE_NUDGE = (
+    "[System: you already hold this lead's real PAIN and the GAIN they want — discovery is "
+    "DONE. Stop asking questions and MOVE TO CLOSE this turn:\n"
+    "1) Present the ONE best-fit product against exactly THEIR pain and gain, in their words — "
+    "value first, not a feature dump. If you name the price, lead with the smallest step (the "
+    "DP that secures a seat) + instalments/QRIS, full amount only as context.\n"
+    "2) Take the next step YOURSELF — an assumptive trial close ('aku bantu amankan seat Kakak "
+    "buat batch depan ya?'), NEVER a passive 'gimana, tertarik?' that invites a no.\n"
+    "3) If you don't have their WhatsApp yet, offer to send the full details there so a warm "
+    "lead who goes quiet stays reachable ('boleh aku kirim rincian lengkap ke WA Kakak?'). A "
+    "WA shared just to receive details keeps ready=false and the bot stays on.\n"
+    "One clear next step, not five. Facts only from the KB.]"
+)
+
 DISCOVER_BEFORE_PRICE_NUDGE = (
     "[System: this lead is engaged but hasn't told you a single pain or goal yet, and they did "
     "NOT ask for the price. Do NOT quote the fee, the monthly figure, or the total now — a price "
@@ -441,6 +461,16 @@ DISCOVER_BEFORE_PRICE_NUDGE = (
     "specific question about what they want to achieve or what's getting in their way, so the "
     "price later lands against something worth paying for. (If they DO ask the price outright, "
     "answer it — this only applies while they haven't.)]"
+)
+
+# A follow-up that names the lead's OWN earlier words ("dulu Kakak sempat bilang soal <need>")
+# re-engages far better than a generic "masih tertarik?" — it proves someone listened. The
+# need text is the lead's own captured phrase, so quoting it fabricates nothing.
+FOLLOWUP_NEED_ANCHOR = (
+    "\n[System addition: this lead already told you what they care about: \"{need}\". Re-open "
+    "by referencing THAT in their own terms — remind them of the outcome they wanted and tie "
+    "this nudge to it, instead of a generic 'still interested?'. Don't quote it robotically; "
+    "weave it in like a person who remembers the conversation.]"
 )
 
 DISCOVERY_CAP_NUDGE = (
@@ -565,6 +595,9 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         return MENU_REPLY_NUDGE  # a menu answer converts to value+step, not more questions
     if stored_needs.pains and not stored_needs.gains and inbound_count <= DISCOVERY_TURN_CAP:
         return NEED_PAYOFF_NUDGE
+    if stored_needs.captured():
+        # pain AND gain in hand → discovery is done: present, close assumptively, capture WA
+        return PRESENT_AND_CLOSE_NUDGE
     if not stored_needs.pains and inbound_count <= DISCOVERY_TURN_CAP:
         return DISCOVER_BEFORE_PRICE_NUDGE
     if not stored_needs.captured() and inbound_count > DISCOVERY_TURN_CAP:

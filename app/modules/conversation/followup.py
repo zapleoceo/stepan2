@@ -34,6 +34,7 @@ from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .situations import (
     AD_TEMPLATE_RE,
     FOLLOWUP_BREVITY_SUFFIX,
+    FOLLOWUP_NEED_ANCHOR,
     FOLLOWUP_PRODUCT_DISCIPLINE,
     FOLLOWUP_SILENT_CLICKER_EXTRA,
     lead_spoke_own_words,
@@ -217,6 +218,13 @@ class FollowupService:
                               last_inbound="", mode=mode, followup_attempt=sent_so_far)
         nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
         nudge += FOLLOWUP_PRODUCT_DISCIPLINE
+        # A follow-up that re-opens with the lead's OWN stated pain/goal re-engages far better
+        # than a generic "masih tertarik?" — it proves we listened. Only when we actually have
+        # their words on record (never invent one); the model already has the full needs block.
+        needs = getattr(ctx, "stored_needs", None)
+        anchor = ((needs.pains or needs.gains or needs.jobs)[:1] if needs else [])
+        if anchor:
+            nudge += FOLLOWUP_NEED_ANCHOR.format(need=anchor[0])
         if not lead_spoke_own_words(ctx.dialog):
             # a button click is not the lead speaking — no price/pitch in their follow-ups
             nudge += FOLLOWUP_SILENT_CLICKER_EXTRA
