@@ -28,19 +28,32 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.19.0"
+PROJECT_VERSION = "1.20.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
 COMING_NEXT = {
-    "title": "Two-way CRM sync",
-    "blurb": "Stepan already writes every qualified lead and stage change into your CRM. "
-             "Next it reads back from it too, so a deal your team advances by hand stays "
-             "perfectly in step with the conversation.",
+    "title": "Event reminders that actually reach people",
+    "blurb": "Phone reminders reach barely a quarter of event sign-ups. Stepan will nudge "
+             "them in the chat they already answer — and write the confirmation back into "
+             "your CRM.",
 }
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.20.0", "date": "17 Jul 2026", "tag": "Integration",
+        "title": "Two-way CRM sync is live — and it rescues the leads your phone can't reach",
+        "blurb": "Stepan now reads your CRM before every message he sends. A client whose "
+                 "contract is already signed, or who spoke to a manager this week, is left "
+                 "alone — automatically, no list to maintain. And the same wire works the "
+                 "other way: in the branch we audited, 41% of a month's phone leads never "
+                 "picked up, and every future buyer had sat through unanswered calls on the "
+                 "way to a contract. Stepan now reads the CRM call log, finds the people "
+                 "the phone keeps missing, and quietly continues them in the chat they "
+                 "actually answer — a steady trickle during working hours, one polite "
+                 "message per lead per week, never someone a human is already handling.",
+    },
     {
         "version": "1.19.0", "date": "17 Jul 2026", "tag": "Selling",
         "title": "Closes at the checkout, never invents a number",
