@@ -524,8 +524,9 @@ async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
     """One branch's CRM sync, both directions: push unsynced manager alerts out (crm_enabled),
     and pull lead state in to stand down leads a manager already owns (crm_read_enabled). Push
     and pull are separately try-wrapped so one direction's error can't lose the other."""
-    from app.adapters.crm import CrmReader, CrmWebhook  # noqa: PLC0415
+    from app.adapters.crm import CrmWebhook  # noqa: PLC0415
     from app.modules.crm import CrmSyncService  # noqa: PLC0415
+    from app.modules.crm.gate import build_crm_reader  # noqa: PLC0415
     from app.modules.crm.pull import CrmPullService  # noqa: PLC0415
     synced = 0
     try:
@@ -535,7 +536,9 @@ async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
         logger.exception("crm push failed branch=%d", branch_id)
     try:
         async with session_scope() as session:
-            await CrmPullService(session, branch_id, CrmReader()).sync_active()
+            cfg = await get_settings(session, branch_id)
+            reader = build_crm_reader(cfg)  # REST contract or the CRM's own MCP server
+            await CrmPullService(session, branch_id, reader).sync_active()
     except Exception:
         logger.exception("crm pull failed branch=%d", branch_id)
     return synced

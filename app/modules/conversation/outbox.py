@@ -190,14 +190,15 @@ class OutboxSender:
     async def _crm_gate(self, thread, row: Outbox) -> Outbox | None:
         """Consult the CRM before sending: a `hold` verdict skips this line (won't
         resend) and stands the lead down. Returns the row when skipped, else None."""
-        from app.adapters.crm import CrmReader  # noqa: PLC0415 (optional dep, keep lazy)
-        from app.modules.crm.gate import CrmGate  # noqa: PLC0415
+        from app.modules.crm.gate import CrmGate, build_crm_reader  # noqa: PLC0415
+        from app.modules.settings.service import get_settings  # noqa: PLC0415
 
         lead = await self.session.get(Lead, thread.lead_id)
         if lead is None:
             return None
+        cfg = await get_settings(self.session, self.branch_id)
         allowed, reason = await CrmGate(
-            self.session, self.branch_id, CrmReader()).allow_send(lead, row.source)
+            self.session, self.branch_id, build_crm_reader(cfg)).allow_send(lead, row.source)
         if allowed:
             return None
         row.status = "skipped"  # not 'pending' → oldest_pending never re-picks it

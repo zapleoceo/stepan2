@@ -67,6 +67,13 @@ class Settings(BaseSettings):
 
     # CRM read link (the gate that stops Stepan re-touching a lead a manager already owns).
     crm_read_timeout_s: float = Field(default=8.0, description="per-request CRM read timeout")
+    crm_mcp_timeout_s: float = Field(
+        default=25.0, description="whole-conversation budget for one MCP state read "
+                                  "(handshake + search + history)")
+    crm_manager_call_hold_h: float = Field(
+        default=72.0, description="a SUCCESSFUL manager call younger than this holds the "
+                                  "bot off the lead; an older one doesn't (re-engaging a "
+                                  "gone-cold lead is desired)")
     crm_state_ttl_s: int = Field(
         default=300, description="a cached CRM state newer than this is trusted; older → the "
                                 "pre-send point-check refetches live")

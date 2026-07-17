@@ -42,6 +42,22 @@ class CrmReaderPort:
     async def get_state(self, url: str, secret: str, phone: str) -> dict | None: ...
 
 
+def crm_read_url(cfg) -> str:  # noqa: ANN001
+    """The state-source URL: the branch REST contract wins when set, else the CRM's own
+    MCP server (platform-level setting the branches inherit)."""
+    return (cfg.crm_state_url or "").strip() or (cfg.crm_mcp_url or "").strip()
+
+
+def build_crm_reader(cfg) -> CrmReaderPort:  # noqa: ANN001
+    """Pick the reader matching the configured source: REST (crm_state_url) or the CRM's
+    MCP server (crm_mcp_url). Callers (outbox gate, pull sync) stay source-agnostic."""
+    if not (cfg.crm_state_url or "").strip() and (cfg.crm_mcp_url or "").strip():
+        from app.adapters.crm_mcp import CrmMcpReader  # noqa: PLC0415
+        return CrmMcpReader(cfg.crm_mcp_city_alias)
+    from app.adapters.crm import CrmReader  # noqa: PLC0415
+    return CrmReader()
+
+
 # CRM fields that, when truthy, mean a human/process already owns the lead's next step —
 # Stepan must stand down. Each maps to a short reason token for the journal.
 _HOLD_FLAGS = {
@@ -91,7 +107,7 @@ class CrmGate:
         """True → Stepan may send. Manager sends always pass (human override). A `hold`
         verdict returns False AND stands the lead down so nothing else generates."""
         cfg = await get_settings(self.session, self.branch_id)
-        url = (cfg.crm_state_url or "").strip()
+        url = crm_read_url(cfg)
         if not cfg.crm_read_enabled or not url or source == "manager":
             return True, ""
         if not lead.phone_e164:
@@ -108,7 +124,7 @@ class CrmGate:
     async def refresh(self, lead: Lead) -> CrmState | None:
         """Force a live fetch + cache upsert (used by the pull sync)."""
         cfg = await get_settings(self.session, self.branch_id)
-        url = (cfg.crm_state_url or "").strip()
+        url = crm_read_url(cfg)
         if not cfg.crm_read_enabled or not url or not lead.phone_e164:
             return None
         if not is_safe_webhook_url(url):

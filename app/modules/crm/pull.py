@@ -8,6 +8,7 @@ cache warm and catches leads a manager touched between messages. Gated by crm_re
 from __future__ import annotations
 
 import logging
+import time
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -30,13 +31,21 @@ class CrmPullService:
         self.branch_id = branch_id
         self.gate = CrmGate(session, branch_id, reader)
 
-    async def sync_active(self, limit: int = 50) -> int:
+    async def sync_active(self, limit: int = 15, time_budget_s: float = 60.0) -> int:
+        """Refresh the stalest active leads. Bounded twice: `limit` leads AND a wall-clock
+        budget — an MCP state read costs seconds, and this runs inside a cron job with a
+        hard timeout; better to cover fewer leads than to blow the job."""
         cfg = await get_settings(self.session, self.branch_id)
-        if not cfg.crm_read_enabled or not (cfg.crm_state_url or "").strip():
+        from app.modules.crm.gate import crm_read_url  # noqa: PLC0415
+        if not cfg.crm_read_enabled or not crm_read_url(cfg):
             return 0
         leads = await self._stale_active(limit)
         held = 0
+        started = time.monotonic()
         for lead in leads:
+            if time.monotonic() - started > time_budget_s:
+                logger.info("crm pull branch=%d: time budget hit", self.branch_id)
+                break
             try:
                 if await self.gate.enforce(lead) == "hold":
                     held += 1
