@@ -649,8 +649,8 @@ def test_answer_dont_escalate_correction_forbids_escalation_and_phone_ask() -> N
     force-answers first; the correction it sends must forbid both escalation and the phone-ask
     (the end-to-end behaviour is exercised by the regression sim)."""
     c = guard.ANSWER_DONT_ESCALATE_CORRECTION.lower()
-    assert "needs_manager" in c and "not" in c
-    assert "phone" in c
+    assert "do not set needs_manager" in c  # the actual instruction, not just the word
+    assert "do not ask for a phone number" in c
     assert "knowledge base" in c  # answer must come from the KB, not a stall
 
 

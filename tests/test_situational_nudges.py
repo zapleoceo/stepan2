@@ -176,10 +176,16 @@ def test_format_mirror_rides_on_top_of_the_situation() -> None:
     assert ANSWER_FIRST_NUDGE in got and "characters" in got
 
 
-def test_format_mirror_fires_alone_when_no_situation() -> None:
-    # an ordinary short reply has no special situation, but still must not get a wall of text
-    got = _pick("oke kak")
-    assert got is not None and "one-liners" in got
+def test_format_mirror_suffix_fires_for_a_short_non_opener_message() -> None:
+    # the mirror content itself: a short lead message (not the ad opener) gets the length
+    # anchor. (A spoken lead now always has SOME situation, so the suffix rides on top — the
+    # rides-on-top case is covered separately; here we check the suffix function's own output.)
+    from app.modules.conversation.situations import format_suffix
+    assert "one-liners" in format_suffix("oke kak", None)
+    assert format_suffix("oke kak", None)  # short → suffix present
+    # a long message gets no mirror (they wrote paragraphs, answer in kind)
+    essay = "a" * 300
+    assert format_suffix(essay, None) == ""
 
 
 def test_format_mirror_skips_the_numbered_opener() -> None:
@@ -251,10 +257,11 @@ def test_discover_before_price_fires_for_engaged_lead_without_a_pain() -> None:
 
 
 def test_discover_before_price_yields_to_a_direct_question() -> None:
-    # they DID ask — answer-first wins, no discover-first steer (a non-price ask keeps the
-    # plain answer-first; a price ask gets the framed variant, tested separately below)
+    # they DID ask — answer-first wins, neither discover-first nor the price-framing steer
+    # (a plain non-price question is a clean answer-first, no framing variant)
     got = _pick("jadwalnya hari apa kak?", n=2)
-    assert ANSWER_FIRST_NUDGE in got and DISCOVER_BEFORE_PRICE_NUDGE not in got
+    assert ANSWER_FIRST_NUDGE in got
+    assert DISCOVER_BEFORE_PRICE_NUDGE not in got and ANSWER_PRICE_NO_PAIN_NUDGE not in got
     # a price ask must also never fall back to the discover-first steer — they asked
     assert DISCOVER_BEFORE_PRICE_NUDGE not in _pick("berapa biayanya kak?", n=2)
 
@@ -300,15 +307,8 @@ def test_price_question_once_a_pain_is_known_uses_plain_answer_first() -> None:
     assert ANSWER_FIRST_NUDGE in got and ANSWER_PRICE_NO_PAIN_NUDGE not in got
 
 
-def test_non_price_question_is_unaffected() -> None:
-    got = _pick("jadwalnya hari apa kak?", n=2)
-    assert ANSWER_FIRST_NUDGE in got and ANSWER_PRICE_NO_PAIN_NUDGE not in got
-
-
-def test_tight_budget_price_question_still_wins() -> None:
-    # 'ga ada modal, berapa biayanya?' keeps the cheap-entry combo, not the generic framing
-    got = _pick("ga ada modal kak, berapa biayanya?", n=2)
-    assert ANSWER_FIRST_TIGHT_BUDGET_NUDGE in got
+# (merged into test_discover_before_price_yields_to_a_direct_question and
+#  test_combo_question_from_tight_budget_answers_with_cheap_entry — were exact duplicates)
 
 
 def test_soft_no_catches_polite_not_interested() -> None:
