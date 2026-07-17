@@ -115,11 +115,25 @@ def test_undecipherable_slang_is_non_target_not_needs_manager() -> None:
 
 
 def test_lead_auto_reply_is_not_escalated() -> None:
-    # thread 2058, 2026-07-11: the lead's OWN business auto-responder ("terima kasih telah
-    # menghubungi kami, akan segera kami balas") got escalated to a manager — it's a robot,
-    # not the lead talking
-    assert "AUTO-REPLY / AWAY MESSAGE" in _DECISION_CONTRACT
-    assert "it's their account's robot" in _DECISION_CONTRACT
+    """Thread 2058: the lead's OWN business auto-responder ("terima kasih telah menghubungi
+    kami, akan segera kami balas") got escalated to a manager — it's a robot, not the lead.
+
+    The defence is no longer the prompt asking nicely: ingest.is_auto_reply drops an
+    auto-responder before it can reach a reply at all (it doesn't move last_in_at, reset the
+    follow-up cycle or wake the bot), so the model is never asked to answer one. The prompt
+    keeps only what no gate can do — recognising one already sitting in the HISTORY.
+    """
+    from app.modules.conversation.situations import is_auto_reply
+
+    # the deterministic gate — this is what actually stops the escalation
+    assert is_auto_reply("Halo, terima kasih telah menghubungi kami, "
+                         "pesan Anda akan segera kami balas")
+    assert is_auto_reply("Thanks for your message, we'll get back to you")
+    assert not is_auto_reply("makasih kak infonya")  # a real human thanking us
+
+    # and the prompt still tells the model how to read one in the history
+    assert "auto-reply" in _DECISION_CONTRACT.lower()
+    assert "robot, not the lead" in _DECISION_CONTRACT
 
 
 def test_stage_reason_required_not_optional() -> None:

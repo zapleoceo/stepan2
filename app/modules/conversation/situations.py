@@ -109,8 +109,9 @@ AUTO_REPLY_RE = re.compile(
     r"|kami (?:sudah|telah) menerima pesan"
     r"|pesan (?:ini )?otomatis|balasan otomatis"
     r"|akan (?:segera )?(?:kami )?balas secepatnya"
-    r"|thank you for (?:contacting|reaching out)"
+    r"|thank(?:s| you) for (?:contacting|reaching out|your message)"
     r"|we (?:have )?received your message"
+    r"|we(?:'| wi)?ll get back to you"
     r"|this is an? automated|auto[- ]reply)",
     re.IGNORECASE)
 
