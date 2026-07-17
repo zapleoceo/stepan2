@@ -537,3 +537,66 @@ async def test_budget_gate_blocks_decide(db_session) -> None:
     first = await svc.decide(tid)  # records 0.02 → over budget after this call
     assert first is not None
     assert await svc.decide(tid) is None  # gated now
+
+
+# ─── soft-no snooze: no kill, no nudge storm (audit of threads >=2000) ───
+
+async def _thread_of(s, tid: int) -> ChannelThread:  # noqa: ANN001
+    return (await s.exec(select(ChannelThread).where(ChannelThread.id == tid))).one()
+
+
+async def _set_last_inbound(s, tid: int, text: str) -> None:  # noqa: ANN001
+    msg = (await s.exec(select(Message).where(Message.thread_id == tid,
+                                              Message.direction == "in"))).first()
+    msg.text = text
+    s.add(msg)
+    await s.flush()
+
+
+async def test_soft_no_lands_in_objection_not_dormant(db_session) -> None:
+    """Threads 2275/2493/2689: the model set DORMANT the moment a lead said "next time aja"
+    — dead on the spot with zero follow-ups. A polite 'not now' is an objection to work
+    later, not a corpse."""
+    bid, tid, lead = await _world(db_session, stage=Stage.QUALIFYING)
+    await _set_last_inbound(db_session, tid, "Nggak kak, makasih. Next time aja ya")
+    thread = await _thread_of(db_session, tid)
+
+    await _svc(db_session, bid)._apply_decision(
+        lead, thread, _decision(stage=Stage.DORMANT, reply="Baik Kak, kabari ya"))
+    assert lead.stage == Stage.OBJECTION
+
+
+async def test_soft_no_collapses_the_cycle_to_one_final_nudge(db_session) -> None:
+    """The naive fix (just forbid DORMANT) would drop the lead into the normal 1/4/24/120h
+    cycle — FOUR nudges after they said no, the ban vector from threads 2045/1996. Exactly
+    one dated re-contact must remain."""
+    bid, tid, lead = await _world(db_session, stage=Stage.QUALIFYING)
+    await _set_last_inbound(db_session, tid, "Nanti saya fikirkan lagi ya kak")
+    thread = await _thread_of(db_session, tid)
+    svc = _svc(db_session, bid)
+
+    assert await svc._snooze_on_soft_no(lead, thread) is True
+    schedule = _parse({}).followup_schedule_h
+    assert thread.followups_sent == len(schedule) - 1  # only the last, longest step is left
+
+
+async def test_annoyed_lead_is_never_snoozed_or_re_contacted(db_session) -> None:
+    """"Stop bothering me" belongs to the hard-stop path — a snooze would re-contact someone
+    who explicitly told us to go away (the exact escalation in threads 2045/1996)."""
+    bid, tid, lead = await _world(db_session, stage=Stage.QUALIFYING)
+    await _set_last_inbound(db_session, tid, "gak usah ganggu aku lagi")
+    thread = await _thread_of(db_session, tid)
+
+    assert await _svc(db_session, bid)._snooze_on_soft_no(lead, thread) is False
+    assert thread.followups_sent == 0  # nothing planned
+
+
+async def test_engaged_lead_is_not_snoozed(db_session) -> None:
+    """The snooze must not fire on a normal, interested reply — that would silently cut a
+    live conversation down to a single nudge."""
+    bid, tid, lead = await _world(db_session, stage=Stage.QUALIFYING)
+    await _set_last_inbound(db_session, tid, "boleh kak, saya tertarik banget")
+    thread = await _thread_of(db_session, tid)
+
+    assert await _svc(db_session, bid)._snooze_on_soft_no(lead, thread) is False
+    assert thread.followups_sent == 0

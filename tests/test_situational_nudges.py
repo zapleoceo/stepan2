@@ -259,3 +259,11 @@ def test_discover_before_price_yields_once_a_pain_is_captured() -> None:
     needs = NeedsProfile(pains=["followers stuck"], gains=[])
     got = _pick("oke kak", needs=needs, n=2)
     assert NEED_PAYOFF_NUDGE in got and DISCOVER_BEFORE_PRICE_NUDGE not in got
+
+
+def test_soft_no_detects_the_fikir_spelling_and_suffixes() -> None:
+    # thread 2689: "Nanti saya fikirkan lagi ya kak" matched nothing — 'fikir' (f-spelling)
+    # with the -kan suffix — so the lead was dormant-ed instead of snoozed
+    for s in ["Nanti saya fikirkan lagi ya kak", "saya pikirkan dulu ya",
+              "aku fikir dulu deh", "mikirin dulu ya kak"]:
+        assert _SOFT_NO_RE.search(s), s

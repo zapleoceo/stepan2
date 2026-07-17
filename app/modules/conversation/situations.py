@@ -57,7 +57,11 @@ ANSWERABLE_Q_RE = re.compile(
 # A polite Indonesian 'not now' — usually a real 'no' wrapped to save face (gengsi). Pushing
 # price/DP through it is the single biggest ghost-maker found in the audits.
 SOFT_NO_RE = re.compile(
-    r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|pikir[- ]?(pikir\s*)?(dulu|lagi)|mikir\s*dulu|"
+    # 'pikir' is also spelt 'fikir', and takes the -kan/-in suffixes: "Nanti saya fikirkan
+    # lagi ya kak" (thread 2689) matched nothing here, so the soft-no handling never fired at
+    # all and the model dormant-ed the lead instead.
+    r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|[pf]ikir(kan|in)?[- ]?([pf]ikir\s*)?(dulu|lagi)|"
+    r"mikir(in|kan)?\s*(dulu|lagi)|"
     r"nabung\s*dulu|belum\s*(ada|punya|siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
     r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
     r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"

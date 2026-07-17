@@ -96,3 +96,4 @@ occurred_at` и прогони список через `sim.say(8, ...)`.
 Промпт-правила, на которые опирается чеклист, живут в
 `app/modules/conversation/prompt.py`; методология — в
 [sales-methodology.md](sales-methodology.md).
+| 35 | Лид вежливо отказал («Next time aja», «Nanti saya fikirkan lagi», «gak dulu») | Стадия `objection` + ОДИН отложенный контакт (расписание схлопнуто до последнего шага, ~5 дней) → потом dormant | Мгновенный `dormant` от модели с нулём фолоапов; ИЛИ полный цикл из 4 нуджей после «нет» (ban-вектор) | аудит ≥2000 |

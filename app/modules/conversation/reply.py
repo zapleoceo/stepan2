@@ -41,6 +41,9 @@ from .situations import (
     NEED_PAYOFF_NUDGE as _NEED_PAYOFF_NUDGE,
 )
 from .situations import (
+    SOFT_NO_RE as _SOFT_NO_RE,
+)
+from .situations import (
     is_answerable_question as _is_answerable_question,
 )
 from .situations import (
@@ -764,7 +767,8 @@ class ReplyService:
         if ready and eff_subtype == "openhouse":
             await self._handoff_openhouse(lead, thread)
         inbound = await self.messages.inbound_count(thread.id)
-        new_stage = self._stage_for(decision, lead, inbound, eff_subtype)
+        soft_no = await self._snooze_on_soft_no(lead, thread)
+        new_stage = self._stage_for(decision, lead, inbound, eff_subtype, soft_no=soft_no)
         if new_stage == lead.stage:
             return None
         self.session.add(StageEvent(
@@ -810,6 +814,39 @@ class ReplyService:
         if new_stage == Stage.READY:
             return "ready"
         return None
+
+    async def _snooze_on_soft_no(self, lead: Lead, thread) -> bool:  # noqa: ANN001
+        """A polite 'not now' gets ONE dated re-contact — never a kill, never a nudge storm.
+
+        Audit of threads >=2000: the model may set DORMANT itself, and did so on 7 leads whose
+        last word was a soft no ("Nggak kak, makasih. Next time aja ya", "Nanti saya fikirkan
+        lagi", "Skip dulu, harganya gak masuk") — dead on the spot, zero follow-ups. The
+        funnel guards the opposite direction (only code may set READY) but left DORMANT wide
+        open, so the bot could kill a warm lead unilaterally.
+
+        The naive fix — forbid DORMANT — is worse: the lead then enters the normal 1/4/24/120h
+        cycle and gets FOUR nudges after saying no, which is the ban vector that produced
+        "Gak usah ganggu aku lagi" (threads 2045/1996). So collapse the remaining schedule to
+        its LAST step instead: exactly one gentle re-contact (~5 days out), then dormant. That
+        is the KB's own rule — "a vague 'later' is a lost lead; a dated 'later' is a plan".
+
+        Returns True when the lead soft-no'd this turn (the stage gate then blocks DORMANT).
+        """
+        last_in = await self.messages.last_inbound_text(thread.id)
+        if not last_in or not _SOFT_NO_RE.search(last_in):
+            return False
+        if guard.lead_signaled_annoyance(last_in):
+            return False  # a real "stop bothering me" — the hard-stop path owns it, not a snooze
+        if lead.stage in HUMAN_LED_STAGES or lead.lead_type == "non_target":
+            return False
+        schedule = self.settings.followup_schedule_h if self.settings else []
+        if schedule and thread.followups_sent < len(schedule) - 1:
+            thread.followups_sent = len(schedule) - 1  # only the final, longest step remains
+            self.session.add(thread)
+            logger.info(
+                "branch=%d thread=%d soft-no → snoozed to one final nudge (+%dh)",
+                self.branch_id, thread.id, schedule[-1])
+        return True
 
     async def _product_kind(self, slug: str) -> str:
         row = (await self.session.execute(
@@ -861,7 +898,7 @@ class ReplyService:
         return decision.ready or decision.stage == Stage.READY
 
     def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0,
-                   ready_subtype: str | None = None) -> Stage:
+                   ready_subtype: str | None = None, soft_no: bool = False) -> Stage:
         # Once a lead is in a HUMAN-LED stage (manager took it over, or it's already ready/
         # handed off), only a manual UI action may move it out — the bot never auto-moves the
         # funnel stage again, even if it keeps talking (agent_enabled can stay on; see
@@ -895,6 +932,12 @@ class ReplyService:
             and not self._needs_captured(decision, lead)
         ):
             return Stage.QUALIFYING
+        # A polite "not now" is an OBJECTION to work later, not a corpse. The model reached
+        # for DORMANT on 7 such leads (audit of threads >=2000) — killing them the moment they
+        # hesitated. _snooze_on_soft_no has already collapsed the cycle to one final nudge, so
+        # this costs one gentle re-contact, not a nudge storm.
+        if soft_no and decision.stage == Stage.DORMANT:
+            return Stage.OBJECTION
         return decision.stage
 
     @staticmethod

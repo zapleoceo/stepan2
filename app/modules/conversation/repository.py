@@ -60,6 +60,15 @@ class MessageRepo(_LeadMessageRepo):
             kept.append(m)
         return list(reversed(kept))
 
+    async def last_inbound_text(self, thread_id: int) -> str:
+        """The lead's most recent message — the signal the soft-no snooze reads."""
+        row = (await self.session.execute(
+            select(Message.text).where(
+                Message.thread_id == thread_id, Message.direction == "in",
+            ).order_by(Message.occurred_at.desc(), Message.id.desc()).limit(1)
+        )).first()
+        return (row[0] or "") if row else ""
+
     async def inbound_count(self, thread_id: int) -> int:
         """How many messages the lead has sent in this thread — the discovery-length signal
         the gate uses to stop forcing discovery once the lead has had enough turns."""
