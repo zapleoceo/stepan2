@@ -867,8 +867,10 @@ class WorkerSettings:
         # Needs-cloud aggregation once a day at 17:00 UTC = 00:00 WIB (midnight Jakarta), all
         # branches. Incremental + analytics-only, so it's cheap and safe to run platform-wide.
         cron(aggregate_needs, hour={17}, minute={0}, second=0, run_at_startup=False),
-        # after aggregate_needs, so the needs cloud in the file is the fresh one
-        cron(daily_digest, hour={17}, minute={30}, second=0, run_at_startup=False),
+        # 07:00 Jakarta (WIB = UTC+7) — the owner reads it with morning coffee. Lands 7h
+        # after aggregate_needs (17:00 UTC = midnight Jakarta), so the needs cloud in the
+        # file is that same night's freshly-classified one.
+        cron(daily_digest, hour={0}, minute={0}, second=0, run_at_startup=False),
         # Meta ad map + insights every 20 min. Deliberately slow: Meta throttles an ad account
         # account-wide after a burst (code 80004 — hit live while building this), and its own
         # attribution lags ~7 days, so a faster cadence would buy nothing but 429s. Costs zero
