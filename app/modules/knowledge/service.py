@@ -88,19 +88,14 @@ class KnowledgeService:
         returning valid JSON at all, so an oversized context doesn't buy recall — it buys
         empty responses and broker retries."""
         resolved_lang = await self._lang(lang)
-        # Ordered STABLE-FIRST so the branch-wide blocks form a byte-identical prefix on every
-        # call: persona + always-docs + catalog are the same for every thread of a branch,
-        # while the focus card varies per product and the RAG chunks per query. A prompt cache
-        # only ever matches a PREFIX, so a variable block placed early (the focus card used to
-        # sit second) truncates the cacheable span to nothing. No content changes — only order.
         blocks = [_persona_block(await self._persona_text(), resolved_lang)]
+        focused = await self._focused(product_slug)
+        if focused is not None:
+            blocks.append(_focus_block(focused, resolved_lang))
         always = await self._always_docs_block()
         if always:
             blocks.append(always)
         blocks.append(_catalog_block(await self.products.active(), resolved_lang))
-        focused = await self._focused(product_slug)
-        if focused is not None:
-            blocks.append(_focus_block(focused, resolved_lang))
         if self.llm is not None and query:
             try:
                 # NOTE: the focus product is NO LONGER excluded from RAG. Its bulky sections
