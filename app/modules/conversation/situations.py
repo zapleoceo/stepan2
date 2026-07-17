@@ -76,7 +76,11 @@ LOW_BUDGET_RE = re.compile(
     r"|ga\s*sanggup|(?:nggak|ngga|ndak|gak|ga|gk)\s*mampu|"
     r"mahal\s*(banget|amat|bgt|bener|sekali)|kemahalan|"
     r"gratis(an|in)?|belum\s*(kerja|ada\s*penghasilan)|nganggur|pengangguran|"
-    r"butuh\s*(kerja|duit|uang|kerjaan)|lagi\s*bokek",
+    r"butuh\s*(kerja|duit|uang|kerjaan)|lagi\s*bokek|"
+    # thread 4082: 'Kendala saya di budget… terasa berat' voiced a clear money objection and
+    # got a dream question instead of the cheap entry — the word 'budget' wasn't matched.
+    r"kendala\s*\S*\s*budget|bud?get\s*(terbatas|minim|pas[- ]?pasan|kurang)|"
+    r"(te)?rasa\s+berat|masih\s+berat|keberatan\b",
     re.IGNORECASE)
 
 # School-age lead OR a parent asking for their child — either way the PARENT pays and decides.
@@ -343,6 +347,64 @@ PAYMENT_INTENT_RE = re.compile(
     r"mau\s+(bayar|transfer)|bayar\s+ke|transfer\s+ke",
     re.IGNORECASE)
 
+# The lead says they WANT IN ('saya ingin bergabung', 'mau daftar') — one notch before the
+# how-to-pay question. Live loss (thread 4194, 2026-07-17): 'saya ingin bergabung..' was
+# answered with a wall of price + bank account + schedule in one block; two minutes later —
+# 'maaf ka kayanya saya gabisa deh'. A buyer needs ONE small step, not an invoice.
+BUYING_SIGNAL_RE = re.compile(
+    r"\b(mau|ingin|pengen|pgn|siap|langsung)\s+(daftar|gabung|bergabung|ikut(an)?|join|"
+    r"ambil\s+kelas)\b|\bdaftar(kan)?\s+(saya|aku|dong|sekarang)\b|\bberminat\s+daftar\b",
+    re.IGNORECASE)
+
+BUYING_SIGNAL_NUDGE = (
+    "[System: the lead just said they WANT TO JOIN. Do NOT celebrate with a wall of text — "
+    "a full dump of price + bank account + schedule at this exact moment scared off a real "
+    "buyer (live: 'saya ingin bergabung' got an invoice-wall and replied 'kayanya saya "
+    "gabisa deh'). Reply in 1-2 SHORT bubbles: confirm warmly, name the ONE next small step "
+    "— the DP from the card that secures their seat — and ask for their WhatsApp number so "
+    "the team can send the details and confirm. Bank account details only if they ask where "
+    "to send the money. No new discovery questions this turn.]"
+)
+
+# The lead answered a numbered menu with a bare digit. Live loss (threads 4146/4058): '1'
+# (switch career) got 'what's your biggest challenge?' — and thread 4058 got the same
+# open question three times in a day, then silence. A menu answer is a CHOICE — convert it.
+MENU_REPLY_RE = re.compile(r"^\s*[1-4]\s*(️?⃣)?\s*$")
+
+MENU_REPLY_NUDGE = (
+    "[System: the lead just answered your numbered menu with a choice — that is a "
+    "conversion moment, not an invitation to interrogate. Do NOT reply with another open "
+    "discovery question (live: '1' was answered with 'apa tantangan terbesar?' three times "
+    "and the lead went silent). Give ONE concrete value line matched to their chosen goal, "
+    "from the KB, then ONE light next step — e.g. offer to send the syllabus/schedule via "
+    "WhatsApp, or the real upcoming event from the KB. At most one short question, and only "
+    "if it moves them toward that step.]"
+)
+
+# A share of OUR OWN Instagram post. The generic unseen-media reply ('maaf, kontennya
+# tidak bisa dibuka') makes the bot look broken to a lead who just tapped OUR ad/post —
+# seen in 5+ threads (4243/4274/4252/1420/4214). The share IS the interest signal.
+OWN_POST_SHARE_RE = re.compile(r"^[📷🎬📖]\s*\S*itstep\S*$", re.IGNORECASE)
+
+OWN_POST_NUDGE = (
+    "[System: the lead shared one of OUR OWN Instagram posts — that is interest in that "
+    "content, NOT unreadable media. Never apologize about being unable to open it. Greet "
+    "warmly, say you saw they're checking out our post, and ask what caught their eye — "
+    "a short numbered list of our program areas is a good way to let them answer with one "
+    "tap. No prices yet (they haven't said a word of their own).]"
+)
+
+# The lead's message packs SEVERAL questions — the most engaged leads do this, and they
+# were the ones hitting a half-answer or a clarify stub (thread 2533: 'what's taught? what
+# background? job guarantee?' got 'be more specific'). Appended ON TOP of the chosen nudge,
+# like the format mirror — orthogonal to the situation.
+MULTI_QUESTION_SUFFIX = (
+    "\n[System: the lead's message asks SEVERAL things at once. Answer EVERY part in this "
+    "reply, each on its own short line, in their order; if some part has no fact in the KB, "
+    "say so honestly for THAT part instead of dropping it. Never answer only the first "
+    "question — a half-answered lead has to chase the rest and usually doesn't.]"
+)
+
 PAYMENT_INTENT_NUDGE = (
     "[System: the lead is asking HOW or WHERE to pay — that is a BUYING signal; this turn "
     "closes the deal. Do NOT pitch, do NOT ask a discovery question, and NEVER answer with a "
@@ -431,14 +493,25 @@ def with_situation(correction: str, situational: str | None) -> str:
     return f"{correction}\n{situational}" if situational else correction
 
 
+def _bot_offered_menu(dialog) -> bool:  # noqa: ANN001
+    """The most recent BOT message actually contained a numbered menu — a bare '2' from the
+    lead is only a menu answer if there was a menu to answer."""
+    for m in reversed(dialog):
+        if m.direction == "out":
+            return "1️⃣" in (m.text or "")
+    return False
+
+
 def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
     """The steering block for this turn: ONE situational nudge (priority chain below) plus the
-    length-mirror suffix when the lead is chatting in one-liners. Returns None only when
-    neither applies."""
+    length-mirror suffix when the lead is chatting in one-liners, plus the answer-every-part
+    suffix when their message packs several questions. Returns None only when none apply."""
     nudge = _pick_situation(
         lead_type=lead_type, dialog=dialog, last_txt=last_txt,
         stored_needs=stored_needs, inbound_count=inbound_count)
     suffix = format_suffix(last_txt, nudge)
+    if (last_txt or "").count("?") >= 2:
+        suffix += MULTI_QUESTION_SUFFIX
     if not suffix:
         return nudge
     return (nudge + suffix) if nudge else suffix.lstrip("\n")
@@ -462,11 +535,15 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
     if not lead_spoke_own_words(dialog):
         return AD_OPENER_NUDGE
     if unseen_media_in_turn(dialog):
+        if OWN_POST_SHARE_RE.match(last_txt.strip()):
+            return OWN_POST_NUDGE  # our own post shared back = interest, not broken media
         return UNSEEN_MEDIA_NUDGE  # can't read their turn — nothing else can be trusted
     if MINOR_RE.search(last_txt):
         return MINOR_NUDGE
     if PAYMENT_INTENT_RE.search(last_txt) and not AD_TEMPLATE_RE.search(last_txt):
         return PAYMENT_INTENT_NUDGE  # a buyer at the checkout outranks every other signal
+    if BUYING_SIGNAL_RE.search(last_txt) and not AD_TEMPLATE_RE.search(last_txt):
+        return BUYING_SIGNAL_NUDGE  # 'I want in' — one small step, never an invoice-wall
     asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
     if SOFT_NO_RE.search(last_txt):
         return SOFT_NO_WITH_QUESTION_NUDGE if asks else SOFT_NO_NUDGE
@@ -480,6 +557,8 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         return ANSWER_FIRST_NUDGE
     if LOW_BUDGET_RE.search(last_txt):
         return LOW_BUDGET_NUDGE
+    if MENU_REPLY_RE.match(last_txt) and _bot_offered_menu(dialog):
+        return MENU_REPLY_NUDGE  # a menu answer converts to value+step, not more questions
     if stored_needs.pains and not stored_needs.gains and inbound_count <= DISCOVERY_TURN_CAP:
         return NEED_PAYOFF_NUDGE
     if not stored_needs.pains and inbound_count <= DISCOVERY_TURN_CAP:

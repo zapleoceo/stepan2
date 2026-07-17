@@ -89,3 +89,65 @@ def test_plain_price_question_does_not_trigger_payment_intent() -> None:
         lead_type=None, dialog=_dialog_with("berapa biayanya?"),
         last_txt="berapa biayanya?", stored_needs=NeedsProfile(), inbound_count=2)
     assert nudge is None or "HOW or WHERE to pay" not in nudge
+
+
+def test_ingin_bergabung_gets_the_small_step_nudge() -> None:
+    nudge = pick_nudge(
+        lead_type=None, dialog=_dialog_with("saya ingin bergabung.."),
+        last_txt="saya ingin bergabung..", stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and "WANT TO JOIN" in nudge
+
+
+def _dialog_with_menu(last: str) -> list[_Msg]:
+    return [_Msg("in", "halo"),
+            _Msg("out", "Pilih ya: 1️⃣ Karier 2️⃣ Bisnis 3️⃣ Skill 4️⃣ Anak"),
+            _Msg("in", last)]
+
+
+def test_menu_digit_converts_instead_of_more_discovery() -> None:
+    nudge = pick_nudge(
+        lead_type=None, dialog=_dialog_with_menu("1"), last_txt="1",
+        stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and "answered your numbered menu" in nudge
+
+
+def test_bare_digit_without_a_menu_is_not_a_menu_reply() -> None:
+    nudge = pick_nudge(
+        lead_type=None, dialog=_dialog_with("1"), last_txt="1",
+        stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is None or "answered your numbered menu" not in nudge
+
+
+def test_own_post_share_is_interest_not_broken_media() -> None:
+    dialog = [_Msg("in", "halo kak"), _Msg("out", "halo!"),
+              _Msg("in", "📷 itstep_jakarta")]
+    nudge = pick_nudge(
+        lead_type=None, dialog=dialog, last_txt="📷 itstep_jakarta",
+        stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and "OUR OWN Instagram post" in nudge
+
+
+def test_foreign_share_still_gets_the_unseen_media_nudge() -> None:
+    dialog = [_Msg("in", "halo kak"), _Msg("out", "halo!"),
+              _Msg("in", "📷 dramaindonesia")]
+    nudge = pick_nudge(
+        lead_type=None, dialog=dialog, last_txt="📷 dramaindonesia",
+        stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and "OUR OWN" not in nudge
+
+
+def test_two_questions_get_the_answer_every_part_suffix() -> None:
+    txt = "yang dipelajari apa? ada jaminan kerja?"
+    nudge = pick_nudge(
+        lead_type=None, dialog=_dialog_with(txt), last_txt=txt,
+        stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and "EVERY part" in nudge
+
+
+def test_budget_objection_in_plain_words_hits_the_cheap_entry_nudge() -> None:
+    txt = "Kendala saya di budget, biayanya terasa berat"
+    nudge = pick_nudge(
+        lead_type=None, dialog=_dialog_with(txt), last_txt=txt,
+        stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and ("cheap" in nudge.lower() or "budget" in nudge.lower()
+                                  or "murah" in nudge.lower() or "entry" in nudge.lower())

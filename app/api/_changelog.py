@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.20.0"
+PROJECT_VERSION = "1.21.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,23 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.21.0", "date": "17 Jul 2026", "tag": "Selling",
+        "title": "Reads the buying moment — and stops interrogating it",
+        "blurb": "A fresh audit of 100 conversations showed where warm leads still cooled "
+                 "off, and this release fixes each spot. A client who says 'I want to "
+                 "join' now gets one small, warm next step — the seat-holding deposit and "
+                 "a WhatsApp confirmation — instead of a price-list wall that scared off a "
+                 "real buyer the same morning. A client who answers the choice menu with a "
+                 "'1' gets value for that exact choice, not another survey question — "
+                 "that loop had asked one lead the same question three times in a day. "
+                 "Saying 'the budget feels heavy' now brings the affordable entry option "
+                 "right away. Someone sharing our own Instagram post is greeted as an "
+                 "interested visitor instead of being told the content can't be opened. "
+                 "A message with several questions gets every one of them answered, in "
+                 "order. And follow-ups are now held to the same honesty bar as live "
+                 "replies: no invented success stories, percentages or deadlines — ever.",
+    },
     {
         "version": "1.20.0", "date": "17 Jul 2026", "tag": "Integration",
         "title": "Two-way CRM sync is live — and it rescues the leads your phone can’t reach",

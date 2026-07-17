@@ -83,7 +83,12 @@ _FOLLOWUP_NUDGE = (
     " question) - either give them a concrete value/answer instead, or ask about a"
     " completely different angle. CHANGE THE ANGLE each attempt for real: a concrete case"
     " tied to their stated need, a cheaper entry point (Skill Booster / bootcamp) if price"
-    " was the sticking point, or a low-friction yes/no question instead of an open one."
+    " was the sticking point, or a low-friction yes/no question instead of an open one.\n"
+    "FACTS ONLY FROM THE KNOWLEDGE BASE: never invent an alumni story, an ROI/percentage "
+    "figure, a discount, a deadline, or a class schedule that is not written there (live "
+    "follow-ups fabricated 'ROI 30% in the first month' and 'an app used by thousands' — "
+    "one screenshot of a made-up claim costs more than the lead). No real fact for your "
+    "angle → use a general truthful line or pick another angle."
     " Return the JSON as usual.]"
 )
 
