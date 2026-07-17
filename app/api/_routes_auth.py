@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html as _h
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -26,16 +27,30 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 
+def _safe_next(dest: str) -> str:
+    """A post-login destination is only honoured if it's a same-site absolute PATH — never an
+    absolute URL, a protocol-relative '//evil', or an auth endpoint. Blocks open-redirect and
+    a login→login bounce; anything unsafe falls back to the inbox."""
+    if (dest.startswith("/") and not dest.startswith(("//", "/\\"))
+            and not dest.startswith(("/login", "/logout", "/api/"))):
+        return dest
+    return "/ui/inbox"
+
+
 @router.get("/login", response_class=HTMLResponse)
-async def login_page() -> HTMLResponse:
+async def login_page(next: str = "") -> HTMLResponse:  # noqa: A002 — matches the ?next= param
     if not settings().auth_enabled:
         return HTMLResponse("", status_code=302, headers={"Location": "/ui/inbox"})
-    return HTMLResponse(_login_html(settings().tg_login_bot_username))
+    return HTMLResponse(_login_html(settings().tg_login_bot_username, _safe_next(next)))
 
 
 @router.get("/api/tg_login")
 async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectResponse)
-    tg_id = verify_telegram_login(dict(request.query_params), settings().tg_bot_token)
+    # `next` is OUR param, not part of Telegram's signed payload — pop it before verifying or
+    # the hash check fails (it signs only its own fields).
+    params = dict(request.query_params)
+    dest = _safe_next(params.pop("next", ""))
+    tg_id = verify_telegram_login(params, settings().tg_bot_token)
     if tg_id is None:
         return HTMLResponse(_msg_html("Login verification failed."), status_code=403)
 
@@ -66,7 +81,7 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
     # mobile in-app WebViews (Telegram's browser, older Android WebView) drop a Set-Cookie that
     # rides a 3xx response, so the very next request arrived with no session and bounced back to
     # /login — an endless login loop on phones while desktop worked (real report 2026-07-17).
-    resp = HTMLResponse(_post_login_html("/ui/inbox"))
+    resp = HTMLResponse(_post_login_html(dest))
     resp.set_cookie(
         SESSION_COOKIE, token, max_age=SESSION_MAX_AGE_S,
         httponly=True, samesite="lax", secure=True,
@@ -81,12 +96,17 @@ async def logout() -> RedirectResponse:
     return resp
 
 
-def _login_html(bot_username: str) -> str:
+def _login_html(bot_username: str, next_dest: str = "/ui/inbox") -> str:
     if bot_username:
+        # The widget appends its signed &id=…&hash=… to data-auth-url, so ?next= rides along
+        # and tg_login returns the user to where the gate first intercepted them.
+        auth_url = "/api/tg_login"
+        if next_dest and next_dest != "/ui/inbox":
+            auth_url += f"?next={quote(next_dest, safe='')}"
         widget = (
             f'<script async src="https://telegram.org/js/telegram-widget.js?22"'
             f' data-telegram-login="{bot_username}" data-size="large"'
-            f' data-auth-url="/api/tg_login" data-request-access="write"></script>'
+            f' data-auth-url="{_h.escape(auth_url)}" data-request-access="write"></script>'
         )
     else:
         widget = (

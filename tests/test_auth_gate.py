@@ -94,7 +94,7 @@ def test_tg_login_no_token_rejected() -> None:
 
 # ─── /api/tg_login callback: the privilege-assignment step ────────────────────
 
-async def _run_tg_login(db_session, monkeypatch, tg_id: int):
+async def _run_tg_login(db_session, monkeypatch, tg_id: int, query: str = ""):
     """Drive the real tg_login route with a stubbed verify + the test DB, return the
     session dict decoded from the Set-Cookie it mints (or None if login was rejected)."""
     import contextlib
@@ -111,7 +111,7 @@ async def _run_tg_login(db_session, monkeypatch, tg_id: int):
     monkeypatch.setattr(ra, "verify_telegram_login", lambda *a, **k: tg_id)
     monkeypatch.setattr(ra, "settings", lambda: _StubSettings(tg_bot_token="TOKEN"))  # noqa: S106
 
-    req = Request({"type": "http", "headers": [], "query_string": b"", "state": {}})
+    req = Request({"type": "http", "headers": [], "query_string": query.encode(), "state": {}})
     resp = await ra.tg_login(req)
     cookie = resp.headers.get("set-cookie", "")
     if f"{_SC}=" not in cookie:
@@ -232,12 +232,21 @@ def test_gate_disabled_by_default_allows_access() -> None:
     assert resp.status_code == 200
 
 
-def test_gate_enabled_redirects_anonymous(monkeypatch) -> None:
+def test_gate_enabled_redirects_anonymous_remembering_the_destination(monkeypatch) -> None:
     _enable(monkeypatch)
     client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
-    resp = client.get("/ui/inbox")
+    resp = client.get("/hiw?lang=uk")
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/login"
+    # the gate carries where they were headed so login can land them back there
+    assert resp.headers["location"] == "/login?next=%2Fhiw%3Flang%3Duk"
+
+
+def test_gate_never_makes_next_point_at_an_auth_endpoint(monkeypatch) -> None:
+    # a bounce off /api/... (or /login itself) must not build /login?next=/login… — plain /login
+    _enable(monkeypatch)
+    client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
+    resp = client.get("/api/whatever")
+    assert resp.status_code == 303 and resp.headers["location"] == "/login"
 
 
 def test_gate_enabled_htmx_gets_hx_redirect(monkeypatch) -> None:
@@ -280,3 +289,36 @@ def test_login_html_with_bot_has_widget() -> None:
 
 def test_login_html_without_bot_warns() -> None:
     assert "BotFather" in _login_html("")
+
+
+def test_login_widget_carries_next_into_the_auth_url() -> None:
+    html = _login_html("mybot", "/hiw?lang=uk")
+    assert 'data-auth-url="/api/tg_login?next=%2Fhiw%3Flang%3Duk"' in html
+
+
+def test_safe_next_blocks_open_redirect_and_auth_endpoints() -> None:
+    from app.api._routes_auth import _safe_next
+    assert _safe_next("/hiw") == "/hiw"
+    assert _safe_next("/ui/reports?x=1") == "/ui/reports?x=1"
+    assert _safe_next("//evil.com") == "/ui/inbox"          # protocol-relative
+    assert _safe_next("https://evil.com") == "/ui/inbox"    # absolute URL
+    assert _safe_next("/login") == "/ui/inbox"              # no login→login bounce
+    assert _safe_next("/api/tg_login") == "/ui/inbox"
+    assert _safe_next("") == "/ui/inbox"
+
+
+async def test_tg_login_returns_user_to_the_next_destination(db_session, monkeypatch) -> None:
+    from app.adapters.db.models import Membership, User
+    from app.domain.enums import Role
+
+    u = User(telegram_id=169510539, name="Dima")
+    db_session.add(u)
+    await db_session.flush()
+    db_session.add(Membership(user_id=u.id, branch_id=None, role=Role.SUPER_ADMIN))
+    await db_session.flush()
+
+    _, resp = await _run_tg_login(db_session, monkeypatch, 169510539, query="next=%2Fhiw")
+    assert resp.status_code == 200
+    body = resp.body.decode()
+    assert "/hiw" in body                                   # landed back where they were headed
+    assert "/ui/inbox" not in body

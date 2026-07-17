@@ -77,7 +77,8 @@ def test_hiw_requires_session_when_auth_enabled(monkeypatch) -> None:
     client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
     resp = client.get("/hiw")
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/login"
+    # carries the destination so login returns here, not the inbox (see test_auth_gate)
+    assert resp.headers["location"] == "/login?next=%2Fhiw"
 
 
 def test_hiw_with_valid_session_renders_both_languages(monkeypatch) -> None:

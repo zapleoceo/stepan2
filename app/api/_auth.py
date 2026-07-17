@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import logging
 import time
+from urllib.parse import quote
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -127,7 +128,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             resp = Response(status_code=401)
             resp.headers["HX-Redirect"] = "/login"
             return resp
-        return RedirectResponse(url="/login", status_code=303)
+        # Remember where they were headed so login lands them there, not always /ui/inbox.
+        # Never round-trip an auth endpoint back into itself (avoids a /login?next=/login loop).
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        if target.startswith(("/login", "/logout", "/api/")):
+            return RedirectResponse(url="/login", status_code=303)
+        return RedirectResponse(url=f"/login?next={quote(target, safe='')}", status_code=303)
 
 
 class AdminGuardMiddleware(BaseHTTPMiddleware):
