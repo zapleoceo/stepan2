@@ -28,7 +28,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.17.0"
+PROJECT_VERSION = "1.18.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -41,6 +41,21 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.18.0", "date": "17 Jul 2026", "tag": "Selling",
+        "title": "A price question gets a price",
+        "blurb": "The hottest moment in any chat is the client asking how much — and in "
+                 "roughly half of those moments Stepan used to reply with ‘may I have your "
+                 "WhatsApp first?’ instead of the number. Measured on two weeks of live "
+                 "conversations, a clearly framed price keeps clients talking just as well "
+                 "as holding it back — the silence after a dodged question is what loses "
+                 "them. Stepan now always answers a direct price question in that same "
+                 "message: he leads with the smallest real step — the seat-holding down "
+                 "payment or the monthly instalment — gives the full amount as context, and "
+                 "only then continues the conversation. The contact ask still happens, just "
+                 "never INSTEAD of the answer. And a brand-new client who only clicked an ad "
+                 "can no longer be greeted with a request for their phone number.",
+    },
     {
         "version": "1.17.0", "date": "17 Jul 2026", "tag": "Integration",
         "title": "Plugs into your CRM — and into your team’s AI assistant",

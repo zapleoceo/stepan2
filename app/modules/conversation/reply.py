@@ -605,9 +605,17 @@ class ReplyService:
                 answered = parse_decision(raw)
             except ValueError:
                 answered = None
-            if answered is not None and answered.reply and not answered.needs_manager \
+            # Accept the regen's ANSWER even when the model insists on escalating: with no
+            # phone the escalation gets suppressed below anyway, so discarding a clean answer
+            # here only trades it for the contact-ask stub (thread 4224: pain+gain captured,
+            # "berapa biayanya?" still got the WhatsApp stub because the regen re-escalated).
+            if answered is not None and answered.reply \
+                    and not guard.promised_handoff(answered.reply) \
                     and not _deterministic_issues(
                         answered.reply, engine.last_context, _lead_spoke_own_words(ctx.dialog)):
+                if answered.needs_manager:
+                    answered = replace(answered, needs_manager=False,
+                                       manager_question=None, kb_gap=None)
                 decision, meta = answered, regen_meta
         # PHONE BEFORE HAND-OFF (hard gate): never mute the bot and hand a contact-less lead to
         # a manager who then has no way to reach them (lead 2757 went to MANAGER with a NULL
@@ -618,11 +626,30 @@ class ReplyService:
         if decision.needs_manager and lead is not None \
                 and not lead.phone_e164 and not (decision.phone or "").strip():
             from dataclasses import replace  # noqa: PLC0415
-            logger.info(
-                "guard: branch=%d thread=%d needs_manager without a phone → ask for contact",
-                self.branch_id, thread_id)
-            decision = replace(decision, needs_manager=False, manager_question=None,
-                               kb_gap=None, reply=guard.ASK_PHONE_BEFORE_HANDOFF)
+            # The stub REPLACES the whole reply — never let it erase a real answer. Keep the
+            # drafted reply (and just drop the escalation) when the lead asked an answerable
+            # question in their own words (thread 4224: the price answer was drafted, then
+            # overwritten by the WhatsApp stub) or hasn't typed a word yet (thread 4199: the
+            # very FIRST bot message to an ad click was the WhatsApp stub). Canned fallbacks
+            # and hand-off promises are not answers — those still funnel into the stub.
+            reply_txt = (decision.reply or "").strip()
+            keepable = bool(reply_txt) \
+                and reply_txt not in (guard.SAFE_FALLBACK, guard.CLARIFY_FALLBACK) \
+                and not guard.promised_handoff(reply_txt)
+            asked = _is_answerable_question(last_in_txt) \
+                and not _AD_TEMPLATE_RE.search(last_in_txt)
+            if keepable and (asked or not _lead_spoke_own_words(ctx.dialog)):
+                logger.info(
+                    "guard: branch=%d thread=%d needs_manager without a phone → keep the "
+                    "answer, drop the escalation", self.branch_id, thread_id)
+                decision = replace(decision, needs_manager=False, manager_question=None,
+                                   kb_gap=None)
+            else:
+                logger.info(
+                    "guard: branch=%d thread=%d needs_manager without a phone → ask for "
+                    "contact", self.branch_id, thread_id)
+                decision = replace(decision, needs_manager=False, manager_question=None,
+                                   kb_gap=None, reply=guard.ASK_PHONE_BEFORE_HANDOFF)
         self._last_llm_meta = meta
         if lead is not None:
             # Needs are recorded ONLY once the lead has typed something of their own. An ad's
