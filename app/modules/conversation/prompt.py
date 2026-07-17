@@ -229,14 +229,13 @@ _DECISION_CONTRACT = (
     "escalating it wastes their attention on nothing they can act on. Acknowledge lightly, "
     "steer back to what you actually offer ONCE, and if the next reply is still unrelated, "
     "soft-close per SOFT-QUALIFY EARLY above - never hand this off to a person.\n\n"
-    # Trimmed from ~550 chars. ingest.is_auto_reply now drops an auto-responder before it can
-    # reach a reply at all — it no longer moves last_in_at, resets the follow-up cycle or
-    # wakes the bot — so every "do NOT answer it / do NOT escalate it" line here became
-    # unreachable. Kept: the one thing no gate does — reading one in the HISTORY and
-    # classifying the account.
-    "⛔ An auto-reply / away message in the history ('terima kasih telah menghubungi kami', "
-    "'we'll get back to you') is the account's robot, not the lead — never read it as their "
-    "words. lead_type='non_target' if no real person ever engages.\n\n"
+    "⛔ THE LEAD'S OWN AUTO-REPLY / AWAY MESSAGE (a templated bounce like 'Halo, terima kasih "
+    "telah menghubungi kami, pesan Anda akan segera kami balas', 'Thanks for your message, "
+    "we'll get back to you', an Instagram business auto-response) is NOT the lead talking - "
+    "it's their account's robot. Do NOT treat it as a question, do NOT escalate it, do NOT "
+    "set needs_manager. Just wait for a real human reply; if you must respond, one short "
+    "friendly line and stop. lead_type='non_target' if it's clearly an automated business "
+    "account with no real person engaging.\n\n"
     "CATCH-ALL ANSWERS ('semua', 'semuanya', 'apa aja', 'iya', 'terserah'): 'everything' is NOT "
     "a discovery answer - do NOT re-ask openly. Narrow it FOR them: either present the single "
     "most relevant option concretely, or offer a specific either/or ('lebih ke bikin aplikasi "
