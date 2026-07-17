@@ -63,6 +63,10 @@ SOFT_NO_RE = re.compile(
     r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|[pf]ikir(kan|in)?[- ]?([pf]ikir\s*)?(dulu|lagi)|"
     r"mikir(in|kan)?\s*(dulu|lagi)|"
     r"nabung\s*dulu|belum\s*(ada|punya|siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
+    # A polite "not interested (yet)" is the most common face-saving refusal and was missed
+    # entirely (thread 2949: "maaf belum tertarik" got a discovery question + a follow-up an
+    # hour later, straight over the no, instead of the soft-no easing-off and objection snooze).
+    r"(belum|blm|ga|gak|nggak|ngga|ndak|tidak|tdk)\s*(tertarik|tertarikan|minat|berminat)|"
     r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
     r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
     r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",

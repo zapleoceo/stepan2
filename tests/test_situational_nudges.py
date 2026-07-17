@@ -309,3 +309,17 @@ def test_tight_budget_price_question_still_wins() -> None:
     # 'ga ada modal, berapa biayanya?' keeps the cheap-entry combo, not the generic framing
     got = _pick("ga ada modal kak, berapa biayanya?", n=2)
     assert ANSWER_FIRST_TIGHT_BUDGET_NUDGE in got
+
+
+def test_soft_no_catches_polite_not_interested() -> None:
+    # thread 2949: "maaf belum tertarik" got a discovery question + a follow-up over the no
+    for s in ["Makasih Kak tawaran nya, maaf belum tertarik 🙏", "belum tertarik",
+              "tidak tertarik kak", "gak tertarik", "belum minat", "maaf belum berminat",
+              "ga minat kak"]:
+        assert _SOFT_NO_RE.search(s), s
+
+
+def test_soft_no_ignores_positive_interest() -> None:
+    for s in ["saya tertarik banget", "tertarik kak mau daftar", "minat dong",
+              "iya berminat sekali kak"]:
+        assert not _SOFT_NO_RE.search(s), s
