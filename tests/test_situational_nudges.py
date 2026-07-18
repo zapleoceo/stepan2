@@ -351,3 +351,26 @@ def test_present_and_close_does_not_fire_before_discovery_is_done() -> None:
     # nothing captured → discover-first, not the close
     got2 = _pick("oke kak", needs=NeedsProfile(), n=2)
     assert PRESENT_AND_CLOSE_NUDGE not in (got2 or "")
+
+
+# ─── Indonesian money shorthand: '4jta' is money, never years (thread 4045) ───
+
+from app.modules.conversation.situations import AMOUNT_SHORTHAND_RE  # noqa: E402
+
+
+def test_amount_shorthand_detects_bare_money_answers() -> None:
+    for s in ["4jta", "4 jt", "500rb", "1,5 juta", "Rp 300 ribu", "2.5jt"]:
+        assert AMOUNT_SHORTHAND_RE.match(s), s
+
+
+def test_amount_shorthand_ignores_non_money() -> None:
+    # a longer sentence has context of its own — the hint is only for the BARE amount
+    for s in ["4 tahun", "umur 15", "kelas 12", "4jta per bulan target saya",
+              "berapa juta?", "oke kak"]:
+        assert not AMOUNT_SHORTHAND_RE.match(s), s
+
+
+def test_amount_hint_rides_on_the_nudge() -> None:
+    got = _pick("4jta", n=2)
+    assert got is not None and "AMOUNT OF MONEY" in got and "4jta" in got
+    assert "NOT years" in got

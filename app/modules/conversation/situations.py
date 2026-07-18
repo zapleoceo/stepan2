@@ -510,6 +510,23 @@ FORMAT_MIRROR_SUFFIX = (
 )
 
 
+# A bare amount in Indonesian money shorthand. Live miss (thread 4045, confirmed in sim): the
+# lead answered "4jta" (= 4 juta rupiah, their income goal) right after the bot asked "kerja
+# atau masih sekolah?" — and the model read it as "4 TAHUN kerja" (4 years of work), derailing
+# the whole discovery. The number's meaning is deterministic (jt/juta=millions, rb/ribu=k), so
+# spell it out instead of trusting the model to parse slang under a priming question.
+AMOUNT_SHORTHAND_RE = re.compile(
+    r"^\s*(?:rp\.?\s*)?\d+(?:[.,]\d+)?\s*(?:jt|jta|juta|rb|ribu)\b\s*[.!]?\s*$",
+    re.IGNORECASE)
+
+AMOUNT_HINT_SUFFIX = (
+    "\n[System: the lead's message '{txt}' is an AMOUNT OF MONEY in Indonesian shorthand "
+    "(jt/jta/juta = millions of rupiah, rb/ribu = thousands). In context it is most likely "
+    "their income goal or their budget. It is NOT years of experience, NOT an age, NOT a "
+    "duration — never read a jt/rb number as anything but money.]"
+)
+
+
 def format_suffix(last_txt: str, nudge: str | None) -> str:
     """The length-mirror instruction for this turn, or '' when it doesn't apply."""
     if nudge is AD_OPENER_NUDGE:
@@ -546,6 +563,8 @@ def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> s
     suffix = format_suffix(last_txt, nudge)
     if (last_txt or "").count("?") >= 2:
         suffix += MULTI_QUESTION_SUFFIX
+    if AMOUNT_SHORTHAND_RE.match(last_txt or ""):
+        suffix += AMOUNT_HINT_SUFFIX.format(txt=(last_txt or "").strip())
     if not suffix:
         return nudge
     return (nudge + suffix) if nudge else suffix.lstrip("\n")
