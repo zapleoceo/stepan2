@@ -51,7 +51,7 @@ AD_TEMPLATE_RE = re.compile(
 # filled with the full price. With a real '?' they still count (the \? alternation).
 ANSWERABLE_Q_RE = re.compile(
     r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
-    r"cicilan|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi)\b"
+    r"cicilan|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi|gaji|gajih|salary)\b"
     # 'what's taught' questions — Indonesian glues suffixes (kurikulum-nya, di-pelajari), so
     # match the stem with any trailing letters rather than a hard word boundary (bench 3917:
     # "apa aja materi yang dikasih" got a WhatsApp stub instead of the syllabus).

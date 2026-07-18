@@ -691,3 +691,14 @@ def test_promised_handoff_detects_a_stated_team_takeover() -> None:
     assert not guard.promised_handoff(
         "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak")
     assert not guard.promised_handoff("Kelas kami dipandu mentor praktisi dari tim kami")
+
+
+def test_booster_wrong_duration_catches_wide_and_spares_comparison() -> None:
+    # bench 4069: "Data Analyst Skill Booster dirancang ... dalam 1 minggu" (booster is 1 day)
+    assert guard.booster_wrong_duration(
+        "Data Analyst Skill Booster dirancang khusus untuk menguasai Excel dalam 1 minggu")
+    assert guard.booster_wrong_duration("Skill Booster ini berlangsung selama 2 bulan")
+    # a legitimate comparison — booster's real 1-hari next to SMM's real 2-minggu — is spared
+    assert not guard.booster_wrong_duration(
+        "Ada Skill Booster 1 hari, atau SMM Intensive yang 2 minggu")
+    assert not guard.booster_wrong_duration("Skill Booster 1 hari (5 jam), Rp 500.000")

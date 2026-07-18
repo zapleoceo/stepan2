@@ -662,6 +662,17 @@ class ReplyService:
                     "answer, drop the escalation", self.branch_id, thread_id)
                 decision = replace(decision, needs_manager=False, manager_question=None,
                                    kb_gap=None)
+            elif any(guard.ASK_PHONE_BEFORE_HANDOFF.strip()[:40] in (m.text or "")
+                     for m in ctx.dialog if m.direction == "out"):
+                # already asked for the phone once and the lead still hasn't given it — re-sending
+                # the identical "give me your WhatsApp" is spam (bench 4113: a non-target lead got
+                # it verbatim 3× in a row). Drop the escalation and let the model's own reply
+                # stand rather than repeat the stub.
+                logger.info(
+                    "guard: branch=%d thread=%d phone already requested → drop repeat stub",
+                    self.branch_id, thread_id)
+                decision = replace(decision, needs_manager=False, manager_question=None,
+                                   kb_gap=None)
             else:
                 logger.info(
                     "guard: branch=%d thread=%d needs_manager without a phone → ask for "

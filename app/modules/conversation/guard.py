@@ -195,8 +195,14 @@ def stale_dates(reply: str, today: date | None = None) -> list[str]:
 # named with ANY week/month duration is always a fabrication (only SMM Intensive is 2 weeks;
 # everything else is 1 day or 4-9 months), so catch it deterministically. Tight window so a
 # legitimate "Skill Booster 1 hari, atau SMM Intensive 2 minggu" comparison isn't flagged.
+# A booster given a week/month length anywhere in the same clause — but NOT when 'hari'/'jam'
+# (its real 1-day duration) or another product name sits between, which is a legitimate
+# comparison ("Skill Booster 1 hari, atau SMM Intensive 2 minggu"). Bench 4069: "Data Analyst
+# Skill Booster dirancang … dalam 1 minggu" slipped the old tight 15-char window.
 _BOOSTER_DURATION_RE = re.compile(
-    r"\bbooster\b[^.!?\n]{0,15}\b\d+\s*(?:minggu|bulan)\b", re.IGNORECASE)
+    r"\bbooster\b(?:(?!\bhari\b|\bjam\b|\bintensive\b|\bsmm\b|\bvibe\b|\bpython\b)[^.!?\n]){0,90}?"
+    r"\b\d+\s*(?:minggu|bulan)\b",
+    re.IGNORECASE)
 
 
 def booster_wrong_duration(reply: str) -> list[str]:
