@@ -51,7 +51,11 @@ AD_TEMPLATE_RE = re.compile(
 # filled with the full price. With a real '?' they still count (the \? alternation).
 ANSWERABLE_Q_RE = re.compile(
     r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
-    r"cicilan|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi)\b",
+    r"cicilan|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi)\b"
+    # 'what's taught' questions — Indonesian glues suffixes (kurikulum-nya, di-pelajari), so
+    # match the stem with any trailing letters rather than a hard word boundary (bench 3917:
+    # "apa aja materi yang dikasih" got a WhatsApp stub instead of the syllabus).
+    r"|\b(?:materi|kurikulum|modul|silabus|diajar|dipelajari|pelajari)\w*",
     re.IGNORECASE)
 
 # A polite Indonesian 'not now' — usually a real 'no' wrapped to save face (gengsi). Pushing
@@ -137,7 +141,8 @@ def lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
         if m.direction != "in":
             continue
         text = (m.text or "").strip()
-        if not text or AD_TEMPLATE_RE.match(text) or is_auto_reply(text):
+        if (not text or AD_TEMPLATE_RE.match(text) or is_auto_reply(text)
+                or OWN_POST_SHARE_RE.match(text)):
             continue
         if text in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
             continue
@@ -388,7 +393,14 @@ MENU_REPLY_NUDGE = (
 # A share of OUR OWN Instagram post. The generic unseen-media reply ('maaf, kontennya
 # tidak bisa dibuka') makes the bot look broken to a lead who just tapped OUR ad/post —
 # seen in 5+ threads (4243/4274/4252/1420/4214). The share IS the interest signal.
-OWN_POST_SHARE_RE = re.compile(r"^[📷🎬📖]\s*\S*itstep\S*$", re.IGNORECASE)
+# The lead shared/replied to one of OUR OWN IG posts or ads. Two shapes: a bare share
+# ("📷 itstep_jakarta") OR a shared AD with its full caption copy ("📷 itstep_jakarta ·
+# itstep_jakarta Masih scroll tapi belum menghasilkan? … upgrade skill di Regular Program
+# SMM …"). Both are a CLICK on our content, NOT the lead's own words — so the ad-copy caption
+# must not count as "the lead spoke" or the price/pitch leaks on turn one (bench 4045/3917/2802:
+# the shared SMM ad got the full Rp 1.882.955 immediately). Prefix match (no $) catches the
+# caption-with-copy; requiring 'itstep' keeps a genuine third-party share out of scope.
+OWN_POST_SHARE_RE = re.compile(r"^[📷🎬📖🎥🎞]\s*\S*itstep", re.IGNORECASE)
 
 OWN_POST_NUDGE = (
     "[System: the lead shared one of OUR OWN Instagram posts — that is interest in that "

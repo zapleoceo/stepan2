@@ -374,3 +374,31 @@ def test_amount_hint_rides_on_the_nudge() -> None:
     got = _pick("4jta", n=2)
     assert got is not None and "AMOUNT OF MONEY" in got and "4jta" in got
     assert "NOT years" in got
+
+
+# ─── shared ad-caption is not the lead speaking (bench 4045/3917/2802) ───
+
+
+_AD_CAPTION = ("📷 itstep_jakarta · itstep_jakarta Masih scroll tapi belum menghasilkan? 👀 "
+               "Saatnya upgrade skill di Regular Program Social Media Marketing 🚀 "
+               "🔗 https://fb.itstep.org/Mwbel")
+
+
+def test_shared_ad_caption_does_not_count_as_lead_speaking() -> None:
+    # the full ad copy shared back is a click on OUR content, not the lead's words → no price
+    assert not lead_spoke_own_words([_M("in", _AD_CAPTION)])
+    assert not lead_spoke_own_words([_M("in", "📷 itstep_jakarta")])  # bare share too
+    # …but one real word flips it
+    assert lead_spoke_own_words([_M("in", _AD_CAPTION), _M("in", "berapa harganya kak?")])
+
+
+def test_ad_caption_first_turn_gets_the_ad_opener_not_a_price() -> None:
+    got = pick_nudge(lead_type=None, dialog=[_M("in", _AD_CAPTION)], last_txt=_AD_CAPTION,
+                     stored_needs=NeedsProfile(), inbound_count=1)
+    assert got == AD_OPENER_NUDGE  # ad opener owns it — never a price
+
+
+def test_materials_question_is_answerable() -> None:
+    for s in ["Saat di kelas apa aja materi yang di kasih", "kurikulumnya gimana",
+              "apa aja yang dipelajari", "modul apa aja kak"]:
+        assert _is_answerable_question(s), s

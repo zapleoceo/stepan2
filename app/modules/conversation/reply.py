@@ -561,11 +561,14 @@ class ReplyService:
             _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
             if post_guard_ratio >= _DUPLICATE_RATIO:
                 from dataclasses import replace  # noqa: PLC0415
-                last_out = next(
-                    (m.text or "" for m in reversed(ctx.dialog) if m.direction == "out"), "")
-                looping = SequenceMatcher(
-                    None, last_out.strip().lower(),
-                    guard.CLARIFY_FALLBACK.strip().lower()).ratio() >= 0.7
+                # The numbered-menu clarify was sent ANYWHERE in this thread already, not just
+                # last turn — bench 2864 fired the identical "1️⃣2️⃣3️⃣4️⃣" menu THREE times,
+                # interspersed with other replies, so a last-out-only check kept missing it.
+                clarify_norm = guard.CLARIFY_FALLBACK.strip().lower()
+                looping = any(
+                    SequenceMatcher(None, (m.text or "").strip().lower(),
+                                    clarify_norm).ratio() >= 0.7
+                    for m in ctx.dialog if m.direction == "out")
                 if _is_answerable_question(last_in_txt):
                     # the lead asked a CONCRETE question — send the answer even if it repeats a
                     # fact; "be more specific" is dismissive when they WERE specific (sim of
