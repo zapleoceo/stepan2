@@ -69,11 +69,13 @@ async def test_silent_clicker_never_gets_the_stub_first(db_session) -> None:
     assert t["reply"] == greeting
 
 
-async def test_handoff_promise_still_funnels_into_the_stub(db_session) -> None:
+async def test_handoff_promise_funnels_into_the_stub_once_then_stops_repeating(db_session) -> None:
     bid = await _branch(db_session)
     promise = "Datanya sudah aku teruskan, tim kami akan menghubungi Kakak ya 🙏"
     sim = SimService(db_session, _EscalatingLLM(promise))
-    await sim.say(bid, "promise", "halo, mau tanya")
-    t = await sim.say(bid, "promise", "berapa biayanya?")
-    # a promised call needs a number to call — the contact-ask is correct here
-    assert t["reply"] == guard.ASK_PHONE_BEFORE_HANDOFF
+    # the model promises a hand-off every turn and the lead never gives a number — the
+    # contact-ask is right ONCE, but re-sending it verbatim every turn is spam (bench 4113).
+    replies = [(await sim.say(bid, "promise", q))["reply"]
+               for q in ("halo, mau tanya", "terus gimana?", "oke lanjut")]
+    stubs = sum(1 for r in replies if r == guard.ASK_PHONE_BEFORE_HANDOFF)
+    assert stubs == 1, f"phone stub should appear once, not {stubs} times: {replies}"
