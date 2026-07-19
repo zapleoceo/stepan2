@@ -503,9 +503,10 @@ PRESENT_AND_CLOSE_NUDGE = (
     "DP that secures a seat) + instalments/QRIS, full amount only as context.\n"
     "2) Take the next step YOURSELF — an assumptive trial close ('aku bantu amankan seat Kakak "
     "buat batch depan ya?'), NEVER a passive 'gimana, tertarik?' that invites a no.\n"
-    "3) If you don't have their WhatsApp yet, offer to send the full details there so a warm "
-    "lead who goes quiet stays reachable ('boleh aku kirim rincian lengkap ke WA Kakak?'). A "
-    "WA shared just to receive details keeps ready=false and the bot stays on.\n"
+    "3) If you don't have their WhatsApp yet, ASK for the number tied to a concrete reason so a "
+    "warm lead who goes quiet stays reachable ('boleh minta nomor WA Kakak biar aku amankan "
+    "seat-nya?'). You're on Instagram and CANNOT send to WA - never offer to 'kirim ... ke WA', "
+    "just ask for the number. A number given keeps ready=false and the bot stays on.\n"
     "One clear next step, not five. Facts only from the KB.]"
 )
 
