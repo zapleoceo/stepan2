@@ -74,10 +74,16 @@ async def threads_awaiting_reply(
     oldest-waiting-first, capped at `limit` (defaults to _REPLY_BATCH_CAP).
 
     Per-lead agent_enabled gates manager takeovers; the NOT-EXISTS pending guard stops
-    a second generation while a queued reply waits out its human-typing delay."""
+    a second generation while a queued reply waits out its human-typing delay.
+
+    'sending' counts as un-sent too: a reply queued then picked up by send_outbox sits in
+    'sending' while its (slow, under-load) IG call runs, and last_out_at only updates on
+    completion — so a guard on 'pending' alone let a second generation fire in that window
+    and shipped a near-duplicate (thread 4579, 2026-07-19, server load 69)."""
     pending = (
         select(Outbox.id)
-        .where(Outbox.thread_id == ChannelThread.id, Outbox.status == "pending")
+        .where(Outbox.thread_id == ChannelThread.id,
+               Outbox.status.in_(("pending", "sending")))  # type: ignore[attr-defined]
         .exists()
     )
     cutoff = datetime.now(UTC).replace(tzinfo=None) - _AWAITING_REPLY_MAX_AGE

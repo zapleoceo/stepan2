@@ -85,3 +85,17 @@ def test_block_pill_renders_state() -> None:
     _lang.set("en")
     assert "/ui/chat/7/block" in chat_block_pill_html(7, False)
     assert "blocked" in chat_block_pill_html(7, True)
+
+
+async def test_sending_outbox_also_blocks_a_second_generation(db_session) -> None:
+    """REGRESSION (thread 4579, server load 69): a reply queued then picked up by send_outbox
+    sits in status='sending' while its slow IG call runs, and last_out_at only updates on
+    completion — a guard on 'pending' alone let a second reply generate and shipped a
+    near-duplicate. Both un-sent statuses must exclude the thread."""
+    from app.adapters.db.models import Outbox
+    bid, _cid, _lead, thread = await _thread(db_session)
+    assert thread.id in await threads_awaiting_reply(db_session, bid)  # baseline: eligible
+    db_session.add(Outbox(branch_id=bid, thread_id=thread.id, text="hi",
+                          source="agent", status="sending", scheduled_at=_NOW))
+    await db_session.flush()
+    assert thread.id not in await threads_awaiting_reply(db_session, bid)
