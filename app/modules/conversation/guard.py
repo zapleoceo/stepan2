@@ -211,6 +211,35 @@ def booster_wrong_duration(reply: str) -> list[str]:
         if m else []
 
 
+# A concrete monthly-EARNINGS figure ('alumni dapat 5-6 juta per bulan', 'gaji 8jt/bulan') is
+# a fabricated statistic — no branch KB carries an income number, and the LLM verify waves it
+# through as "general archetype language" because the sentence is phrased generally. The number
+# is the lie. Bench b10g 4045: "banyak alumni kami dapat proyek freelance sampai 5-6 juta per
+# bulan" reached the final reply. Deterministic backstop: an earnings word + a money figure
+# tied to 'per bulan' fires — but an INSTALLMENT ('cicilan 3 juta per bulan') is a real KB
+# price, so a payment word in the same bubble spares it.
+_EARN_WORD_RE = re.compile(
+    r"\b(dapat|dapet|penghasilan|gaji|gajih|hasilkan|menghasilkan|income|earning|raup|cuan|"
+    r"freelance|proyek|fee|omzet|profit|untung)\w*", re.IGNORECASE)
+_PAY_WORD_RE = re.compile(
+    r"\b(cicil|angsur|bayar|investasi|dp\b|biaya|harga|total|uang muka|pembayaran)\w*",
+    re.IGNORECASE)
+_PER_MONTH_MONEY_RE = re.compile(
+    r"\d[\d.,]*\s*(?:juta|jt|ribu|rb|k)\b[^.!?\n]{0,18}?(?:per\s*bulan|/?\s*bulan|sebulan"
+    r"|perbulan|tiap bulan|sebulannya)", re.IGNORECASE)
+
+
+def fabricated_income_figure(reply: str) -> list[str]:
+    out = []
+    for bubble in (reply or "").split("|||"):
+        if _PAY_WORD_RE.search(bubble):
+            continue
+        m = _PER_MONTH_MONEY_RE.search(bubble)
+        if m and _EARN_WORD_RE.search(bubble):
+            out.append(f"invented monthly-income figure (no KB source): {m.group(0)}")
+    return out
+
+
 def price_before_lead_spoke(reply: str, lead_spoke: bool) -> list[str]:
     """A number quoted to a lead who has still only ever tapped an ad button.
 

@@ -252,6 +252,7 @@ def _deterministic_issues(
         *guard.price_before_lead_spoke(reply, lead_spoke),
         *guard.stale_dates(reply),
         *guard.booster_wrong_duration(reply),
+        *guard.fabricated_income_figure(reply),
         *guard.premature_payment_details(reply, lead_words),
         *guard.invented_price_no_card(reply, context),
     ]

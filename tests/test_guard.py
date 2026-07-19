@@ -131,6 +131,19 @@ def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert not guard.impossible_capability_offers("aku jelasin di sini aja ya Kak lewat chat")
 
 
+def test_fabricated_income_figure_flags_earnings_not_installments() -> None:
+    # bench b10g 4045: an invented alumni monthly income reached the final reply
+    assert guard.fabricated_income_figure(
+        "banyak alumni kami dapat proyek freelance sampai 5-6 juta per bulan")
+    assert guard.fabricated_income_figure("lulusan kami bisa raup 8jt/bulan")
+    # a real KB installment carries a payment word — must NOT be flagged
+    assert not guard.fabricated_income_figure(
+        "Investasinya Rp13.000.000, bisa dicicil 4 juta per bulan tanpa bunga")
+    # a general true archetype with no number stays fine
+    assert not guard.fabricated_income_figure(
+        "banyak alumni kami sekarang jadi SMM specialist dan freelancer")
+
+
 def test_wrong_channel_claims_catches_dm_on_instagram() -> None:
     assert guard.wrong_channel_claims("langsung aja DM aku di Instagram ya Kak")
     assert guard.wrong_channel_claims("chat aku di Instagram aja buat lanjutin")
