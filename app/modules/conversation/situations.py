@@ -306,6 +306,28 @@ def postpone_days(text: str) -> int | None:
     return None
 
 
+# Legitimacy doubt — trust is the #1 purchase barrier in Indonesian chat commerce (34% fear
+# fraud). 'Apakah ini real?' answered with the clarify MENU (thread 4435, 24h review) is the
+# worst possible reply: a doubt met with a form. Answer with VERIFIABLE facts + an invitation
+# to check us, never defensiveness.
+TRUST_DOUBT_RE = re.compile(
+    r"\b(real(?![- ]?tim)|asli|beneran|resmi|legal(itas)?|terpercaya|penipuan|penipu|"
+    r"tipu[- ]?tipu|scam+|bodong|abal[- ]?abal|fiktif|amanah|"
+    r"aman\s*(ga|gak|nggak|kah|nya)?)\b",
+    re.IGNORECASE)
+
+TRUST_DOUBT_NUDGE = (
+    "[System: the lead just questioned whether we are LEGITIMATE ('apakah ini real / scam / "
+    "resmi?'). This is the #1 purchase barrier here - treat it as a golden moment, never "
+    "defensively and NEVER with a menu/counter-question. Reply with VERIFIABLE facts from the "
+    "KB only: the physical campus (Menara Sudirman lt.8, Jakarta), operating since 1999 in 24 "
+    "countries, 267.000+ alumni, legal entity PT. ITSTEP ACADEMY IND - and INVITE them to "
+    "verify in person ('kampusnya bisa Kakak datangi langsung kapan aja'). One warm line that "
+    "doubt is normal ('wajar banget kok cek-cek dulu'). Then ONE light question to continue. "
+    "Never invent registration numbers or certificates not in the KB. Return the JSON as "
+    "usual.]"
+)
+
 SOFT_NO_NUDGE = (
     "[System: the lead just softly declined or stalled — a polite Indonesian 'not now' "
     "('nanti/pikir dulu/insyaallah/belum ada biaya/lain kali' or 'tanya keluarga dulu'), "
@@ -756,6 +778,10 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
     if MINOR_RE.search(last_txt):
         return MINOR_NUDGE
     asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
+    # A legitimacy doubt outranks soft-no/answer-first: the doubt IS the objection, and the
+    # canned facts answer beats anything else this turn (thread 4435: 'Apakah ini real' → menu).
+    if TRUST_DOUBT_RE.search(last_txt):
+        return TRUST_DOUBT_NUDGE
     if SOFT_NO_RE.search(last_txt):
         # First objection this conversation → work it once; on a repeat, ease off (existing).
         soft_no_count = sum(

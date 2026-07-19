@@ -472,3 +472,13 @@ def test_materials_question_is_answerable() -> None:
     for s in ["Saat di kelas apa aja materi yang di kasih", "kurikulumnya gimana",
               "apa aja yang dipelajari", "modul apa aja kak"]:
         assert _is_answerable_question(s), s
+
+
+def test_trust_doubt_gets_legitimacy_answer_not_menu() -> None:
+    from app.modules.conversation.situations import TRUST_DOUBT_NUDGE, TRUST_DOUBT_RE
+    # thread 4435: 'Apakah ini real' was answered with the clarify menu
+    for s in ["Apakah ini real", "takut scam soalnya", "ini resmi kah?", "aman ga sih"]:
+        assert TRUST_DOUBT_RE.search(s), s
+    for s in ["prediksi market realtime bisa?", "berapa harganya"]:
+        assert not TRUST_DOUBT_RE.search(s), s
+    assert TRUST_DOUBT_NUDGE in _pick("apakah ini beneran resmi kak?")
