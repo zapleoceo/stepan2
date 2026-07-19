@@ -39,7 +39,9 @@ def test_answer_first_fires_on_real_questions() -> None:
     for s in ["Berbayar berapa", "Biaya nya berapa?", "apakah dibayar",
               "Modal hp bisa ga sih min", "untuk jadwalnya hari apa aja ya biasanya?",
               "Untuk ikut serta caranya gimana ya kak?", "sertifikatnya BNSP kan kak?",
-              "ini gratis atau ada biaya nya kak"]:
+              "ini gratis atau ada biaya nya kak",
+              # sim s10: bare 'cicil' without the -an suffix got the WA-stub dodge
+              "bs cicil ga"]:
         assert _answer_first_fires(s), s
 
 
@@ -57,6 +59,14 @@ def test_answer_first_never_fires_on_ad_prefill() -> None:
 def test_answer_first_ignores_non_questions() -> None:
     for s in ["oke makasih", "iya kak", "Mantap"]:
         assert not _answer_first_fires(s), s
+
+
+def test_buying_signal_catches_gas_family() -> None:
+    from app.modules.conversation.situations import BUYING_SIGNAL_RE
+    # sim s10 slang_minimal: 'yaudh gas' (= go ahead) got the clarify menu at the buying moment
+    for s in ["yaudh gas", "gaskeun kak", "oke gas", "mau daftar sekarang"]:
+        assert BUYING_SIGNAL_RE.search(s), s
+    assert not BUYING_SIGNAL_RE.search("saya masih mikir dulu")
 
 
 # ─── unseen media: the lead sent something the bot cannot read ───

@@ -131,6 +131,16 @@ def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert not guard.impossible_capability_offers("aku jelasin di sini aja ya Kak lewat chat")
 
 
+def test_ungrounded_times_flags_invented_class_hours() -> None:
+    ctx = "Open House gratis tiap Kamis jam 16:00-20:00 WIB di Menara Sudirman"
+    # sim s10 night_worker: '19.00-20.00' quoted to a shift worker, KB says only 'malam'
+    assert guard.ungrounded_times("Kelas kita malam hari, sekitar jam 19.00 - 20.30 WIB", ctx)
+    # a time the KB does state passes, separator-normalized (16.00 vs 16:00)
+    assert not guard.ungrounded_times("Open House Kamis jam 16.00-20.00 ya Kak", ctx)
+    # prices with dotted thousands must not read as clock times
+    assert not guard.ungrounded_times("Investasinya Rp 1.882.955, DP Rp 500.000", ctx)
+
+
 def test_fabricated_income_figure_flags_earnings_not_installments() -> None:
     # bench b10g 4045: an invented alumni monthly income reached the final reply
     assert guard.fabricated_income_figure(

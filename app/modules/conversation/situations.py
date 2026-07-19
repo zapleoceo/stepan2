@@ -54,7 +54,7 @@ AD_TEMPLATE_RE = re.compile(
 # filled with the full price. With a real '?' they still count (the \? alternation).
 ANSWERABLE_Q_RE = re.compile(
     r"\?|\b(harus|apakah|berapa|kapan|di\s?mana|modal|bayar|berbayar|gratis|biaya|harga|"
-    r"cicilan|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi|gaji|gajih|salary)\b"
+    r"cicil\w*|daftar|syarat|sertif|bnsp|jadwal|lokasi|durasi|gaji|gajih|salary)\b"
     # 'what's taught' questions — Indonesian glues suffixes (kurikulum-nya, di-pelajari), so
     # match the stem with any trailing letters rather than a hard word boundary (bench 3917:
     # "apa aja materi yang dikasih" got a WhatsApp stub instead of the syllabus).
@@ -347,7 +347,7 @@ FOLLOWUP_PRODUCT_DISCIPLINE = (
 # answer is NOT the fix (they asked, and the ad's own button invites the price question) —
 # what changes is the framing around the number.
 PRICE_QUESTION_RE = re.compile(
-    r"\b(berapa|harga|biaya|tarif|cicilan|angsuran|murah|mahal|gratis|bayar|berbayar|modal)\b",
+    r"\b(berapa|harga|biaya|tarif|cicil\w*|angsuran|murah|mahal|gratis|bayar|berbayar|modal)\b",
     re.IGNORECASE)
 
 # The lead is asking HOW/WHERE to pay — the strongest buying signal there is. Thread 2821:
@@ -363,9 +363,12 @@ PAYMENT_INTENT_RE = re.compile(
 # how-to-pay question. Live loss (thread 4194, 2026-07-17): 'saya ingin bergabung..' was
 # answered with a wall of price + bank account + schedule in one block; two minutes later —
 # 'maaf ka kayanya saya gabisa deh'. A buyer needs ONE small step, not an invoice.
+# The gas-family ('yaudh gas', 'gaskeun') is chat-Indonesian for 'let's go' — sim s10:
+# 'yaudh gas' after an installment question got the clarify MENU at the exact buying moment.
 BUYING_SIGNAL_RE = re.compile(
     r"\b(mau|ingin|pengen|pgn|siap|langsung)\s+(daftar|gabung|bergabung|ikut(an)?|join|"
-    r"ambil\s+kelas)\b|\bdaftar(kan)?\s+(saya|aku|dong|sekarang)\b|\bberminat\s+daftar\b",
+    r"ambil\s+kelas)\b|\bdaftar(kan)?\s+(saya|aku|dong|sekarang)\b|\bberminat\s+daftar\b"
+    r"|\bgas(s|keun|kan)?\b|\bgasken\b",
     re.IGNORECASE)
 
 BUYING_SIGNAL_NUDGE = (

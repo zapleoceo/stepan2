@@ -240,6 +240,24 @@ def fabricated_income_figure(reply: str) -> list[str]:
     return out
 
 
+# A clock time quoted for a class/event that the KB never states. Sim s10 night_worker: a
+# shift worker asking about evenings got 'kelas kita malam hari, sekitar jam 19.00-20.00 WIB'
+# plus an offer of later groups — the KB says only 'malam', no times. The lead plans their
+# shift around an invented hour and no-shows. Same shape as booster_wrong_duration: the one
+# class of fact that reads authoritative but has no card behind it. Times the context DOES
+# state (Open House 16:00-20:00) pass via separator-normalized substring match.
+_CLOCK_RE = re.compile(r"\b([01]?\d|2[0-3])[.:]([0-5]\d)\b")
+
+
+def ungrounded_times(reply: str, context: str) -> list[str]:
+    ctx_norm = _CLOCK_RE.sub(lambda m: f"{int(m.group(1))}:{m.group(2)}", context or "")
+    out = []
+    for m in _CLOCK_RE.finditer(reply or ""):
+        if f"{int(m.group(1))}:{m.group(2)}" not in ctx_norm:
+            out.append(f"clock time not stated anywhere in the KB: {m.group(0)}")
+    return out
+
+
 def price_before_lead_spoke(reply: str, lead_spoke: bool) -> list[str]:
     """A number quoted to a lead who has still only ever tapped an ad button.
 
