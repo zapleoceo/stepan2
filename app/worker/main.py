@@ -10,7 +10,7 @@ import asyncio
 import logging
 import random
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from arq import cron, func
@@ -97,6 +97,57 @@ async def _ingest_channel(branch_id: int, channel_id: int) -> int:
     except Exception:
         logger.exception("ingest failed channel %s", channel_id)
         return 0
+
+
+# Adaptive polling: the base ingest runs every 2 min (anti-ban footprint fixed). During a
+# LIVE back-and-forth the lead should not wait a whole 2-min tick for each of their replies to
+# be seen, so an interleaved poll on the OFF minutes picks up ONLY channels that currently have
+# an active conversation — a thread with a lead message in the last few minutes that the bot
+# hasn't answered yet. An idle account is never polled extra, so the private-API footprint only
+# rises when a real human would also be checking more often (a live chat), which reads as more
+# human, not less. Bounded window keeps a stale thread from holding a channel in fast-poll.
+_ACTIVE_CONVO_WINDOW_MIN = 6
+
+
+async def ingest_active_conversations(ctx: dict[str, Any]) -> int:
+    """Off-minute dispatcher: interleave an extra ingest for branches with a live conversation."""
+    return await _fan_out_per_branch(ctx, "ingest_active_branch", gate_platform=True)
+
+
+async def ingest_active_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """Poll ONLY channels with an active (recent, unanswered) conversation — skip idle ones so
+    the baseline anti-ban cadence is untouched for accounts nobody is chatting with right now."""
+    await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=_ACTIVE_CONVO_WINDOW_MIN)
+    async with session_scope() as session:
+        channels = await wiring.active_channels(session, branch_id)
+        active_ids = await _channels_with_live_convo(
+            session, [c.id for c in channels], cutoff)
+    stored = 0
+    for channel in channels:
+        if channel.id in active_ids:
+            stored += await _ingest_channel(branch_id, channel.id)
+    return stored
+
+
+async def _channels_with_live_convo(
+    session: AsyncSession, channel_ids: list[int], cutoff: datetime,
+) -> set[int]:
+    """Channel ids that have a thread with a lead message since `cutoff` the bot hasn't caught
+    up to (last_in newer than last_out) — the live-conversation signal. `cutoff` is a naive
+    UTC datetime to match channel_thread's `timestamp without time zone` columns."""
+    if not channel_ids:
+        return set()
+    from sqlalchemy import text  # noqa: PLC0415
+    rows = (await session.execute(
+        text("SELECT DISTINCT channel_id FROM channel_thread"
+             " WHERE channel_id = ANY(:ids)"
+             "   AND last_in_at IS NOT NULL"
+             "   AND last_in_at > :cutoff"
+             "   AND (last_out_at IS NULL OR last_in_at > last_out_at)"),
+        {"ids": channel_ids, "cutoff": cutoff},
+    )).all()
+    return {r[0] for r in rows}
 
 
 async def _healthy(session: AsyncSession, branch_id: int, channel: Channel, port) -> bool:
@@ -827,7 +878,8 @@ class WorkerSettings:
     functions = [
         # Cron dispatchers: each fans out one per-branch job so branches run concurrently and
         # independently (a slow/failing branch can't stall or abort the tick for the others).
-        ingest_active_channels, reply_pending, send_outbox, schedule_followups,
+        ingest_active_channels, ingest_active_conversations, reply_pending, send_outbox,
+        schedule_followups,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         daily_digest, crm_rescue,
         reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
@@ -835,7 +887,8 @@ class WorkerSettings:
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
         # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
         # id the instant the job ends, so the dedup never outlives the run.
-        ingest_branch, reply_pending_branch, send_outbox_branch, schedule_followups_branch,
+        ingest_branch, ingest_active_branch, reply_pending_branch, send_outbox_branch,
+        schedule_followups_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
         daily_digest_branch,
@@ -852,6 +905,13 @@ class WorkerSettings:
         # overlap (→ constraint races) and hammered IG; 2 min stays well clear and is
         # gentler on the account. Reply/send stay per-minute (DB/queue, cheap).
         cron(ingest_active_channels, minute=set(range(0, 60, 2)), second=0,
+             run_at_startup=False),
+        # Adaptive interleave: fill the OFF minutes (1,3,5,…) but only for channels with a
+        # LIVE conversation (see ingest_active_branch) — a lead mid-chat is seen within ~1 min
+        # instead of ~2, while idle accounts keep the exact 2-min footprint (anti-ban). The
+        # (channel_id, external_id) unique constraint makes an overlap with the base poll a
+        # harmless no-op, same as two base runs racing.
+        cron(ingest_active_conversations, minute=set(range(1, 60, 2)), second=0,
              run_at_startup=False),
         # reply_pending polls once/min (not every 20s): a slow tick — broker degraded, or a
         # guard regen doubling the LLM calls — can outrun ARQ's job_timeout, get killed and
