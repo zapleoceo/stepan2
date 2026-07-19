@@ -1624,3 +1624,18 @@ def test_nav_order_matches_requested_grouping() -> None:
               "Reports", "Leads", "Members", "Settings", "Branches", "Broker log"]
     positions = [html.index(f">{lbl}<") for lbl in labels]
     assert positions == sorted(positions)  # exact requested order, left to right
+
+
+def test_demo_persona_carries_the_current_sales_methodology() -> None:
+    """The site demo persona must track the selling craft the branch pipeline learned:
+    gain-pull before the pitch, soft-no easing, budget -> risk-free first step, multi-part
+    answers, no near-verbatim repeats. It is a separate hardcoded prompt, so without this
+    pin it silently falls behind every methodology upgrade."""
+    from app.api._routes_demo import _SYSTEM
+
+    assert "pull the GAIN" in _SYSTEM
+    assert "SOFT no" in _SYSTEM and "ease " in _SYSTEM
+    assert "free up to 10 leads a day" in _SYSTEM         # budget objection -> free tier
+    assert "EVERY part answered" in _SYSTEM               # multi-part questions
+    assert "near-verbatim" in _SYSTEM                     # anti-repeat
+    assert "Never mention or imply any specific real client" in _SYSTEM
