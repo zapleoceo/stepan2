@@ -69,7 +69,11 @@ SOFT_NO_RE = re.compile(
     # all and the model dormant-ed the lead instead.
     r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|[pf]ikir(kan|in)?[- ]?([pf]ikir\s*)?(dulu|lagi)|"
     r"mikir(in|kan)?\s*(dulu|lagi)|"
-    r"nabung\s*dulu|belum\s*(ada|punya|siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
+    # 'belum ada/punya' needs a REFUSAL object: bare 'belum ada pengalaman, bisa ikut?' is a
+    # warm QUALIFYING question, not a no — matching it sent the whole follow-up cadence into
+    # the soft-no snooze (sales-logic audit 2026-07-19, #6).
+    r"nabung\s*dulu|belum\s*(ada|punya)\s*(biaya|uang|dana|duit|modal|budget|niat|minat|"
+    r"waktu)|belum\s*(siap|kepikiran)|lain\s*kali|next\s*time|nex\s*(aja|kk)|"
     # A polite "not interested (yet)" is the most common face-saving refusal and was missed
     # entirely (thread 2949: "maaf belum tertarik" got a discovery question + a follow-up an
     # hour later, straight over the no, instead of the soft-no easing-off and objection snooze).
@@ -356,10 +360,12 @@ _FOLLOWUP_ANGLE_LADDER = (
     "bring ONE concrete, KB-sourced proof — a real Success Case or a specific tangible outcome "
     "of this exact program — tied to their goal, to make it feel POSSIBLE for someone like "
     "them. One proof, not a feature list. Never invent a case or a number.]",
-    # attempt 3 (n=3): lower the barrier
+    # attempt 3 (n=3): lower the barrier. NO schedule example here — for a silent clicker the
+    # ad-opener rules still forbid schedules, and a conflicting example made the model pick
+    # arbitrarily (sales-logic audit 2026-07-19, #8).
     "LOWER the barrier: offer the cheapest real next step from the KB — a Skill Booster, the "
-    "free weekly Open House, or a low-friction yes/no ('mau aku kirimin jadwal terdekat?'). "
-    "The goal now is a tiny yes, NOT selling the full program.]",
+    "free weekly Open House, or a low-friction yes/no ('mau aku ceritain singkat gimana "
+    "kelasnya jalan?'). The goal now is a tiny yes, NOT selling the full program.]",
     # attempt 4+ (n>=4): graceful soft close
     "this is likely the LAST touch — a graceful, no-pressure close. Acknowledge they may be "
     "busy, leave the door wide open ('kalau nanti mau lanjut, chat aku aja ya kapan pun'), one "
@@ -632,11 +638,18 @@ def with_situation(correction: str, situational: str | None) -> str:
 
 
 def _bot_offered_menu(dialog) -> bool:  # noqa: ANN001
-    """The most recent BOT message actually contained a numbered menu — a bare '2' from the
-    lead is only a menu answer if there was a menu to answer."""
+    """A recent BOT message contained a numbered menu — a bare '2' from the lead is only a
+    menu answer if there was a menu to answer. Scans the last few bot messages, not just the
+    newest: a follow-up nudge sent between the menu and the lead's '1' used to hide the menu
+    and the choice fell to another open discovery question (thread 4058's exact failure)."""
+    seen_out = 0
     for m in reversed(dialog):
         if m.direction == "out":
-            return "1️⃣" in (m.text or "")
+            if "1️⃣" in (m.text or ""):
+                return True
+            seen_out += 1
+            if seen_out >= 3:
+                return False
     return False
 
 
@@ -678,12 +691,15 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         if OWN_POST_SHARE_RE.match(last_txt.strip()):
             return OWN_POST_NUDGE  # our own post shared back = interest, not broken media
         return UNSEEN_MEDIA_NUDGE  # can't read their turn — nothing else can be trusted
-    if MINOR_RE.search(last_txt):
-        return MINOR_NUDGE
+    # Checkout beats the audience classifier: a parent writing 'mau daftar anak saya,
+    # transfer ke mana?' is the PAYER at the checkout — steering them to Open House because
+    # 'anak' matched MINOR_RE loses the close (sales-logic audit 2026-07-19, top-2).
     if PAYMENT_INTENT_RE.search(last_txt) and not AD_TEMPLATE_RE.search(last_txt):
         return PAYMENT_INTENT_NUDGE  # a buyer at the checkout outranks every other signal
     if BUYING_SIGNAL_RE.search(last_txt) and not AD_TEMPLATE_RE.search(last_txt):
         return BUYING_SIGNAL_NUDGE  # 'I want in' — one small step, never an invoice-wall
+    if MINOR_RE.search(last_txt):
+        return MINOR_NUDGE
     asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
     if SOFT_NO_RE.search(last_txt):
         # First objection this conversation → work it once; on a repeat, ease off (existing).
@@ -704,13 +720,16 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         return LOW_BUDGET_NUDGE
     if MENU_REPLY_RE.match(last_txt) and _bot_offered_menu(dialog):
         return MENU_REPLY_NUDGE  # a menu answer converts to value+step, not more questions
-    if stored_needs.pains and not stored_needs.gains and inbound_count <= DISCOVERY_TURN_CAP:
+    # `<` aligns with reply.py's stage gate (`inbound_count < _DISCOVERY_TURN_CAP`): at the
+    # cap the funnel already allows PRESENTING, so the nudge must release the same turn —
+    # `<=` held the pitch hostage one extra turn (sales-logic audit 2026-07-19, #5).
+    if stored_needs.pains and not stored_needs.gains and inbound_count < DISCOVERY_TURN_CAP:
         return NEED_PAYOFF_NUDGE
     if stored_needs.captured():
         # pain AND gain in hand → discovery is done: present, close assumptively, capture WA
         return PRESENT_AND_CLOSE_NUDGE
-    if not stored_needs.pains and inbound_count <= DISCOVERY_TURN_CAP:
+    if not stored_needs.pains and inbound_count < DISCOVERY_TURN_CAP:
         return DISCOVER_BEFORE_PRICE_NUDGE
-    if not stored_needs.captured() and inbound_count > DISCOVERY_TURN_CAP:
+    if not stored_needs.captured() and inbound_count >= DISCOVERY_TURN_CAP:
         return DISCOVERY_CAP_NUDGE.format(n=inbound_count)
     return None

@@ -88,4 +88,10 @@ def pick_capability(
     text = last_inbound or ""
     if _BUY_RE.search(text) or _PHONE_RE.search(text):
         return SMART  # buying signal arrived early — don't gamble the close on the cheap model
+    # A soft-no / budget objection is the save-the-sale turn: OBJECTION_HANDLE is the most
+    # instruction-heavy nudge in the system, and the cheap model follows it worst exactly when
+    # the sale hangs on it (sales-logic audit 2026-07-19, top finding).
+    from .situations import LOW_BUDGET_RE, SOFT_NO_RE  # noqa: PLC0415 (avoid import cycle)
+    if SOFT_NO_RE.search(text) or LOW_BUDGET_RE.search(text):
+        return SMART
     return FAST

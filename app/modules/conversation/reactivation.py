@@ -16,6 +16,7 @@ Anti-ban / anti-spam invariants:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -38,7 +39,7 @@ from .reply import (
 )
 from .repository import OutboxRepo, ThreadRepo
 from .routing import SMART
-from .situations import SOFT_NO_RE, lead_spoke_own_words
+from .situations import lead_spoke_own_words
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -46,6 +47,12 @@ if TYPE_CHECKING:
     from app.ports.notify import NotifierPort
 
 logger = logging.getLogger(__name__)
+
+# A hard refusal (not a postponement): declined interest or backed out. Postponers
+# ('nanti dulu', 'nabung dulu') stay eligible — see the suppress comment below.
+_HARD_REFUSAL_RE = re.compile(
+    r"(belum|blm|ga|gak|nggak|ngga|ndak|tidak|tdk)\s*(tertarik|minat|berminat)"
+    r"|(tidak|tdk|gak|ga|nggak|ngga|ndak|gk)\s*jadi\b|sudah\s*tidak", re.IGNORECASE)
 
 MIN_DORMANT_DAYS = 3
 MAX_DORMANT_DAYS = 21
@@ -132,12 +139,14 @@ class ReactivationService:
         if not lead_spoke_own_words(ctx.dialog):
             return False  # never spoke → nothing to adapt to; leave dormant
         recent_in = [m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"][:3]
-        # A lead who declined ('gak tertarik', 'nanti dulu') or got annoyed made a CHOICE -
-        # re-nudging them soon is exactly the spam that earns a report. Scan the last few
-        # messages, not just the last: a refusal is often followed by a polite 'makasih' /
-        # 'oke' (thread 3060: 'saya sudah tidak tertarik' then 'terimakasih'). Suppress them
-        # (record the touch so the gap/cap excludes them for 14d) and send nothing.
-        if any(guard.lead_signaled_annoyance(t) or SOFT_NO_RE.search(t) for t in recent_in):
+        # Suppress HARD refusals and annoyance ('gak tertarik', 'tidak jadi', 'spam') - that's
+        # a made choice, touching again earns a report. But a POSTPONER ('nanti dulu', 'nabung
+        # dulu', 'pikir dulu') literally asked for later - they're the warmest dormant segment
+        # and exactly whom reactivation exists for; the 3-21 day window IS the 'later' they
+        # asked about (sales-logic audit 2026-07-19, #7). Scan the last 3 messages: a refusal
+        # is often followed by a polite 'makasih' (thread 3060).
+        if any(guard.lead_signaled_annoyance(t) or _HARD_REFUSAL_RE.search(t)
+               for t in recent_in):
             await self._suppress(thread_id, lead_id, now)
             return False
         branch = await self.session.get(Branch, self.branch_id)

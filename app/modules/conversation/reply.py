@@ -678,6 +678,17 @@ class ReplyService:
                     self.branch_id, thread_id)
                 decision = replace(decision, needs_manager=False, manager_question=None,
                                    kb_gap=None)
+            elif asked:
+                # The lead asked a real question but no clean answer survived the guards
+                # (live 2740, 2026-07-19: two failed regens → the question got answered with
+                # the phone stub and, with needs_manager stripped, NO human ever saw it). The
+                # phone-gate premise is false on IG — the thread itself is a reply channel:
+                # send the honest SAFE_FALLBACK and KEEP the escalation so a human answers
+                # in-thread.
+                logger.info(
+                    "guard: branch=%d thread=%d unanswerable real question without a phone "
+                    "→ safe fallback + keep the alert", self.branch_id, thread_id)
+                decision = replace(decision, reply=guard.SAFE_FALLBACK)
             else:
                 logger.info(
                     "guard: branch=%d thread=%d needs_manager without a phone → ask for "
