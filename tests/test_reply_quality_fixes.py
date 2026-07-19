@@ -11,7 +11,12 @@ from datetime import datetime
 from app.adapters.db.models import AppSetting, Branch
 from app.modules.conversation import guard
 from app.modules.conversation.prompt import build_messages, now_hint
-from app.modules.conversation.reply import _clean_bubble, _split_bubbles
+from app.modules.conversation.reply import (
+    _DUPLICATE_RATIO,
+    _clean_bubble,
+    _most_similar_prior,
+    _split_bubbles,
+)
 from app.modules.conversation.sim import SimService
 from app.modules.settings.service import invalidate
 
@@ -101,3 +106,17 @@ async def test_clarify_loop_escalates_instead_of_repeating_verbatim(db_session) 
     t3 = await sim.say(bid, "loop", "jelasin dong")
     assert t3["reply"] != guard.CLARIFY_FALLBACK           # loop broken, not repeated
     assert t3["reply"] == guard.ASK_PHONE_BEFORE_HANDOFF   # escalation path (contact-less lead)
+
+
+def test_reworded_discovery_question_is_a_repeat() -> None:
+    """Live 4531/3154/4306: a lead's answered qualifier got re-asked in fresh words, sliding
+    under the char-ratio gate. Question content-word overlap now catches it."""
+    from types import SimpleNamespace as NS
+    prior = [NS(direction="out", text="Kak, apa target utama Kakak belajar coding sekarang?")]
+    _, r = _most_similar_prior(
+        "Kakak pengennya capai target apa lewat belajar coding ini?", prior)
+    assert r >= _DUPLICATE_RATIO
+    # two DISTINCT questions sharing at most one noun must not be flagged as a repeat
+    other = [NS(direction="out", text="Kakak lebih suka kelas offline atau online?")]
+    _, r2 = _most_similar_prior("Kakak sudah pernah pakai tools desain sebelumnya?", other)
+    assert r2 < _DUPLICATE_RATIO

@@ -85,6 +85,10 @@ _READY_HANDOFF_CLOSING = (
 # check at all (thread 2260, 2026-07-08: the SECOND occurrence of a re-asked discovery
 # question was a live reply, not a followup, and slipped straight through).
 _DUPLICATE_RATIO = 0.6
+# Two questions sharing this fraction of content words are the SAME question reworded — tuned
+# on the 2026-07-19 week sweep to catch reworded discovery re-asks without tripping distinct
+# questions that happen to share a noun.
+_QUESTION_REPEAT_JACCARD = 0.55
 _REPEAT_CORRECTION = (
     "[System: your draft repeats something you already said in this thread almost "
     "word-for-word: {prior!r}. Do NOT send it again — react SPECIFICALLY to what the lead "
@@ -141,6 +145,15 @@ def _most_similar_prior(new_text: str, dialog) -> tuple[str, float]:  # noqa: AN
             prior_q = _last_question(prior)
             if prior_q:
                 ratio = max(ratio, SequenceMatcher(None, new_q.lower(), prior_q.lower()).ratio())
+                # Content-word overlap of the two QUESTIONS catches a REWORDED discovery re-ask
+                # that the char ratio slides under: 'apa target utama belajar coding?' re-asked
+                # as 'Kakak pengen capai apa lewat coding?' shares the key nouns but not the
+                # surface (live 4531/3154/4306 — a lead's answered qualifier got asked again).
+                nqw, pqw = _content_words(new_q), _content_words(prior_q)
+                if len(nqw) >= 4 and len(pqw) >= 4:
+                    qj = len(nqw & pqw) / len(nqw | pqw)
+                    if qj >= _QUESTION_REPEAT_JACCARD:
+                        ratio = max(ratio, _DUPLICATE_RATIO)
         for bubble in new_bubbles:
             ratio = max(ratio, SequenceMatcher(None, bubble, prior_lower).ratio())
         # Word-overlap (Jaccard) catches a REWORDED repeat — the same greeting/point in fresh
