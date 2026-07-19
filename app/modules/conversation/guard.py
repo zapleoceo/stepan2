@@ -469,8 +469,8 @@ ANSWER_DONT_ESCALATE_CORRECTION = (
 )
 
 ASK_PHONE_BEFORE_HANDOFF = (
-    "Biar tim kami bisa bantu Kakak lebih lanjut, boleh aku minta nomor WhatsApp Kakak "
-    "dulu ya? 🙏")
+    "Biar aku bisa amankan slot Kakak & tim kami bantu proses daftarnya, boleh minta "
+    "nomor WhatsApp-nya ya, Kak? 😊")
 
 # Used when a live reply keeps converging onto a near-duplicate after a guard regen. That's
 # a style dead-end (the model can't rephrase), NOT a knowledge gap — summoning a manager here
