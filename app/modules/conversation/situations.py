@@ -74,6 +74,9 @@ SOFT_NO_RE = re.compile(
     # entirely (thread 2949: "maaf belum tertarik" got a discovery question + a follow-up an
     # hour later, straight over the no, instead of the soft-no easing-off and objection snooze).
     r"(belum|blm|ga|gak|nggak|ngga|ndak|tidak|tdk)\s*(tertarik|tertarikan|minat|berminat)|"
+    # 'tidak/gak jadi' = backing out / changed my mind (thread 2811: "maaf KA tidak jadi",
+    # "saya tidak jadi") — a clear refusal the soft-no detector was missing entirely.
+    r"(tidak|tdk|gak|ga|nggak|ngga|ndak|gk)\s*jadi\b|"
     r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
     r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
     r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",

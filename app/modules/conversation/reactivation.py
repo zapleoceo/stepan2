@@ -38,7 +38,7 @@ from .reply import (
 )
 from .repository import OutboxRepo, ThreadRepo
 from .routing import SMART
-from .situations import lead_spoke_own_words
+from .situations import SOFT_NO_RE, lead_spoke_own_words
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -132,7 +132,11 @@ class ReactivationService:
         if not lead_spoke_own_words(ctx.dialog):
             return False  # never spoke → nothing to adapt to; leave dormant
         last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
-        if guard.lead_signaled_annoyance(last_in):
+        # A lead who declined ('gak tertarik', 'nanti dulu') or got annoyed made a CHOICE -
+        # re-nudging them soon is exactly the spam that earns a report. Suppress them (record
+        # the touch so the gap/cap excludes them for 14d) and send nothing.
+        if guard.lead_signaled_annoyance(last_in) or SOFT_NO_RE.search(last_in):
+            await self._suppress(thread_id, lead_id, now)
             return False
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch is not None else "id"
@@ -175,3 +179,15 @@ class ReactivationService:
         await self.session.flush()
         logger.info("reactivation queued branch=%d thread=%d", self.branch_id, thread_id)
         return True
+
+    async def _suppress(self, thread_id: int, lead_id: int, now: datetime) -> None:
+        """Record a reactivation touch WITHOUT sending, so a declined/annoyed lead isn't
+        re-picked every run (the gap/cap key off this StageEvent). The lead stays dormant."""
+        lead = await self.session.get(Lead, lead_id)
+        if lead is None:
+            return
+        self.session.add(StageEvent(
+            branch_id=self.branch_id, lead_id=lead_id, thread_id=thread_id,
+            from_stage=str(lead.stage), to_stage=str(lead.stage),
+            actor="system", reason=_REASON, created_at=now))
+        await self.session.flush()

@@ -118,13 +118,17 @@ def test_unseen_media_ignores_readable_turns_and_older_history() -> None:
 def test_soft_no_detects_polite_refusals() -> None:
     for s in ["nanti aja deh kak", "saya pikir dulu ya", "insya allah lain kali",
               "belum ada biaya kak", "next time aja", "mau tanya istri dulu",
-              "diskusi sama orang tua dulu ya", "ga dulu deh", "nabung dulu"]:
+              "diskusi sama orang tua dulu ya", "ga dulu deh", "nabung dulu",
+              # 'tidak/gak jadi' = backing out (thread 2811)
+              "maaf KA tidak jadi", "saya tidak jadi", "gak jadi kak"]:
         assert _SOFT_NO_RE.search(s), s
 
 
 def test_soft_no_ignores_engaged_replies() -> None:
     for s in ["iya kak mau daftar", "boleh minta linknya?", "oke lanjut",
-              "jadwalnya kapan kak?", "saya tertarik banget"]:
+              "jadwalnya kapan kak?", "saya tertarik banget",
+              # 'jadi' as 'so/then' must NOT read as the 'tidak jadi' refusal
+              "jadi kapan kelasnya?", "jadi gimana ka"]:
         assert not _SOFT_NO_RE.search(s), s
 
 
