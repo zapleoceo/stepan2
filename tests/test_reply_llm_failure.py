@@ -149,7 +149,16 @@ class _BadJsonLLM:
 async def test_decide_returns_none_when_both_fast_and_smart_unparseable(db_session) -> None:
     """A double-unparseable decision (fast fails → smart escalation also fails) must degrade
     to None (caller skips + retries), NOT raise ValueError and abort the reply job."""
-    bid, tid, _lead, _thread = await _world(db_session)
+    bid, tid, lead, thread = await _world(db_session)
+    # mid-conversation, neutral, cold → routes to fast so the fast→smart escalation is exercised
+    lead.stage = Stage.QUALIFYING
+    lead.lead_type = "cold"
+    db_session.add(lead)
+    for i, txt in enumerate(("lanjut", "oh gitu")):
+        db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                               external_id=f"mx{i}", direction="in", sent_by="lead",
+                               text=txt, occurred_at=_NOW))
+    await db_session.flush()
     llm = _BadJsonLLM()
     svc = ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid),
                        branch_settings=_parse({}))

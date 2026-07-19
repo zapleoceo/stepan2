@@ -54,7 +54,8 @@ class FakeNotifier:
 
 
 async def _world(s, *, phone: str | None = None, stage: Stage = Stage.NEW,
-                 settings: dict[str, str] | None = None) -> tuple[int, int, Lead]:
+                 settings: dict[str, str] | None = None,
+                 inbounds: list[str] | None = None) -> tuple[int, int, Lead]:
     branch = Branch(name="T", lang="id")
     s.add(branch)
     await s.flush()
@@ -69,9 +70,10 @@ async def _world(s, *, phone: str | None = None, stage: Stage = Stage.NEW,
     thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
     s.add(thread)
     await s.flush()
-    s.add(Message(branch_id=branch.id, thread_id=thread.id, channel_id=ch.id,
-                  external_id="m1", direction="in", sent_by="lead", text="halo",
-                  occurred_at=_NOW))
+    for i, txt in enumerate(inbounds or ["halo"]):
+        s.add(Message(branch_id=branch.id, thread_id=thread.id, channel_id=ch.id,
+                      external_id=f"m{i}", direction="in", sent_by="lead", text=txt,
+                      occurred_at=_NOW))
     await s.flush()
     invalidate(branch.id)
     return branch.id, thread.id, lead
@@ -105,7 +107,13 @@ def _decision(**over: Any) -> Decision:
 
 
 async def test_fast_broken_json_escalates_to_smart(db_session) -> None:
-    bid, tid, _ = await _world(db_session, stage=Stage.NEW)  # early + no signal → routes to fast
+    # mid-conversation, neutral last message, cold lead → routes to fast (not the first-reply
+    # or a conversion moment), so the broken-JSON → smart escalation path is exercised
+    bid, tid, lead = await _world(
+        db_session, stage=Stage.QUALIFYING, inbounds=["halo", "oh gitu", "oke deh"])
+    lead.lead_type = "cold"
+    db_session.add(lead)
+    await db_session.flush()
     llm = CapRecordingLLM()
     decision = await _svc(db_session, bid, llm=llm).decide(tid)
     assert llm.caps == ["chat:fast", "chat:smart"]  # tried cheap, escalated on broken JSON
