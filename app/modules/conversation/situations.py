@@ -230,10 +230,38 @@ MINOR_NUDGE = (
     "may hear it honestly). Positive, no pressure. Return the JSON as usual.]"
 )
 
+# FIRST objection/soft-no → work it once (IT STEP objection method, Asia-softened): a first
+# 'no' is usually a reflex, not a decision. Surface the REAL reason, reframe it honestly, offer
+# a soft step — then, if they hold, SOFT_NO_NUDGE eases off next time. This is the single turn
+# where we don't just fold (thread 2949: 'belum tertarik' got an instant capitulation and the
+# sale was left on the table).
+OBJECTION_HANDLE_NUDGE = (
+    "[System: the lead gave their FIRST soft 'no' / objection this conversation ('belum "
+    "tertarik', 'nanti dulu', 'mahal', 'mikir dulu', 'tidak jadi'). A first 'no' is usually a "
+    "reflex, not a final decision — do NOT capitulate ('oke kabari kalau minat' leaves the sale "
+    "on the table), but do NOT hard-push either. ONE calm objection-handling move, in the "
+    "lead's language:\n"
+    "1) ACKNOWLEDGE sincerely, zero pressure ('paham banget Kak, wajar kok mikir dulu').\n"
+    "2) SURFACE the real reason with ONE gentle question if they haven't named it: 'boleh tau, "
+    "yang bikin ragu lebih ke biayanya, waktunya, atau masih belum yakin cocok buat Kakak?' — "
+    "so you handle the REAL objection, not a guess.\n"
+    "3) If the reason IS known, reframe it honestly from the KB only: PRICE → value + the "
+    "smallest real step (DP/instalment), never invent an ROI %/salary; TIME → why the real "
+    "duration exists (hands-on practice/projects); TRUST/bad-reviews → a real Success Case from "
+    "the KB, never fabricated; NO MONEY NOW → the cheaper 1-day Skill Booster or free Open "
+    "House; NOT SURE IT FITS → tie one concrete outcome to their stated goal.\n"
+    "4) End with ONE soft, low-pressure next step - a light question or the free Open House - "
+    "NEVER a 'lock your seat today' hard close.\n"
+    "This is the ONE attempt. If the lead declines AGAIN after this, ease off fully. If they "
+    "ALSO asked a real question, answer it first (KB fact), then handle the objection. Facts "
+    "ONLY from the KB, never fabricate a number, case, or claim. Return the JSON as usual.]"
+)
+
 SOFT_NO_NUDGE = (
     "[System: the lead just softly declined or stalled — a polite Indonesian 'not now' "
     "('nanti/pikir dulu/insyaallah/belum ada biaya/lain kali' or 'tanya keluarga dulu'), "
-    "usually a real 'no' wrapped to save face. Do NOT push price, DP, scarcity or a new "
+    "usually a real 'no' wrapped to save face, AND they've already had one objection-handling "
+    "turn — so now ease off for real. Do NOT push price, DP, scarcity or a new "
     "pitch this turn — that makes them ghost. Acknowledge sincerely, give a graceful out, and "
     "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster) "
     "or just ask permission to follow up later ('boleh aku kabari kalau ada info baru?'). "
@@ -658,6 +686,11 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         return BUYING_SIGNAL_NUDGE  # 'I want in' — one small step, never an invoice-wall
     asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
     if SOFT_NO_RE.search(last_txt):
+        # First objection this conversation → work it once; on a repeat, ease off (existing).
+        soft_no_count = sum(
+            1 for m in dialog if m.direction == "in" and SOFT_NO_RE.search(m.text or ""))
+        if soft_no_count <= 1:
+            return OBJECTION_HANDLE_NUDGE
         return SOFT_NO_WITH_QUESTION_NUDGE if asks else SOFT_NO_NUDGE
     if asks:
         if LOW_BUDGET_RE.search(last_txt):

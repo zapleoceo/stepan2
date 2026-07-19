@@ -166,6 +166,7 @@ from app.modules.conversation.situations import (  # noqa: E402
     ANSWER_FIRST_TIGHT_BUDGET_NUDGE,
     DISCOVERY_TURN_CAP,
     NEED_PAYOFF_NUDGE,
+    OBJECTION_HANDLE_NUDGE,
     SOFT_NO_NUDGE,
     SOFT_NO_WITH_QUESTION_NUDGE,
     pick_nudge,
@@ -180,12 +181,23 @@ def _pick(last_txt: str, needs: NeedsProfile | None = None, n: int = 2) -> str |
                       inbound_count=n)
 
 
-def test_combo_soft_no_with_question_answers_then_eases_off() -> None:
-    # 'nanti dulu… tapi berapa harganya?' — neither half may be dropped: answer, then ease.
-    got = _pick("nanti dulu deh kak, tapi berapa sih harganya?")
-    assert SOFT_NO_WITH_QUESTION_NUDGE in got
-    # a plain stall without a question keeps the pure soft-no handling
-    assert SOFT_NO_NUDGE in _pick("nanti dulu deh kak")
+def test_first_soft_no_works_the_objection_then_repeat_eases_off() -> None:
+    # FIRST soft-no this conversation → surface + handle the objection, don't capitulate
+    # (thread 2949: 'belum tertarik' got an instant give-up and the sale was lost)
+    assert OBJECTION_HANDLE_NUDGE in _pick("maaf belum tertarik kak")
+    assert OBJECTION_HANDLE_NUDGE in _pick("nanti dulu deh kak, tapi berapa sih harganya?")
+    # a SECOND soft-no (one already handled) eases off for real
+    two_nos = pick_nudge(lead_type="warm",
+                         dialog=[_M("in", "mau belajar coding"), _M("in", "nanti dulu deh"),
+                                 _M("out", "boleh tau yang bikin ragu?"), _M("in", "belum tertarik")],
+                         last_txt="belum tertarik", stored_needs=NeedsProfile(), inbound_count=3)
+    assert SOFT_NO_NUDGE in two_nos
+    two_nos_q = pick_nudge(lead_type="warm",
+                          dialog=[_M("in", "mau coding"), _M("in", "nanti dulu"),
+                                  _M("out", "?"), _M("in", "pikir dulu, tapi berapa harganya?")],
+                          last_txt="pikir dulu, tapi berapa harganya?", stored_needs=NeedsProfile(),
+                          inbound_count=3)
+    assert SOFT_NO_WITH_QUESTION_NUDGE in two_nos_q
 
 
 def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
