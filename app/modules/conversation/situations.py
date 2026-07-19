@@ -730,6 +730,21 @@ def _bot_offered_menu(dialog) -> bool:  # noqa: ANN001
     return False
 
 
+def _current_turn_text(dialog) -> str:  # noqa: ANN001
+    """Everything the lead typed in their CURRENT turn (every inbound since our last send),
+    joined. An objection detector that reads only the LAST message misses a soft-no/doubt
+    chased with a trailing filler — thread 4573: 'Nanti aja lagi galau gue' then 'Maaf yaaaa'
+    left last_txt='Maaf yaaaa' (no pattern), so the model pitched Vibe Coding over the no."""
+    parts: list[str] = []
+    for m in reversed(dialog):
+        if m.direction == "out":
+            break
+        if m.direction == "in":
+            parts.append(m.text or "")
+    parts.reverse()
+    return " ".join(parts)
+
+
 def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
     """The steering block for this turn: ONE situational nudge (priority chain below) plus the
     length-mirror suffix when the lead is chatting in one-liners, plus the answer-every-part
@@ -778,11 +793,16 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
     if MINOR_RE.search(last_txt):
         return MINOR_NUDGE
     asks = is_answerable_question(last_txt) and not AD_TEMPLATE_RE.search(last_txt)
+    # Objections are sticky across the turn: when the lead's LAST message isn't itself a fresh
+    # question (they'd want that answered), scan the WHOLE current turn so a soft-no/doubt
+    # trailed by filler still gets handled, not pitched over (thread 4573). A last-message
+    # question still routes to answer-first below, exactly as before.
+    turn_txt = last_txt if asks else _current_turn_text(dialog)
     # A legitimacy doubt outranks soft-no/answer-first: the doubt IS the objection, and the
     # canned facts answer beats anything else this turn (thread 4435: 'Apakah ini real' → menu).
-    if TRUST_DOUBT_RE.search(last_txt):
+    if TRUST_DOUBT_RE.search(turn_txt):
         return TRUST_DOUBT_NUDGE
-    if SOFT_NO_RE.search(last_txt):
+    if SOFT_NO_RE.search(turn_txt):
         # First objection this conversation → work it once; on a repeat, ease off (existing).
         soft_no_count = sum(
             1 for m in dialog if m.direction == "in" and SOFT_NO_RE.search(m.text or ""))
@@ -797,7 +817,7 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         if PRICE_QUESTION_RE.search(last_txt) and not stored_needs.pains:
             return ANSWER_PRICE_NO_PAIN_NUDGE
         return ANSWER_FIRST_NUDGE
-    if LOW_BUDGET_RE.search(last_txt):
+    if LOW_BUDGET_RE.search(turn_txt):
         return LOW_BUDGET_NUDGE
     if MENU_REPLY_RE.match(last_txt) and _bot_offered_menu(dialog):
         return MENU_REPLY_NUDGE  # a menu answer converts to value+step, not more questions

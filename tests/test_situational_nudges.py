@@ -230,6 +230,23 @@ def test_first_soft_no_works_the_objection_then_repeat_eases_off() -> None:
         "nanti dulu", "pikir dulu, tapi berapa harganya?")
 
 
+def test_objection_trailed_by_filler_still_handled_not_pitched_over() -> None:
+    # thread 4573: 'Nanti aja lagi galau gue' then 'Maaf yaaaa' — last_txt is the apology, but
+    # the soft-no earlier in the SAME turn must still route to objection-handling.
+    dialog = [_M("in", "mau belajar coding"), _M("out", "yuk Kak"),
+              _M("in", "Nanti aja lagi galau gue"), _M("in", "Maaf yaaaa")]
+    got = pick_nudge(lead_type="warm", dialog=dialog, last_txt="Maaf yaaaa",
+                     stored_needs=NeedsProfile(), inbound_count=3)
+    assert OBJECTION_HANDLE_NUDGE in (got or "")
+    # but a fresh question as the LAST message still gets answered, not the objection nudge,
+    # even if an earlier turn message soft-declined (the lead re-engaged)
+    dialog2 = [_M("in", "mau belajar coding"), _M("out", "yuk Kak"),
+               _M("in", "nanti dulu deh"), _M("in", "eh tapi berapa biayanya kak?")]
+    got2 = pick_nudge(lead_type="warm", dialog=dialog2, last_txt="eh tapi berapa biayanya kak?",
+                      stored_needs=NeedsProfile(), inbound_count=3)
+    assert OBJECTION_HANDLE_NUDGE not in (got2 or "")
+
+
 def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
     # 'ga ada modal, berapa biayanya?' — honest number + the affordable entry beside it
     got = _pick("ga ada modal kak, berapa biayanya?")
