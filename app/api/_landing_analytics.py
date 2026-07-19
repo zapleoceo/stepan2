@@ -14,7 +14,7 @@ _SEGMENTS = [
     ("No budget", 45, "#9b8cff", "2% · won 7%"),
     ("Hot", 29, "#ff5c5c", "2% · won 17%"),
     ("Cold", 25, "#4d8dff", "1% · won 4%"),
-    ("Students", 15, "#f5a623", "1% · won 0%"),
+    ("Referrals", 15, "#f5a623", "1% · won 0%"),
 ]
 _TOTAL = 1805
 
@@ -151,19 +151,19 @@ def _messages_svg() -> str:
 def analytics_section() -> str:
     return (
         "<section><div class=\"wrap\">"
-        "<div class=\"kick\">Analytics</div>"
+        ""
         "<h2>Read your whole pipeline at a glance</h2>"
         "<p class=\"lead\">Every lead segmented by intent, every stage of the funnel, "
-        "and message volume by hour — updated as conversations happen.</p>"
+        "and message volume by hour, updated as conversations happen.</p>"
         "<div class=\"anl\">"
         f"<div class=\"apanel\"><div class=\"atitle\">Lead segments</div>"
         f"{_segments_svg()}</div>"
         f"<div class=\"apanel\"><div class=\"atitle\">Sales funnel</div>"
         f"{_funnel_svg()}</div>"
-        f"<div class=\"apanel\"><div class=\"atitle\">Messages by hour · 0–23"
+        f"<div class=\"apanel\"><div class=\"atitle\">Messages by hour, 0-23"
         f"<span class=\"asub\"> · 4167 in · 9532 out · peak 1293 at 08:00</span>"
         f"</div>{_messages_svg()}</div>"
         "</div>"
-        "<p class=\"mnote\">Illustrative — sample data, not a real account.</p>"
+        "<p class=\"mnote\">Illustrative: sample data, not a real account.</p>"
         "</div></section>"
     )

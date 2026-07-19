@@ -10,9 +10,9 @@ from app.api._landing_analytics import analytics_section
 from app.config import settings
 
 _SITE_NAME = "Stepan"
-_TAGLINE = "Stepan — the AI sales agent that closes in your DMs"
+_TAGLINE = "Stepan: the AI sales agent that closes in your DMs"
 _DESC = ("Stepan is an AI sales agent that qualifies and sells to your leads in "
-         "Instagram & WhatsApp DMs — like your best rep, 24/7. Consultative selling, "
+         "Instagram & WhatsApp DMs, like your best rep, 24/7. Consultative selling, "
          "multilingual replies, smart follow-ups and human handoff.")
 
 
@@ -61,7 +61,7 @@ _DEMO_FB = "https://www.facebook.com/zapleo.ceo"
 
 _WIDGET_JS = r"""
 var STP={msgs:[],busy:false};
-var STP_GREET="Hey — I'm Stepan. Quick one: what do you sell, and where do most of your leads come from (Instagram, WhatsApp, ads)?";
+var STP_GREET="Hey! I'm Stepan. Quick one: what do you sell, and where do most of your leads come from (Instagram, WhatsApp, ads)?";
 function stpAdd(role,text){
   STP.msgs.push({role:role,content:text});
   var b=document.getElementById('stp-body');
@@ -91,7 +91,7 @@ async function sendStepan(){
   try{
     var r=await fetch('/demo/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:STP.msgs})});
     var j=await r.json();stpTyping(false);stpAdd('assistant',(j&&j.reply)||'…');
-  }catch(e){stpTyping(false);stpAdd('assistant','Connection hiccup — try again?');}
+  }catch(e){stpTyping(false);stpAdd('assistant','Connection hiccup. Try again?');}
   STP.busy=false;inp.focus();
 }
 function stpKey(e){
@@ -223,6 +223,15 @@ h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;
 .pinc li{display:flex;align-items:flex-start;gap:.55rem;font-size:.85rem;color:var(--mut);line-height:1.5}
 .pinc li .ic{color:var(--ok);flex-shrink:0;margin-top:.15rem}
 @media (max-width:760px){.pgrid,.pinc{grid-template-columns:1fr}}
+/* FAQ: native details accordion, same 16px radius family as the pricing cards */
+.faq{max-width:760px}
+.faq details{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin-bottom:.7rem}
+.faq details[open]{border-color:var(--line2)}
+.faq summary{cursor:pointer;padding:1.05rem 1.25rem;font-weight:600;font-size:.97rem;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:1rem}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";color:var(--mut);font-size:1.15rem;line-height:1;transition:transform .18s;flex-shrink:0}
+.faq details[open] summary::after{transform:rotate(45deg)}
+.faq .fa-a{padding:0 1.25rem 1.1rem;color:var(--mut);font-size:.92rem;line-height:1.65;max-width:62ch}
 /* compare */
 .cmp{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2.8rem}
 .col{border-radius:16px;padding:1.7rem;border:1px solid var(--line);background:var(--panel)}
@@ -248,7 +257,7 @@ h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;
 .mtable tbody tr:hover td,.mtable tbody tr:hover th{background:rgba(255,255,255,.02)}
 .mtcap{font-size:.72rem;color:var(--faint);margin-top:.9rem}
 /* enterprise trust strip */
-.trust{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:2.8rem}
+.trust{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
 .tcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.4rem 1.2rem}
 .tcard .ic{color:var(--acc);margin-bottom:.9rem;display:block}
 .tcard h3{font-family:var(--disp);font-size:.92rem;font-weight:600;margin-bottom:.35rem;letter-spacing:-.01em}
@@ -310,7 +319,7 @@ footer{border-top:1px solid var(--line);padding:2.4rem 0;color:var(--mut);font-s
 .stp-foot textarea:focus{outline:none;border-color:var(--faint)}
 .stp-send{background:var(--ink);color:#000;border:none;border-radius:10px;width:40px;height:38px;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center}
 @media (max-width:460px){.stp-w{right:8px;bottom:8px;width:calc(100vw - 16px);height:calc(100vh - 16px)}.stp-fab{right:12px;bottom:12px}}
-/* product mockups (illustrative — not real data) */
+/* product mockups (illustrative, not real data) */
 .shots{display:grid;grid-template-columns:1fr 1fr;gap:1.4rem;margin-top:2.8rem;align-items:start}
 .frame{background:var(--bg);border:1px solid var(--line2);border-radius:16px;overflow:hidden}
 .fbar{display:flex;align-items:center;gap:.4rem;padding:.55rem .8rem;border-bottom:1px solid var(--line);background:var(--panel2)}
@@ -403,7 +412,7 @@ footer{border-top:1px solid var(--line);padding:2.4rem 0;color:var(--mut);font-s
 @media (prefers-reduced-motion:no-preference){.chip{animation:floaty var(--d,7s) ease-in-out infinite}}
 @keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
 @media (max-width:760px){.cloud{grid-template-columns:1fr}}
-/* persona library — split: copy left, versioned persona rows right */
+/* persona library: copy left, versioned persona rows right */
 .plib{display:grid;grid-template-columns:1fr 1fr;gap:2.2rem;align-items:center;margin-top:2.6rem}
 .plib-list{display:flex;flex-direction:column;gap:.8rem}
 .prow{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.05rem 1.15rem;transition:border-color .18s,transform .12s}
@@ -478,7 +487,7 @@ def _pricing_section() -> str:
     once per lead regardless of outcome or how long the conversation runs. No per-message
     or per-token metering (unlike Meta's own token-billed agent)."""
     included = [
-        "Unlimited messages per lead — a 40-turn qualification costs the same $1 as one reply",
+        "Unlimited messages per lead: a 40-turn qualification costs the same $1 as one reply",
         "Instagram + WhatsApp + Messenger, every language",
         "CRM sync via MCP, ad attribution, analytics dashboard",
     ]
@@ -488,7 +497,7 @@ def _pricing_section() -> str:
         "<div class=\"shead\">"
         "<div class=\"kick\">Pricing</div>"
         "<h2>Pay for leads, not for chatting</h2>"
-        "<p class=\"lead\">No seats, no message caps, no token metering — a flat fee per "
+        "<p class=\"lead\">No seats, no message caps, no token metering. A flat fee per "
         "lead, charged once, no matter the outcome or how long Stepan talks to them.</p></div>"
         "<div class=\"pgrid\">"
         "<div class=\"pcard\">"
@@ -501,7 +510,7 @@ def _pricing_section() -> str:
         "<div class=\"ptag\">Pay as you grow</div>"
         "<div class=\"pnum\">$1<small>/lead</small></div>"
         "<div class=\"pwhat\">Past 10 leads / day</div>"
-        "<p class=\"pnote\">Charged once per lead — regardless of result or how long the "
+        "<p class=\"pnote\">Charged once per lead, regardless of result or how long the "
         "conversation runs. Never per message, never per token.</p>"
         "</div></div>"
         f"<ul class=\"pinc\">{inc_items}</ul>"
@@ -520,22 +529,22 @@ def _meta_compare_section() -> str:
     public announcement + independent reviews, not a strawman. Framed for a buyer who will
     fact-check both, so claims about Meta stay to what's publicly documented."""
     rows = [
-        ("Pricing model", "Per-token — cost scales with every reply sent",
+        ("Pricing model", "Per-token: cost scales with every reply sent",
          "Flat $1 per lead, charged once, any length"),
         ("Sales approach", "Q&amp;A + catalog recommendations + booking",
          "Consultative: discovery &rarr; needs &rarr; objection handling &rarr; timed offer"),
         ("Grounding / anti-hallucination", "Not publicly documented",
-         "Built-in fact-checking guard — regenerates or hands off rather than invent"),
+         "Built-in fact-checking guard that regenerates or hands off rather than invent"),
         ("Lead scoring", "Basic qualifying questions",
          "Two-axis intent + audience scoring, re-qualifies mid-conversation"),
-        ("CRM integration", "No native CRM — custom API work required",
-         "Open MCP connector — plugs into your CRM's own fields"),
+        ("CRM integration", "No native CRM: custom API work required",
+         "Open MCP connector that plugs into your CRM's own fields"),
         ("Ad performance &amp; attribution", "Not a stated feature",
          "Pulls ad spend/CPL, maps every lead to its exact ad, merges identity across ads"),
         ("Multi-brand / multi-location", "Not documented for franchise-style management",
          "Native multi-branch with role-based access per team"),
         ("Channels", "WhatsApp, Instagram, Messenger",
-         "Instagram, WhatsApp, Messenger, TikTok soon — plus Telegram or any messenger with "
+         "Instagram, WhatsApp, Messenger, TikTok soon, plus Telegram or any messenger with "
          "an API, built to order"),
     ]
     body = "".join(
@@ -556,7 +565,7 @@ def _meta_compare_section() -> str:
         f"<tbody>{body}</tbody>"
         "</table></div>"
         "<p class=\"mtcap\">Meta Business Agent details from Meta's June 2026 announcement "
-        "and independent reviews at time of writing — features change; verify current specs "
+        "and independent reviews at time of writing; features change, so verify current specs "
         "with Meta.</p>"
         "</div></section>"
     )
@@ -585,14 +594,14 @@ def _trust_section() -> str:
 
 def _ad_accounts_section() -> str:
     rows = "".join([
-        _adrow("HF", "Home Fitness — Reels", "142 leads · CPL $3.10", "28 booked", "ROAS 4.6×"),
-        _adrow("MP", "Meal Plan — Stories", "96 leads · CPL $4.80", "11 booked", "ROAS 2.1×"),
-        _adrow("1:1", "1-on-1 Coaching — Feed", "54 leads · CPL $6.20", "19 booked", "ROAS 5.9×"),
+        _adrow("HF", "Home Fitness (Reels)", "142 leads · CPL $3.10", "28 booked", "ROAS 4.6×"),
+        _adrow("MP", "Meal Plan (Stories)", "96 leads · CPL $4.80", "11 booked", "ROAS 2.1×"),
+        _adrow("1:1", "1-on-1 Coaching (Feed)", "54 leads · CPL $6.20", "19 booked", "ROAS 5.9×"),
     ])
     return (
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
-        "<div class=\"kick\">Connected to your ad accounts</div>"
+        ""
         "<h2>Every ad measured. Every lead unified.</h2>"
         "<p class=\"lead\">Stepan pulls performance straight from your marketing cabinets, knows "
         "which product each ad promotes, and merges the same person across products into one "
@@ -603,7 +612,7 @@ def _ad_accounts_section() -> str:
         "<div class=\"mhd\"><span class=\"dot\"></span>Ad performance · by product"
         "<span class=\"live\">live</span></div>"
         f"<div class=\"mbody\">{rows}"
-        "<div class=\"push\">Conversions pushed back to Meta — the algorithm learns who buys.</div>"
+        "<div class=\"push\">Conversions pushed back to Meta, so the algorithm learns who buys.</div>"
         "</div></div>"
         "<div class=\"mpanel\">"
         "<div class=\"mhd\"><span class=\"dot\"></span>One lead, every touchpoint</div>"
@@ -622,13 +631,13 @@ def _ad_accounts_section() -> str:
         # re-qualification strip
         "<div class=\"requal\">"
         "<div class=\"rq-t\"><b>Re-qualifies mid-conversation.</b> When a lead reveals a deeper "
-        "pain or real urgency, Stepan updates the segment and score on the fly — no rigid tag "
+        "pain or real urgency, Stepan updates the segment and score on the fly, with no rigid tag "
         "set at first contact.</div>"
         "<span class=\"rqtag rq-old\"><span class=\"dt\"></span>Cold · low intent</span>"
         "<span class=\"rq-arrow\">→</span>"
         "<span class=\"rqtag rq-new\"><span class=\"dt\"></span>Hot · ready to buy</span>"
         "</div>"
-        "<p class=\"mnote\">Illustrative — sample data, not a real account.</p>"
+        "<p class=\"mnote\">Illustrative: sample data, not a real account.</p>"
         "</div></section>"
     )
 
@@ -639,18 +648,18 @@ def _insights_cloud_section() -> str:
     def chip(text: str, d: str) -> str:
         return f'<span class="chip" style="--d:{d}s">{text}</span>'
     goals = "".join(chip(x, d) for x, d in (
-        ("Land my first data job", "6.5"), ("Grow my brand's reach", "8"),
-        ("Switch careers into tech", "7.2"), ("Earn on the side freelancing", "9")))
+        ("Feel confident on the beach", "6.5"), ("Get back in shape", "8"),
+        ("Fit into my favorite jeans", "7.2"), ("Have energy for my kids", "9")))
     pains = "".join(chip(x, d) for x, d in (
-        ("No time for a full course", "7.8"), ("Tried tutorials, got stuck", "6.2"),
+        ("No time for a 1-hour gym trip", "7.8"), ("Tried apps, quit in a week", "6.2"),
         ("Budget is tight right now", "8.6"), ("Burned before by empty promises", "7")))
     fears = "".join(chip(x, d) for x, d in (
-        ("What if I'm too old to start?", "6.8"), ("Scared it's too technical", "8.2"),
-        ("Worried I won't finish it", "7.5"), ("Afraid it won't get me hired", "9.1")))
+        ("What if I can't keep up?", "6.8"), ("Scared of being judged", "8.2"),
+        ("Worried I'll quit again", "7.5"), ("Afraid nothing will change", "9.1")))
     return (
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead reveal\">"
-        "<div class=\"kick\">Lead intelligence</div>"
+        ""
         "<h2>Every lead's goals, pains and fears, captured while they talk</h2>"
         "<p class=\"lead\">Stepan listens for what each lead really wants, what is blocking "
         "them, and what they are quietly afraid of, then turns it into a living profile you "
@@ -702,7 +711,7 @@ def _persona_library_section() -> str:
     return (
         "<section class=\"divide\"><div class=\"wrap\"><div class=\"plib\">"
         "<div class=\"reveal\">"
-        "<div class=\"kick\">Seller persona library</div>"
+        ""
         "<h2>A library of proven sales personas</h2>"
         "<p class=\"lead\">The selling craft is shared, your catalog stays yours. Pick a "
         "battle-tested persona for each brand, keep your own products and facts, and let the "
@@ -716,12 +725,62 @@ def _persona_library_section() -> str:
     )
 
 
+_FAQ: list[tuple[str, str]] = [
+    ("How fast can we go live?",
+     "Connect your Instagram or WhatsApp, paste in your real facts and prices, and Stepan "
+     "can take its first lead the same day. No flow-building, no scripts."),
+    ("Will it put my account at risk?",
+     "Stepan is built to protect the account: human-paced replies, hourly and daily send "
+     "caps, quiet hours, and warm follow-ups that never read as spam."),
+    ("What happens when it doesn't know the answer?",
+     "It never guesses. Stepan answers only from the facts you gave it; when something is "
+     "missing, it asks your team and flags the gap, so a wrong promise never reaches a lead."),
+    ("What counts as a lead for billing?",
+     "One real person Stepan works, charged once. Whether the conversation takes 3 messages "
+     "or 60, the price is the same."),
+    ("Which languages does it speak?",
+     "It replies in each lead's own language automatically, so one setup covers every "
+     "market you sell to."),
+    ("Who owns the data?",
+     "You do. Your facts, your leads and every transcript stay yours, synced to your CRM "
+     "or exported whenever you want."),
+]
+
+
+def _faq_section() -> str:
+    """The objections a buyer actually has before trusting an AI with their leads, answered
+    from what the product really does. Native <details> accordion (no JS), plus FAQPage
+    JSON-LD so the answers are quotable by search engines and AI assistants."""
+    import json as _json  # noqa: PLC0415
+    items = "".join(
+        f'<details{" open" if i == 0 else ""}><summary>{q}</summary>'
+        f'<div class="fa-a">{a}</div></details>'
+        for i, (q, a) in enumerate(_FAQ)
+    )
+    ld = _json.dumps({
+        "@context": "https://schema.org", "@type": "FAQPage",
+        "mainEntity": [
+            {"@type": "Question", "name": q,
+             "acceptedAnswer": {"@type": "Answer", "text": a}}
+            for q, a in _FAQ
+        ],
+    }, ensure_ascii=False)
+    return (
+        "<section class=\"divide\" id=\"faq\"><div class=\"wrap\">"
+        "<div class=\"shead\">"
+        "<h2>Questions owners actually ask</h2></div>"
+        f"<div class=\"faq reveal\">{items}</div>"
+        f"<script type=\"application/ld+json\">{ld}</script>"
+        "</div></section>"
+    )
+
+
 def landing_html() -> str:
     steps = "".join([
-        _step("01", "chat", "Greets every lead", "The moment someone DMs — from an ad, a comment, a "
-              "story reply — Stepan answers in seconds, day or night."),
+        _step("01", "chat", "Greets every lead", "The moment someone DMs from an ad, a comment or a "
+              "story reply, Stepan answers in seconds, day or night."),
         _step("02", "search", "Qualifies like a pro", "It asks the right questions, uncovers the real "
-              "goal and the pain behind it — not a rigid form, a real conversation."),
+              "goal and the pain behind it. Not a rigid form, a real conversation."),
         _step("03", "trend", "Sells, not just chats", "Value before price, honest objection handling, "
               "the right offer at the right moment. It moves the deal forward."),
         _step("04", "users", "Follows up &amp; hands off", "Revives silent leads with fresh angles, and "
@@ -729,21 +788,21 @@ def landing_html() -> str:
     ])
     feats = "".join([
         _feat("bulb", "Consultative selling", "Reaches the emotional layer and handles "
-              "objections — a trusted advisor, not a FAQ bot."),
+              "objections. A trusted advisor, not a FAQ bot."),
         _feat("msgs", "Instagram &amp; WhatsApp", "Meets buyers where they already are: IG, "
               "WhatsApp and Messenger DMs, one brain across all."),
         _feat("globe", "Speaks their language", "Replies in each lead's own language, "
-              "automatically — no separate setup per market."),
-        _feat("shield", "Never makes things up", "Every claim is grounded in your facts — no "
+              "automatically. No separate setup per market."),
+        _feat("shield", "Never makes things up", "Every claim is grounded in your facts: no "
               "fake promises, no invented prices. It survives a screenshot."),
-        _feat("refresh", "Smart follow-ups", "Brings back leads who went quiet — varied, natural, "
+        _feat("refresh", "Smart follow-ups", "Brings back leads who went quiet. Varied, natural, "
               "never spammy, and safe for your account."),
         _feat("arrow", "Human handoff", "Alerts your team and passes the lead the instant it's "
-              "hot — never a dead-end bot."),
+              "hot. Never a dead-end bot."),
         _feat("chart", "Live funnel &amp; analytics", "See every stage, peak activity hours and "
-              "which ad drives which sale — operator-grade, not vanity metrics."),
+              "which ad drives which sale. Operator-grade, not vanity metrics."),
         _feat("grad", "You coach it in plain words", "Teach it a new fact or a better pitch in "
-              "one sentence — it updates its own playbook, with your approval."),
+              "one sentence and it updates its own playbook, with your approval."),
     ])
     return (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
@@ -767,6 +826,7 @@ def landing_html() -> str:
         "<div class=\"brand\"><span class=\"logo\">S</span>Stepan"
         "<small>AI Sales Agent</small></div>"
         "<div style=\"display:flex;align-items:center;gap:1.1rem\">"
+        "<a href=\"#pricing\" style=\"font-size:.9rem;color:var(--mut)\">Pricing</a>"
         "<a href=\"/whats-new\" style=\"font-size:.9rem;color:var(--mut)\">What's new</a>"
         "<a class=\"login\" href=\"/login\">Log in</a></div>"
         "</div></nav>"
@@ -784,15 +844,15 @@ def landing_html() -> str:
         "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button>"
         "<a class=\"btn btn-g\" href=\"#how\">See how it works</a>"
         "</div>"
-        "<p class=\"note\">The best demo is Stepan itself. Message it and watch it qualify you."
-        "</p>"
-        f"{_trust_section()}"
         "</div></header>"
+        # trust strip: its own section right under the hero (a hero carries the value prop
+        # and the CTA; enterprise proof points live below it, not inside it)
+        f"<section class=\"divide\"><div class=\"wrap\">{_trust_section()}</div></section>"
         # how it works
         "<section id=\"how\" class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
         "<div class=\"kick\">How it works</div>"
-        "<h2>From \"hi\" to a hot lead — on its own</h2>"
+        "<h2>From \"hi\" to a hot lead, on its own</h2>"
         "<p class=\"lead\">Stepan runs the whole first conversation the way your best closer "
         "would, then hands you the ready-to-buy leads.</p></div>"
         f"<div class=\"steps\">{steps}</div>"
@@ -800,9 +860,9 @@ def landing_html() -> str:
         # ── a peek inside (illustrative mockups) ──
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
-        "<div class=\"kick\">A peek inside</div>"
+        ""
         "<h2>See what it actually does</h2>"
-        "<p class=\"lead\">A real conversation on one side, your live dashboard on the other — "
+        "<p class=\"lead\">A real conversation on one side, your live dashboard on the other. "
         "Stepan works the lead end to end and hands you the ready-to-buy ones.</p></div>"
         "<div class=\"shots\">"
         # chat mockup
@@ -810,14 +870,14 @@ def landing_html() -> str:
         "<div class=\"ph-top\"><span class=\"ph-ava\">M</span>"
         "<div><b>Maya</b><small>Instagram · online</small></div></div>"
         "<div class=\"ph-body\">"
-        "<div class=\"mb in\">hi! saw your ad — is this ok if I've literally never trained "
+        "<div class=\"mb in\">hi! saw your ad. is this ok if I've literally never trained "
         "before?</div>"
-        "<div class=\"mb out\"><span class=\"who\">Stepan</span>Totally — that's exactly where "
-        "most people start, Maya. Quick one: what would you most love to change first — "
+        "<div class=\"mb out\"><span class=\"who\">Stepan</span>Totally, that's exactly where "
+        "most people start, Maya. Quick one: what would you most love to change first: "
         "energy, strength, or how you feel in your clothes?</div>"
         "<div class=\"mb in\">honestly how I feel in my clothes… but I have zero time for a "
         "gym</div>"
-        "<div class=\"mb out\"><span class=\"who\">Stepan</span>Hear you — \"no time\" is the "
+        "<div class=\"mb out\"><span class=\"who\">Stepan</span>Hear you, \"no time\" is the "
         "#1 reason people stall. It's built around 20-min sessions you can do at home, "
         "shaped to your week. Want me to show how your first two weeks would look?</div>"
         "<div class=\"mb in\">yes please</div>"
@@ -827,7 +887,7 @@ def landing_html() -> str:
         "<div class=\"fbar\"><i></i><i></i><i></i>"
         "<span class=\"furl\">stepan · dashboard</span></div>"
         "<div class=\"dash\">"
-        "<div class=\"mcard\"><div class=\"mlbl\">Lead — captured automatically</div>"
+        "<div class=\"mcard\"><div class=\"mlbl\">Lead · captured automatically</div>"
         "<div class=\"leadrow\"><span class=\"av\">M</span><b>Maya R.</b>"
         "<span class=\"spill\">Qualifying</span></div>"
         "<div class=\"chips\">"
@@ -848,10 +908,10 @@ def landing_html() -> str:
         "<div class=\"fnrow\"><span class=\"nm\">Ready</span>"
         "<span class=\"fnbar\" style=\"width:8%\"></span><span class=\"v num\">9</span></div>"
         "</div></div>"
-        "<div class=\"alert\">Maya's ready to book — handed to your team just now.</div>"
+        "<div class=\"alert\">Maya's ready to book, handed to your team just now.</div>"
         "</div></div>"
         "</div>"
-        "<p class=\"mnote\">Illustrative — sample data, not a real customer.</p>"
+        "<p class=\"mnote\">Illustrative: sample data, not a real customer.</p>"
         "</div></section>"
         # what Stepan captures per lead (goals/pains/fears) + the seller persona library
         + _insights_cloud_section()
@@ -864,11 +924,11 @@ def landing_html() -> str:
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
         "<div class=\"kick\">Works with your stack</div>"
-        "<h2>Wired to your CRM — both ways, through an open MCP connector</h2>"
+        "<h2>Wired to your CRM, both ways, through an open MCP connector</h2>"
         "<p class=\"lead\">Stepan ships a Model-Context-Protocol connector, so every qualified "
-        "lead — with its captured needs, stage and source ad — flows straight into the CRM you "
+        "lead, with its captured needs, stage and source ad, flows straight into the CRM you "
         "already run. The wire runs the other way too: point Stepan at a CRM that speaks MCP "
-        "and he works from its real client cards, calls and contracts — no brittle exports, no "
+        "and he works from its real client cards, calls and contracts. No brittle exports, no "
         "copy-paste.</p></div>"
         "<div class=\"mcp\">"
         f"<div class=\"mnode\">{_svg(_IC['bot'], 30)}<b>Stepan</b>"
@@ -889,34 +949,34 @@ def landing_html() -> str:
         "<span class=\"sync\"><span class=\"dt\"></span>Client card &amp; calls ←</span>"
         "<span class=\"sync\"><span class=\"dt\"></span>Contracts &amp; payments ←</span>"
         "</div>"
-        "<p class=\"mnote\">Illustrative — connector maps to your CRM's own fields. "
+        "<p class=\"mnote\">Illustrative: connector maps to your CRM's own fields. "
         "Arrows mark what Stepan reads back from the CRM.</p>"
         "</div></section>"
         # capabilities
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
-        "<div class=\"kick\">What it does</div>"
-        "<h2>Everything a great rep does — at scale</h2></div>"
+        ""
+        "<h2>Everything a great rep does, at scale</h2></div>"
         f"<div class=\"grid\">{feats}</div>"
         "</div></section>"
         # comparison
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
-        "<div class=\"kick\">Why Stepan</div>"
+        ""
         "<h2>Not another flow bot</h2>"
         "<p class=\"lead\">Rule-based DM bots capture leads. Stepan closes them.</p></div>"
         "<div class=\"cmp\">"
         f"<div class=\"col bad\"><h3>{_svg(_IC['bot'], 20)}Typical DM bot</h3><ul>"
-        "<li>Canned button flows — breaks off-script</li>"
+        "<li>Canned button flows that break off-script</li>"
         "<li>Can't handle a real objection</li>"
         "<li>Just collects a contact, then stalls</li>"
         "<li>Makes things up when it doesn't know</li>"
         "<li>One channel, one language</li></ul></div>"
         f"<div class=\"col good\"><h3>{_svg(_IC['trend'], 20)}Stepan</h3><ul>"
-        "<li>Real conversation — adapts to every lead</li>"
+        "<li>A real conversation that adapts to every lead</li>"
         "<li>Diagnoses the pain, reframes objections</li>"
         "<li>Sells value, times the offer, drives the deal</li>"
-        "<li>Grounded in your facts — never invents</li>"
+        "<li>Grounded in your facts, never invents</li>"
         "<li>IG + WhatsApp + Messenger, any language</li></ul></div>"
         "</div></div></section>"
         # meta business agent comparison
@@ -924,7 +984,7 @@ def landing_html() -> str:
         # channels — with TikTok coming soon
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
-        "<div class=\"kick\">Where it works</div>"
+        ""
         "<h2>Right inside the chats your buyers already use</h2></div>"
         "<div class=\"chan\">"
         f"<span class=\"pill\">{_svg(_IC['ig'], 18)}Instagram</span>"
@@ -936,16 +996,18 @@ def landing_html() -> str:
         "<span class=\"tag custom\">on request</span></span>"
         "</div>"
         "<p class=\"mnote\" style=\"margin-top:1rem\">"
-        f"{_svg(_IC['plug'], 14)} Any messenger with an API can be wired in — Telegram is "
+        f"{_svg(_IC['plug'], 14)} Any messenger with an API can be wired in; Telegram is "
         "the same connector pattern as the channels above.</p>"
         "</div></section>"
         # pricing
-        + _pricing_section() +
+        + _pricing_section()
+        # objections, answered (FAQ + FAQPage schema)
+        + _faq_section() +
         # final CTA
         "<section class=\"divide\"><div class=\"wrap\"><div class=\"final\">"
-        "<div class=\"kick\" style=\"position:relative\">See it for yourself</div>"
+        ""
         "<h2>Let Stepan sell <em>you</em>.</h2>"
-        "<p class=\"lead\">Message it like one of your leads and watch it qualify and pitch — "
+        "<p class=\"lead\">Message it like one of your leads and watch it qualify and pitch, "
         "in real time.</p>"
         "<div class=\"cta\">"
         "<button class=\"btn btn-p\" onclick=\"openStepan()\">Talk to Stepan</button></div>"

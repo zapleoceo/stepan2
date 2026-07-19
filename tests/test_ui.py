@@ -1014,8 +1014,8 @@ def test_landing_is_public_and_generic() -> None:
     assert "Stepan" in body
     assert 'href="/login"' in body               # login present (top-right)
     assert "ig.me" in body                        # "Talk to Stepan" demo CTA
-    assert "A peek inside" in body                 # illustrative UI mockups
-    assert "Connected to your ad accounts" in body  # ad-cabinet pull + attribution
+    assert "See what it actually does" in body     # illustrative UI mockups
+    assert "Every ad measured. Every lead unified." in body  # ad-cabinet pull + attribution
     assert "Re-qualifies mid-conversation" in body  # in-chat re-qualification
     assert "MCP connector" in body                 # CRM sync via MCP
     assert "TikTok" in body                        # channels incl. coming-soon
