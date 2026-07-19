@@ -131,11 +131,14 @@ class ReactivationService:
             return False
         if not lead_spoke_own_words(ctx.dialog):
             return False  # never spoke → nothing to adapt to; leave dormant
-        last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
+        recent_in = [m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"][:3]
+        last_in = recent_in[0] if recent_in else ""
         # A lead who declined ('gak tertarik', 'nanti dulu') or got annoyed made a CHOICE -
-        # re-nudging them soon is exactly the spam that earns a report. Suppress them (record
-        # the touch so the gap/cap excludes them for 14d) and send nothing.
-        if guard.lead_signaled_annoyance(last_in) or SOFT_NO_RE.search(last_in):
+        # re-nudging them soon is exactly the spam that earns a report. Scan the last few
+        # messages, not just the last: a refusal is often followed by a polite 'makasih' /
+        # 'oke' (thread 3060: 'saya sudah tidak tertarik' then 'terimakasih'). Suppress them
+        # (record the touch so the gap/cap excludes them for 14d) and send nothing.
+        if any(guard.lead_signaled_annoyance(t) or SOFT_NO_RE.search(t) for t in recent_in):
             await self._suppress(thread_id, lead_id, now)
             return False
         branch = await self.session.get(Branch, self.branch_id)
@@ -148,10 +151,15 @@ class ReactivationService:
             decision = parse_decision(raw)
         except ValueError:
             return False
+        # No usable re-engagement (model found no fresh hook, or it would just repeat / stall):
+        # suppress so this lead isn't re-picked and re-generated every run, blocking a slot other
+        # dormant leads could use. A transient bad-JSON above is NOT suppressed — that retries.
         if not decision.reply:
+            await self._suppress(thread_id, lead_id, now)
             return False
         _, ratio = _most_similar_prior(decision.reply, ctx.dialog)
         if ratio >= _DUPLICATE_RATIO:
+            await self._suppress(thread_id, lead_id, now)
             return False  # nothing new to say → don't send a stale echo
         decision, meta = await guard_decision(
             self.session, self.branch_id, self.settings, self.llm,
@@ -159,6 +167,7 @@ class ReactivationService:
         if not decision.reply or decision.reply.strip() in (
                 guard.SAFE_FALLBACK, guard.CLARIFY_FALLBACK) \
                 or guard.promised_handoff(decision.reply):
+            await self._suppress(thread_id, lead_id, now)
             return False
         meta_line = _fmt_llm_meta(meta)
         for i, bubble in enumerate(_split_bubbles(decision.reply)):
