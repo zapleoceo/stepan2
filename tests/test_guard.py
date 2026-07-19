@@ -131,6 +131,21 @@ def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert not guard.impossible_capability_offers("aku jelasin di sini aja ya Kak lewat chat")
 
 
+def test_price_order_small_step_must_lead() -> None:
+    # live 2026-07-19: totals still led 2/3 of price quotes despite the prompt rule
+    assert guard.price_order_wrong(
+        "Investasinya Rp 13.000.000 - bisa dicicil 4 x Rp3.250.000 tanpa bunga")
+    assert guard.price_order_wrong(
+        "Investasinya Rp 1.882.955 total, DP Rp 500.000 untuk amankan seat")
+    # DP/cicilan first → correct order, passes
+    assert not guard.price_order_wrong(
+        "DP Rp 500.000 aja buat amankan seat, total Rp 1.882.955")
+    assert not guard.price_order_wrong(
+        "cicilan Rp 1.670.000 per bulan, atau lunas Rp 15.030.000")
+    # a lone cheap price with no small-step figure is not an ordering problem
+    assert not guard.price_order_wrong("Skill Booster cuma Rp 500.000, 1 hari aja")
+
+
 def test_ungrounded_times_flags_invented_class_hours() -> None:
     ctx = "Open House gratis tiap Kamis jam 16:00-20:00 WIB di Menara Sudirman"
     # sim s10 night_worker: '19.00-20.00' quoted to a shift worker, KB says only 'malam'

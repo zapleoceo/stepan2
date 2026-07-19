@@ -249,6 +249,25 @@ def fabricated_income_figure(reply: str) -> list[str]:
 _CLOCK_RE = re.compile(r"\b([01]?\d|2[0-3])[.:]([0-5]\d)\b")
 
 
+# Price ORDER (Miroslav-adopted rule, prompt alone holds it only ~1/3 of the time on the free
+# model, measured live 2026-07-19): when a reply carries BOTH a full multi-million total AND a
+# small-step figure (DP/instalment), the small step must come FIRST — the big number first is
+# a shock anchor. Only fires when both are present, so a lone Booster price passes untouched.
+_MILLIONS_RE = re.compile(r"rp\s*\.?\s*\d{1,3}[.,]\d{3}[.,]\d{3}", re.IGNORECASE)
+_SMALL_STEP_RE = re.compile(r"\bdp\b|cicil\w*|angsur\w*|per\s*bulan|/\s*bulan|uang\s*muka",
+                            re.IGNORECASE)
+
+
+def price_order_wrong(reply: str) -> list[str]:
+    text = reply or ""
+    million = _MILLIONS_RE.search(text)
+    step = _SMALL_STEP_RE.search(text)
+    if million and step and million.start() < step.start():
+        return ["full price total appears BEFORE the DP/instalment - lead with the smallest "
+                "real step (DP/cicilan), full amount only after, as context"]
+    return []
+
+
 def ungrounded_times(reply: str, context: str) -> list[str]:
     ctx_norm = _CLOCK_RE.sub(lambda m: f"{int(m.group(1))}:{m.group(2)}", context or "")
     out = []
