@@ -16,10 +16,8 @@ from app.domain.enums import Stage
 SMART = "chat:smart"
 FAST = "chat:fast"
 
-# Default stages where money is on the table — a weaker decision here loses a deal. Operator-
-# tunable via the smart_stages setting; this is the fallback when the setting is empty/garbage.
+# Stages where money is on the table — a weaker decision here loses a deal.
 _DEFAULT_SMART_STAGES = frozenset({"presenting", "objection", "ready"})
-_ALL_STAGE_VALUES = frozenset(s.value for s in Stage)
 # A hot buying signal can land while the lead is still nominally early (e.g. "gimana bayar"
 # at qualifying). Catch it with a cheap regex and force smart regardless of the stage.
 _BUY_RE = re.compile(
@@ -42,14 +40,6 @@ _DEEP_CONVERSATION_TURNS = 10
 # single regen over a whole lead history is noise (any lead who ever tripped one stayed smart
 # forever); two+ is a pattern.
 _GUARD_REGEN_STICKY_THRESHOLD = 2
-
-
-def parse_smart_stages(raw: str | None) -> frozenset[str]:
-    """Comma-list setting → validated set of stage names. Unknown tokens are dropped; an empty
-    or all-invalid value falls back to the default (never let a typo route money turns to fast)."""
-    vals = {t.strip().lower() for t in (raw or "").split(",") if t.strip()}
-    valid = vals & _ALL_STAGE_VALUES
-    return frozenset(valid) if valid else _DEFAULT_SMART_STAGES
 
 
 def pick_capability(
