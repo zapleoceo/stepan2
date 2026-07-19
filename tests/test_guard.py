@@ -131,6 +131,17 @@ def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert not guard.impossible_capability_offers("aku jelasin di sini aja ya Kak lewat chat")
 
 
+def test_ungrounded_biz_counts_flags_invented_company_networks() -> None:
+    ctx = "Sejak 1999, 24 negara, 267.000+ alumni. Partner resmi: 3 perusahaan lokal."
+    # thread 2740: 'jaringan alumni di lebih dari 1.500 perusahaan' — nowhere in the KB
+    assert guard.ungrounded_biz_counts(
+        "akses ke jaringan alumni di lebih dari 1.500 perusahaan", ctx)
+    # a count the KB does state passes (separator-insensitive)
+    assert not guard.ungrounded_biz_counts("kami punya 3 perusahaan partner lokal", ctx)
+    # plain numbers not glued to a company noun are out of scope
+    assert not guard.ungrounded_biz_counts("kelasnya maksimal 14 orang, 2x seminggu", ctx)
+
+
 def test_price_order_small_step_must_lead() -> None:
     # live 2026-07-19: totals still led 2/3 of price quotes despite the prompt rule
     assert guard.price_order_wrong(

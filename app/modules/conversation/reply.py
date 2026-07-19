@@ -255,6 +255,7 @@ def _deterministic_issues(
         *guard.fabricated_income_figure(reply),
         *guard.ungrounded_times(reply, context),
         *guard.price_order_wrong(reply),
+        *guard.ungrounded_biz_counts(reply, context),
         *guard.premature_payment_details(reply, lead_words),
         *guard.invented_price_no_card(reply, context),
     ]

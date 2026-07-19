@@ -240,6 +240,25 @@ def fabricated_income_figure(reply: str) -> list[str]:
     return out
 
 
+# A quantitative business claim (N perusahaan/partner/klien/alumni-network size) the KB never
+# states. Thread 2740 (2026-07-19): 'jaringan alumni di lebih dari 1.500 perusahaan' plus
+# invented 'career guidance' - plausible-sounding career fabrications the LLM-verify waved
+# through. Deterministic backstop: a number glued to a company/partner noun must literally
+# exist in the KB context (separator-insensitive), else regen.
+_BIZ_COUNT_RE = re.compile(
+    r"(\d[\d.,]*)\s*\+?\s*(perusahaan|companies|company|partner\w*|klien|clients?|"
+    r"lowongan|vacanc\w+)", re.IGNORECASE)
+
+
+def ungrounded_biz_counts(reply: str, context: str) -> list[str]:
+    ctx_digits = re.sub(r"[.,\s]", "", context or "")
+    out = []
+    for m in _BIZ_COUNT_RE.finditer(reply or ""):
+        if re.sub(r"[.,\s]", "", m.group(1)) not in ctx_digits:
+            out.append(f"business count not stated in the KB: {m.group(0)}")
+    return out
+
+
 # A clock time quoted for a class/event that the KB never states. Sim s10 night_worker: a
 # shift worker asking about evenings got 'kelas kita malam hari, sekitar jam 19.00-20.00 WIB'
 # plus an offer of later groups — the KB says only 'malam', no times. The lead plans their
