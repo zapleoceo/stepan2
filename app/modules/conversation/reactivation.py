@@ -132,7 +132,6 @@ class ReactivationService:
         if not lead_spoke_own_words(ctx.dialog):
             return False  # never spoke → nothing to adapt to; leave dormant
         recent_in = [m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"][:3]
-        last_in = recent_in[0] if recent_in else ""
         # A lead who declined ('gak tertarik', 'nanti dulu') or got annoyed made a CHOICE -
         # re-nudging them soon is exactly the spam that earns a report. Scan the last few
         # messages, not just the last: a refusal is often followed by a polite 'makasih' /
