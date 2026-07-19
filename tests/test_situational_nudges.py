@@ -181,23 +181,23 @@ def _pick(last_txt: str, needs: NeedsProfile | None = None, n: int = 2) -> str |
                       inbound_count=n)
 
 
+def _pick_repeat(prior_no: str, last: str) -> str | None:
+    # a dialog where the lead already soft-declined once (prior_no) and does again (last)
+    dialog = [_M("in", "mau belajar coding"), _M("in", prior_no),
+              _M("out", "boleh tau yang bikin ragu?"), _M("in", last)]
+    return pick_nudge(lead_type="warm", dialog=dialog, last_txt=last,
+                      stored_needs=NeedsProfile(), inbound_count=3)
+
+
 def test_first_soft_no_works_the_objection_then_repeat_eases_off() -> None:
     # FIRST soft-no this conversation → surface + handle the objection, don't capitulate
     # (thread 2949: 'belum tertarik' got an instant give-up and the sale was lost)
     assert OBJECTION_HANDLE_NUDGE in _pick("maaf belum tertarik kak")
     assert OBJECTION_HANDLE_NUDGE in _pick("nanti dulu deh kak, tapi berapa sih harganya?")
     # a SECOND soft-no (one already handled) eases off for real
-    two_nos = pick_nudge(lead_type="warm",
-                         dialog=[_M("in", "mau belajar coding"), _M("in", "nanti dulu deh"),
-                                 _M("out", "boleh tau yang bikin ragu?"), _M("in", "belum tertarik")],
-                         last_txt="belum tertarik", stored_needs=NeedsProfile(), inbound_count=3)
-    assert SOFT_NO_NUDGE in two_nos
-    two_nos_q = pick_nudge(lead_type="warm",
-                          dialog=[_M("in", "mau coding"), _M("in", "nanti dulu"),
-                                  _M("out", "?"), _M("in", "pikir dulu, tapi berapa harganya?")],
-                          last_txt="pikir dulu, tapi berapa harganya?", stored_needs=NeedsProfile(),
-                          inbound_count=3)
-    assert SOFT_NO_WITH_QUESTION_NUDGE in two_nos_q
+    assert SOFT_NO_NUDGE in _pick_repeat("nanti dulu deh", "belum tertarik")
+    assert SOFT_NO_WITH_QUESTION_NUDGE in _pick_repeat(
+        "nanti dulu", "pikir dulu, tapi berapa harganya?")
 
 
 def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
