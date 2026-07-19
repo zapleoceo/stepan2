@@ -40,6 +40,7 @@ class BranchSettings:
     tg_group_id: str
     followup_enabled: bool
     followup_schedule_h: list[int]
+    reactivation_enabled: bool
     tech_search_enabled: bool
     tech_usecase_enabled: bool
     daily_budget_usd: float
@@ -193,6 +194,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         tg_group_id=raw.get("tg_group_id", _DEFAULTS.get("tg_group_id", "")),
         followup_enabled=_b(raw, "followup_enabled"),
         followup_schedule_h=_parse_schedule(raw),
+        reactivation_enabled=_b(raw, "reactivation_enabled"),
         tech_search_enabled=_b(raw, "tech_search_enabled"),
         tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),

@@ -116,6 +116,11 @@ SCHEMA: list[SettingSection] = [
                    "Hours after reply, comma-separated. Meta's window is ~24h — use shorter",
                    "Jam setelah balasan, pisah koma. Jendela Meta ~24 jam — pakai lebih pendek"),
            width="170px", scope="channel"),
+        _f("reactivation_enabled", "bool", "false",
+           _l("Реактивация спящих", "Reactivate dormant", "Aktifkan kembali"), width="150px",
+           help=_l("Один персональный заход к уснувшим лидам (3-21 дн.), по их же диалогу",
+                   "One personalized touch to dormant leads (3-21d), adapted to their dialog",
+                   "Satu sapaan personal ke lead yang diam (3-21 hari), sesuai obrolannya")),
     ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [

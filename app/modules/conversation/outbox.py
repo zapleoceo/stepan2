@@ -80,8 +80,8 @@ class OutboxSender:
         cfg = await get_channel_settings(self.session, self.branch_id, thread.channel_id)
         if not cfg.sending_enabled:
             return None  # connector sending paused (soft-block) — queue keeps building
-        if row.source == "followup" and cfg.is_quiet_hour():
-            return None  # follow-ups hold at night; live replies still go out (S1)
+        if row.source in ("followup", "reactivation") and cfg.is_quiet_hour():
+            return None  # proactive touches hold at night; live replies still go out (S1)
         if row.source != "manager" and await self._cap_reached(now, cfg, thread.channel_id):
             logger.info(
                 "outbox hold branch=%d thread=%d: send cap reached", self.branch_id, thread_id

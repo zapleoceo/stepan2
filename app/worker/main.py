@@ -25,6 +25,7 @@ from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
 from app.domain.enums import SessionStatus
 from app.modules.conversation.followup import FollowupService
+from app.modules.conversation.reactivation import ReactivationService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import ThreadRepo
@@ -138,15 +139,15 @@ async def _channels_with_live_convo(
     UTC datetime to match channel_thread's `timestamp without time zone` columns."""
     if not channel_ids:
         return set()
-    from sqlalchemy import text  # noqa: PLC0415
-    rows = (await session.execute(
-        text("SELECT DISTINCT channel_id FROM channel_thread"
-             " WHERE channel_id = ANY(:ids)"
-             "   AND last_in_at IS NOT NULL"
-             "   AND last_in_at > :cutoff"
-             "   AND (last_out_at IS NULL OR last_in_at > last_out_at)"),
-        {"ids": channel_ids, "cutoff": cutoff},
-    )).all()
+    from sqlalchemy import bindparam, text  # noqa: PLC0415
+    stmt = text(
+        "SELECT DISTINCT channel_id FROM channel_thread"
+        " WHERE channel_id IN :ids"
+        "   AND last_in_at IS NOT NULL"
+        "   AND last_in_at > :cutoff"
+        "   AND (last_out_at IS NULL OR last_in_at > last_out_at)"
+    ).bindparams(bindparam("ids", expanding=True))
+    rows = (await session.execute(stmt, {"ids": channel_ids, "cutoff": cutoff})).all()
     return {r[0] for r in rows}
 
 
@@ -412,6 +413,50 @@ async def _queue_one_followup(
             return await svc.queue_one(thread_id, product_slug, sent_so_far)
     except Exception:
         logger.exception("followup failed branch=%d thread=%d", branch_id, thread_id)
+        return False
+
+
+async def reactivate_dormant(ctx: dict[str, Any]) -> int:
+    """Dispatcher: fan out one dormant-reactivation harvest per branch (opt-in, gated)."""
+    return await _fan_out_per_branch(ctx, "reactivate_dormant_branch", gate_platform=True,
+                                     gate_broker=True)
+
+
+async def reactivate_dormant_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's dormant harvest — a single personalized touch per due lead, per-thread tx."""
+    queued = 0
+    llm = BrokerLLM()
+    try:
+        async with session_scope() as session:
+            branch_cfg = await get_settings(session, branch_id)
+            if not branch_cfg.reactivation_enabled:
+                return 0
+            kb = await effective_kb_branch(session, branch_id)
+            svc = ReactivationService(session, branch_id, llm,
+                                      KnowledgeService(session, kb, llm), branch_cfg)
+            due = await svc.due(datetime.now(UTC).replace(tzinfo=None))
+    except Exception:
+        logger.exception("reactivate_dormant: branch=%s bookkeeping failed, skipping", branch_id)
+        return 0
+    for thread_id, _slug, lead_id in due:
+        if await _reactivate_one(branch_id, thread_id, lead_id, llm):
+            queued += 1
+    return queued
+
+
+async def _reactivate_one(
+    branch_id: int, thread_id: int, lead_id: int, llm: BrokerLLM,
+) -> bool:
+    """One dormant lead's reactivation in its own transaction (isolates per-lead failures)."""
+    try:
+        async with session_scope() as session:
+            branch_cfg = await get_settings(session, branch_id)
+            kb = await effective_kb_branch(session, branch_id)
+            svc = ReactivationService(session, branch_id, llm,
+                                      KnowledgeService(session, kb, llm), branch_cfg)
+            return await svc.reactivate_one(thread_id, lead_id)
+    except Exception:
+        logger.exception("reactivation failed branch=%d thread=%d", branch_id, thread_id)
         return False
 
 
@@ -879,7 +924,7 @@ class WorkerSettings:
         # Cron dispatchers: each fans out one per-branch job so branches run concurrently and
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, ingest_active_conversations, reply_pending, send_outbox,
-        schedule_followups,
+        schedule_followups, reactivate_dormant,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         daily_digest, crm_rescue,
         reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
@@ -888,7 +933,7 @@ class WorkerSettings:
         # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
         # id the instant the job ends, so the dedup never outlives the run.
         ingest_branch, ingest_active_branch, reply_pending_branch, send_outbox_branch,
-        schedule_followups_branch,
+        schedule_followups_branch, reactivate_dormant_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
         daily_digest_branch,
@@ -934,6 +979,10 @@ class WorkerSettings:
         # Follow-ups run every 10 minutes (minute divisible by 10, second=50)
         cron(schedule_followups, minute={0, 10, 20, 30, 40, 50}, second=50,
              run_at_startup=False),
+        # Dormant reactivation: opt-in (reactivation_enabled), twice a day at Jakarta midday
+        # (UTC+7: 04:00 UTC = 11:00 WIB, 08:00 UTC = 15:00 WIB) so a cold touch lands in
+        # business hours; small batch, quiet hours still held by the outbox send layer.
+        cron(reactivate_dormant, hour={4, 8}, minute={20}, second=30, run_at_startup=False),
         # CRM push every 5 minutes (only branches with crm_enabled + webhook URL)
         cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
         # Rescue of CRM missed-call leads: hourly, work hours only (service-enforced),
