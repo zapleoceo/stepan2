@@ -72,6 +72,15 @@ def test_followup_angle_ladder_is_attempt_specific() -> None:
     assert "close" in followup_angle(9).lower() and "follow-up #10" in followup_angle(9)
 
 
+def test_menu_reply_tolerates_decorated_digits() -> None:
+    from app.modules.conversation.situations import MENU_REPLY_RE
+    # live 4531: '2 kak' fell through and the lead's answered choice got re-asked
+    for s in ["2 kak", "2", "no 2", "yang 3 min", "1️⃣"]:
+        assert MENU_REPLY_RE.match(s), s
+    for s in ["2 juta", "08123456", "saya pilih kursus"]:
+        assert not MENU_REPLY_RE.match(s), s
+
+
 def test_buying_signal_catches_gas_family() -> None:
     from app.modules.conversation.situations import BUYING_SIGNAL_RE
     # sim s10 slang_minimal: 'yaudh gas' (= go ahead) got the clarify menu at the buying moment

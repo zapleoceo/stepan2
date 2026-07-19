@@ -458,7 +458,13 @@ BUYING_SIGNAL_NUDGE = (
 # The lead answered a numbered menu with a bare digit. Live loss (threads 4146/4058): '1'
 # (switch career) got 'what's your biggest challenge?' — and thread 4058 got the same
 # open question three times in a day, then silence. A menu answer is a CHOICE — convert it.
-MENU_REPLY_RE = re.compile(r"^\s*[1-4]\s*(️?⃣)?\s*$")
+# Real leads decorate the digit: '2 kak', 'no 2', 'yang 2 min' (live 4531: '2 kak' fell
+# through to an open discovery question and the model then RE-ASKED the very choice the
+# lead had answered). Tolerate common prefixes/suffixes; anything else ('2 juta') still
+# fails the match.
+MENU_REPLY_RE = re.compile(
+    r"^\s*(?:no\.?|nomor|yang|pilih)?\s*[1-4]\s*(️?⃣)?\s*(?:kak|ka|min|ya|dong|aja|deh)?\s*$",
+    re.IGNORECASE)
 
 MENU_REPLY_NUDGE = (
     "[System: the lead just answered your numbered menu with a choice — that is a "
