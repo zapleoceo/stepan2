@@ -503,6 +503,13 @@ async def test_followup_regenerates_when_only_one_bubble_of_several_is_a_duplica
                            text=prior_line, occurred_at=_NOW - timedelta(hours=1)))
     await db_session.flush()
 
+    # A future date, so the stale_dates guard (which uses the real clock) never fires on the
+    # fixture — a hardcoded day was a time bomb that flipped stale the day after it.
+    _id_months = ("Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli",
+                  "Agustus", "September", "Oktober", "November", "Desember")
+    _future = (_NOW + timedelta(days=5)).date()
+    event_date = f"{_future.day} {_id_months[_future.month - 1]}"
+
     class _ScriptLLM:
         def __init__(self) -> None:
             self.calls = 0
@@ -510,10 +517,10 @@ async def test_followup_regenerates_when_only_one_bubble_of_several_is_a_duplica
         async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
             self.calls += 1
             if self.calls == 1:
-                reply = (f"{prior_line}|||Tapi ada Demo Event Sabtu 18 Juli jam 9 pagi|||"
+                reply = (f"{prior_line}|||Tapi ada Demo Event {event_date} jam 9 pagi|||"
                          "Tiketnya cuma Rp 100.000 aja")
             else:
-                reply = "Kalau mau, Demo Event Sabtu 18 Juli masih ada slot - mau aku catat?"
+                reply = f"Kalau mau, Demo Event {event_date} masih ada slot - mau aku catat?"
             return json.dumps({"reply": reply, "stage": "qualifying"}), \
                 {"model": "fake", "cost_usd": 0.0}
 
