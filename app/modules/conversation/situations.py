@@ -111,6 +111,21 @@ LOW_BUDGET_RE = re.compile(
     r"(te)?rasa\s+berat|masih\s+berat|keberatan\b",
     re.IGNORECASE)
 
+# The TIME objection — the top non-price reason a warm lead stalls ('nggak ada waktu', 'sibuk',
+# 'waktunya padet', 'gak sempat'). It hides inside SOFT_NO ('belum ada waktu') but capitulates
+# there ('kabari kalau ada waktu', thread 4062) instead of reframing the REAL, small weekly
+# commitment. Split it out so it gets the time-specific grounded reframe, same as LOW_BUDGET
+# has its own. 'waktu luang' (free time) and 'kapan waktunya' (a schedule question) must NOT
+# match — only a scarcity/busy reading does.
+NO_TIME_RE = re.compile(
+    r"\b(?:nggak|ngga|ndak|tidak|tdk|gak|ga|gk|belum|blm|gada|nda)\s*(?:ada\s*|punya\s*|"
+    r"sempet\s*|sempat\s*)?waktu\b"
+    r"|\b(?:gak|ga|nggak|ngga|tdk|tidak|gk|belum|blm)\s*(?:sempat|sempet)\b"
+    r"|\b(?:lagi\s*)?sibuk\b|\bkesibukan\b|\blagi\s*repot\b"
+    r"|\b(?:jadwal|waktu|hari|kerjaan)\w*\s*(?:padet|padat|penuh|mepet)"
+    r"|banyak\s*(?:kerjaan|kegiatan|kesibukan)",
+    re.IGNORECASE)
+
 # School-age lead OR a parent asking for their child — either way the PARENT pays and decides.
 # ('kelas 10-12' is a school grade; 'kelas 1 hari' is a course format — the \b keeps them apart.)
 MINOR_RE = re.compile(
@@ -375,6 +390,20 @@ ANSWER_FIRST_TIGHT_BUDGET_NUDGE = (
     "but put the CHEAPEST real entry right beside it as the main path — the 1-day Skill "
     "Booster / mini course or the free Open House — so the answer doesn't read as 'this is "
     "not for you'. No DP push, never guarantee income. Return the JSON as usual.]"
+)
+
+NO_TIME_NUDGE = (
+    "[System: the lead's objection is TIME — busy / 'nggak ada waktu' / 'sibuk' / 'waktunya "
+    "padet' / 'nanti kalau sempat'. Do NOT capitulate ('kabari kalau ada waktu' leaves the "
+    "sale on the table) and do NOT hard-push. WORK it: reframe the time cost using the ACTUAL "
+    "schedule of the product in the knowledge context — name how SMALL the real weekly "
+    "commitment is (the sessions-per-week and minutes from the card), that it can be taken "
+    "ONLINE (no commute), and that the class day/time can be chosen to fit around work or "
+    "study, exactly as the card states. Acknowledge warmly first ('paham banget Kak, jadwal "
+    "padat itu nyata'), land that it fits a busy life, tie it to their goal if you know it, "
+    "then ONE soft step (e.g. 'hari apa yang paling longgar buat Kakak?'), never a hard close. "
+    "Use ONLY schedule facts present in the KB context — never invent a session count, an "
+    "evening time, a class recording, or an income figure. Return the JSON as usual.]"
 )
 
 LOW_BUDGET_NUDGE = (
@@ -802,6 +831,14 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
     # canned facts answer beats anything else this turn (thread 4435: 'Apakah ini real' → menu).
     if TRUST_DOUBT_RE.search(turn_txt):
         return TRUST_DOUBT_NUDGE
+    # TIME is a specific objection ('sibuk'/'nggak ada waktu') that hides inside SOFT_NO and
+    # capitulates there — give it the grounded schedule reframe FIRST; on a repeat, ease off.
+    if NO_TIME_RE.search(turn_txt):
+        time_obj_count = sum(
+            1 for m in dialog if m.direction == "in" and NO_TIME_RE.search(m.text or ""))
+        if time_obj_count <= 1:
+            return NO_TIME_NUDGE
+        return SOFT_NO_WITH_QUESTION_NUDGE if asks else SOFT_NO_NUDGE
     if SOFT_NO_RE.search(turn_txt):
         # First objection this conversation → work it once; on a repeat, ease off (existing).
         soft_no_count = sum(

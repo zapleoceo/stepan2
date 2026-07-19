@@ -196,6 +196,7 @@ from app.modules.conversation.situations import (  # noqa: E402
     ANSWER_FIRST_TIGHT_BUDGET_NUDGE,
     DISCOVERY_TURN_CAP,
     NEED_PAYOFF_NUDGE,
+    NO_TIME_NUDGE,
     OBJECTION_HANDLE_NUDGE,
     SOFT_NO_NUDGE,
     SOFT_NO_WITH_QUESTION_NUDGE,
@@ -245,6 +246,25 @@ def test_objection_trailed_by_filler_still_handled_not_pitched_over() -> None:
     got2 = pick_nudge(lead_type="warm", dialog=dialog2, last_txt="eh tapi berapa biayanya kak?",
                       stored_needs=NeedsProfile(), inbound_count=3)
     assert OBJECTION_HANDLE_NUDGE not in (got2 or "")
+
+
+def test_no_time_objection_gets_the_grounded_schedule_reframe() -> None:
+    # thread 4062: 'waktunya padet kak belum ada waktu' got a capitulation, not a reframe.
+    # The TIME objection must route to the schedule reframe, not generic soft-no capitulation.
+    assert NO_TIME_NUDGE in (_pick("waktunya padet kak belum ada waktu") or "")
+    assert NO_TIME_NUDGE in (_pick("aku lagi sibuk banget kak") or "")
+    assert NO_TIME_NUDGE in (_pick("gak sempat kak") or "")
+    # a positive 'free time' and a schedule question must NOT read as the objection
+    assert NO_TIME_NUDGE not in (_pick("kapan waktunya kelas kak?") or "")
+
+
+def test_no_time_repeat_eases_off_instead_of_hammering() -> None:
+    dialog = [_M("in", "mau belajar"), _M("in", "aku sibuk kak"),
+              _M("out", "cuma 2 sesi malam per minggu kok"), _M("in", "tetep gak sempat sih")]
+    got = pick_nudge(lead_type="warm", dialog=dialog, last_txt="tetep gak sempat sih",
+                     stored_needs=NeedsProfile(), inbound_count=3)
+    assert NO_TIME_NUDGE not in (got or "")  # second time objection → ease off, not re-reframe
+    assert SOFT_NO_NUDGE in (got or "")
 
 
 def test_combo_question_from_tight_budget_answers_with_cheap_entry() -> None:
