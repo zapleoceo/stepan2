@@ -32,14 +32,17 @@ DISCOVERY_TURN_CAP = 4
 
 # ─── detectors ───────────────────────────────────────────────────────────────
 
-# The click-to-message ad prefill families — a button click, not the lead's own words. Two
-# canned openers seen at scale (2026-07: 609 threads on the second family alone): "💻
-# Ceritakan lebih detail tentang program …" and "Halo, saya ingin tahu detail program X dan
-# biaya kursusnya 😊". An emoji prefix is tolerated. Nothing here may ever be treated as the
-# lead speaking: not for needs, not for answer-first, not for a price.
+# The click-to-message ad prefill families — a button click, not the lead's own words. Three
+# canned openers seen at scale (2026-07: 609 threads on the second family, 163 on the third):
+# "💻 Ceritakan lebih detail tentang program …", "Halo, saya ingin tahu detail program X dan
+# biaya kursusnya 😊", and "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?".
+# An emoji prefix is tolerated. Nothing here may ever be treated as the lead speaking: not
+# for needs, not for answer-first, not for a price (the unrecognized third family made the
+# bot dump a full price block as its FIRST message on thread 4500).
 AD_TEMPLATE_RE = re.compile(
     r"^[^a-zA-Z]*(ceritakan lebih detail tentang program"
-    r"|(halo[\s,]*)?(saya |aku )?ingin tahu detail program)",
+    r"|(halo[\s,!]*)?(saya |aku )?ingin tahu detail program"
+    r"|(halo[\s,!]*)?tertarik kursus\W*boleh info jadwal)",
     re.IGNORECASE)
 
 # A concrete, answerable question from the lead — a "?" or a question/money/enroll keyword.

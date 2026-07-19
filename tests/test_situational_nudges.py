@@ -47,7 +47,10 @@ def test_answer_first_never_fires_on_ad_prefill() -> None:
     # the ad button click mentions 'biaya' but must NOT get a price — _AD_OPENER_NUDGE owns it
     for s in ["Halo, saya ingin tahu detail program SMM dan biaya kursusnya 😊",
               "💻 Ceritakan lebih detail tentang program kursusnya",
-              "🐍 Ceritakan lebih detail tentang program kursus Python"]:
+              "🐍 Ceritakan lebih detail tentang program kursus Python",
+              # third prefill family, 163 threads by 2026-07-19 — unrecognized, it made the
+              # bot dump a full price block as its FIRST message (thread 4500)
+              "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"]:
         assert not _answer_first_fires(s), s
 
 
