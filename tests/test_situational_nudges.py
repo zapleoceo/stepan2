@@ -129,7 +129,10 @@ def test_soft_no_detects_polite_refusals() -> None:
               "belum ada biaya kak", "next time aja", "mau tanya istri dulu",
               "diskusi sama orang tua dulu ya", "ga dulu deh", "nabung dulu",
               # 'tidak/gak jadi' = backing out (thread 2811)
-              "maaf KA tidak jadi", "saya tidak jadi", "gak jadi kak"]:
+              "maaf KA tidak jadi", "saya tidak jadi", "gak jadi kak",
+              # warm-postponer forms with the 'dlu' chat abbreviation (thread 4520)
+              "aku simpen dlu deh ini", "nanti biar aku mikir mikir dlu ya",
+              "aku cuman mau ngamanin informasi dulu"]:
         assert _SOFT_NO_RE.search(s), s
 
 
@@ -137,7 +140,9 @@ def test_soft_no_ignores_engaged_replies() -> None:
     for s in ["iya kak mau daftar", "boleh minta linknya?", "oke lanjut",
               "jadwalnya kapan kak?", "saya tertarik banget",
               # 'jadi' as 'so/then' must NOT read as the 'tidak jadi' refusal
-              "jadi kapan kelasnya?", "jadi gimana ka"]:
+              "jadi kapan kelasnya?", "jadi gimana ka",
+              # 'simpanan' / 'mikir positif' must not trip the postponer forms
+              "simpanan aku cukup kok", "mikir positif dong"]:
         assert not _SOFT_NO_RE.search(s), s
 
 

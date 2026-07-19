@@ -68,7 +68,12 @@ SOFT_NO_RE = re.compile(
     # lagi ya kak" (thread 2689) matched nothing here, so the soft-no handling never fired at
     # all and the model dormant-ed the lead instead.
     r"\b(nanti\s*(aja|dulu|ya|lah)|nti\s*dulu|[pf]ikir(kan|in)?[- ]?([pf]ikir\s*)?(dulu|lagi)|"
-    r"mikir(in|kan)?\s*(dulu|lagi)|"
+    # 'mikir mikir dulu' (repeated word), and 'simpen/simpan dulu' + 'ngamanin info dulu'
+    # (I'll save it / just securing the info first) — classic warm-postponer soft-declines
+    # missed live (thread 4520: the bot pushed DP + a WhatsApp ask instead of easing off).
+    # 'dlu'/'dl' is the chat abbreviation of 'dulu' — accept both via du?lu.
+    r"mikir[- ]?(mikir\s*)?(in|kan)?\s*d[u]?lu|"
+    r"si?mp[ae]n\s*(d[u]?lu|info)|(ngamanin|amankan|simpan)\s*(informasi|info)\s*d[u]?lu|"
     # 'belum ada/punya' needs a REFUSAL object: bare 'belum ada pengalaman, bisa ikut?' is a
     # warm QUALIFYING question, not a no — matching it sent the whole follow-up cadence into
     # the soft-no snooze (sales-logic audit 2026-07-19, #6).
