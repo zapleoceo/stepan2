@@ -74,6 +74,11 @@ SOFT_NO_RE = re.compile(
     # 'dlu'/'dl' is the chat abbreviation of 'dulu' — accept both via du?lu.
     r"mikir[- ]?(mikir\s*)?(in|kan)?\s*d[u]?lu|"
     r"si?mp[ae]n\s*(d[u]?lu|info)|(ngamanin|amankan|simpan)\s*(informasi|info)\s*d[u]?lu|"
+    # 'ngumpulin/kumpulin duit dulu' (saving up first) and 'nanti kalo … kabarin/hubungin'
+    # (I'll reach out when I'm ready) — graceful postpone/close forms that fell through to the
+    # clarify menu (thread 4520). 'nanti aja' already matches; these two didn't.
+    r"(ng?umpulin|kumpul(in|kan)?)\s*(duit|uang|dana|modal)|"
+    r"(kalo|kalau|klo)[^\n]{0,80}(kabarin|kabari|hubungin|hubungi)\s*(kaka|kakak|lagi|kk)|"
     # 'belum ada/punya' needs a REFUSAL object: bare 'belum ada pengalaman, bisa ikut?' is a
     # warm QUALIFYING question, not a no — matching it sent the whole follow-up cadence into
     # the soft-no snooze (sales-logic audit 2026-07-19, #6).
