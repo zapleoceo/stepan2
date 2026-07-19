@@ -44,6 +44,9 @@ from .situations import (
     SOFT_NO_RE as _SOFT_NO_RE,
 )
 from .situations import (
+    postpone_days as _postpone_days,
+)
+from .situations import (
     is_answerable_question as _is_answerable_question,
 )
 from .situations import (
@@ -933,8 +936,23 @@ class ReplyService:
             return False  # a real "stop bothering me" — the hard-stop path owns it, not a snooze
         if lead.stage in HUMAN_LED_STAGES or lead.lead_type == "non_target":
             return False
+        # The lead may have NAMED their own re-contact time ("bulan depan", "abis gajian",
+        # "2 minggu lagi") — a dated 'later' beats any fixed snooze: schedule the single
+        # re-contact exactly when THEY said (owner idea 2026-07-19). The OutboxSender's
+        # step-arming is bypassed by setting next_followup_at directly past the schedule.
+        named_days = _postpone_days(last_in)
         schedule = self.settings.followup_schedule_h if self.settings else []
-        if schedule and thread.followups_sent < len(schedule) - 1:
+        if named_days is not None:
+            from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+            thread.followups_sent = max(
+                thread.followups_sent, len(schedule) - 1 if schedule else 0)
+            thread.next_followup_at = datetime.now(UTC).replace(tzinfo=None) \
+                + timedelta(days=named_days)
+            self.session.add(thread)
+            logger.info(
+                "branch=%d thread=%d soft-no with NAMED time → re-contact in %dd",
+                self.branch_id, thread.id, named_days)
+        elif schedule and thread.followups_sent < len(schedule) - 1:
             thread.followups_sent = len(schedule) - 1  # only the final, longest step remains
             self.session.add(thread)
             logger.info(

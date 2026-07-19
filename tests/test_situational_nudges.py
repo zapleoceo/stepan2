@@ -72,6 +72,17 @@ def test_followup_angle_ladder_is_attempt_specific() -> None:
     assert "close" in followup_angle(9).lower() and "follow-up #10" in followup_angle(9)
 
 
+def test_postpone_days_parses_named_recontact_times() -> None:
+    from app.modules.conversation.situations import postpone_days
+    assert postpone_days("oke kak bulan depan aja ya") == 30
+    assert postpone_days("2 minggu lagi ya") == 14
+    assert postpone_days("besok aku kabari") == 1
+    assert postpone_days("3 hari lagi") == 3
+    assert 2 <= postpone_days("abis gajian deh kak") <= 30  # payday window, date-dependent
+    assert postpone_days("nanti aja kak") is None            # vague → default snooze
+    assert postpone_days("berapa harganya?") is None
+
+
 def test_menu_reply_tolerates_decorated_digits() -> None:
     from app.modules.conversation.situations import MENU_REPLY_RE
     # live 4531: '2 kak' fell through and the lead's answered choice got re-asked

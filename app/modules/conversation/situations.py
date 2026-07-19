@@ -271,14 +271,53 @@ OBJECTION_HANDLE_NUDGE = (
     "ONLY from the KB, never fabricate a number, case, or claim. Return the JSON as usual.]"
 )
 
+# The lead NAMED a timeframe in their postpone ("bulan depan", "abis gajian", "2 minggu
+# lagi") — that's a dated 'later', gold for follow-up timing. Parsed deterministically in
+# reply._snooze_on_soft_no so the re-contact lands when THEY said, not on a fixed +7d guess.
+POSTPONE_UNTIL_RE = re.compile(
+    r"(?P<num>\d+)\s*(?P<unit>hari|minggu|bulan)\b"
+    r"|\b(?P<besok>besok)\b|\b(?P<lusa>lusa)\b"
+    r"|(?P<mingdep>minggu\s*depan)|(?P<bulandep>bulan\s*depan)"
+    r"|(?P<akhirbulan>akhir\s*bulan)|(?P<gajian>(abis|habis|setelah|nunggu)\s*gajian)",
+    re.IGNORECASE)
+
+
+def postpone_days(text: str) -> int | None:
+    """Days until the lead's own named re-contact time, or None if none named."""
+    m = POSTPONE_UNTIL_RE.search(text or "")
+    if not m:
+        return None
+    if m.group("num"):
+        n = int(m.group("num"))
+        return n * {"hari": 1, "minggu": 7, "bulan": 30}[m.group("unit").lower()]
+    if m.group("besok"):
+        return 1
+    if m.group("lusa"):
+        return 2
+    if m.group("mingdep"):
+        return 7
+    if m.group("bulandep"):
+        return 30
+    if m.group("akhirbulan") or m.group("gajian"):
+        # end of month ≈ payday window (gajian): re-contact lands 25th-ish, when money exists
+        from datetime import UTC, datetime  # noqa: PLC0415
+        today = datetime.now(UTC).day
+        return max(2, 26 - today) if today < 26 else 30
+    return None
+
+
 SOFT_NO_NUDGE = (
     "[System: the lead just softly declined or stalled — a polite Indonesian 'not now' "
     "('nanti/pikir dulu/insyaallah/belum ada biaya/lain kali' or 'tanya keluarga dulu'), "
     "usually a real 'no' wrapped to save face, AND they've already had one objection-handling "
     "turn — so now ease off for real. Do NOT push price, DP, scarcity or a new "
     "pitch this turn — that makes them ghost. Acknowledge sincerely, give a graceful out, and "
-    "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster) "
-    "or just ask permission to follow up later ('boleh aku kabari kalau ada info baru?'). "
+    "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster). "
+    "If they haven't named WHEN they'd revisit, you may ask ONE light timing question - "
+    "'mau aku ingetin lagi kapan enaknya - minggu depan, atau abis gajian? 😊' - a dated "
+    "'later' becomes a real plan; a vague 'later' is a lost lead. If they DID name a time "
+    "('bulan depan', 'abis gajian'), just confirm it warmly ('siap, aku kabari sekitar itu "
+    "ya') - the system schedules the follow-up to their date automatically. "
     "Never repeat an offer you already made. Return the JSON as usual.]"
 )
 
