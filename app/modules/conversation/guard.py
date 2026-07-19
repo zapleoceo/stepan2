@@ -250,6 +250,26 @@ _BIZ_COUNT_RE = re.compile(
     r"lowongan|vacanc\w+)", re.IGNORECASE)
 
 
+# Career-service claims are ALWAYS false (owner-confirmed 2026-07-19): no career guidance,
+# no bimbingan karier, no job placement / penyaluran / penempatan program exists. Mentors
+# answer questions if asked, but there is no dedicated service. Negated mentions ("belum
+# punya program penempatan") are the honest answer and must pass.
+_CAREER_SERVICE_RE = re.compile(
+    r"career\s*(guidance|support|coaching)|bimbingan\s*karie?r|job\s*placement|"
+    r"penyaluran\s*(kerja|lowongan)|penempatan\s*kerja", re.IGNORECASE)
+_NEGATION_BEFORE_RE = re.compile(
+    r"(belum|tidak|tak|nggak|ngga|gak|ga|no)\b[^.!?\n]{0,30}$", re.IGNORECASE)
+
+
+def career_service_claims(reply: str) -> list[str]:
+    out = []
+    for m in _CAREER_SERVICE_RE.finditer(reply or ""):
+        prefix = (reply or "")[max(0, m.start() - 35):m.start()]
+        if not _NEGATION_BEFORE_RE.search(prefix):
+            out.append(f"career service that does not exist: {m.group(0)}")
+    return out
+
+
 def ungrounded_biz_counts(reply: str, context: str) -> list[str]:
     ctx_digits = re.sub(r"[.,\s]", "", context or "")
     out = []

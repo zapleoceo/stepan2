@@ -131,6 +131,17 @@ def test_impossible_capability_offers_catches_voice_and_call() -> None:
     assert not guard.impossible_capability_offers("aku jelasin di sini aja ya Kak lewat chat")
 
 
+def test_career_service_claims_flags_offers_spares_honest_denials() -> None:
+    # thread 2740: 'career guidance dari mentor praktisi' — no such service exists
+    assert guard.career_service_claims("Ditambah ada career guidance dari mentor praktisi")
+    assert guard.career_service_claims("kami menyediakan job placement untuk lulusan")
+    # the honest denial is the CORRECT answer and must pass
+    assert not guard.career_service_claims(
+        "kami belum punya program penempatan kerja khusus")
+    assert not guard.career_service_claims(
+        "IT STEP tidak ada kerja sama penyaluran lowongan khusus")
+
+
 def test_ungrounded_biz_counts_flags_invented_company_networks() -> None:
     ctx = "Sejak 1999, 24 negara, 267.000+ alumni. Partner resmi: 3 perusahaan lokal."
     # thread 2740: 'jaringan alumni di lebih dari 1.500 perusahaan' — nowhere in the KB
