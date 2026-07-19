@@ -61,6 +61,17 @@ def test_answer_first_ignores_non_questions() -> None:
         assert not _answer_first_fires(s), s
 
 
+def test_followup_angle_ladder_is_attempt_specific() -> None:
+    from app.modules.conversation.situations import followup_angle
+    a1, a2, a3, a4 = (followup_angle(i) for i in range(4))
+    assert "follow-up #1" in a1 and "re-open" in a1.lower()
+    assert "follow-up #2" in a2 and "proof" in a2.lower()
+    assert "follow-up #3" in a3 and "barrier" in a3.lower()
+    assert "follow-up #4" in a4 and "close" in a4.lower()
+    # every attempt past the fourth reuses the graceful-close rung, never crashes
+    assert "close" in followup_angle(9).lower() and "follow-up #10" in followup_angle(9)
+
+
 def test_buying_signal_catches_gas_family() -> None:
     from app.modules.conversation.situations import BUYING_SIGNAL_RE
     # sim s10 slang_minimal: 'yaudh gas' (= go ahead) got the clarify menu at the buying moment

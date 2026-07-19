@@ -37,6 +37,7 @@ from .situations import (
     FOLLOWUP_NEED_ANCHOR,
     FOLLOWUP_PRODUCT_DISCIPLINE,
     FOLLOWUP_SILENT_CLICKER_EXTRA,
+    followup_angle,
     lead_spoke_own_words,
     with_situation,
 )
@@ -218,6 +219,7 @@ class FollowupService:
                               last_inbound="", mode=mode, followup_attempt=sent_so_far)
         nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
         nudge += FOLLOWUP_PRODUCT_DISCIPLINE
+        nudge += followup_angle(sent_so_far)
         # A follow-up that re-opens with the lead's OWN stated pain/goal re-engages far better
         # than a generic "masih tertarik?" — it proves we listened. Only when we actually have
         # their words on record (never invent one); the model already has the full needs block.

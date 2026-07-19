@@ -300,11 +300,48 @@ FOLLOWUP_SILENT_CLICKER_EXTRA = (
     "\n[System addition: this lead has NEVER typed a word of their own — their only message "
     "is the ad's prefilled button text. The ad-opener rules STILL hold here: NO price, NO "
     "schedule, NO module dump (the button's '…dan biaya kursusnya' is the ad's wording, not "
-    "theirs). Re-open warmly instead: one light, concrete hook about what this skill lets a "
-    "person actually do, then ONE effortless question with 3-4 NUMBERED options (career "
-    "switch / own project / level up at work / mencari kursus buat anaknya / just curious) "
-    "and 'cukup balas angkanya'. Return the JSON as usual.]"
+    "theirs). They clicked an ad for a SPECIFIC skill — NAME that skill/topic as the hook "
+    "('soal kelas <skill> yang Kakak lihat tadi …', topic only, never its price or schedule) "
+    "so the message is obviously about what THEY looked at, not a generic blast. Then one "
+    "light, concrete line about what that skill lets a person actually DO, then ONE effortless "
+    "question with 3-4 NUMBERED options (career switch / own project / level up at work / "
+    "mencari kursus buat anaknya / just curious) and 'cukup balas angkanya'. Return the JSON "
+    "as usual.]"
 )
+
+# A designed 4-step escalation for follow-ups, keyed to the attempt number, instead of the
+# model re-rolling a random "different angle" each time. A real salesperson warms, then proves,
+# then lowers the barrier, then bows out gracefully — a ladder converts far better than four
+# unrelated pitches (the FOLLOWUP_PRODUCT_DISCIPLINE 'catalogue read aloud' failure mode). The
+# last rung is a soft close, NOT another pitch: past a point, more pushing only earns a report.
+_FOLLOWUP_ANGLE_LADDER = (
+    "\n[System addition — THIS is follow-up #{n}. Lead with this specific angle, don't just "
+    "repeat a past one: ",
+    # attempt 1 (n=1): re-hook on their own stated need
+    "re-open on the lead's OWN stated goal/pain (or the ad's skill if they never spoke) — one "
+    "warm, concrete line about what that skill lets them DO, then one easy question. Nothing "
+    "salesy yet, just re-open the door.]",
+    # attempt 2 (n=2): concrete proof
+    "bring ONE concrete, KB-sourced proof — a real Success Case or a specific tangible outcome "
+    "of this exact program — tied to their goal, to make it feel POSSIBLE for someone like "
+    "them. One proof, not a feature list. Never invent a case or a number.]",
+    # attempt 3 (n=3): lower the barrier
+    "LOWER the barrier: offer the cheapest real next step from the KB — a Skill Booster, the "
+    "free weekly Open House, or a low-friction yes/no ('mau aku kirimin jadwal terdekat?'). "
+    "The goal now is a tiny yes, NOT selling the full program.]",
+    # attempt 4+ (n>=4): graceful soft close
+    "this is likely the LAST touch — a graceful, no-pressure close. Acknowledge they may be "
+    "busy, leave the door wide open ('kalau nanti mau lanjut, chat aku aja ya kapan pun'), one "
+    "soft line. Do NOT hard-sell or re-list the offer — a warm exit is remembered better than "
+    "a nag.]",
+)
+
+
+def followup_angle(attempt: int) -> str:
+    """The attempt-specific angle line (attempt = followups_sent, 0-indexed). The 4th rung
+    covers every attempt past the third."""
+    rung = _FOLLOWUP_ANGLE_LADDER[min(attempt + 1, len(_FOLLOWUP_ANGLE_LADDER) - 1)]
+    return _FOLLOWUP_ANGLE_LADDER[0].format(n=attempt + 1) + rung
 
 # A follow-up is UNPROMPTED — nobody asked for it — so its length rule is stricter than the
 # live-reply mirror and doesn't depend on the lead's last message (they're silent by
