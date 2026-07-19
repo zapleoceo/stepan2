@@ -44,9 +44,6 @@ from .situations import (
     SOFT_NO_RE as _SOFT_NO_RE,
 )
 from .situations import (
-    postpone_days as _postpone_days,
-)
-from .situations import (
     is_answerable_question as _is_answerable_question,
 )
 from .situations import (
@@ -54,6 +51,9 @@ from .situations import (
 )
 from .situations import (
     pick_nudge as _pick_situational_nudge,
+)
+from .situations import (
+    postpone_days as _postpone_days,
 )
 from .situations import (
     with_situation,
