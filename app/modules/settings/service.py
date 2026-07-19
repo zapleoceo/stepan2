@@ -40,7 +40,6 @@ class BranchSettings:
     tg_group_id: str
     followup_enabled: bool
     followup_schedule_h: list[int]
-    reactivation_enabled: bool
     tech_search_enabled: bool
     tech_usecase_enabled: bool
     daily_budget_usd: float
@@ -64,6 +63,7 @@ class BranchSettings:
     # 'hybrid' → route cheap turns to chat:fast, keep chat:smart for money moments;
     # 'off' → always chat:smart (pre-optimisation behaviour). See conversation.routing.
     reply_routing: str = "hybrid"
+    reactivation_enabled: bool = False
     # Comma-list of stages that keep the strong model under hybrid routing (operator-tunable).
     smart_stages: str = "presenting,objection,ready"
     # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
