@@ -37,7 +37,7 @@ async def _dormant_lead(s, bid, chid, *, days_ago: float, reacts=0, last_react_d
                       last_in_at=now - timedelta(days=days_ago),
                       last_out_at=now - timedelta(days=days_ago + 0.1))
     s.add(t)
-    for i in range(reacts):
+    for _ in range(reacts):
         when = now - timedelta(days=last_react_days if last_react_days is not None else 30)
         s.add(StageEvent(branch_id=bid, lead_id=lead.id, thread_id=None,
                          from_stage="dormant", to_stage="nurturing", actor="system",

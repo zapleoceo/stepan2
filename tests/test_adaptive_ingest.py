@@ -35,12 +35,13 @@ async def test_live_convo_detection(db_session) -> None:
     stale = await _channel(s, b.id, "stale")         # lead spoke 20m ago → outside window
     idle = await _channel(s, b.id, "idle")           # no thread at all
 
-    s.add(ChannelThread(lead_id=lead.id, channel_id=active, external_thread_id="a",
-                        last_in_at=now - timedelta(minutes=2), last_out_at=now - timedelta(minutes=3)))
-    s.add(ChannelThread(lead_id=lead.id, channel_id=answered, external_thread_id="b",
-                        last_in_at=now - timedelta(minutes=2), last_out_at=now - timedelta(minutes=1)))
-    s.add(ChannelThread(lead_id=lead.id, channel_id=stale, external_thread_id="c",
-                        last_in_at=now - timedelta(minutes=20), last_out_at=now - timedelta(minutes=30)))
+    def _thr(cid, ext, in_min, out_min):
+        return ChannelThread(lead_id=lead.id, channel_id=cid, external_thread_id=ext,
+                             last_in_at=now - timedelta(minutes=in_min),
+                             last_out_at=now - timedelta(minutes=out_min))
+    s.add(_thr(active, "a", 2, 3))
+    s.add(_thr(answered, "b", 2, 1))
+    s.add(_thr(stale, "c", 20, 30))
     await s.flush()
 
     cutoff = now - timedelta(minutes=6)

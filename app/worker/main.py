@@ -25,8 +25,8 @@ from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
 from app.domain.enums import SessionStatus
 from app.modules.conversation.followup import FollowupService
-from app.modules.conversation.reactivation import ReactivationService
 from app.modules.conversation.outbox import OutboxSender
+from app.modules.conversation.reactivation import ReactivationService
 from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import ThreadRepo
 from app.modules.knowledge.service import KnowledgeService
