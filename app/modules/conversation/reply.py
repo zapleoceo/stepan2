@@ -64,6 +64,8 @@ logger = logging.getLogger(__name__)
 _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
+# Indonesian mobile number as typed in chat: 08…, 628…, +628…, with optional spaces/dashes.
+_ID_PHONE_RE = re.compile(r"(?:\+?62[\s\-]?|0)8\d(?:[\s\-]?\d){6,10}")
 # A needs_manager turn always mutes the bot (agent_enabled=False) — but the model's own
 # reply that same turn is about answering the lead's question, not about announcing a
 # hand-off; nothing told the LEAD a human is now taking over. A lead who then sends a
@@ -268,6 +270,7 @@ def _deterministic_issues(
         *guard.price_before_lead_spoke(reply, lead_spoke),
         *guard.stale_dates(reply),
         *guard.booster_wrong_duration(reply),
+        *guard.vibe_wrong_duration(reply),
         *guard.fabricated_income_figure(reply),
         *guard.ungrounded_times(reply, context),
         *guard.price_order_wrong(reply),
@@ -659,6 +662,20 @@ class ReplyService:
         # If the model wants a manager but we have no phone — and the lead didn't just give one
         # — suppress the escalation, keep the bot on, and ask for a WhatsApp number first. A
         # later turn WITH a phone escalates for real (a manual UI move to MANAGER is unaffected).
+        #
+        # Deterministic phone backfill FIRST: the model's `phone` field misses numbers the
+        # lead literally typed (live 4529: '081321654184' in-chat, and the bot then ASKED for
+        # a WhatsApp number). Indonesian-mobile shape only (08…/+628…), so prices/IDs don't
+        # false-positive; scanning the dialog means a number from ANY earlier turn counts.
+        if not (decision.phone or "").strip() \
+                and lead is not None and not lead.phone_e164:
+            for m in reversed(ctx.dialog):
+                if m.direction == "in" and (hit := _ID_PHONE_RE.search(m.text or "")):
+                    from dataclasses import replace  # noqa: PLC0415
+                    decision = replace(decision, phone=hit.group(0))
+                    logger.info("phone backfilled from dialog branch=%d thread=%d",
+                                self.branch_id, thread_id)
+                    break
         if decision.needs_manager and lead is not None \
                 and not lead.phone_e164 and not (decision.phone or "").strip():
             from dataclasses import replace  # noqa: PLC0415

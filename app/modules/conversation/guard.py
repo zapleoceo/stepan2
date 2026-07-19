@@ -211,6 +211,21 @@ def booster_wrong_duration(reply: str) -> list[str]:
         if m else []
 
 
+# Vibe Coding is a ~4-MONTH program; the model shrank it to '4 minggu' live (thread 4220,
+# 24h review 2026-07-19) — a lead plans a month and meets a 4-month commitment. Same shape
+# as the booster guard: a week/day duration glued to the program name is always wrong.
+_VIBE_DURATION_RE = re.compile(
+    r"\bvibe\s*coding\b(?:(?!\bbulan\b)[^.!?\n]){0,60}?\b\d+\s*(?:minggu|hari)\b"
+    r"|\b\d+\s*(?:minggu|hari)\b(?:(?!\bbulan\b)[^.!?\n]){0,40}?\bvibe\s*coding\b",
+    re.IGNORECASE)
+
+
+def vibe_wrong_duration(reply: str) -> list[str]:
+    m = _VIBE_DURATION_RE.search(reply or "")
+    return [f"Vibe Coding given a week/day length — it is a ~4-month program: {m.group(0)}"] \
+        if m else []
+
+
 # A concrete monthly-EARNINGS figure ('alumni dapat 5-6 juta per bulan', 'gaji 8jt/bulan') is
 # a fabricated statistic — no branch KB carries an income number, and the LLM verify waves it
 # through as "general archetype language" because the sentence is phrased generally. The number
@@ -355,6 +370,9 @@ _LEAD_ANNOYANCE_RE = re.compile(
     r"\b(jangan ganggu|gak usah ganggu|nggak usah ganggu|tolong jangan ganggu|"
     r"berhenti (?:chat|kirim|hubungi|nge-?chat)|stop (?:chat|hubungi|mengirim|nge-?chat)|"
     r"udah jangan (?:chat|hubungi)|capek diganggu|sok asik|sukanya chat.*mulu|"
+    # disgust/vulgar rejection words — 'Najis' got 6 more pitches (thread 2833, 24h review);
+    # 'jangan ganggu i' (broken english mix, 4417) also slipped the strict phrase list
+    r"najis+\b|bangke+\b|anjir+ (?:spam|bot)|jangan ganggu\b|"
     r"diem+(?:in)?\b|shu+t+\b)",
     re.IGNORECASE)
 

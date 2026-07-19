@@ -765,3 +765,15 @@ def test_booster_wrong_duration_catches_wide_and_spares_comparison() -> None:
     assert not guard.booster_wrong_duration(
         "Ada Skill Booster 1 hari, atau SMM Intensive yang 2 minggu")
     assert not guard.booster_wrong_duration("Skill Booster 1 hari (5 jam), Rp 500.000")
+
+
+def test_vibe_wrong_duration_flags_weeks_spares_months() -> None:
+    # thread 4220: Vibe Coding (a ~4-month program) shrank to '4 minggu'
+    assert guard.vibe_wrong_duration("Vibe Coding cuma 4 minggu aja")
+    assert not guard.vibe_wrong_duration("Vibe Coding ~4 bulan, 2x seminggu")
+
+
+def test_annoyance_catches_disgust_words() -> None:
+    # thread 2833: 'Najis' got six more pitches
+    assert guard.lead_signaled_annoyance("Najis")
+    assert not guard.lead_signaled_annoyance("oke kak makasih")

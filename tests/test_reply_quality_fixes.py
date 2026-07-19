@@ -120,3 +120,11 @@ def test_reworded_discovery_question_is_a_repeat() -> None:
     other = [NS(direction="out", text="Kakak lebih suka kelas offline atau online?")]
     _, r2 = _most_similar_prior("Kakak sudah pernah pakai tools desain sebelumnya?", other)
     assert r2 < _DUPLICATE_RATIO
+
+
+def test_id_phone_regex_catches_typed_numbers_not_prices() -> None:
+    # thread 4529: the lead typed '081321654184' and the bot asked for a WhatsApp number
+    from app.modules.conversation.reply import _ID_PHONE_RE
+    assert _ID_PHONE_RE.search("nih nomorku 081321654184 ya")
+    assert _ID_PHONE_RE.search("+62 812-3456-7890")
+    assert not _ID_PHONE_RE.search("total Rp 1.882.955, DP Rp 500.000")
