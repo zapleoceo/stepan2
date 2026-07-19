@@ -178,8 +178,10 @@ def test_followup_has_the_what_changed_angle() -> None:
 
 def test_ad_opener_is_not_permission_to_present() -> None:
     # thread 2983: an ad-click prefilled opener got the full product pitch on turn one
-    assert "BUTTON CLICK, not a real 'tell me about the program'" in _DECISION_CONTRACT
-    assert "discovery skipped entirely" in _DECISION_CONTRACT
+    assert "is a CLICK, not the lead's words - NOT permission to present" in _DECISION_CONTRACT
+    assert "thread 2983" in _DECISION_CONTRACT
+    # C2: a TYPED question (own words) must still be answered, not deferred
+    assert "gets a REAL answer THIS turn" in _DECISION_CONTRACT
 
 
 def test_money_question_leads_with_paid_not_no() -> None:
