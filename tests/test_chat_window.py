@@ -178,13 +178,12 @@ def test_thread_list_ajax_calls_name_their_source() -> None:
     assert "{target:'#tl',source:btn}" in html    # connector chips
 
 
-def test_analyze_button_still_drives_its_own_spinner() -> None:
-    # the spinner must still appear for the request it belongs to
+def test_chat_panel_has_no_analyze_button() -> None:
+    # the Analyze button was removed as useless clutter; keep the fin-tools row clean
     from app.api._ui_html import chat_panel_html
     _set_lang("ru")
     html = chat_panel_html(7, "Alice", "new", [], [])
-    assert 'hx-indicator="#an-ind-7"' in html
-    assert 'id="an-ind-7" class="htmx-indicator coach-think"' in html
+    assert "coach/analyze" not in html and "an-ind" not in html and 'id="an-7"' not in html
 
 
 # ─── manual media recognition button ──────────────────────────────────────────

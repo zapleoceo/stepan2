@@ -367,16 +367,6 @@ _TR: dict[str, dict[str, str]] = {
     "chat.stage":       {"ru": "Стадия",           "en": "Stage",             "id": "Tahap"},
     "chat.suggest":     {"ru": "✦ Предложить",     "en": "✦ Suggest",         "id": "✦ Sarankan"},
     "chat.translate":   {"ru": "≡ Саммари",        "en": "≡ Summary",         "id": "≡ Ringkasan"},
-    "chat.analyze":     {"ru": "Разбор",           "en": "Analyze",           "id": "Analisa"},
-    "coach.analysis":   {"ru": "Разбор чата (сверка с базой)", "en": "Chat analysis (vs KB)",
-                         "id": "Analisa chat (vs KB)"},
-    "hint.analyze": {
-        "ru": "Коуч читает весь чат и сверяет с базой: где бот ответил верно/неверно и чего "
-              "в базе не хватило.",
-        "en": "Coach reads the whole chat vs the KB: where the bot was right/wrong and what "
-              "the KB was missing.",
-        "id": "Coach membaca seluruh chat vs KB: di mana bot benar/salah dan apa yang kurang.",
-    },
     "chat.tr_result":   {"ru": "Саммари:", "en": "Summary:", "id": "Ringkasan:"},
     "rep.ad_funnel":    {"ru": "Воронка по рекламе", "en": "Ad funnel", "id": "Corong iklan"},
     "rep.ad":           {"ru": "Реклама", "en": "Ad", "id": "Iklan"},

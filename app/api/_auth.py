@@ -154,11 +154,9 @@ class AdminGuardMiddleware(BaseHTTPMiddleware):
 
 def _is_read_support_post(path: str) -> bool:
     """POSTs a branch_viewer may still call — they don't mutate business data, they
-    support READING: message/draft translation caches, 'analyze this chat', loading
-    older history, and setting the (server-clamped) branch-filter view cookie."""
+    support READING: message/draft translation caches, loading older history, and setting
+    the (server-clamped) branch-filter view cookie."""
     if path == "/ui/branch-filter":
-        return True
-    if "/analyze/" in path:  # /ui/coach/analyze/{id} — grades a chat, writes nothing
         return True
     return path.endswith(("/translate", "/tr-draft", "/tr", "/load-context"))
 

@@ -310,7 +310,6 @@ def test_read_support_post_classification() -> None:
     from app.api._auth import _is_read_support_post
     # read-support (a viewer may call these — they don't mutate business data)
     assert _is_read_support_post("/ui/branch-filter") is True
-    assert _is_read_support_post("/ui/coach/analyze/7") is True
     assert _is_read_support_post("/ui/chat/7/translate") is True
     assert _is_read_support_post("/ui/chat/7/tr-draft") is True
     assert _is_read_support_post("/ui/chat/7/msg/5/tr") is True
@@ -343,12 +342,11 @@ def test_write_guard_blocks_viewer_allows_admin_and_super() -> None:
 
 
 def test_write_guard_allows_viewer_read_support_posts() -> None:
-    """A viewer must still be able to translate / analyze / load history / switch branch —
+    """A viewer must still be able to translate / load history / switch branch —
     those POSTs are read-support and must NOT be 403'd."""
     try:
         viewer = _cookie_client({"tg": 3, "uid": 3, "sa": False, "br": [1], "wr": []})
         assert viewer.post("/ui/chat/1/translate").status_code != 403
-        assert viewer.post("/ui/coach/analyze/1").status_code != 403
         assert viewer.post("/ui/branch-filter", data={"bid": "1"}).status_code != 403
     finally:
         _clear_auth_env()
@@ -428,43 +426,6 @@ async def test_mixed_role_writes_own_admin_branch_not_viewer_branch(
     before_b1 = await _enabled(t1)
     await chat_bot_toggle(t1, mixed)               # write to admin-branch → allowed
     assert await _enabled(t1) != before_b1          # flipped
-
-
-# ─── coach analyze must not read another branch's chat + KB (IDOR) ────────────
-
-async def test_coach_analyze_denies_cross_branch(db_session, monkeypatch) -> None:
-    import contextlib
-
-    from app.api._routes_coach import coach_analyze
-
-    a = Branch(name="A", lang="id")
-    b = Branch(name="B", lang="id")
-    db_session.add_all([a, b])
-    await db_session.flush()
-    tid = await _thread(db_session, a.id)
-
-    called = {"n": 0}
-
-    async def fake_analyze(*args, **kwargs):
-        called["n"] += 1
-        return "GRADED"
-
-    @contextlib.asynccontextmanager
-    async def fake_scope():
-        yield db_session
-
-    monkeypatch.setattr("app.api._routes_coach.session_scope", fake_scope)
-    monkeypatch.setattr("app.api._routes_coach.analyze_chat", fake_analyze)
-
-    denied = await coach_analyze(tid, _req(allowed=[b.id]))
-    assert denied.body == b""            # cross-branch → nothing rendered
-    assert called["n"] == 0              # and the LLM/KB read never ran
-
-    ok = await coach_analyze(tid, _req(allowed=[a.id]))
-    assert b"GRADED" in ok.body
-    assert called["n"] == 1
-
-
 async def test_guarded_branch_denies_zero_branch_member(db_session) -> None:
     a = Branch(name="A", lang="id")
     db_session.add(a)
