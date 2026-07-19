@@ -777,3 +777,27 @@ def test_annoyance_catches_disgust_words() -> None:
     # thread 2833: 'Najis' got six more pitches
     assert guard.lead_signaled_annoyance("Najis")
     assert not guard.lead_signaled_annoyance("oke kak makasih")
+
+
+def test_open_house_as_event_flags_event_framing_spares_visit_time() -> None:
+    # threads 4563/4550: OH pitched as a fixed weekly event to show up to
+    assert guard.open_house_as_event(
+        "kami ada Open House gratis tiap Kamis. Kakak mau datang minggu ini?")
+    assert guard.open_house_as_event(
+        "ada Open House Kamis ini di Menara Sudirman, bisa datang?")
+    assert guard.open_house_as_event("yuk ikut acara Open House kami")
+    # the reframed offer — visit time, no weekday/event label — must pass
+    assert not guard.open_house_as_event(
+        "kami sediakan waktu khusus buat kunjungan ke Menara Sudirman, kapan Kakak sempat?")
+    assert not guard.open_house_as_event("oh iya Kak, soal jadwalnya nanti aku info")
+
+
+def test_game_offering_claims_flags_invented_course_spares_honest_pivot() -> None:
+    # thread 4573: a game course / 'game projects we built' that don't exist
+    assert guard.game_offering_claims("kami ada kelas game development lho Kak")
+    assert guard.game_offering_claims("mau lihat contoh project game yang pernah kami buat?")
+    assert guard.game_offering_claims("di sini kita ajarin bikin game juga")
+    # honest negation and a general programming truth both pass
+    assert not guard.game_offering_claims("jujur ya Kak, kami belum ada kelas khusus game")
+    assert not guard.game_offering_claims(
+        "Python Back-End juga bisa dipakai buat bikin game sederhana")

@@ -294,6 +294,62 @@ def ungrounded_biz_counts(reply: str, context: str) -> list[str]:
     return out
 
 
+# Open House reframe (owner 2026-07-19): OH is a real office VISIT — meet the team, see the
+# classroom, walk through the program — NOT an event or demo lesson. Because Jakarta leads
+# travel far, it must be offered as "time set aside for a visit, whenever suits you" and ASK
+# if coming is convenient, never as a fixed weekly event to show up to. The reframe was a
+# prompt rule and the cheap follow-up model kept shipping the old event pitch ("Open House
+# gratis tiap Kamis, datang minggu ini?", threads 4563/4550, 2026-07-19) — same pattern as
+# the price/booster guards: a rule the weak model drops → deterministic backstop. Fires only
+# when Open House carries a fixed-event marker (a weekday, "acara", a "this week" deadline);
+# the reframed visit-time offer names no weekday/event and passes.
+_OH_EVENT_RE = re.compile(
+    r"open\s*house[^.!?\n]{0,60}\b(?:tiap|setiap|hari)?\s*kamis\b"
+    r"|\bkamis\b[^.!?\n]{0,40}open\s*house"
+    r"|open\s*house[^.!?\n]{0,30}\bacara\b|\bacara\b[^.!?\n]{0,20}open\s*house"
+    r"|open\s*house[^.!?\n]{0,50}\b(?:minggu|pekan)\s+ini\b",
+    re.IGNORECASE)
+
+
+def open_house_as_event(reply: str) -> list[str]:
+    m = _OH_EVENT_RE.search(reply or "")
+    return [
+        "Open House framed as a fixed/weekly event to attend — reframe it: it is time set "
+        "aside for an office VISIT (meet the team, see the classroom, walk through the "
+        "program), offered whenever suits the lead; and because Jakarta is far, ASK whether "
+        f"coming is convenient — never a 'come this Thursday' event: {m.group(0)}"
+    ] if m else []
+
+
+# IT STEP Jakarta has NO game-development course (catalog: cybersecurity, data_analyst,
+# graphic_design, python_backend, smm_intensive, uiux_design, vibe_coding + Skill Boosters).
+# Leads asking to build games keep getting a fabricated game class or "game projects we built"
+# (thread 4573, 2026-07-19: "bikin game multiplayer + contoh project game yang pernah kami
+# buat"). The honest move is to pivot to Python Back-End; inventing a game program is the
+# fabrication. Fires when a game course/program is claimed, or WE are said to teach/have built
+# games — an honest negation ("belum ada kelas game") and a general truth ("Python bisa buat
+# bikin game juga") both pass.
+_GAME_OFFER_RE = re.compile(
+    r"\b(?:kelas|kursus|program|jurusan)\s+(?:khusus\s+)?(?:bikin\s+|buat\s+|dev\w*\s+)?game\b"
+    r"|\b(?:contoh|portofolio|portfolio|proyek|project)\s+game\b[^.!?\n]{0,20}\b(?:kami|kita)\b"
+    r"|\b(?:kami|kita)\b[^.!?\n]{0,20}\b(?:ajarin|ngajarin|ngajar|mengajar|ajarkan)\b"
+    r"[^.!?\n]{0,20}\bgame\b",
+    re.IGNORECASE)
+_GAME_NEGATION_RE = re.compile(
+    r"\b(belum|tidak|tak|nggak|ngga|gak|ga|blm|no)\b[^.!?\n]{0,25}$", re.IGNORECASE)
+
+
+def game_offering_claims(reply: str) -> list[str]:
+    out = []
+    for m in _GAME_OFFER_RE.finditer(reply or ""):
+        prefix = (reply or "")[max(0, m.start() - 30):m.start()]
+        if not _GAME_NEGATION_RE.search(prefix):
+            out.append(
+                "game course/projects claimed — Jakarta has no game program; pivot honestly "
+                f"to Python Back-End, never invent a game class: {m.group(0)}")
+    return out
+
+
 # A clock time quoted for a class/event that the KB never states. Sim s10 night_worker: a
 # shift worker asking about evenings got 'kelas kita malam hari, sekitar jam 19.00-20.00 WIB'
 # plus an offer of later groups — the KB says only 'malam', no times. The lead plans their
