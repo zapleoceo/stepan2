@@ -144,6 +144,9 @@ def test_price_order_small_step_must_lead() -> None:
         "cicilan Rp 1.670.000 per bulan, atau lunas Rp 15.030.000")
     # a lone cheap price with no small-step figure is not an ordering problem
     assert not guard.price_order_wrong("Skill Booster cuma Rp 500.000, 1 hari aja")
+    # a millions figure that IS the monthly instalment must not read as a total
+    assert not guard.price_order_wrong(
+        "Untuk kursusnya memang berbayar ya Kak, Rp 1.670.000 per bulan selama 8 bulan.")
 
 
 def test_ungrounded_times_flags_invented_class_hours() -> None:

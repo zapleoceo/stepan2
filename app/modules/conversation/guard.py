@@ -258,13 +258,24 @@ _SMALL_STEP_RE = re.compile(r"\bdp\b|cicil\w*|angsur\w*|per\s*bulan|/\s*bulan|ua
                             re.IGNORECASE)
 
 
+# A millions figure IMMEDIATELY followed by a per-month marker is itself the instalment
+# ("Rp 1.670.000 per bulan") — that's the small step, not a total, so it never counts as
+# the shock anchor.
+_MONTHLY_SUFFIX_RE = re.compile(r"^[\s,]*(?:/|per\s*|se)bulan", re.IGNORECASE)
+
+
 def price_order_wrong(reply: str) -> list[str]:
     text = reply or ""
-    million = _MILLIONS_RE.search(text)
     step = _SMALL_STEP_RE.search(text)
-    if million and step and million.start() < step.start():
-        return ["full price total appears BEFORE the DP/instalment - lead with the smallest "
-                "real step (DP/cicilan), full amount only after, as context"]
+    if not step:
+        return []
+    for million in _MILLIONS_RE.finditer(text):
+        if _MONTHLY_SUFFIX_RE.match(text[million.end():million.end() + 14]):
+            continue  # a monthly figure, not a total
+        if million.start() < step.start():
+            return ["full price total appears BEFORE the DP/instalment - lead with the "
+                    "smallest real step (DP/cicilan), full amount only after, as context"]
+        break  # first real total sits after the small step — order is right
     return []
 
 
