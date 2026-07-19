@@ -117,9 +117,14 @@ def test_undecipherable_slang_is_non_target_not_needs_manager() -> None:
 def test_lead_auto_reply_is_not_escalated() -> None:
     # thread 2058, 2026-07-11: the lead's OWN business auto-responder ("terima kasih telah
     # menghubungi kami, akan segera kami balas") got escalated to a manager — it's a robot,
-    # not the lead talking
-    assert "AUTO-REPLY / AWAY MESSAGE" in _DECISION_CONTRACT
-    assert "it's their account's robot" in _DECISION_CONTRACT
+    # not the lead talking. The prompt rule was removed: situations.is_auto_reply now owns
+    # this deterministically (it gates lead_spoke_own_words), so assert the detector, and
+    # that the prompt doesn't grow the rule back.
+    from app.modules.conversation.situations import is_auto_reply
+
+    assert is_auto_reply(
+        "Halo, terima kasih telah menghubungi kami, pesan Anda akan segera kami balas")
+    assert "AUTO-REPLY / AWAY MESSAGE" not in _DECISION_CONTRACT
 
 
 def test_stage_reason_required_not_optional() -> None:
