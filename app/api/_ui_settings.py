@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import html as _h
 
-from app.modules.conversation.routing import parse_smart_stages
 from app.modules.settings import schema as S
 
 _INP = (
@@ -62,7 +61,7 @@ def _control(
     hx_vals = f"hx-vals='{{\"key\": \"{f.key}\"{_cid}}}'"
     style = f"{_INP};width:{width or f.width}"
     if f.kind == "multi":  # checkbox group → a comma-list saved via a hidden input
-        selected = parse_smart_stages(value)  # effective set, so UI always matches behaviour
+        selected = {t.strip().lower() for t in (value or "").split(",") if t.strip()}
         boxes = "".join(
             f'<label style="display:inline-flex;align-items:center;gap:.25rem;font-size:.72rem;'
             f'color:#cdd6e0;cursor:pointer;white-space:nowrap">'

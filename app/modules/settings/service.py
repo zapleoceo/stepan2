@@ -60,13 +60,8 @@ class BranchSettings:
     # Rescue of CRM missed-call leads (Stepan DMs leads the phone couldn't reach) — off
     # until a branch explicitly opts in.
     crm_rescue_enabled: bool = False
-    # 'hybrid' → route cheap turns to chat:fast, keep chat:smart for money moments;
-    # 'off' → always chat:smart (pre-optimisation behaviour). See conversation.routing.
-    reply_routing: str = "hybrid"
     reactivation_enabled: bool = False
     learning_audit_enabled: bool = False
-    # Comma-list of stages that keep the strong model under hybrid routing (operator-tunable).
-    smart_stages: str = "presenting,objection,ready"
     # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
     # verify on risky replies), 'urls' (deterministic only), 'off'. See conversation.guard.
     reply_guard: str = "full"
@@ -210,8 +205,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_rescue_enabled=_b(raw, "crm_rescue_enabled"),
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
-        reply_routing=raw.get("reply_routing", "hybrid"),
-        smart_stages=raw.get("smart_stages", "presenting,objection,ready"),
         reply_guard=raw.get("reply_guard", "full"),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),

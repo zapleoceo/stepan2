@@ -736,8 +736,12 @@ async def verify_grounding(
         # No require_json_schema: the verifier answers in plain lines, so the broker isn't
         # limited to JSON-mode providers (wider/cheaper pool, fewer timeouts). The parser
         # still accepts a legacy JSON body from a stale guard_verify prompt.
+        # chat:smart (2026-07-19): this is the FABRICATION gate — a weak verifier waved
+        # '1.500 perusahaan' and 'career guidance' through (threads 2740). A fabrication
+        # reaching a customer is the most expensive error, so it is NOT a place to economize;
+        # it fires only on risky replies (is_risky), so the volume stays low.
         raw, meta = await llm.chat(
-            messages, capability="chat:fast",
+            messages, capability="chat:smart",
             workflow="guard", thread_id=thread_id, branch_id=branch_id)
         if not bill:
             meta.pop("cost_usd", None)  # sandbox verify shouldn't distort cost meta

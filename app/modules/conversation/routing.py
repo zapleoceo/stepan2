@@ -3,7 +3,7 @@
 `chat:smart` is the strong-but-scarce model; `chat:fast` is the cheap, effectively
 unlimited one. The hybrid policy keeps `smart` for the moments where a subtly worse
 decision costs a sale, and routes the cheap majority to `fast`. Reversible per branch via
-the `reply_routing` setting (`off` → always `smart`, the pre-optimisation behaviour).
+a single baked-in policy (2026-07-19) — see pick_capability.
 
 A broken `fast` decision is caught downstream (reply.py) and retried once on `smart`, so
 `fast` never silently drops a reply — this router only decides the FIRST attempt."""
@@ -54,32 +54,33 @@ def parse_smart_stages(raw: str | None) -> frozenset[str]:
 
 def pick_capability(
     *, workflow: str, stage: Stage | str | None, lead_type: str | None,
-    last_inbound: str, mode: str,
-    smart_stages: frozenset[str] = _DEFAULT_SMART_STAGES,
+    last_inbound: str,
     followup_attempt: int = 0,
     inbound_count: int = 0,
     guard_regen_count: int = 0,
 ) -> str:
-    """`SMART` or `FAST` for this turn. mode != 'hybrid' → always SMART (feature off).
+    """`SMART` (DeepSeek, warm-cached) or `FAST` (free pool) for this turn.
 
-    smart_stages = the operator-tunable set of stages that keep the strong model.
-    followup_attempt = how many nudges already sent in this thread (0 = first nudge).
-    inbound_count = how many lead messages so far in this thread — a per-lead depth signal
-    independent of funnel stage (a long 'qualifying' back-and-forth is still real investment).
-    guard_regen_count = how many times guard has ALREADY had to regenerate a reply for this
-    LEAD (across their whole history, not just this thread) — a per-lead reliability signal:
-    once the cheap model has stumbled on this specific lead, keep it on smart going forward
-    rather than re-rolling the same risk every turn."""
-    if mode != "hybrid":
-        return SMART
+    Policy is baked in (2026-07-19, owner-approved — the old reply_routing/smart_stages
+    settings are gone): the strong model handles every SALES-DECISIVE moment; the free pool
+    handles only genuinely low-stakes chatter, to save cost. Decisive = the first reply to a
+    new lead (the opener decides ~76% of ghosts), any money stage, a hot lead, a buying/phone
+    signal, a price question, a menu choice, a soft-no/budget objection, a deep thread, or a
+    lead the cheap model already stumbled on. Everything else (neutral mid-discovery, plain
+    acknowledgements, off-topic) rides the cheap lane.
+
+    followup_attempt = nudges already sent (0 = first). inbound_count = lead messages so far.
+    guard_regen_count = times guard regenerated for this LEAD across their whole history."""
     if workflow == "followup":
-        # The first nudge is genuinely low-stakes (cheap model is fine). From the 2nd nudge
-        # on, the cheap model was observed repeating an earlier opener near-verbatim (chat
-        # 1830: re-greeted the lead and re-asked the same discovery question 2 nudges in) —
-        # varying the angle across attempts needs the stronger model's instruction-following.
+        # The first nudge is low-stakes (cheap). From the 2nd on, varying the angle without
+        # repeating an earlier opener needs the strong model's instruction-following (chat 1830).
         return SMART if followup_attempt >= 1 else FAST
+    # The FIRST reply to a brand-new lead is the single highest-leverage message — the opener
+    # is where ~76% of leads ghost (funnel audit 2026-07-19). Never gamble it on the free pool.
+    if inbound_count <= 1:
+        return SMART
     stage_val = stage.value if isinstance(stage, Stage) else str(stage or "").lower()
-    if stage_val in smart_stages or lead_type == "hot":
+    if stage_val in _DEFAULT_SMART_STAGES or lead_type == "hot":
         return SMART
     if guard_regen_count >= _GUARD_REGEN_STICKY_THRESHOLD:
         return SMART  # this lead has already burned a regen once — don't gamble again
@@ -88,10 +89,16 @@ def pick_capability(
     text = last_inbound or ""
     if _BUY_RE.search(text) or _PHONE_RE.search(text):
         return SMART  # buying signal arrived early — don't gamble the close on the cheap model
-    # A soft-no / budget objection is the save-the-sale turn: OBJECTION_HANDLE is the most
-    # instruction-heavy nudge in the system, and the cheap model follows it worst exactly when
-    # the sale hangs on it (sales-logic audit 2026-07-19, top finding).
-    from .situations import LOW_BUDGET_RE, SOFT_NO_RE  # noqa: PLC0415 (avoid import cycle)
-    if SOFT_NO_RE.search(text) or LOW_BUDGET_RE.search(text):
+    # Conversion moments the cheap model fumbles: a price question (framed answer decides the
+    # sale), a numbered-menu choice (value+step, not a re-ask), and the objection turn (soft-no
+    # / budget) — OBJECTION_HANDLE is the most instruction-heavy nudge in the system.
+    from .situations import (  # noqa: PLC0415 (avoid import cycle)
+        LOW_BUDGET_RE,
+        MENU_REPLY_RE,
+        PRICE_QUESTION_RE,
+        SOFT_NO_RE,
+    )
+    if (SOFT_NO_RE.search(text) or LOW_BUDGET_RE.search(text)
+            or PRICE_QUESTION_RE.search(text) or MENU_REPLY_RE.match(text.strip())):
         return SMART
     return FAST

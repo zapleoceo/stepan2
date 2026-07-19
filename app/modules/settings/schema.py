@@ -132,33 +132,10 @@ SCHEMA: list[SettingSection] = [
     ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
-        _f("reply_routing", "text", "hybrid",
-           _l("Маршрутизация модели", "Model routing", "Routing model"),
-           help=_l("Гибрид: дешёвая модель на простых ходах, сильная — на закрытии сделки",
-                   "Hybrid: cheap model on easy turns, strong model for closing",
-                   "Hybrid: model murah untuk giliran mudah, model kuat untuk closing"),
-           width="170px",
-           choices=[
-               ("hybrid", _l("Гибрид (экономно)", "Hybrid (thrifty)", "Hybrid (hemat)")),
-               ("off", _l("Всегда сильная", "Always strong", "Selalu kuat")),
-           ]),
-        _f("smart_stages", "multi", "presenting,objection,ready",
-           _l("Стадии на сильной модели", "Strong-model stages", "Tahap model kuat"),
-           help=_l("Гибрид: отмеченные стадии отвечает сильная модель, остальные — дешёвая. "
-                   "Горячие лиды и сигналы оплаты — всегда на сильной. Снять все = дефолт.",
-                   "Hybrid: ticked stages use the strong model, the rest use the cheap one. "
-                   "Hot leads and payment signals always use strong. Untick all = default.",
-                   "Hybrid: tahap tercentang pakai model kuat, sisanya model murah. Lead panas "
-                   "& sinyal bayar selalu kuat. Hapus semua = default."),
-           width="260px",
-           choices=[
-               ("new", _l("новый", "new", "baru")),
-               ("nurturing", _l("прогрев", "nurturing", "nurturing")),
-               ("qualifying", _l("квалиф.", "qualifying", "kualifikasi")),
-               ("presenting", _l("презент.", "presenting", "presentasi")),
-               ("objection", _l("возраж.", "objection", "keberatan")),
-               ("ready", _l("готов", "ready", "siap")),
-           ]),
+        # Model routing is baked into code (routing.pick_capability): the strong model handles
+        # every sales-decisive moment (opener, price, menu, objection, money stages, buying
+        # signals), the free pool handles low-stakes chatter. The old reply_routing /
+        # smart_stages toggles were removed 2026-07-19 — no operator tuning needed.
         # hidden until the RAG / tech-context / web-search features are ported — the
         # keys are still parsed + seeded, but showing dead toggles misleads the operator.
         _f("tech_usecase_enabled", "bool", "true",

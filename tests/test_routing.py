@@ -12,19 +12,21 @@ from app.modules.conversation.routing import (
 
 
 def _pick(**over) -> str:
+    # default mid-conversation (inbound_count=3) so tests aren't all the first-reply case
     base = dict(workflow="reply", stage=Stage.QUALIFYING, lead_type=None,
-                last_inbound="halo kak", mode="hybrid")
+                last_inbound="halo kak", inbound_count=3)
     base.update(over)
     return pick_capability(**base)
 
 
-def test_off_mode_always_smart() -> None:
-    assert _pick(mode="off") == SMART
-    assert _pick(mode="off", stage=Stage.NEW, workflow="followup") == SMART
+def test_first_reply_to_new_lead_is_smart() -> None:
+    # the opener decides ~76% of ghosts — never gamble it on the free pool
+    assert _pick(inbound_count=1, stage=Stage.NEW) == SMART
+    assert _pick(inbound_count=0) == SMART
 
 
 def test_followups_are_cheap() -> None:
-    assert _pick(workflow="followup") == FAST
+    assert _pick(workflow="followup", followup_attempt=0) == FAST
 
 
 def test_money_stages_stay_smart() -> None:
@@ -37,9 +39,9 @@ def test_hot_lead_stays_smart() -> None:
 
 
 def test_early_low_stakes_is_fast() -> None:
-    assert _pick(stage=Stage.NEW) == FAST
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold") == FAST
-    assert _pick(stage=Stage.NURTURING, lead_type="unclear") == FAST
+    # past the first reply, neutral chatter rides the cheap lane
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", last_inbound="oh gitu ya") == FAST
+    assert _pick(stage=Stage.NURTURING, lead_type="unclear", last_inbound="oke makasih") == FAST
 
 
 def test_buying_signal_forces_smart_even_early() -> None:

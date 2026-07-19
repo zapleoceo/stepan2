@@ -212,11 +212,10 @@ class FollowupService:
         total = len(self.settings.followup_schedule_h)
         from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
         from .routing import FAST, SMART, pick_capability  # noqa: PLC0415
-        mode = self.settings.reply_routing if self.settings is not None else "hybrid"
         # A nudge to a quiet lead is the lowest-stakes traffic → cheap model; escalate once if
         # the cheap model returns a broken decision so the follow-up still goes out.
         cap = pick_capability(workflow="followup", stage=None, lead_type=None,
-                              last_inbound="", mode=mode, followup_attempt=sent_so_far)
+                              last_inbound="", followup_attempt=sent_so_far)
         nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
         nudge += FOLLOWUP_PRODUCT_DISCIPLINE
         nudge += followup_angle(sent_so_far)

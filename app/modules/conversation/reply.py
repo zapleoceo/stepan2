@@ -30,7 +30,7 @@ from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
 from .needs import is_question, lead_grounded, merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
-from .routing import FAST, SMART, parse_smart_stages, pick_capability
+from .routing import FAST, SMART, pick_capability
 from .situations import (
     AD_TEMPLATE_RE as _AD_TEMPLATE_RE,
 )
@@ -466,15 +466,12 @@ class ReplyService:
         if script_lang and lead is not None and lead.preferred_language != script_lang:
             lead.preferred_language = script_lang  # sticks even if the model forgets to say so
             self.session.add(lead)
-        mode = self.settings.reply_routing if self.settings is not None else "hybrid"
-        smart_stages = parse_smart_stages(
-            self.settings.smart_stages if self.settings is not None else None)
         inbound_count = await self.messages.inbound_count(thread_id)
         cap = pick_capability(
             workflow=route_wf, stage=lead.stage if lead is not None else None,
             lead_type=lead.lead_type if lead is not None else None,
-            last_inbound=last_in.text if last_in is not None else "", mode=mode,
-            smart_stages=smart_stages, inbound_count=inbound_count,
+            last_inbound=last_in.text if last_in is not None else "",
+            inbound_count=inbound_count,
             guard_regen_count=lead.guard_regen_count if lead is not None else 0)
         # Situational steering — detectors, nudges, priorities and their conflict combos all
         # live in situations.pick_nudge (one chain, one owner; see that module's docstring).
