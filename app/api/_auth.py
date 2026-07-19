@@ -30,7 +30,7 @@ SESSION_MAX_AGE_S = 60 * 60 * 24 * 30  # 30 days
 # Exact-match public paths (no trailing slash → must NOT be prefix-matched, or a future
 # "/loginhistory" route would be silently public). Subpath surfaces stay as prefixes below.
 _PUBLIC_EXACT = ("/healthz", "/login", "/api/tg_login", "/logout", "/", "/privacy",
-                 "/whats-new", "/robots.txt", "/sitemap.xml", "/og.svg")
+                 "/whats-new", "/robots.txt", "/sitemap.xml", "/og.svg", "/og.png")
 _PUBLIC_PREFIXES = ("/webhooks/", "/mcp/", "/connector/", "/reader/", "/demo/")
 
 

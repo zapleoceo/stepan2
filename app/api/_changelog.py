@@ -22,7 +22,9 @@ def _whatsnew_seo() -> str:
         '<meta property="og:site_name" content="Stepan">'
         '<meta property="og:title" content="What\'s New — Stepan">'
         f'<meta property="og:url" content="{base}/whats-new">'
-        f'<meta property="og:image" content="{base}/og.svg">'
+        f'<meta property="og:image" content="{base}/og.png">'
+        '<meta property="og:image:width" content="1200">'
+        '<meta property="og:image:height" content="630">'
         '<meta name="twitter:card" content="summary_large_image">'
     )
 

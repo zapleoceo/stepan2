@@ -77,6 +77,34 @@ def test_nav_links_to_pricing() -> None:
     assert 'href="#pricing"' in html and 'id="pricing"' in html
 
 
+def test_stats_strip_under_hero_with_honest_label() -> None:
+    """Real production totals (rounded down), never unlabeled: the page marks them as live
+    totals with a date so they read as measured numbers, not marketing invention."""
+    html = landing_html()
+    assert 'class="stats' in html
+    assert "3,600+" in html and "29,000+" in html and "200+" in html
+    assert "Live production totals" in html and "July 2026" in html
+    # placed right after the hero, before everything else
+    assert html.find('class="stats') < html.find('class="trust"')
+
+
+def test_og_meta_points_at_png_for_messengers() -> None:
+    # Telegram/WhatsApp skip SVG og:images entirely; the preview must be the PNG
+    html = landing_html()
+    assert 'og:image" content="https://stepan2.zapleo.com/og.png"' in html \
+        or '/og.png">' in html
+    assert 'og:image:width" content="1200"' in html
+    assert 'og:image:height" content="630"' in html
+    assert "og.svg" not in html
+
+
+def test_og_png_renders_a_real_image() -> None:
+    from app.api._og import og_png
+    b = og_png()
+    assert b[:4] == b"\x89PNG"
+    assert len(b) > 20_000                    # a drawn card, not a stub
+
+
 def test_root_route_serves_landing() -> None:
     client = TestClient(app, raise_server_exceptions=False)
     resp = client.get("/")

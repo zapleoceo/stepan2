@@ -275,7 +275,8 @@ def test_gate_enabled_marketing_pages_public(monkeypatch) -> None:
     # must render for anonymous visitors and crawlers, like / and /privacy.
     _enable(monkeypatch)
     client = TestClient(app, follow_redirects=False, raise_server_exceptions=False)
-    for path in ("/", "/whats-new", "/privacy", "/robots.txt", "/sitemap.xml", "/og.svg"):
+    for path in ("/", "/whats-new", "/privacy", "/robots.txt", "/sitemap.xml", "/og.svg",
+                 "/og.png"):
         assert client.get(path).status_code == 200, path
 
 

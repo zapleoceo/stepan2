@@ -164,6 +164,14 @@ def create_app() -> FastAPI:
         return Response(og_svg(), media_type="image/svg+xml",
                         headers={"Cache-Control": "public, max-age=86400"})
 
+    @app.get("/og.png", include_in_schema=False)
+    async def og_image_png() -> Response:
+        # Messengers (Telegram/WhatsApp/iMessage) don't render an SVG og:image — the share
+        # preview needs a raster. Rendered once per process, cached a day at the edge.
+        from app.api._og import og_png  # noqa: PLC0415
+        return Response(og_png(), media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/admin", include_in_schema=False)
     async def admin_root() -> RedirectResponse:
         return RedirectResponse(url="/ui/inbox", status_code=302)

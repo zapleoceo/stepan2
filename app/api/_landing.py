@@ -45,11 +45,17 @@ def _seo_head() -> str:
         f'<meta property="og:title" content="{_TAGLINE}">'
         f'<meta property="og:description" content="{_DESC}">'
         f'<meta property="og:url" content="{base}/">'
-        f'<meta property="og:image" content="{base}/og.svg">'
+        # PNG, not SVG: Telegram/WhatsApp/iMessage skip SVG previews entirely
+        f'<meta property="og:image" content="{base}/og.png">'
+        '<meta property="og:image:type" content="image/png">'
+        '<meta property="og:image:width" content="1200">'
+        '<meta property="og:image:height" content="630">'
+        '<meta property="og:image:alt" content="Stepan, the AI sales agent for Instagram '
+        'and WhatsApp DMs">'
         '<meta name="twitter:card" content="summary_large_image">'
         f'<meta name="twitter:title" content="{_TAGLINE}">'
         f'<meta name="twitter:description" content="{_DESC}">'
-        f'<meta name="twitter:image" content="{base}/og.svg">'
+        f'<meta name="twitter:image" content="{base}/og.png">'
         f'<script type="application/ld+json">{ld}</script>'
     )
 
@@ -223,6 +229,13 @@ h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;
 .pinc li{display:flex;align-items:flex-start;gap:.55rem;font-size:.85rem;color:var(--mut);line-height:1.5}
 .pinc li .ic{color:var(--ok);flex-shrink:0;margin-top:.15rem}
 @media (max-width:760px){.pgrid,.pinc{grid-template-columns:1fr}}
+/* stats strip: real production totals, mono numbers, no card-per-number clutter */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:1.6rem 1rem}
+.stat{text-align:center;display:flex;flex-direction:column;gap:.3rem}
+.stat b{font-family:var(--mono);font-size:1.9rem;font-weight:700;color:var(--ink);letter-spacing:-.02em}
+.stat span{font-size:.8rem;color:var(--mut)}
+.stats .stat:nth-child(3) b{color:var(--acc)}
+@media (max-width:760px){.stats{grid-template-columns:1fr 1fr;gap:1.3rem}}
 /* FAQ: native details accordion, same 16px radius family as the pricing cards */
 .faq{max-width:760px}
 .faq details{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin-bottom:.7rem}
@@ -725,6 +738,30 @@ def _persona_library_section() -> str:
     )
 
 
+# Real production totals across all live deployments (rounded down; refresh the snapshot
+# alongside the "as of" label). Source: leads/messages/stage_event aggregates, 2026-07-19.
+_STATS: list[tuple[str, str]] = [
+    ("3,600+", "leads worked end to end"),
+    ("29,000+", "messages handled, human-paced"),
+    ("200+", "leads qualified to sales-ready"),
+    ("24/7", "always on, in the lead's language"),
+]
+
+
+def _stats_section() -> str:
+    tiles = "".join(
+        f'<div class="stat"><b class="num">{n}</b><span>{lbl}</span></div>'
+        for n, lbl in _STATS
+    )
+    return (
+        "<section class=\"divide\"><div class=\"wrap\">"
+        f"<div class=\"stats reveal\">{tiles}</div>"
+        "<p class=\"mnote\" style=\"margin-top:1.1rem;text-align:center\">Live production "
+        "totals across all deployments, July 2026.</p>"
+        "</div></section>"
+    )
+
+
 _FAQ: list[tuple[str, str]] = [
     ("How fast can we go live?",
      "Connect your Instagram or WhatsApp, paste in your real facts and prices, and Stepan "
@@ -845,8 +882,8 @@ def landing_html() -> str:
         "<a class=\"btn btn-g\" href=\"#how\">See how it works</a>"
         "</div>"
         "</div></header>"
-        # trust strip: its own section right under the hero (a hero carries the value prop
-        # and the CTA; enterprise proof points live below it, not inside it)
+        # proof first: real production totals right under the hero, then the trust strip
+        + _stats_section() +
         f"<section class=\"divide\"><div class=\"wrap\">{_trust_section()}</div></section>"
         # how it works
         "<section id=\"how\" class=\"divide\"><div class=\"wrap\">"
