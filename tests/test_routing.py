@@ -48,7 +48,10 @@ def test_buying_signal_forces_smart_even_early() -> None:
     assert _pick(stage=Stage.NEW, last_inbound="mau bayar sekarang dong") == SMART
     assert _pick(stage=Stage.QUALIFYING, last_inbound="Gasss") == SMART
     assert _pick(stage=Stage.QUALIFYING, last_inbound="ini nomor wa 0812 3456 7890") == SMART
-    assert _pick(stage=Stage.QUALIFYING, last_inbound="masih mikir dulu ya") == FAST
+    # a soft-no is the save-the-sale (objection-handling) turn — it needs the strong model
+    # too (sales-logic audit 2026-07-19); a neutral message still rides the cheap lane
+    assert _pick(stage=Stage.QUALIFYING, last_inbound="masih mikir dulu ya") == SMART
+    assert _pick(stage=Stage.QUALIFYING, last_inbound="oke kak makasih infonya") == FAST
 
 
 def test_parse_smart_stages() -> None:

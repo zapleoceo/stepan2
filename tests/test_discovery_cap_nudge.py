@@ -103,7 +103,9 @@ async def test_no_ad_opener_nudge_once_lead_speaks_own_words(db_session) -> None
 
 
 async def test_no_nudge_within_cap(db_session) -> None:
-    bid, tid = await _thread_with_turns(db_session, _DISCOVERY_TURN_CAP)
+    # strictly BELOW the cap — at the cap itself the nudge now fires, aligned with the
+    # reply.py stage gate that already allows presenting there (sales-logic audit, #5)
+    bid, tid = await _thread_with_turns(db_session, _DISCOVERY_TURN_CAP - 1)
     llm = _SpyLLM()
     await ReplyService(db_session, bid, llm, KnowledgeService(db_session, bid)).decide(tid)
     assert llm.last_messages[-1]["role"] != "user" or "discovery questions for" \
