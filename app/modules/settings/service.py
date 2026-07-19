@@ -64,6 +64,7 @@ class BranchSettings:
     # 'off' → always chat:smart (pre-optimisation behaviour). See conversation.routing.
     reply_routing: str = "hybrid"
     reactivation_enabled: bool = False
+    learning_audit_enabled: bool = False
     # Comma-list of stages that keep the strong model under hybrid routing (operator-tunable).
     smart_stages: str = "presenting,objection,ready"
     # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
@@ -195,6 +196,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         followup_enabled=_b(raw, "followup_enabled"),
         followup_schedule_h=_parse_schedule(raw),
         reactivation_enabled=_b(raw, "reactivation_enabled"),
+        learning_audit_enabled=_b(raw, "learning_audit_enabled"),
         tech_search_enabled=_b(raw, "tech_search_enabled"),
         tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),

@@ -460,6 +460,25 @@ async def _reactivate_one(
         return False
 
 
+async def learning_audit(ctx: dict[str, Any]) -> int:
+    """Dispatcher: weekly learning-audit report per branch (propose-only, TG report)."""
+    return await _fan_out_per_branch(ctx, "learning_audit_branch", gate_platform=True)
+
+
+async def learning_audit_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    from app.modules.learning.audit import LearningAudit  # noqa: PLC0415
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            if not getattr(cfg, "learning_audit_enabled", False):
+                return 0
+            await LearningAudit(session, branch_id, _build_notifier(cfg)).run()
+            return 1
+    except Exception:
+        logger.exception("learning_audit failed branch=%s", branch_id)
+        return 0
+
+
 async def send_outbox(ctx: dict[str, Any]) -> int:
     """Drain one pending outbox line per thread through its channel. Returns rows attempted.
 
@@ -924,7 +943,7 @@ class WorkerSettings:
         # Cron dispatchers: each fans out one per-branch job so branches run concurrently and
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, ingest_active_conversations, reply_pending, send_outbox,
-        schedule_followups, reactivate_dormant,
+        schedule_followups, reactivate_dormant, learning_audit,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         daily_digest, crm_rescue,
         reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
@@ -933,7 +952,7 @@ class WorkerSettings:
         # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
         # id the instant the job ends, so the dedup never outlives the run.
         ingest_branch, ingest_active_branch, reply_pending_branch, send_outbox_branch,
-        schedule_followups_branch, reactivate_dormant_branch,
+        schedule_followups_branch, reactivate_dormant_branch, learning_audit_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
         daily_digest_branch,
@@ -983,6 +1002,10 @@ class WorkerSettings:
         # (UTC+7: 04:00 UTC = 11:00 WIB, 08:00 UTC = 15:00 WIB) so a cold touch lands in
         # business hours; small batch, quiet hours still held by the outbox send layer.
         cron(reactivate_dormant, hour={4, 8}, minute={20}, second=30, run_at_startup=False),
+        # Learning audit: Monday 02:00 UTC = 09:00 WIB — the week's self-review lands with
+        # the owner's Monday morning coffee. Propose-only; per-branch opt-in flag.
+        cron(learning_audit, weekday={0}, hour={2}, minute={0}, second=0,
+             run_at_startup=False),
         # CRM push every 5 minutes (only branches with crm_enabled + webhook URL)
         cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
         # Rescue of CRM missed-call leads: hourly, work hours only (service-enforced),

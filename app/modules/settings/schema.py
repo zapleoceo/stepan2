@@ -121,6 +121,14 @@ SCHEMA: list[SettingSection] = [
            help=_l("Один персональный заход к уснувшим лидам (3-21 дн.), по их же диалогу",
                    "One personalized touch to dormant leads (3-21d), adapted to their dialog",
                    "Satu sapaan personal ke lead yang diam (3-21 hari), sesuai obrolannya")),
+        _f("learning_audit_enabled", "bool", "false",
+           _l("Еженед. аудит обучения", "Weekly learning audit", "Audit mingguan"),
+           width="150px",
+           help=_l("Пн 09:00 WIB: авто-разбор недели в TG — нарушения, воронка, предложения. "
+                   "Ничего не меняет сам",
+                   "Mon 09:00 WIB: weekly self-review to TG - violations, funnel, proposals. "
+                   "Changes nothing by itself",
+                   "Senin 09:00 WIB: tinjauan mingguan ke TG. Tidak mengubah apa pun")),
     ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
