@@ -26,6 +26,7 @@ from .reply import (
     _DUPLICATE_RATIO,
     _REPEAT_CORRECTION,
     _most_similar_prior,
+    _reply_bubble_cap,
     _split_bubbles,
     guard_decision,
     raise_manager_alert,
@@ -33,10 +34,12 @@ from .reply import (
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .situations import (
     AD_TEMPLATE_RE,
+    FAKE_SERENDIPITY_RE,
     FOLLOWUP_BREVITY_SUFFIX,
     FOLLOWUP_NEED_ANCHOR,
     FOLLOWUP_PRODUCT_DISCIPLINE,
     FOLLOWUP_SILENT_CLICKER_EXTRA,
+    NO_REPEAT_SERENDIPITY_NUDGE,
     followup_angle,
     lead_spoke_own_words,
     with_situation,
@@ -284,6 +287,21 @@ class FollowupService:
             situational=nudge)
         if not decision.reply:
             return False
+        # Don't reuse the fake-serendipity opener ('kebetulan…', 'baru aja ada alumni…') twice
+        # in one chat — it reads as a canned script the second time (thread 1754: sent 17:23
+        # then 21:31). Regen once with a different opening if an earlier bot message used it too.
+        if FAKE_SERENDIPITY_RE.search(decision.reply) and any(
+                m.direction == "out" and FAKE_SERENDIPITY_RE.search(m.text or "")
+                for m in ctx.dialog):
+            raw, meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow="followup", capability=SMART,
+                extra_user_msg=with_situation(NO_REPEAT_SERENDIPITY_NUDGE, nudge))
+            try:
+                reworded = parse_decision(raw)
+                if reworded.reply:
+                    decision = reworded
+            except ValueError:
+                pass  # keep the guarded draft rather than drop the nudge
         # guard_decision can regenerate the draft too (for an UNRELATED violation elsewhere
         # in the text) — that regeneration is never re-checked against dialog history, so it
         # can silently reintroduce the exact near-duplicate the check above already rejected
@@ -343,7 +361,8 @@ class FollowupService:
             await self._burn_dry_step(thread_id, now)
             return False
         meta_line = _fmt_llm_meta(meta)
-        for i, bubble in enumerate(_split_bubbles(decision.reply)):
+        for i, bubble in enumerate(
+            _split_bubbles(decision.reply, max_parts=_reply_bubble_cap(decision.reply))):
             await self.outbox.add(Outbox(
                 branch_id=self.branch_id,
                 thread_id=thread_id,

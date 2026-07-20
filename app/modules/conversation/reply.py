@@ -207,6 +207,14 @@ def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
 
 
+def _reply_bubble_cap(reply: str) -> int:
+    """At most TWO messages in a row for a normal reply — three DMs with no lead turn between
+    reads as a monolog and raises spam-detection risk (20-chat audit: bot share ~65-70%). The
+    numbered-menu turns (ad opener, clarify/goal menu) genuinely need their 3rd bubble for the
+    options, so those keep the full _MAX_BUBBLES; everything else is capped at 2."""
+    return _MAX_BUBBLES if "1️⃣" in (reply or "") else 2
+
+
 async def guard_prompt(session: AsyncSession, branch_id: int) -> str | None:
     """The reply-guard checker prompt, editable per branch via the `guard_verify` KB
     doc (resolved through a shared-KB link); None → guard.py's built-in default."""
@@ -279,6 +287,7 @@ def _deterministic_issues(
         *guard.open_house_as_event(reply),
         *guard.open_house_online_claims(reply),
         *guard.game_offering_claims(reply),
+        *guard.nonexistent_hardware_claims(reply),
         *guard.student_discount_to_adult(reply),
         *guard.premature_payment_details(reply, lead_words),
         *guard.invented_price_no_card(reply, context),
@@ -779,7 +788,7 @@ class ReplyService:
         base = self._scheduled_at()
         outbox: Outbox | None = None
         meta_line = _fmt_llm_meta(self._last_llm_meta)
-        bubbles = _split_bubbles(decision.reply)
+        bubbles = _split_bubbles(decision.reply, max_parts=_reply_bubble_cap(decision.reply))
         for i, bubble in enumerate(bubbles):
             outbox = await self.outbox.add(
                 Outbox(

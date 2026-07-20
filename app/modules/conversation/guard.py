@@ -402,6 +402,33 @@ def student_discount_to_adult(reply: str) -> list[str]:
     ] if m else []
 
 
+# IT STEP Jakarta teaches SOFTWARE / digital skills only — no hardware, electronics, or
+# device-repair course exists (catalog: cybersecurity, data_analyst, graphic_design,
+# python_backend, smm, uiux, vibe_coding + Skill Boosters). Thread 1761: a lead who wanted a
+# phone-repair job got "beneran worth it, gaji stabil" plus a pitch for electronics/hardware
+# certificates that don't exist — the bot invented a whole program off the catalog. Honest
+# move: say we don't have it, pivot to a real software track only if one genuinely fits, else
+# hand off. An honest negation ("belum ada kelas reparasi") passes.
+_HARDWARE_OFFER_RE = re.compile(
+    r"\b(?:kelas|kursus|program|jurusan|sertifikat|sertifikasi)\b[^.!?\n]{0,35}"
+    r"\b(?:hardware|elektronika?|reparasi|perbaikan\s*(?:hp|komputer|laptop|gadget|elektronik)"
+    r"|servis\s*(?:hp|komputer|laptop|elektronik)|teknisi\s*(?:hp|komputer|laptop|jaringan))\b"
+    r"|\b(?:kami|kita)\b[^.!?\n]{0,25}\b(?:ajarin|ngajarin|ajarkan|mengajar)\b[^.!?\n]{0,20}"
+    r"\b(?:hardware|reparasi|servis\s*(?:hp|komputer)|perbaikan\s*(?:hp|komputer)|elektronika?)\b",
+    re.IGNORECASE)
+
+
+def nonexistent_hardware_claims(reply: str) -> list[str]:
+    out = []
+    for m in _HARDWARE_OFFER_RE.finditer(reply or ""):
+        prefix = (reply or "")[max(0, m.start() - 30):m.start()]
+        if not _GAME_NEGATION_RE.search(prefix):
+            out.append(
+                "hardware/repair/electronics course claimed — IT STEP Jakarta teaches software/"
+                f"digital only; never invent one, pivot to a real track or hand off: {m.group(0)}")
+    return out
+
+
 # A clock time quoted for a class/event that the KB never states. Sim s10 night_worker: a
 # shift worker asking about evenings got 'kelas kita malam hari, sekitar jam 19.00-20.00 WIB'
 # plus an offer of later groups — the KB says only 'malam', no times. The lead plans their

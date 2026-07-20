@@ -815,6 +815,16 @@ def test_student_discount_flags_pelajar_offer_to_a_mahasiswa() -> None:
     assert not guard.student_discount_to_adult("kalau ajak teman, kalian berdua dapat diskon 10%")
 
 
+def test_nonexistent_hardware_claims_flags_repair_course_spares_negation() -> None:
+    # thread 1761: a phone-repair lead got a pitch for hardware/electronics certificates
+    assert guard.nonexistent_hardware_claims("kami ada kelas reparasi HP kok Kak")
+    assert guard.nonexistent_hardware_claims("ada program sertifikat elektronika di sini")
+    assert guard.nonexistent_hardware_claims("di sini kita ajarin servis komputer juga")
+    # honest negation and real software tracks pass
+    assert not guard.nonexistent_hardware_claims("jujur Kak, kami belum ada kelas reparasi HP")
+    assert not guard.nonexistent_hardware_claims("kami ada kelas Cybersecurity + AI")
+
+
 def test_game_offering_claims_flags_invented_course_spares_honest_pivot() -> None:
     # thread 4573: a game course / 'game projects we built' that don't exist
     assert guard.game_offering_claims("kami ada kelas game development lho Kak")

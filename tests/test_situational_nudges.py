@@ -248,6 +248,15 @@ def test_objection_trailed_by_filler_still_handled_not_pitched_over() -> None:
     assert OBJECTION_HANDLE_NUDGE not in (got2 or "")
 
 
+def test_fake_serendipity_regex_flags_canned_openers() -> None:
+    from app.modules.conversation.situations import FAKE_SERENDIPITY_RE
+    assert FAKE_SERENDIPITY_RE.search("Eh Kak, kebetulan nih baru aja ada alumni yang...")
+    assert FAKE_SERENDIPITY_RE.search("baru aja ada project alumni yang keren")
+    assert FAKE_SERENDIPITY_RE.search("eh iya baru inget soal kelas Kakak")
+    # a plain, concrete opener is fine
+    assert not FAKE_SERENDIPITY_RE.search("Kak, program Data Analyst durasinya 9 bulan ya")
+
+
 def test_no_time_objection_gets_the_grounded_schedule_reframe() -> None:
     # thread 4062: 'waktunya padet kak belum ada waktu' got a capitulation, not a reframe.
     # The TIME objection must route to the schedule reframe, not generic soft-no capitulation.

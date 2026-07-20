@@ -15,6 +15,7 @@ from app.modules.conversation.reply import (
     _DUPLICATE_RATIO,
     _clean_bubble,
     _most_similar_prior,
+    _reply_bubble_cap,
     _split_bubbles,
 )
 from app.modules.conversation.sim import SimService
@@ -62,6 +63,14 @@ def test_clean_bubble_strips_horizontal_rules_and_headings() -> None:
 def test_split_bubbles_drops_artifact_only_bubbles() -> None:
     assert _split_bubbles("Halo Kak|||---") == ["Halo Kak"]         # the '---' bubble vanishes
     assert _split_bubbles("Satu 😊\n---|||Dua") == ["Satu 😊", "Dua"]
+
+
+def test_reply_bubble_cap_limits_normal_reply_to_two_keeps_menu_at_three() -> None:
+    # a normal 3-part reply is capped at 2 messages (no monolog); the numbered menu keeps 3
+    normal = "Satu|||Dua|||Tiga"
+    assert len(_split_bubbles(normal, max_parts=_reply_bubble_cap(normal))) == 2
+    menu = "Pilih ya Kak|||1️⃣ Biaya|||2️⃣ Jadwal"
+    assert len(_split_bubbles(menu, max_parts=_reply_bubble_cap(menu))) == 3
 
 
 # ─── fix 2: the clarify loop breaks into a hand-off (integration via SimService) ──

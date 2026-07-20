@@ -444,6 +444,25 @@ FOLLOWUP_SILENT_CLICKER_EXTRA = (
     "as usual.]"
 )
 
+# Fake-serendipity opener — 'kebetulan nih baru aja ada alumni/project…', 'eh baru inget…'.
+# The model reaches for it on every follow-up; it reads as spontaneous ONCE, then as a canned
+# bot script (thread 1754 sent it twice, 17:23 and 21:31; the construction recurs across 6+
+# chats verbatim). Detected so a repeat in the SAME thread gets a different opening.
+FAKE_SERENDIPITY_RE = re.compile(
+    r"\bkebetulan\b"
+    r"|baru\s*aja\s*(?:ada|dapet|dapat|nemu|keinget|keingetan|kepikiran)"
+    r"|eh\s*(?:iya\s*)?baru\s*(?:inget|keinget|keingetan|kepikiran)",
+    re.IGNORECASE)
+
+NO_REPEAT_SERENDIPITY_NUDGE = (
+    "[System: you ALREADY opened an earlier follow-up in THIS chat with a fake-serendipity "
+    "line ('kebetulan nih…', 'baru aja ada alumni/project…', 'eh baru inget…'). Using that "
+    "construction a second time reads as a canned bot script — it only works once. Open THIS "
+    "message a DIFFERENT, concrete way: a real fact tied to their stated goal, a specific next "
+    "step, or a plain question — NEVER another 'kebetulan' / 'baru aja ada' / 'baru inget'. "
+    "Return the JSON as usual.]"
+)
+
 # A designed 4-step escalation for follow-ups, keyed to the attempt number, instead of the
 # model re-rolling a random "different angle" each time. A real salesperson warms, then proves,
 # then lowers the barrier, then bows out gracefully — a ladder converts far better than four
