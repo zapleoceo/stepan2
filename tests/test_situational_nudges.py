@@ -165,12 +165,16 @@ def test_soft_no_ignores_engaged_replies() -> None:
 def test_low_budget_detects_money_signals() -> None:
     for s in ["ga ada modal kak", "belum punya uang", "mahal banget",
               "kemahalan kak", "gratisan aja bisa?", "masih nganggur",
-              "butuh kerja bukan sertifikat", "ga ada ongkos ke sana"]:
+              "butuh kerja bukan sertifikat", "ga ada ongkos ke sana",
+              # thread 4545: "can't afford" with words between the negation and 'bayar'
+              "saya ga punya buat bayar biaya nya", "ga ada buat bayar",
+              "duitnya ga cukup buat bayar", "ga sanggup bayar"]:
         assert _LOW_BUDGET_RE.search(s), s
 
 
 def test_low_budget_ignores_neutral() -> None:
-    for s in ["harganya berapa kak?", "bisa dicicil ga?", "ada diskon ga"]:
+    for s in ["harganya berapa kak?", "bisa dicicil ga?", "ada diskon ga",
+              "mau bayar sekarang", "gimana cara bayar", "bisa bayar cicilan ga?"]:
         assert not _LOW_BUDGET_RE.search(s), s
 
 

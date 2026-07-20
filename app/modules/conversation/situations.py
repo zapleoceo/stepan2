@@ -108,7 +108,14 @@ LOW_BUDGET_RE = re.compile(
     # thread 4082: 'Kendala saya di budget… terasa berat' voiced a clear money objection and
     # got a dream question instead of the cheap entry — the word 'budget' wasn't matched.
     r"kendala\s*\S*\s*budget|bud?get\s*(terbatas|minim|pas[- ]?pasan|kurang)|"
-    r"(te)?rasa\s+berat|masih\s+berat|keberatan\b",
+    r"(te)?rasa\s+berat|masih\s+berat|keberatan\b"
+    # thread 4545: 'saya ga punya buat bayar biaya nya' — a plain "can't afford" that the
+    # money-word-adjacent rules above missed (words sit between 'punya' and 'biaya'), so the
+    # bot skipped the budget play and escalated to a manager instead of offering instalments.
+    r"|(?:nggak|ngga|ndak|tidak|tdk|gak|ga|gk|belum|blm)\s*(?:ada|punya|cukup)"
+    r"[^.!?\n]{0,15}?\bbayar\b"
+    r"|(?:nggak|ngga|gak|ga|tdk|tidak|belum)\s*(?:cukup|sanggup)\s*(?:buat|untuk)?\s*bayar"
+    r"|(?:duit|uang|dana|biaya|budget)\w*\s*(?:nggak|ngga|gak|ga|belum|kurang|ga\s*cukup)",
     re.IGNORECASE)
 
 # The TIME objection — the top non-price reason a warm lead stalls ('nggak ada waktu', 'sibuk',
