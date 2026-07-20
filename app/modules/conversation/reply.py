@@ -41,6 +41,11 @@ from .situations import (
     NEED_PAYOFF_NUDGE as _NEED_PAYOFF_NUDGE,
 )
 from .situations import (
+    PREMATURE_CONTACT_CORRECTION,
+    premature_contact_ask,
+    with_situation,
+)
+from .situations import (
     SOFT_NO_RE as _SOFT_NO_RE,
 )
 from .situations import (
@@ -54,9 +59,6 @@ from .situations import (
 )
 from .situations import (
     postpone_days as _postpone_days,
-)
-from .situations import (
-    with_situation,
 )
 
 logger = logging.getLogger(__name__)
@@ -625,6 +627,31 @@ class ReplyService:
                         "(ratio=%.2f) → clarify", workflow, self.branch_id, thread_id,
                         post_guard_ratio)
                     decision = replace(decision, reply=guard.CLARIFY_FALLBACK)
+        # DON'T GRAB CONTACT BEFORE EARNING IT. Asking a still-cold lead (no pain surfaced, no
+        # price/pay/buying signal, no phone yet) for their WhatsApp reads as a lead-capture bot,
+        # and cold leads bail — the single biggest measured conversion leak (contact given by
+        # only ~6/100 leads; thread 4615 tapped a menu number, got 'give me your WhatsApp', left).
+        # Regen once to deliver value tied to their goal + a deepening question instead.
+        _has_phone = bool(lead is not None and lead.phone_e164) \
+            or bool((decision.phone or "").strip())
+        if decision.reply and premature_contact_ask(
+            decision.reply, last_in_txt,
+            has_pains=bool(ctx.stored_needs.pains), has_phone=_has_phone,
+            ready=bool(decision.ready),
+        ):
+            logger.info("%s: branch=%d thread=%d premature contact ask on a cold lead → regen",
+                        workflow, self.branch_id, thread_id)
+            raw, regen_meta = await engine.complete(
+                ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+                extra_user_msg=with_situation(PREMATURE_CONTACT_CORRECTION, extra_user_msg))
+            try:
+                fixed = parse_decision(raw)
+                if fixed.reply and not premature_contact_ask(
+                    fixed.reply, last_in_txt, has_pains=bool(ctx.stored_needs.pains),
+                    has_phone=False, ready=bool(fixed.ready)):
+                    decision, meta = fixed, regen_meta
+            except ValueError:
+                pass  # keep the guarded draft rather than drop the reply
         # KEEP A HAND-OFF PROMISE. If the reply tells the lead a human is taking over, a human
         # must actually be notified — otherwise the bot promises a call, nobody gets the lead,
         # and the follow-up cycle keeps nudging the person it just handed off (thread 1230).

@@ -108,14 +108,14 @@ def test_menu_digit_converts_instead_of_more_discovery() -> None:
     nudge = pick_nudge(
         lead_type=None, dialog=_dialog_with_menu("1"), last_txt="1",
         stored_needs=NeedsProfile(), inbound_count=2)
-    assert nudge is not None and "answered your numbered menu" in nudge
+    assert nudge is not None and "tapped a numbered-menu choice" in nudge
 
 
 def test_bare_digit_without_a_menu_is_not_a_menu_reply() -> None:
     nudge = pick_nudge(
         lead_type=None, dialog=_dialog_with("1"), last_txt="1",
         stored_needs=NeedsProfile(), inbound_count=2)
-    assert nudge is None or "answered your numbered menu" not in nudge
+    assert nudge is None or "tapped a numbered-menu choice" not in nudge
 
 
 def test_own_post_share_is_interest_not_broken_media() -> None:

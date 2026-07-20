@@ -252,6 +252,21 @@ def test_objection_trailed_by_filler_still_handled_not_pitched_over() -> None:
     assert OBJECTION_HANDLE_NUDGE not in (got2 or "")
 
 
+def test_premature_contact_ask_flags_cold_wa_grab_spares_warm() -> None:
+    from app.modules.conversation.situations import premature_contact_ask
+    cold = dict(has_pains=False, has_phone=False, ready=False)
+    # thread 4615: menu tap → 'give me your WhatsApp' on a cold lead
+    assert premature_contact_ask("boleh minta nomor WhatsApp-nya ya Kak?", "1", **cold)
+    assert premature_contact_ask("boleh minta nomornya, Kak?", "2", **cold)
+    # warm signals spare it: a price/pay/buying signal this turn, a captured pain, a phone
+    assert not premature_contact_ask("boleh minta nomor WA?", "berapa biayanya kak?", **cold)
+    assert not premature_contact_ask("boleh minta nomor WA?", "mau daftar dong", **cold)
+    assert not premature_contact_ask(
+        "boleh minta nomor WA?", "1", has_pains=True, has_phone=False, ready=False)
+    # a reply with no contact ask is never flagged
+    assert not premature_contact_ask("Keren Kak! Mau bikin aplikasi buat apa?", "1", **cold)
+
+
 def test_fake_serendipity_regex_flags_canned_openers() -> None:
     from app.modules.conversation.situations import FAKE_SERENDIPITY_RE
     assert FAKE_SERENDIPITY_RE.search("Eh Kak, kebetulan nih baru aja ada alumni yang...")

@@ -593,13 +593,16 @@ MENU_REPLY_RE = re.compile(
     re.IGNORECASE)
 
 MENU_REPLY_NUDGE = (
-    "[System: the lead just answered your numbered menu with a choice — that is a "
-    "conversion moment, not an invitation to interrogate. Do NOT reply with another open "
-    "discovery question (live: '1' was answered with 'apa tantangan terbesar?' three times "
-    "and the lead went silent). Give ONE concrete value line matched to their chosen goal, "
-    "from the KB, then ONE light next step — e.g. offer to send the syllabus/schedule via "
-    "WhatsApp, or the real upcoming event from the KB. At most one short question, and only "
-    "if it moves them toward that step.]"
+    "[System: the lead just tapped a numbered-menu choice — a warm signal, but they have NOT "
+    "been given any value yet, so they're still cold. Two hard don'ts this turn: do NOT ask "
+    "for their WhatsApp/phone, and do NOT dump the price (live: a menu tap answered with "
+    "'boleh minta nomor WhatsApp?' made the lead leave, thread 4615). Do NOT re-interrogate "
+    "with a generic 'apa tujuan Kakak' either. Instead, in 1-2 short bubbles: (1) acknowledge "
+    "their chosen goal in THEIR words; (2) tie ONE concrete, real outcome from the KB to that "
+    "exact goal — what they'll be able to DO; (3) ask ONE sharp, SPECIFIC question that turns "
+    "the goal into a real need ('buat bidang/produk apa?', 'udah pernah nyoba sebelumnya?', "
+    "'targetnya kerja di mana / bisnis apa?'). Earn the pull first — contact and price come "
+    "later, once they're actually invested.]"
 )
 
 # A share of OUR OWN Instagram post. The generic unseen-media reply ('maaf, kontennya
@@ -632,6 +635,43 @@ MULTI_QUESTION_SUFFIX = (
     "say so honestly for THAT part instead of dropping it. Never answer only the first "
     "question — a half-answered lead has to chase the rest and usually doesn't.]"
 )
+
+# Asking the lead to hand over their contact number. Legit ONCE the lead is warm (asked a
+# price, said 'mau daftar', gave a buying signal, or a pain is on record); premature on a cold
+# lead — grabbing contact before delivering value reads as a lead-capture bot and cold leads
+# bail (thread 4615: a menu tap got 'boleh minta nomor WhatsApp?' and the lead left).
+# 'minta nomor' = the BOT requesting the lead's number (always a contact grab). But 'kirim/
+# share nomor' is instructing the LEAD to send a number — in the numbered-menu / clarify copy
+# that's 'kirim nomornya aja' = send the MENU choice, NOT a phone; so the send-verbs require an
+# explicit WA/phone word, while the request-verbs don't.
+CONTACT_ASK_RE = re.compile(
+    r"minta\s+(?:nomor\w*|no\.?\s*(?:wa|hp))"
+    r"|boleh\s+(?:minta|tau|dapat)\s+(?:nomor\w*|kontak\w*)"
+    r"|(?:share|kirim|kasih|bagi)\s+(?:nomor|no\.?)\s*(?:wa\b|whatsapp|hp\b|telp)",
+    re.IGNORECASE)
+
+PREMATURE_CONTACT_CORRECTION = (
+    "[System: you asked the lead for their WhatsApp/phone, but they're still COLD — no pain "
+    "surfaced, no price/payment question, no 'I want to join' signal. Grabbing contact now "
+    "reads as a lead-capture bot and cold leads bail (thread 4615). Do NOT ask for a number "
+    "this turn. Instead deliver ONE concrete value tied to their stated goal, then ONE sharp "
+    "question that deepens it into a real need. Ask for contact only later, once they're "
+    "pulled in (asked price, said mau daftar, or a clear buying signal). Return the JSON.]"
+)
+
+
+def premature_contact_ask(reply, last_inbound, *, has_pains, has_phone, ready) -> bool:  # noqa: ANN001
+    """True when the reply asks for the lead's number while they're still cold — no pain on
+    record, no phone, not ready, and this turn carries no price/pay/buying signal."""
+    if not CONTACT_ASK_RE.search(reply or ""):
+        return False
+    if has_pains or has_phone or ready:
+        return False
+    txt = last_inbound or ""
+    warm = (PRICE_QUESTION_RE.search(txt) or PAYMENT_INTENT_RE.search(txt)
+            or BUYING_SIGNAL_RE.search(txt))
+    return not warm
+
 
 PAYMENT_INTENT_NUDGE = (
     "[System: the lead is asking HOW or WHERE to pay — that is a BUYING signal; this turn "
