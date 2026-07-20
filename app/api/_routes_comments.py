@@ -129,7 +129,7 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict) -
                   "the bot pulls new ones hourly.",
             "id": "Belum ada komentar. Aktifkan 'Balas komentar' di Pengaturan channel.",
         }, lang))
-        return (f'<div class="panel"><h2>{title}</h2><p class="muted">{intro}</p>'
+        return (f'<div class="panel cm-panel"><h2>{title}</h2><p class="muted">{intro}</p>'
                 f'<div class="emp">{empty}</div></div>')
 
     # Group by post, preserving query order (media_id, occurred_at DESC).
@@ -140,7 +140,7 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict) -
             "branch": r.branch_name, "comments": []})
         p["comments"].append(r)
 
-    out = [f'<div class="panel"><h2>{title}</h2><p class="muted">{intro}</p>']
+    out = [f'<div class="panel cm-panel"><h2>{title}</h2><p class="muted">{intro}</p>']
     for _mid, p in posts.items():
         cap = _h.escape((p["caption"] or "")[:90]) or _h.escape(_lbl(
             {"ru": "(без подписи)", "en": "(no caption)", "id": "(tanpa teks)"}, lang))
@@ -176,6 +176,9 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict) -
 
 _STYLE = (
     "<style>"
+    # #main is overflow:hidden, so the panel needs its OWN scroller or a long list is clipped
+    # (this is why new comments 'didn't show' — they were below the fold with no scrollbar).
+    ".cm-panel{height:100%;overflow-y:auto;padding:.6rem .95rem;box-sizing:border-box}"
     ".cm-post{margin:14px 0;border:1px solid var(--line,#2a2f3d);border-radius:10px;"
     "overflow:hidden}"
     ".cm-post-h{padding:10px 12px;background:var(--card2,#1d212d);font-weight:600;"
