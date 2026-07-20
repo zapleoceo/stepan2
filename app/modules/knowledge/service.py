@@ -42,6 +42,12 @@ _CTX_CHAR_BUDGET = settings().knowledge_context_char_budget
 # cross-product question is answerable without dumping all 15 full cards.
 _QUICK_FACTS_RE = re.compile(r"(?im)^\s*QUICK FACTS:\s*(.+)$")
 
+# Event products are the UNIVERSAL low-friction step ('come see it live first' / free visit)
+# offered in almost every objection handling, so their FULL cards ride in EVERY context — a
+# terse catalog line isn't enough to ground a real offer, and the model offering them from
+# memory got the critic to false-reject ('Demo Event not in KB') and cascade to a hand-off.
+_ALWAYS_PRODUCT_SLUGS = ("vibe_coding_demo_event", "open_house")
+
 
 class KnowledgeService:
     """Knowledge access for one branch — the LLM prompt's context source. `llm` is accepted for
@@ -96,10 +102,16 @@ class KnowledgeService:
         focused = await self._focused(product_slug)
         if focused is not None:
             blocks.append(_focus_block(focused, resolved_lang))
+        events = await self._always_products_block(exclude=product_slug)
+        if events:
+            blocks.append(events)
         always = await self._always_docs_block()
         if always:
             blocks.append(always)
-        catalog = _catalog_block(await self.products.active(), resolved_lang, exclude=product_slug)
+        # the event cards are already full above, so drop them from the compact catalog too
+        catalog_exclude = {product_slug, *_ALWAYS_PRODUCT_SLUGS}
+        catalog = _catalog_block(
+            await self.products.active(), resolved_lang, exclude=catalog_exclude)
         if catalog:
             blocks.append(catalog)
         text = "\n\n".join(b for b in blocks if b)
@@ -116,6 +128,17 @@ class KnowledgeService:
             doc = await self.docs.by_slug(slug)
             if doc is not None and doc.content.strip():
                 parts.append(f"[{slug}]\n{doc.content.strip()}")
+        return "\n\n".join(parts)
+
+    async def _always_products_block(self, exclude: str | None) -> str:
+        """Full cards for the universal low-friction event products, skipping the focus one."""
+        parts = []
+        for slug in _ALWAYS_PRODUCT_SLUGS:
+            if slug == exclude:
+                continue
+            p = await self.products.by_slug(slug)
+            if p is not None and (p.content or "").strip():
+                parts.append(f"[event {p.slug}]\n{p.title}\n{p.content.strip()}")
         return "\n\n".join(parts)
 
     async def _focused(self, product_slug: str | None) -> Product | None:
@@ -143,8 +166,10 @@ def _quick_facts(product: Product) -> str:
     return f"{product.title} — {m.group(1).strip()}" if m else product.title
 
 
-def _catalog_block(products: list[Product], lang: str, exclude: str | None = None) -> str:
-    lines = [f"- {p.slug}: {_quick_facts(p)}" for p in products if p.slug != exclude]
+def _catalog_block(products: list[Product], lang: str,
+                   exclude: str | set[str] | None = None) -> str:
+    ex = {exclude} if isinstance(exclude, str) else set(exclude or ())
+    lines = [f"- {p.slug}: {_quick_facts(p)}" for p in products if p.slug not in ex]
     if not lines:
         return ""
     return (f"[catalog lang={lang}] (ringkasan produk lain — kalau lead fokus ke salah satu, "

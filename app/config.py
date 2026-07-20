@@ -216,7 +216,7 @@ class Settings(BaseSettings):
                                   "their newest 30 messages) while the newest turns stay "
                                   "verbatim for the dedup/don't-repeat checks")
     knowledge_context_char_budget: int = Field(
-        default=24000, description="char ceiling on the assembled KB context (persona + policy/"
+        default=28000, description="char ceiling on the assembled KB context (persona + policy/"
                                    "market facts + the full focus card + the facts catalog). "
                                    "Raised from 16000 with the facts-only-KB redesign: the whole "
                                    "fact surface is now sent every turn (~18-21k assembled), and "
