@@ -23,13 +23,15 @@ _NOW = datetime.now(UTC).replace(tzinfo=None)
 
 class _FakeNotifier:
     def __init__(self) -> None:
-        self.sends: list[str] = []
+        self.sends: list[dict] = []
+        self.topics_created = 0
 
     async def create_topic(self, *, name: str, icon_emoji=None) -> int:  # noqa: ANN001, ARG002
-        return 7
+        self.topics_created += 1
+        return 99
 
-    async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001, ARG002
-        self.sends.append(text)
+    async def send(self, *, text: str, topic_id=None) -> str:  # noqa: ANN001
+        self.sends.append({"text": text, "topic_id": topic_id})
         return "ok"
 
 
@@ -39,14 +41,15 @@ def test_within_hours_window() -> None:
     assert _within_hours(3, "bad-window")  # malformed never blocks
 
 
-async def _ready_alert(s, *, age_min: int = 10, phone: str = "+628123", kind="ready_deal"):
+async def _ready_alert(s, *, age_min: int = 10, phone: str = "+628123", kind="ready_deal",
+                       topic=7):
     b = Branch(name="T", lang="id", tz_offset_h=7)
     s.add(b)
     await s.flush()
     ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
     s.add(ch)
     await s.flush()
-    lead = Lead(branch_id=b.id, stage=Stage.READY, phone_e164=phone, notify_topic_id=7)
+    lead = Lead(branch_id=b.id, stage=Stage.READY, phone_e164=phone, notify_topic_id=topic)
     s.add(lead)
     await s.flush()
     th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
@@ -72,7 +75,8 @@ async def test_stale_ready_alert_repings_manager_once(db_session) -> None:
     notifier = _FakeNotifier()
     sent = await EscalationService(db_session, bid, notifier).run()
     assert sent == 1
-    assert len(notifier.sends) == 1 and "@citraasiha" in notifier.sends[0]
+    assert len(notifier.sends) == 1 and "@citraasiha" in notifier.sends[0]["text"]
+    assert notifier.sends[0]["topic_id"] == 7  # into the lead's own topic, never General
     await db_session.refresh(alert)
     assert alert.reping_at is not None
     # a second pass must NOT re-ping (reping_at already set)
@@ -94,6 +98,16 @@ async def test_stale_backlog_alert_past_ceiling_not_repinged(db_session) -> None
     notifier = _FakeNotifier()
     assert await EscalationService(db_session, bid, notifier).run() == 0
     assert notifier.sends == []
+
+
+async def test_reping_creates_topic_when_missing_never_general(db_session) -> None:
+    # the 2026-07-20 flood went to the group's General because old leads had no topic; a
+    # re-ping must open the lead's own topic (like the alert) and send there, never General.
+    bid, _tid, _a, _cid = await _ready_alert(db_session, topic=None)
+    notifier = _FakeNotifier()
+    assert await EscalationService(db_session, bid, notifier).run() == 1
+    assert notifier.topics_created == 1
+    assert notifier.sends[0]["topic_id"] == 99  # the freshly created topic, not None (General)
 
 
 async def test_manager_reply_suppresses_reping(db_session) -> None:

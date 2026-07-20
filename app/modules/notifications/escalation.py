@@ -14,9 +14,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch
+from app.adapters.db.models import Branch, Lead
 from app.config import settings
 from app.ports.notify import NotifierPort
+
+from .alerts import _KIND_ICON
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ class EscalationService:
         # leads up to 16 days old). ready deal / open-house RSVP always; needs_manager only with a
         # phone. Skip any thread a manager already replied in since the alert — that IS the action.
         rows = (await self.session.execute(text(
-            "SELECT a.id, a.thread_id, a.kind, a.created_at, l.notify_topic_id "
+            "SELECT a.id, a.thread_id, a.lead_id, a.kind, a.created_at, l.notify_topic_id "
             "FROM manager_alert a JOIN lead l ON l.id = a.lead_id "
             "WHERE a.branch_id = :bid AND a.reping_at IS NULL "
             "  AND a.created_at <= :cutoff AND a.created_at >= :floor "
@@ -69,15 +71,33 @@ class EscalationService:
             "ORDER BY a.id LIMIT 20"),
             {"bid": self.branch_id, "cutoff": cutoff, "floor": floor})).all()
         sent = 0
-        for alert_id, thread_id, kind, created_at, topic_id in rows:
-            if await self._reping_one(alert_id, thread_id, kind, created_at, topic_id, naive_now):
+        for alert_id, thread_id, lead_id, kind, created_at, topic_id in rows:
+            if await self._reping_one(
+                alert_id, thread_id, lead_id, kind, created_at, topic_id, naive_now):
                 sent += 1
         if sent:
             logger.info("escalation: branch=%d re-pinged %d stale alert(s)", self.branch_id, sent)
         return sent
 
+    async def _ensure_topic(self, lead_id: int, kind: str, topic_id: int | None) -> int | None:
+        """The lead's forum topic, created if missing — a re-ping goes into the lead's OWN
+        thread, exactly like the chat alert, never into the group's General channel."""
+        assert self._notifier is not None
+        if topic_id is not None:
+            return topic_id
+        lead = await self.session.get(Lead, lead_id)
+        if lead is None:
+            return None
+        name = (lead.display_name or lead.ig_username or f"lead #{lead_id}").strip()
+        new_id = await self._notifier.create_topic(name=name, icon_emoji=_KIND_ICON.get(kind))
+        if new_id is not None:
+            lead.notify_topic_id = new_id
+            self.session.add(lead)
+            await self.session.flush()
+        return new_id
+
     async def _reping_one(
-        self, alert_id: int, thread_id: int | None, kind: str,
+        self, alert_id: int, thread_id: int | None, lead_id: int, kind: str,
         created_at: datetime, topic_id: int | None, now: datetime,
     ) -> bool:
         assert self._notifier is not None
@@ -85,9 +105,15 @@ class EscalationService:
             created_at = datetime.fromisoformat(created_at)
         mins = max(1, int((now - created_at).total_seconds() // 60))
         body = self._compose(kind, mins, thread_id)
+        topic_id = await self._ensure_topic(lead_id, kind, topic_id)
+        if topic_id is None:  # no topic and couldn't open one — never fall back to General
+            logger.warning("escalation: no topic for lead=%s — skipping re-ping", lead_id)
+            return False
         status = await self._notifier.send(text=body, topic_id=topic_id)
-        if status == "topic_gone":
-            status = await self._notifier.send(text=body, topic_id=None)
+        if status == "topic_gone":  # the lead's topic was deleted — recreate it and resend
+            topic_id = await self._ensure_topic(lead_id, kind, None)
+            status = (await self._notifier.send(text=body, topic_id=topic_id)
+                      if topic_id is not None else status)
         if status != "ok":
             logger.warning("escalation: re-ping failed alert=%s status=%s", alert_id, status)
             return False
