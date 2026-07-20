@@ -24,9 +24,14 @@ logger = logging.getLogger(__name__)
 # the prompt) so the same list drives the rubric text AND stays greppable/testable.
 DIMENSIONS = (
     ("grounded", "Every concrete fact (price, date, schedule, duration, platform, link, "
-     "discount, certificate, statistic, alumni/success story) is present in the KNOWLEDGE "
-     "BASE. If a figure or claim is not verbatim-supported there, this FAILS — do not give the "
-     "benefit of the doubt."),
+     "discount, certificate, statistic, alumni/success story) is supported by the KNOWLEDGE "
+     "BASE — which includes BOTH the full focus card AND the one-line QUICK FACTS of every "
+     "other product in the catalog. A number is grounded if the SAME VALUE appears anywhere in "
+     "the KB in ANY Indonesian format: 'Rp 13 juta' = '13jt' = 'Rp 13.000.000'; '500 ribu' = "
+     "'500rb' = '500.000'; 'cicil 4x' = '4×3.250.000'. Do NOT fail a fact merely for a "
+     "formatting or abbreviation difference — only fail when the value is ABSENT from the KB or "
+     "DIFFERENT from what the KB says (a wrong figure, an invented date/discount/claim). When "
+     "unsure whether a value is in the KB, scan the catalog lines before failing."),
     ("responsive", "The reply directly addresses what the lead's LAST message actually said or "
      "asked. Answering a different question, ignoring their point, or a generic reaction "
      "('Mantap Kak!') that doesn't engage their message FAILS."),
