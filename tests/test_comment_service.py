@@ -16,6 +16,7 @@ class _FakePort:
     def __init__(self, comments: list[InboundComment]) -> None:
         self._comments = comments
         self.posted: list[tuple[str, str]] = []
+        self.hidden: list[str] = []
 
     async def fetch_comments(self, *, since=None):  # noqa: ANN001, ANN002
         return self._comments
@@ -23,6 +24,10 @@ class _FakePort:
     async def reply_to_comment(self, comment_external_id: str, text: str) -> SendResult:
         self.posted.append((comment_external_id, text))
         return SendResult(ok=True, external_message_id="reply1")
+
+    async def hide_comment(self, comment_external_id: str) -> SendResult:
+        self.hidden.append(comment_external_id)
+        return SendResult(ok=True)
 
 
 class _FakeLLM:
@@ -102,15 +107,16 @@ async def test_invented_price_degrades_to_dm_invite(db_session) -> None:
     assert "DM" in port.posted[0][1]
 
 
-async def test_spam_is_hidden_not_replied(db_session) -> None:
+async def test_spam_is_deleted_in_ig_not_just_flagged(db_session) -> None:
     bid, ch = await _seed(db_session)
     port = _FakePort([_comment("c1", "follow akun aku ya promo slot gacor")])
     svc = CommentService(db_session, bid, _FakeLLM("x"), _kb(db_session, bid), _cfg())
     await svc.ingest(ch, port)
     posted = await svc.process(ch, port)
     assert posted == 0 and not port.posted
+    assert port.hidden == ["m1:c1"]  # actually deleted in IG, not just a DB flag
     row = (await CommentRepo(db_session, bid).pending(ch.id, 10))
-    assert not row  # nothing left pending — it was resolved to hidden
+    assert not row  # resolved to hidden, nothing left pending
 
 
 async def test_per_post_cap_holds(db_session) -> None:

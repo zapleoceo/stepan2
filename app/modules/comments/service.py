@@ -100,8 +100,11 @@ class CommentService:
             if posted >= budget:
                 break
             action, reason = classify_comment(c.text)
+            if action == "hide":
+                await self._hide(c, port, reason)
+                continue
             if action != "reply":
-                c.status = "hidden" if action == "hide" else "skipped"
+                c.status = "skipped"
                 c.skip_reason = reason
                 c.handled_at = utc_now()
                 self.session.add(c)
@@ -115,6 +118,20 @@ class CommentService:
             if await self._reply(c, port):
                 posted += 1
         return posted
+
+    async def _hide(self, c: PostComment, port: ChannelPort, reason: str) -> None:
+        """Delete a spam/abuse comment under our post. If the delete fails (transport hiccup),
+        leave it pending so the next run retries rather than marking it hidden when it isn't."""
+        result = await port.hide_comment(f"{c.media_id}:{c.external_id}")
+        if result.ok:
+            c.status = "hidden"
+            c.skip_reason = reason
+            c.handled_at = utc_now()
+        else:
+            logger.warning("comment hide failed branch=%d comment=%s: %s",
+                           self.branch_id, c.external_id, result.error)
+            c.attempts += 1  # stays pending → retried next run
+        self.session.add(c)
 
     async def _reply(self, c: PostComment, port: ChannelPort) -> bool:
         text, meta = await self._draft(c)

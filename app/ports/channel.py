@@ -80,3 +80,7 @@ class ChannelPort(Protocol):
     async def reply_to_comment(self, comment_external_id: str, text: str) -> SendResult:
         """Публично ответить на комментарий (reply-to-comment по его id)."""
         ...
+
+    async def hide_comment(self, comment_external_id: str) -> SendResult:
+        """Удалить спам/оскорбление под нашим постом (private API: delete владельцем)."""
+        ...

@@ -334,6 +334,16 @@ class InstagrapiTransport:
             replied_to_comment_id=int(replied_to) if replied_to else None)
         return {"pk": str(getattr(result, "pk", "") or "")}
 
+    async def delete_comment(self, comment_id: str) -> None:
+        """Delete a comment under OUR OWN post (spam/abuse moderation). The private API has no
+        'hide', but the post owner may delete any comment under their media — the public
+        result is the same: it disappears. `comment_id` is 'media_pk:comment_pk'. Raises on
+        failure (caller keeps the DB flag and retries next tick)."""
+        client = self._ensure_client()
+        media_pk, _, comment_pk = comment_id.partition(":")
+        await asyncio.to_thread(
+            client.comment_bulk_delete, media_pk, [int(comment_pk)])
+
 
 class EvolutionTransport:
     """Implements channels.whatsapp.WhatsAppTransport over the Evolution API (HTTP)."""

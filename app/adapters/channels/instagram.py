@@ -51,6 +51,9 @@ class IGTransport(Protocol):
     async def send_comment_reply(self, comment_id: str, text: str) -> dict[str, Any]:
         ...
 
+    async def delete_comment(self, comment_id: str) -> None:
+        ...
+
 
 class InstagramAdapter:
     """Implements app.ports.channel.ChannelPort for IG follow-up via a private transport."""
@@ -129,6 +132,17 @@ class InstagramAdapter:
         except Exception as exc:  # transport failure → caller decides retry/skip
             return SendResult(ok=False, error=str(exc))
         return SendResult(ok=True, external_message_id=str(raw.get("pk", "")))
+
+    async def hide_comment(self, comment_external_id: str) -> SendResult:
+        """Delete a spam/abuse comment under our own post. Idempotent: if IG says it's
+        already gone, that's success (the goal — 'not visible' — is met either way)."""
+        try:
+            await self._t.delete_comment(comment_external_id)
+        except Exception as exc:  # noqa: BLE001 — gone = done, else keep flag + retry
+            if _already_gone(exc):
+                return SendResult(ok=True)
+            return SendResult(ok=False, error=str(exc))
+        return SendResult(ok=True)
 
     def _to_comment(self, c: dict[str, Any]) -> InboundComment:
         return InboundComment(
