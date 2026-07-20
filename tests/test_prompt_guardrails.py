@@ -200,3 +200,23 @@ def test_answer_first_then_ask_for_contact() -> None:
 def test_need_payoff_gain_is_pulled_before_presenting() -> None:
     assert "Always attempt this before presenting" in _DECISION_CONTRACT
     assert "the gain is what your pitch sells back" in _DECISION_CONTRACT
+
+
+def test_nanti_procrastination_reframe_present() -> None:
+    # thread 1835: 'kalau nanti saya jadi' — the postpone-the-decision objection needs an
+    # honest cost-of-waiting reframe (others start first and take the projects), not pressure.
+    assert "NANTI / LATER" in _DECISION_CONTRACT
+    assert "COST OF WAITING" in _DECISION_CONTRACT
+    assert "take the projects/clients first" in _DECISION_CONTRACT
+    assert "NO fake scarcity" in _DECISION_CONTRACT
+
+
+def test_no_present_on_a_single_vague_goal() -> None:
+    # thread 4686: presented SMM after only 'cari pengalaman', job==gain, no pain captured.
+    assert "DON'T PRESENT ON A SINGLE VAGUE GOAL" in _DECISION_CONTRACT
+    assert "jobs and gains are NOT the same field" in _DECISION_CONTRACT
+
+
+def test_generic_price_does_not_dump_every_total() -> None:
+    # thread 4693: dumped 3 products' full totals to a generic 'berapa biaya'.
+    assert "do NOT list EVERY product's full total" in _DECISION_CONTRACT
