@@ -107,10 +107,11 @@ def _decision(**over: Any) -> Decision:
 
 
 async def test_fast_broken_json_escalates_to_smart(db_session) -> None:
-    # mid-conversation, neutral last message, cold lead → routes to fast (not the first-reply
-    # or a conversion moment), so the broken-JSON → smart escalation path is exercised
+    # 'new'-stage mid-conversation, neutral last message, cold lead → routes to fast (active
+    # sales stages now run on smart, so 'new' is the remaining cheap lane), exercising the
+    # broken-JSON → smart escalation path
     bid, tid, lead = await _world(
-        db_session, stage=Stage.QUALIFYING, inbounds=["halo", "oh gitu", "oke deh"])
+        db_session, stage=Stage.NEW, inbounds=["halo", "oh gitu", "oke deh"])
     lead.lead_type = "cold"
     db_session.add(lead)
     await db_session.flush()

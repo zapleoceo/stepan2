@@ -150,8 +150,9 @@ async def test_decide_returns_none_when_both_fast_and_smart_unparseable(db_sessi
     """A double-unparseable decision (fast fails → smart escalation also fails) must degrade
     to None (caller skips + retries), NOT raise ValueError and abort the reply job."""
     bid, tid, lead, thread = await _world(db_session)
-    # mid-conversation, neutral, cold → routes to fast so the fast→smart escalation is exercised
-    lead.stage = Stage.QUALIFYING
+    # 'new'-stage mid-conversation, neutral, cold → routes to fast (active sales stages now run
+    # on smart), so the fast→smart escalation path is exercised
+    lead.stage = Stage.NEW
     lead.lead_type = "cold"
     db_session.add(lead)
     for i, txt in enumerate(("lanjut", "oh gitu")):
