@@ -792,6 +792,29 @@ def test_open_house_as_event_flags_event_framing_spares_visit_time() -> None:
     assert not guard.open_house_as_event("oh iya Kak, soal jadwalnya nanti aku info")
 
 
+def test_open_house_online_flags_zoom_spares_online_class() -> None:
+    # 2026-07-20 export: OH offered online/Zoom, but OH is in-person only
+    assert guard.open_house_online_claims(
+        "Kakak mau ikut Open House gratis secara online minggu ini?")
+    assert guard.open_house_online_claims(
+        "Open House tiap Kamis, hadir langsung di Menara Sudirman atau join online via Zoom")
+    # an online CLASS mentioned next to OH is fine — OH stays in-person, the class can be online
+    assert not guard.open_house_online_claims(
+        "boleh datang ke Open House gratis tiap Kamis, atau pilih kelas online")
+    assert not guard.open_house_online_claims("Open House gratis tiap Kamis di Menara Sudirman")
+
+
+def test_student_discount_flags_pelajar_offer_to_a_mahasiswa() -> None:
+    # policy: pelajar 10% is under-18 only; mahasiswa (18+) do NOT qualify
+    assert guard.student_discount_to_adult(
+        "karena Kakak masih mahasiswa ada diskon pelajar 10%")
+    assert guard.student_discount_to_adult(
+        "Kabar baiknya: karena Kakak masih mahasiswa, ada diskon pelajar 10% 🎓")
+    # a real under-18 pelajar discount (no mahasiswa) passes; referral passes
+    assert not guard.student_discount_to_adult("buat pelajar SMP ada diskon pelajar 10%")
+    assert not guard.student_discount_to_adult("kalau ajak teman, kalian berdua dapat diskon 10%")
+
+
 def test_game_offering_claims_flags_invented_course_spares_honest_pivot() -> None:
     # thread 4573: a game course / 'game projects we built' that don't exist
     assert guard.game_offering_claims("kami ada kelas game development lho Kak")

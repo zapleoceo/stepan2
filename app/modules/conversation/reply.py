@@ -277,7 +277,9 @@ def _deterministic_issues(
         *guard.ungrounded_biz_counts(reply, context),
         *guard.career_service_claims(reply),
         *guard.open_house_as_event(reply),
+        *guard.open_house_online_claims(reply),
         *guard.game_offering_claims(reply),
+        *guard.student_discount_to_adult(reply),
         *guard.premature_payment_details(reply, lead_words),
         *guard.invented_price_no_card(reply, context),
     ]

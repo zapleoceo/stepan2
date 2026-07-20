@@ -350,6 +350,58 @@ def game_offering_claims(reply: str) -> list[str]:
     return out
 
 
+# Open House is IN-PERSON ONLY (Menara Sudirman, Kamis 16:00-20:00); playbook_meetings is
+# explicit — NEVER promise a Zoom link. Classes can run online (Teams), and the model keeps
+# conflating the two, inventing an 'Open House join online via Zoom' (dozens of live cases in
+# the 2026-07-20 export: "hadir langsung di Menara Sudirman atau join online via Zoom"). A
+# lead who plans to attend the OH from home shows up to nothing. An online CLASS mention near
+# OH ('Open House Kamis, atau kelas online') is fine — the kelas/belajar guard spares it.
+# Same-clause filler: any non-sentence-ender, but a period/comma BETWEEN digits (a time
+# '16.00-20.00' or price) is not a boundary — those broke the window on OH-time lines.
+_CL = r"(?:[^.!?\n]|\d[.,]\d)"
+_OH_ONLINE_RE = re.compile(
+    rf"open\s*house{_CL}{{0,90}}?\b(?:join|hadir|ikut|datang)\s+online\b"
+    rf"|open\s*house{_CL}{{0,90}}?\b(?:via|lewat)\s+zoom\b"
+    rf"|open\s*house{_CL}{{0,60}}?\bsecara\s+online\b"
+    # OH itself framed as location-OR-online ("Open House ... di Menara Sudirman atau online")
+    rf"|open\s*house{_CL}{{0,95}}?\batau\s+online\b"
+    rf"|\bopen\s*house\b{_CL}{{0,30}}?\bonline\b",
+    re.IGNORECASE)
+
+
+def open_house_online_claims(reply: str) -> list[str]:
+    out = []
+    for m in _OH_ONLINE_RE.finditer(reply or ""):
+        span = m.group(0).lower()
+        if "kelas" in span or "belajar" in span:
+            continue  # 'Open House Kamis, atau kelas online' — online modifies the class
+        out.append(
+            "Open House offered online/Zoom — it is IN-PERSON only (Menara Sudirman, Kamis "
+            f"16-20); offer online only for the CLASS, never the Open House: {m.group(0)}")
+    return out
+
+
+# The 'pelajar 10%' discount is ONLY for school students UNDER 18 — policy_discounts is
+# explicit: "Umur 18+ TIDAK dapat diskon ini (termasuk mahasiswa)". The model keeps offering
+# it to a mahasiswa (university student, 18+): "karena Kakak masih mahasiswa ada diskon
+# pelajar 10%" (2026-07-20 export). A discount that collapses when they try to claim it costs
+# the sale AND the trust. The real levers for an adult are referral 10% (bring a friend) and
+# the Vibe Coding book-now −1jt, never the pelajar discount.
+_MHS_DISCOUNT_RE = re.compile(
+    r"mahasiswa[^.!?\n]{0,45}diskon[^.!?\n]{0,20}10\s*%"
+    r"|diskon[^.!?\n]{0,20}(?:pelajar|siswa)[^.!?\n]{0,10}10\s*%[^.!?\n]{0,45}mahasiswa",
+    re.IGNORECASE)
+
+
+def student_discount_to_adult(reply: str) -> list[str]:
+    m = _MHS_DISCOUNT_RE.search(reply or "")
+    return [
+        "pelajar 10% discount offered to a mahasiswa — that discount is for UNDER-18 school "
+        "students only; university students (18+) do not qualify. Use referral 10% (bring a "
+        f"friend) or no discount, never the pelajar discount for a mahasiswa: {m.group(0)}"
+    ] if m else []
+
+
 # A clock time quoted for a class/event that the KB never states. Sim s10 night_worker: a
 # shift worker asking about evenings got 'kelas kita malam hari, sekitar jam 19.00-20.00 WIB'
 # plus an offer of later groups — the KB says only 'malam', no times. The lead plans their
