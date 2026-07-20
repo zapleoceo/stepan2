@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import MediaAsset, Message, StageEvent
+from app.adapters.db.models import Lead, MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.ads import AdMappingService
 from app.modules.conversation.situations import is_auto_reply
@@ -157,7 +157,33 @@ class IngestService:
             ))
         if thread.last_out_at is None or inbound.occurred_at > thread.last_out_at:
             thread.last_out_at = inbound.occurred_at
+        # A human manager typed a manual reply in the IG app — they've taken the thread over.
+        # Moving last_out_at alone only holds the bot until the lead's NEXT message, when
+        # _revive_bot flips agent back on (unless the stage is human-led) and the bot resumes
+        # its old script ON TOP of the manager (thread 1761: the manager corrected 'we have no
+        # hardware course' and a minute later the bot re-pitched electronics certificates).
+        # Hand the thread to the human: MANAGER is human-led, so _revive_bot leaves it muted
+        # until a manager re-enables the bot from the UI. Skip when already human-led/dormant
+        # (a dormant lead a manager touches is being worked by that human too, so still mute).
+        await self._pause_bot_for_manager(thread)
         return msg
+
+    async def _pause_bot_for_manager(self, thread) -> None:  # noqa: ANN001
+        """A manual manager reply means a human owns the thread now — mute the bot until it's
+        re-enabled from the UI. No-op if the lead is already human-led."""
+        lead = await self.session.get(Lead, thread.lead_id)
+        if lead is None or lead.stage in HUMAN_LED_STAGES:
+            return
+        self.session.add(StageEvent(
+            branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
+            from_stage=str(lead.stage), to_stage=str(Stage.MANAGER),
+            actor="manager", reason="manager replied manually — human took over",
+        ))
+        lead.stage = Stage.MANAGER
+        lead.agent_enabled = False
+        self.session.add(lead)
+        logger.info("branch=%d lead=%d manager reply → bot paused (MANAGER)",
+                    self.branch_id, lead.id)
 
     async def _store(
         self, lead, thread, channel_id: int, external_id: str, inbound: InboundMessage
