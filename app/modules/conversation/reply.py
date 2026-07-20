@@ -446,7 +446,11 @@ async def apply_critic(
     reply = (decision.reply or "").strip()
     canned = {guard.SAFE_FALLBACK.strip(), guard.CLARIFY_FALLBACK.strip(),
               guard.ASK_PHONE_BEFORE_HANDOFF.strip()}
-    if mode == "off" or not reply or decision.needs_manager or reply in canned:
+    # 'suggest' is a manager-facing DRAFT preview — the manager is the human reviewer, so the
+    # fail-closed hand-off ('let me check with the team') is useless here; skip the critic and
+    # give them the best grounded methodology draft to send or edit.
+    if (mode == "off" or workflow == "suggest" or not reply
+            or decision.needs_manager or reply in canned):
         return decision, meta
 
     async def _judge(text: str) -> critic.Critique:

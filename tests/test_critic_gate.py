@@ -118,6 +118,24 @@ async def test_shadow_logs_but_does_not_alter(db_session) -> None:
     assert llm.critic_calls == 1 and llm.gen_calls == 1  # judged, but no regen
 
 
+async def test_suggest_workflow_skips_the_critic() -> None:
+    """A manager 'suggest' draft must NOT go through the critic's fail-closed hand-off — the
+    manager is the human reviewer. apply_critic returns the draft untouched for workflow=
+    'suggest', before it would even touch the engine (so a None engine here proves the skip)."""
+    from app.modules.conversation.decision import Decision
+    from app.modules.conversation.reply import apply_critic
+    from app.domain.enums import Stage
+
+    settings_on = type("S", (), {"critic_gate": "on"})()
+    draft = Decision(reply="Vibe Coding 13jt, DP 500rb ya Kak", stage=Stage.PRESENTING,
+                     product_slug="vibe_coding", ready=False, needs_manager=False)
+    out, meta = await apply_critic(
+        settings_on, None, None, 1, lang="id", workflow="suggest", bill=False,
+        decision=draft, meta={}, situational=None, last_inbound="berapa harganya?",
+        open_objections=[])
+    assert out is draft  # unchanged — critic skipped (a None engine would crash if it ran)
+
+
 async def test_off_skips_the_critic(db_session) -> None:
     bid = await _branch(db_session, "off")
     llm = _CriticLLM([_DRAFT_A], verdicts=[_bad("never consulted")])

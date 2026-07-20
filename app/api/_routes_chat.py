@@ -22,12 +22,15 @@ from app.admin._branch import (
 from app.config import settings
 from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.needs_translate import cached_needs, translated_needs
+from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.translate import (
     target_for_lang,
     translate_message,
     translate_text,
 )
 from app.modules.knowledge.repository import ProductRepo
+from app.modules.knowledge.service import KnowledgeService
+from app.modules.knowledge.source import effective_kb_branch
 from app.modules.media.service import MediaService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import get_settings
@@ -680,42 +683,26 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
         suggest_bid = await _guarded_branch(session, thread_id, allowed)
         if suggest_bid is None:
             return HTMLResponse("")
-        msgs = (
-            await session.execute(
-                text(
-                    "SELECT direction, sent_by, text FROM message"
-                    " WHERE thread_id = :tid ORDER BY occurred_at DESC, id DESC LIMIT 10"
-                ),
-                {"tid": thread_id},
-            )
-        ).all()
-    if not msgs:
-        return HTMLResponse("")
-    convo_lines = "\n".join(
-        f'{"Lead" if r[0] == "in" else "Bot"}: {(r[2] or "")[:200]}'
-        for r in reversed(msgs)
-    )
-    llm_msgs = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful sales assistant. "
-                "Based on the conversation, write a SHORT friendly reply to the lead. "
-                "Reply in the same language as the lead. Max 3 sentences. "
-                "Return ONLY the reply text."
-            ),
-        },
-        {"role": "user", "content": convo_lines},
-    ]
-    llm = BrokerLLM()
-    try:
-        draft, _ = await llm.chat(llm_msgs, capability="chat:fast", max_tokens=300,
-                                  workflow="suggest", thread_id=thread_id,
-                                  branch_id=suggest_bid)
-    except Exception as exc:
-        _log.warning("suggest LLM error tid=%s: %s", thread_id, exc)
+        # The suggested draft goes through the SAME engine a live reply does — persona, KB
+        # facts, the full sales methodology and the anti-fabrication guard — so the manager gets
+        # what Stepan would actually say, not a generic bare-prompt line. The critic's
+        # fail-closed hand-off is skipped for workflow='suggest' (the manager IS the reviewer),
+        # and the session is rolled back so the preview never mutates the lead's needs/stage.
+        cfg = await get_settings(session, suggest_bid)
+        kb = await effective_kb_branch(session, suggest_bid)  # shared-KB link, if any
+        llm = BrokerLLM()
+        reply_service = ReplyService(
+            session, suggest_bid, llm, KnowledgeService(session, kb, llm), branch_settings=cfg)
         draft = ""
-    return HTMLResponse(suggest_box_html(thread_id, draft.strip()))
+        try:
+            decision = await reply_service.decide(thread_id, workflow="suggest")
+            if decision is not None:
+                draft = (decision.reply or "").strip()
+        except Exception as exc:  # noqa: BLE001 — a draft failure must not 500 the panel
+            _log.warning("suggest draft error tid=%s: %s", thread_id, exc)
+        finally:
+            await session.rollback()  # preview only — discard any needs/counter writes
+    return HTMLResponse(suggest_box_html(thread_id, draft))
 
 
 @router.post("/chat/{thread_id}/tr-draft", response_class=HTMLResponse)
