@@ -34,10 +34,29 @@ async def test_seed_is_idempotent_and_has_sections(db_session) -> None:
     await P.ensure_seeded(db_session)
     await P.ensure_seeded(db_session)                 # second call must not duplicate
     personas = await P.list_personas(db_session)
-    assert len(personas) == len(P.SEED_PERSONAS)
+    assert len(personas) == len(P.SEED_PERSONAS) == 1
     assert all(len(P.sections(p.content)) == 5 for p in personas)
-    assert any(p.name == "The Consultative Closer" for p in personas)
+    # the built-in persona is the live website-demo agent, not the old placeholder junk
+    assert any(p.slug == "website-demo" for p in personas)
+    assert not any(p.slug in ("consultative-closer", "warm-advisor", "fast-mover")
+                   for p in personas)
     assert all(p.author_name and p.author_contact for p in personas)   # author + contact set
+
+
+async def test_ensure_seeded_adds_the_builtin_next_to_an_imported_persona(db_session) -> None:
+    """Slug-scoped seed: a library that already holds a branch import must still get the
+    built-in website-demo persona (the old 'seed only when empty' skipped it)."""
+    from app.adapters.db.models import KnowledgeDoc
+
+    bid = await _branch(db_session)
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="persona_core", category="persona",
+                                content="## Voice\nwarm"))
+    await db_session.flush()
+    await P.import_from_branch(db_session, bid, "Indonesia persona", lang="id", country="ID")
+
+    await P.ensure_seeded(db_session)
+    slugs = {p.slug for p in await P.list_personas(db_session)}
+    assert "website-demo" in slugs and "indonesia-persona" in slugs
 
 
 async def test_select_favorite_and_addendum_roundtrip(db_session) -> None:
@@ -68,22 +87,22 @@ async def test_select_favorite_and_addendum_roundtrip(db_session) -> None:
 
 
 def test_library_panel_renders_cards_stats_and_author() -> None:
+    from types import SimpleNamespace
+
     from app.api._i18n import _lang
     from app.api._ui_personas import personas_panel_html
-    from app.modules.persona.service import SEED_PERSONAS
     _lang.set("en")
 
-    from types import SimpleNamespace
-    personas = [
-        SimpleNamespace(id=i + 1, name=d["name"], version=d["version"], summary=d["summary"],
-                        lang=d["lang"], country=d["country"], author_name="Zapleo",
-                        author_contact="https://t.me/zapleosoft")
-        for i, d in enumerate(SEED_PERSONAS)
-    ]
+    def _p(pid: int, name: str) -> SimpleNamespace:
+        return SimpleNamespace(id=pid, name=name, version="1.0", summary="s.",
+                               lang="en", country="", author_name="Zapleo",
+                               author_contact="https://t.me/zapleosoft")
+
+    personas = [_p(1, "Stepan (website demo)"), _p(2, "Indonesia persona")]
     html = personas_panel_html(
         personas, adopt={1: (2, 3)}, active_id=1, fav_ids={2},
-        can_write=True, active_name="The Consultative Closer")
-    assert "pa-grid" in html and "The Consultative Closer" in html
+        can_write=True, active_name="Stepan (website demo)")
+    assert "pa-grid" in html and "Stepan (website demo)" in html
     assert "2 branches · 3" in html                   # adoption stat rendered
     assert "t.me/zapleosoft" in html                  # contact-author link
     assert "/ui/personas/2/favorite" in html          # favorite toggle present

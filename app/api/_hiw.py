@@ -426,7 +426,7 @@ _BODY_EN = r"""
   <details>
     <summary>Character: the persona library</summary>
     <div class="body">
-      <p>The methodology ("what to do") is the same for all branches and lives in code. But <b>how to sound</b> is configurable: the library holds versioned personas ("The Consultative Closer", "The Warm Advisor", "The Fast Mover"), each described in sections: voice and tone, discovery style, objection handling, closing style, boundaries. A branch picks a persona and can append its own addenda to any section — they survive a persona switch.</p>
+      <p>The methodology ("what to do") is the same for all branches and lives in code. But <b>how to sound</b> is configurable: the library holds versioned personas (the built-in website-demo agent, plus each branch's imported persona), described in sections: voice and tone, discovery style, objection handling, closing style, boundaries. A branch picks a persona and can append its own addenda to any section — they survive a persona switch.</p>
       <details class="l3"><summary>All the way down</summary><div class="body">
         <p><code>app/modules/persona/service.py</code>; tables <code>persona</code> (platform-wide, versioned), <code>branch_persona</code> (choice + addenda), <code>persona_favorite</code>. The persona enters the prompt directly from the branch's <code>persona_core</code> knowledge document and deliberately repeats the "never fabricate" rule — a second line of defence next to the guard.</p>
       </div></details>
