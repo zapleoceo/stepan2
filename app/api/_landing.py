@@ -6,6 +6,8 @@ No mention of any specific client."""
 # ruff: noqa: E501 — inline CSS/HTML string; long lines are inherent, not code smell
 from __future__ import annotations
 
+import html as _h
+
 from app.api._landing_analytics import analytics_section
 from app.config import settings
 
@@ -18,6 +20,30 @@ _DESC = ("Stepan is an AI sales agent that qualifies and sells to your leads in 
 
 def _base_url() -> str:
     return (settings().public_url or "https://stepan2.zapleo.com").rstrip("/")
+
+
+def _pixel_head() -> str:
+    """Meta pixel base code, injected only when a pixel id is configured.
+
+    Events fire from the widget JS: 'Lead' when a visitor opens the demo chat, 'Contact' when
+    they send their first message. That turns a cold-traffic ad from 'optimise for clicks' into
+    'optimise for people who actually engage the product' — exactly what this page promises and,
+    ironically, never did for its own funnel. Every call is guarded by `window.fbq`, so with no
+    pixel configured the page stays byte-for-byte clean."""
+    pixel_id = settings().landing_pixel_id.strip()
+    if not pixel_id:
+        return ""
+    pid = _h.escape(pixel_id)
+    return (
+        "<script>!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?"
+        "n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;"
+        "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;"
+        "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
+        "(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');"
+        f"fbq('init','{pid}');fbq('track','PageView');</script>"
+        f"<noscript><img height=\"1\" width=\"1\" style=\"display:none\" "
+        f"src=\"https://www.facebook.com/tr?id={pid}&ev=PageView&noscript=1\"/></noscript>"
+    )
 
 
 def _seo_head() -> str:
@@ -85,6 +111,7 @@ function openStepan(){
   document.getElementById('stp-fab').style.display='none';
   if(!STP.msgs.length)stpAdd('assistant',STP_GREET);
   document.getElementById('stp-in').focus();
+  if(window.fbq&&!STP.led){STP.led=1;fbq('track','Lead',{content_name:'demo_open'});}
 }
 function closeStepan(){
   document.getElementById('stp-w').classList.remove('on');
@@ -93,6 +120,7 @@ function closeStepan(){
 async function sendStepan(){
   var inp=document.getElementById('stp-in');var text=(inp.value||'').trim();
   if(!text||STP.busy)return;
+  if(window.fbq&&!STP.contacted){STP.contacted=1;fbq('track','Contact',{content_name:'demo_message'});}
   inp.value='';inp.style.height='auto';stpAdd('user',text);STP.busy=true;stpTyping(true);
   try{
     var r=await fetch('/demo/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:STP.msgs})});
@@ -857,6 +885,7 @@ def landing_html() -> str:
         "<rect width='32' height='32' rx='8' fill='%23f2f4f7'/>"
         "<text x='16' y='23' font-size='20' font-weight='700' fill='black' "
         "text-anchor='middle' font-family='Arial'>S</text></svg>\">"
+        + _pixel_head() +
         f"<style>{_CSS}</style></head><body>"
         # nav — login top-right
         "<nav><div class=\"wrap nav\">"
