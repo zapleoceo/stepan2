@@ -144,6 +144,28 @@ def test_two_questions_get_the_answer_every_part_suffix() -> None:
     assert nudge is not None and "EVERY part" in nudge
 
 
+def test_bare_postpone_gets_the_cost_of_waiting_nudge() -> None:
+    """A bare 'nanti aja / kalau jadi nanti konfirmasi' (thread 1835) is procrastination, not a
+    real objection — it must get the gentle opportunity-cost + low-friction nudge, not the
+    generic 'what's holding you back'."""
+    from app.modules.conversation.situations import POSTPONE_NUDGE
+    txt = "nanti aja deh kak, kalau jadi nanti aku konfirmasi"
+    nudge = pick_nudge(lead_type=None, dialog=_dialog_with(txt), last_txt=txt,
+                       stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and nudge.startswith(POSTPONE_NUDGE[:40])
+    assert "opportunity-cost" in nudge
+
+
+def test_plain_not_interested_still_gets_generic_objection_handle() -> None:
+    """A soft-no that isn't a postpone ('belum tertarik') must NOT be stolen by the postpone
+    branch — it gets the generic objection-handling move."""
+    from app.modules.conversation.situations import OBJECTION_HANDLE_NUDGE
+    txt = "belum tertarik sih kak"
+    nudge = pick_nudge(lead_type=None, dialog=_dialog_with(txt), last_txt=txt,
+                       stored_needs=NeedsProfile(), inbound_count=2)
+    assert nudge is not None and nudge.startswith(OBJECTION_HANDLE_NUDGE[:40])
+
+
 def test_substantive_statement_detected_for_clarify_carveout() -> None:
     """thread 4660: 'sebenernya aku nyari magang' got the dismissive clarify menu because the
     keep-answer carve-out only covered questions. A real content statement must be kept."""

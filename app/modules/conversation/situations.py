@@ -293,6 +293,38 @@ OBJECTION_HANDLE_NUDGE = (
     "ONLY from the KB, never fabricate a number, case, or claim. Return the JSON as usual.]"
 )
 
+# A BARE decision-postpone — 'nanti aja / mikir dulu / kalau jadi nanti konfirmasi' — with NO
+# money/time/trust reason named (those route earlier in the chain). The generic soft-no move is
+# 'isolate the doubt' (ask what's wrong), which is the WRONG move here: there's nothing to
+# isolate, they're just deferring. The high-conversion move is a GENTLE opportunity-cost seed +
+# a low-friction step. Distinct enough from SOFT_NO_RE that placing it first only steals the
+# bare-postpone cases, not 'belum tertarik' / 'makasih' etc.
+POSTPONE_RE = re.compile(
+    r"\bnanti\s+(aja|dulu|lah|ya|saja)\b"
+    r"|\bnanti\s+(saya|aku|ku|gua|gue)?\s*(kabar\w*|konfirmasi|chat|hubungi|info\w*)"
+    r"|\bkalau\s+(nanti|udah\s+siap|dah\s+siap|jadi)\b"
+    r"|\b(mikir|pikir)[\s-]*(mikir|pikir)?\s*(dulu|lagi)\b"
+    r"|\bpikir[\s-]*pikir\b"
+    r"|\bbelum\s+(sekarang|kepikiran)\b"
+    r"|\blain\s+(kali|waktu)\b"
+    r"|\bntar\s+(aja|dulu)\b",
+    re.IGNORECASE)
+
+POSTPONE_NUDGE = (
+    "[System: the lead is POSTPONING the DECISION ('nanti aja', 'mikir dulu', 'kalau jadi nanti "
+    "aku konfirmasi') WITHOUT naming a money/time/trust blocker. This is procrastination, not a "
+    "real objection — the high-conversion move is a GENTLE opportunity-cost seed + a low-friction "
+    "step, NOT a generic 'what's holding you back'. ONE warm message in the lead's language:\n"
+    "1) ACKNOWLEDGE with zero pressure ('santai Kak, wajar dipikir dulu 😊').\n"
+    "2) WEAVE ONE short, gentle opportunity-cost line — stated as a fact, never a threat or fake "
+    "scarcity: in this field the ones who start earlier finish earlier and take the projects/"
+    "clients earlier, and with AI the moment to start is now.\n"
+    "3) LOWER THE FRICTION so 'later' becomes a small step NOW: the FREE Open House / paid Demo "
+    "Event to see it live first, or lock today's price with a DP and decide fully later.\n"
+    "4) End with ONE soft question, never a hard close. NO 'now or never', NO invented scarcity "
+    "('sisa 2 kursi' only if the KB says so). If the lead postpones AGAIN after this, ease off "
+    "fully. Facts ONLY from the KB. Return the JSON as usual.]")
+
 # The lead NAMED a timeframe in their postpone ("bulan depan", "abis gajian", "2 minggu
 # lagi") — that's a dated 'later', gold for follow-up timing. Parsed deterministically in
 # reply._snooze_on_soft_no so the re-contact lands when THEY said, not on a fixed +7d guess.
@@ -905,6 +937,21 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
         if time_obj_count <= 1:
             return NO_TIME_NUDGE
         return SOFT_NO_WITH_QUESTION_NUDGE if asks else SOFT_NO_NUDGE
+    # A BARE decision-postpone ('nanti aja', 'mikir dulu') — no money/time/trust reason named —
+    # gets the cost-of-waiting + low-friction move, NOT the generic 'isolate the doubt'. Checked
+    # before SOFT_NO so a bare postpone lands here; a repeat eases off (pushing opportunity-cost
+    # twice reads as nagging).
+    if POSTPONE_RE.search(last_txt) and not asks:
+        # trigger on the LAST message being a bare postpone (not the whole-turn scan) and NOT
+        # when they also asked something — a postpone + question ('nanti dulu, tapi berapa?') or
+        # a postpone with an emotional reason trailing wants answer-first / gentle handling, so
+        # let those fall through to SOFT_NO. Ease off if they've already objected once (any form).
+        prior_obj = sum(
+            1 for m in dialog if m.direction == "in"
+            and (SOFT_NO_RE.search(m.text or "") or POSTPONE_RE.search(m.text or "")))
+        if prior_obj <= 1:
+            return POSTPONE_NUDGE
+        return SOFT_NO_NUDGE
     if SOFT_NO_RE.search(turn_txt):
         # First objection this conversation → work it once; on a repeat, ease off (existing).
         soft_no_count = sum(
