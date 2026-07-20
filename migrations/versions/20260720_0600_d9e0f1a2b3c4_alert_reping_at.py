@@ -4,7 +4,7 @@ A ready/handoff alert the manager hasn't worked within the SLA gets one polite r
 tagging the branch manager. reping_at marks that the re-ping went out, so it fires once.
 
 Revision ID: d9e0f1a2b3c4
-Revises: c8d9e0f1a2b3
+Revises: b7c8d9e0f1a2
 Create Date: 2026-07-20 06:00:00
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "d9e0f1a2b3c4"
-down_revision = "c8d9e0f1a2b3"
+down_revision = "b7c8d9e0f1a2"
 branch_labels = None
 depends_on = None
 
