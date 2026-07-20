@@ -156,6 +156,27 @@ def test_bubble_hides_translate_button_when_no_caption() -> None:
     assert "trMsg(2,10)" not in html  # no translate button on a caption-less media bubble
 
 
+# ─── translate must not dump a gateway 504 page into the bubble ───────────────
+
+def test_translate_fetch_guards_against_gateway_error_bodies() -> None:
+    """fetch() does NOT reject on a 5xx, so an nginx/Cloudflare 504 arrives as ok:false with
+    the gateway's HTML error page as the body. The old code injected r.text() straight into
+    the bubble, so a slow translate replaced the message with a giant '504' page. Every
+    translate call must go through trFetch (which throws on !r.ok) and toast a retry instead."""
+    from app.api._ui_html import app_shell
+    _set_lang("ru")
+    html = app_shell("ru", "", active_nav="inbox")
+    assert "function trFetch(" in html and "if(!r.ok)throw" in html
+    # all three translate paths route through the guard, none does a raw .text() inject
+    assert "trFetch('/ui/chat/'+tid+'/msg/'+mid+'/tr'" in html      # per-bubble
+    assert "trFetch('/ui/chat/'+tid+'/translate'" in html            # chat summary
+    assert "trFetch('/ui/chat/'+tid+'/tr-draft'" in html             # suggest draft
+    assert ".then(function(r){return r.text();})" not in html        # no unguarded inject
+    # a failure asks the operator to retry, localized
+    assert "function toast(msg)" in html and "Перевод не удался" in html
+    assert html.count("toast(_TRERR)") >= 3
+
+
 # ─── the "Stepan is thinking" spinner must only show for ITS OWN request ──────
 
 def test_indicator_css_matches_only_the_indicator_itself() -> None:

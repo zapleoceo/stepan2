@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html as _h
+import json as _json
 import re
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,12 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 
 from ._i18n import t
+
+
+def _js_str(s: str) -> str:
+    """A safe JS string literal for inlining a (localized) message into the shell script."""
+    return _json.dumps(s, ensure_ascii=False)
+
 
 # Tz offset (hours, may be fractional for +5:30 etc.) applied to timestamps in the current
 # render. Fed the VIEWER's own tz (from the browser, via the `tzoff` cookie) so every admin
@@ -373,6 +380,11 @@ _CSS = (
     ".bb-p .bt{border:1px dashed #3a5578}"  # queued (unsent) look
     ".b-tr{font-size:.75rem;color:#5aa2ff;margin-top:.12rem}.bb-o .b-tr{text-align:right}"
     ".bt.trview{color:#5aa2ff}"
+    ".toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(8px);"
+    "background:#2a1512;border:1px solid #5a2a20;color:#ffb4a2;padding:.6rem 1rem;"
+    "border-radius:10px;font-size:.85rem;z-index:300;opacity:0;pointer-events:none;"
+    "max-width:86vw;text-align:center;transition:opacity .2s,transform .2s}"
+    ".toast.on{opacity:1;transform:translateX(-50%) translateY(0)}"
     ".bm{font-size:.63rem;color:#4a5568;margin-bottom:.1rem;display:flex;"
     "align-items:center;gap:.2rem}"
     ".bb-o .bm{justify-content:flex-end}"
@@ -1699,6 +1711,20 @@ def app_shell(
         "el.classList.add('on');}"
         "function scrollMsgs(tid){"
         "var m=document.getElementById('msgs-'+tid);if(m)m.scrollTop=m.scrollHeight;}"
+        # transient toast for a failed action (e.g. a translate that 504'd at the gateway)
+        f'var _TRERR={_js_str(t("chat.tr_retry"))};'
+        "var _toastT=null;"
+        "function toast(msg){var el=document.getElementById('toast');"
+        "if(!el){el=document.createElement('div');el.id='toast';el.className='toast';"
+        "document.body.appendChild(el);}el.textContent=msg;"
+        "el.classList.add('on');clearTimeout(_toastT);"
+        "_toastT=setTimeout(function(){el.classList.remove('on');},3200);}"
+        # translate fetch guard: fetch() does NOT reject on a 5xx, so an nginx/Cloudflare 504
+        # arrives as an ok:false response whose BODY is the gateway's HTML error page. Injecting
+        # r.text() then dumped that whole page into the bubble. Only accept a 2xx; on anything
+        # else, restore and ask to retry via a toast.
+        "function trFetch(url,opts){return fetch(url,opts).then(function(r){"
+        "if(!r.ok)throw new Error('http '+r.status);return r.text();});}"
         # coach: append the manager's own message instantly (optimistic), then cycle a
         # detailed 'what Stepan is doing' status while the deep call runs.
         "function coachSend(f){var ta=f.querySelector('textarea[name=request]');"
@@ -1874,14 +1900,14 @@ def app_shell(
         "el.classList.add('trview');return;}"
         "el.style.opacity='.45';"
         "el.dataset.orig=el.innerHTML;"
-        "fetch('/ui/chat/'+tid+'/msg/'+mid+'/tr',{headers:{'HX-Request':'true'}})"
-        ".then(function(r){return r.text();})"
+        "trFetch('/ui/chat/'+tid+'/msg/'+mid+'/tr',{headers:{'HX-Request':'true'}})"
         ".then(function(html){"
         "el.style.opacity='';"
         "if(html.trim()){"
         "el.dataset.tr=html;el.innerHTML=html;"
-        "el.dataset.state='tr';el.classList.add('trview');}})"
-        ".catch(function(){el.style.opacity='';});}"
+        "el.dataset.state='tr';el.classList.add('trview');}"
+        "else{toast(_TRERR);}})"  # empty = the app-level failure path; also a retry cue
+        ".catch(function(){el.style.opacity='';toast(_TRERR);});}"
         # translate every bubble in the thread at once — loops trMsg over the not-yet-translated
         # bubbles (each cached in message.tr_text, so re-opening the chat never re-bills)
         "function trAll(tid){"
@@ -1916,17 +1942,17 @@ def app_shell(
         "if(out.innerHTML.trim()){out.innerHTML='';return;}"
         "out.innerHTML='<div style=\"padding:.3rem .75rem;font-size:.75rem;"
         "color:#5a6472\">…</div>';"
-        "fetch('/ui/chat/'+tid+'/translate',{method:'POST',headers:{'HX-Request':'true'}})"
-        ".then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
-        ".catch(function(){out.innerHTML='';});}"
+        "trFetch('/ui/chat/'+tid+'/translate',{method:'POST',headers:{'HX-Request':'true'}})"
+        ".then(function(h){if(h.trim()){out.innerHTML=h;}else{out.innerHTML='';toast(_TRERR);}})"
+        ".catch(function(){out.innerHTML='';toast(_TRERR);});}"
         "function trClose(tid){var o=document.getElementById('tr-'+tid);if(o)o.innerHTML='';}"
         # translate the Suggest draft (shows the manager what Stepan's reply says)
         "function trDraft(tid){var ta=document.getElementById('sug-ta-'+tid);"
         "var out=document.getElementById('sug-tr-'+tid);if(!ta||!ta.value.trim())return;"
         "out.textContent='...';var fd=new FormData();fd.append('text',ta.value);"
-        "fetch('/ui/chat/'+tid+'/tr-draft',{method:'POST',headers:{'HX-Request':'true'},"
-        "body:fd}).then(function(r){return r.text();}).then(function(h){out.innerHTML=h;})"
-        ".catch(function(){out.textContent='';});}"
+        "trFetch('/ui/chat/'+tid+'/tr-draft',{method:'POST',headers:{'HX-Request':'true'},"
+        "body:fd}).then(function(h){if(h.trim()){out.innerHTML=h;}else{out.textContent='';toast(_TRERR);}})"
+        ".catch(function(){out.textContent='';toast(_TRERR);});}"
         # No pull-to-refresh emulation. The app-shell layout (html/body overflow:hidden,
         # inner scroll containers — same as any web chat) structurally disables the native
         # gesture in every mobile engine, and the hand-rolled touch handler proved flaky
