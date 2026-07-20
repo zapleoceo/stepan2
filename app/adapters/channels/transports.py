@@ -8,9 +8,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from datetime import UTC, datetime
 from typing import Any
 
 from app.config import settings
+from app.domain.clock import as_naive_utc
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +270,69 @@ class InstagrapiTransport:
                         f"media exceeds {self._MEDIA_MAX_BYTES} bytes — refusing to buffer")
                 chunks.append(chunk)
         return b"".join(chunks)
+
+    # How many recent posts to scan for new comments per run, and how many comments per post.
+    # Small on purpose: a comment walk is a private-API call sequence, and IG throttles it hard.
+    _COMMENT_POSTS_SCAN = 12
+    _COMMENT_PER_POST = 50
+
+    async def fetch_own_comments(self, since_epoch_us: int | None) -> list[dict[str, Any]]:
+        """Comments under OUR OWN recent posts, excluding our own comments. `since_epoch_us`
+        bounds the walk cheaply — comments older than the last run are skipped. Best-effort per
+        post: one post's extractor crash never aborts the whole walk."""
+        client = self._ensure_client()
+        own_id = self._resolve_own_id(client)
+        since_dt = (
+            datetime.fromtimestamp(since_epoch_us / 1_000_000, tz=UTC).replace(tzinfo=None)
+            if since_epoch_us else None)
+        medias = await asyncio.to_thread(
+            client.user_medias_v1, int(own_id), self._COMMENT_POSTS_SCAN)
+        out: list[dict[str, Any]] = []
+        for m in medias:
+            media_pk = str(getattr(m, "pk", "") or "")
+            if not media_pk:
+                continue
+            try:
+                comments = await asyncio.to_thread(
+                    client.media_comments, media_pk, self._COMMENT_PER_POST)
+            except Exception as exc:  # noqa: BLE001 — one post's failure isn't fatal
+                logger.warning("IG media_comments failed media=%s: %s", media_pk, exc)
+                continue
+            code = str(getattr(m, "code", "") or "")
+            caption = str(getattr(m, "caption_text", "") or "") or None
+            permalink = f"https://www.instagram.com/p/{code}/" if code else None
+            for c in comments:
+                author = getattr(c, "user", None)
+                author_pk = str(getattr(author, "pk", "") or "") or None
+                if author_pk == own_id:
+                    continue  # our own reply/comment — never react to ourselves
+                created = getattr(c, "created_at_utc", None) or getattr(c, "created_at", None)
+                created_naive = as_naive_utc(created) if created else None
+                if since_dt and created_naive and created_naive <= since_dt:
+                    continue
+                out.append({
+                    "comment_id": str(getattr(c, "pk", "") or ""),
+                    "media_id": media_pk,
+                    "text": str(getattr(c, "text", "") or ""),
+                    "timestamp": int(created_naive.replace(tzinfo=UTC).timestamp() * 1_000_000)
+                    if created_naive else None,
+                    "author_pk": author_pk,
+                    "author_username": str(getattr(author, "username", "") or "") or None,
+                    "media_caption": caption,
+                    "media_permalink": permalink,
+                })
+        return out
+
+    async def send_comment_reply(self, comment_id: str, text: str) -> dict[str, Any]:
+        """Publicly reply to a comment. instagrapi threads a reply by media + replied-to id;
+        we look up the comment's media from our own stored row, passed as `comment_id` in the
+        form 'media_pk:comment_pk' so the transport needs no extra fetch."""
+        client = self._ensure_client()
+        media_pk, _, replied_to = comment_id.partition(":")
+        result = await asyncio.to_thread(
+            client.media_comment, media_pk, text,
+            replied_to_comment_id=int(replied_to) if replied_to else None)
+        return {"pk": str(getattr(result, "pk", "") or "")}
 
 
 class EvolutionTransport:

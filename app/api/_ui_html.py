@@ -1670,6 +1670,7 @@ def app_shell(
         + _hna("nav.personas", "/ui/personas", "fa-solid fa-masks-theater", "personas")
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
+        + _hna("nav.comments", "/ui/comments/panel", "fa-solid fa-comments", "comments")
         + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
         + '<div class="nav-sep"></div>'
         + (_hna("nav.members", "/ui/members/panel", "fa-solid fa-users", "members")

@@ -62,6 +62,11 @@ class BranchSettings:
     crm_rescue_enabled: bool = False
     reactivation_enabled: bool = False
     learning_audit_enabled: bool = False
+    # Reply to comments under our own posts (hourly). Off until a branch opts in; caps are
+    # separate from and lower than the DM caps — IG throttles comment automation harder.
+    comment_replies_enabled: bool = False
+    comment_hourly_cap: int = 20
+    comment_per_post_cap: int = 5
     # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
     # verify on risky replies), 'urls' (deterministic only), 'off'. See conversation.guard.
     reply_guard: str = "full"
@@ -192,6 +197,9 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         followup_schedule_h=_parse_schedule(raw),
         reactivation_enabled=_b(raw, "reactivation_enabled"),
         learning_audit_enabled=_b(raw, "learning_audit_enabled"),
+        comment_replies_enabled=_b(raw, "comment_replies_enabled"),
+        comment_hourly_cap=_i(raw, "comment_hourly_cap"),
+        comment_per_post_cap=_i(raw, "comment_per_post_cap"),
         tech_search_enabled=_b(raw, "tech_search_enabled"),
         tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),

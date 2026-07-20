@@ -46,6 +46,7 @@ from ._routes_branches import router as _branches_router
 from ._routes_channels import router as _channels_router
 from ._routes_chat import router as _chat_router
 from ._routes_coach import router as _coach_router
+from ._routes_comments import router as _comments_router
 from ._routes_knowledge import router as _knowledge_router
 from ._routes_mcpadmin import router as _mcpadmin_router
 from ._routes_members import router as _members_router
@@ -75,6 +76,7 @@ async def _apply_viewer_tz(request: Request) -> None:
 router = APIRouter(prefix="/ui", dependencies=[Depends(_apply_viewer_tz)])
 router.include_router(_channels_router)
 router.include_router(_chat_router)
+router.include_router(_comments_router)
 router.include_router(_coach_router)
 router.include_router(_knowledge_router)
 router.include_router(_members_router)

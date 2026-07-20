@@ -43,6 +43,20 @@ class SendResult:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class InboundComment:
+    """A comment under one of OUR OWN posts. Public channel, separate from DMs — no thread,
+    no 24h window; the author is not (yet) a lead."""
+    external_id: str                     # native comment id (dedup key)
+    media_id: str                        # the post it sits under
+    text: str
+    occurred_at: datetime
+    author_pk: str | None = None         # numeric IG user id — needed to DM the author
+    author_username: str | None = None
+    media_caption: str | None = None     # the post's caption — grounding context for a reply
+    media_permalink: str | None = None
+
+
 class ChannelPort(Protocol):
     kind: ChannelKind
 
@@ -56,4 +70,13 @@ class ChannelPort(Protocol):
 
     async def session_status(self) -> SessionStatus:
         """Жива ли сессия / открыто ли окно ответа."""
+        ...
+
+    async def fetch_comments(self, *, since: datetime | None = None) -> list[InboundComment]:
+        """Новые комментарии под НАШИМИ постами (public channel). Не все адаптеры это умеют —
+        дефолт пустой список, поддержка только у IG private."""
+        ...
+
+    async def reply_to_comment(self, comment_external_id: str, text: str) -> SendResult:
+        """Публично ответить на комментарий (reply-to-comment по его id)."""
         ...

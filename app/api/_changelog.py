@@ -30,7 +30,7 @@ def _whatsnew_seo() -> str:
 
 
 # Bump this together with a new RELEASES[0] entry (tests keep them in sync).
-PROJECT_VERSION = "1.21.0"
+PROJECT_VERSION = "1.22.0"
 
 # A short teaser for the big thing currently rolling out — shown as a highlighted card above
 # the shipped history. Set to None when there's nothing meaningful in flight.
@@ -43,6 +43,21 @@ COMING_NEXT = {
 
 # Newest first. Each: version, date (DD Mon YYYY), tag (one word), title, blurb (buyer-facing).
 RELEASES = [
+    {
+        "version": "1.22.0", "date": "19 Jul 2026", "tag": "Reach",
+        "title": "Answers comments under your posts — and pulls the warm ones into DMs",
+        "blurb": "A post that takes off fills with questions no one has time to answer, and "
+                 "every unanswered 'how much?' is a buyer walking away. Once an hour Stepan "
+                 "now reads the new comments under your own posts, replies to the real "
+                 "questions with a short public answer straight from your knowledge base, and "
+                 "invites the interested ones to continue in DMs — where the full sales "
+                 "conversation takes over. It stays quiet on the noise: praise, tags and "
+                 "'first!' are left alone, spam and abuse are hidden, and — because a public "
+                 "mistake is the one everyone screenshots — it will never post a price or "
+                 "fact it can't ground in your knowledge base; when unsure it simply invites "
+                 "a DM. A new Comments tab shows exactly what it replied to and why, just "
+                 "like the chat view. Off until you switch it on, per account.",
+    },
     {
         "version": "1.21.0", "date": "17 Jul 2026", "tag": "Selling",
         "title": "Reads the buying moment — and stops interrogating it",

@@ -130,6 +130,29 @@ SCHEMA: list[SettingSection] = [
                    "Changes nothing by itself",
                    "Senin 09:00 WIB: tinjauan mingguan ke TG. Tidak mengubah apa pun")),
     ]),
+    SettingSection("fa-solid fa-comments",
+                   _l("Комментарии под постами", "Post comments", "Komentar postingan"), [
+        _f("comment_replies_enabled", "bool", "false",
+           _l("Отвечать на комментарии", "Reply to comments", "Balas komentar"), width="150px",
+           scope="channel",
+           help=_l("Раз в час бот собирает новые комментарии под НАШИМИ постами: коротко "
+                   "отвечает по делу и уводит тёплых в директ. Публичный ответ строго из базы "
+                   "знаний; при сомнении — только приглашение в личку",
+                   "Hourly, the bot collects new comments under OUR posts: a short on-topic "
+                   "public reply, warm authors invited to DM. Public text strictly from the "
+                   "KB; when unsure — a DM invite only",
+                   "Tiap jam bot mengumpulkan komentar baru di postingan KAMI: balasan singkat, "
+                   "yang hangat diajak ke DM. Teks publik ketat dari basis pengetahuan")),
+        # Comment automation is rate-limited by IG far more aggressively than DMs — keep these
+        # low and separate from the DM caps. A per-post cap stops the bot carpet-answering one
+        # viral post (a fast ban signal).
+        _f("comment_hourly_cap", "int", "20",
+           _l("Ответов в час", "Replies / hour", "Balasan / jam"),
+           ph=_l("20", "20", "20"), width="76px", scope="channel"),
+        _f("comment_per_post_cap", "int", "5",
+           _l("Ответов на один пост", "Replies / post", "Balasan / post"),
+           ph=_l("5", "5", "5"), width="76px", scope="channel"),
+    ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
         # Model routing is baked into code (routing.pick_capability): the strong model handles

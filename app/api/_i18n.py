@@ -40,6 +40,7 @@ def t(key: str, **fmt: object) -> str:
 _TR: dict[str, dict[str, str]] = {
     # navigation
     "nav.inbox":    {"ru": "Входящие",    "en": "Inbox",       "id": "Kotak Masuk"},
+    "nav.comments": {"ru": "Комментарии", "en": "Comments",    "id": "Komentar"},
     "nav.coach":    {"ru": "Коуч KB",     "en": "Coach KB",    "id": "Coach KB"},
     "nav.know":     {"ru": "База знаний", "en": "Knowledge",   "id": "Basis Pengetahuan"},
     "nav.products": {"ru": "Продукты",    "en": "Products",    "id": "Produk"},

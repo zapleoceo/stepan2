@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from app.domain.clock import as_naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
-from app.ports.channel import InboundMessage, SendResult
+from app.ports.channel import InboundComment, InboundMessage, SendResult
 
 # IG errors that mean the message is already gone — unsend is idempotent, don't retry.
 _GONE_MARKERS = ("not found", "does not exist", "media_unavailable", "no longer available",
@@ -43,6 +43,12 @@ class IGTransport(Protocol):
         ...
 
     async def download_media(self, url: str) -> bytes:
+        ...
+
+    async def fetch_own_comments(self, since_epoch_us: int | None) -> list[dict[str, Any]]:
+        ...
+
+    async def send_comment_reply(self, comment_id: str, text: str) -> dict[str, Any]:
         ...
 
 
@@ -111,6 +117,30 @@ class InstagramAdapter:
 
     async def download_media(self, url: str) -> bytes:
         return await self._t.download_media(url)
+
+    async def fetch_comments(self, *, since: datetime | None = None) -> list[InboundComment]:
+        raw = await self._t.fetch_own_comments(
+            int(since.timestamp() * 1_000_000) if since else None)
+        return [self._to_comment(c) for c in raw]
+
+    async def reply_to_comment(self, comment_external_id: str, text: str) -> SendResult:
+        try:
+            raw = await self._t.send_comment_reply(comment_external_id, text)
+        except Exception as exc:  # transport failure → caller decides retry/skip
+            return SendResult(ok=False, error=str(exc))
+        return SendResult(ok=True, external_message_id=str(raw.get("pk", "")))
+
+    def _to_comment(self, c: dict[str, Any]) -> InboundComment:
+        return InboundComment(
+            external_id=str(c["comment_id"]),
+            media_id=str(c["media_id"]),
+            text=str(c.get("text", "")),
+            occurred_at=_as_dt(c.get("timestamp")),
+            author_pk=str(c["author_pk"]) if c.get("author_pk") else None,
+            author_username=c.get("author_username") or None,
+            media_caption=c.get("media_caption") or None,
+            media_permalink=c.get("media_permalink") or None,
+        )
 
     def _to_inbound(self, thread: dict[str, Any]) -> InboundMessage:
         return InboundMessage(
