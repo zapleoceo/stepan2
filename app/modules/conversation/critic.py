@@ -31,7 +31,11 @@ DIMENSIONS = (
      "'500rb' = '500.000'; 'cicil 4x' = '4×3.250.000'. Do NOT fail a fact merely for a "
      "formatting or abbreviation difference — only fail when the value is ABSENT from the KB or "
      "DIFFERENT from what the KB says (a wrong figure, an invented date/discount/claim). When "
-     "unsure whether a value is in the KB, scan the catalog lines before failing."),
+     "unsure whether a value is in the KB, scan the catalog lines before failing. A faithful "
+     "PARAPHRASE of a card fact is grounded, not a fabrication: 'kelasnya hybrid', 'bisa offline "
+     "atau online', 'via Teams' are grounded when the card's format line says so. Fail grounded "
+     "ONLY for a SPECIFIC invented value (a price/date/discount/number/name/link that is wrong "
+     "or absent) — never for a general description that matches the card."),
     ("responsive", "The reply directly addresses what the lead's LAST message actually said or "
      "asked. Answering a different question, ignoring their point, or a generic reaction "
      "('Mantap Kak!') that doesn't engage their message FAILS."),
@@ -44,7 +48,9 @@ DIMENSIONS = (
      "pitch or contact ask. Pitching over an un-addressed objection FAILS."),
     ("register", "Right language (mirrors the lead's language) and warm 'Kak'/'aku' register, "
      "at most ONE question, no premature demand for a phone/WhatsApp from a still-cold lead, "
-     "no promise the channel can't keep (voice note, call, WhatsApp delivery)."),
+     "no promise the channel can't keep (voice note, call, WhatsApp delivery). NOTE: '|||' is "
+     "the intended separator between message bubbles — treat it as a normal bubble break, NEVER "
+     "a defect."),
 )
 
 _RUBRIC = "\n".join(f"- {name}: {desc}" for name, desc in DIMENSIONS)
