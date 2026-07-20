@@ -16,8 +16,13 @@ from app.domain.enums import Stage
 SMART = "chat:smart"
 FAST = "chat:fast"
 
-# Stages where money is on the table — a weaker decision here loses a deal.
-_DEFAULT_SMART_STAGES = frozenset({"presenting", "objection", "ready"})
+# Every ACTIVE sales stage runs on the strong model (owner directive 2026-07-20: sales quality
+# end-to-end over the fast-lane savings). The cheap model's shallow discovery and weak close-
+# momentum in mid-`qualifying` was the main drag on reply quality — a warm lead being worked
+# deserves the strong model on every turn, not only at the money moments. Only 'new' (pre-first-
+# word), followups' first nudge, and non_target wrap-ups still ride the cheap lane.
+_DEFAULT_SMART_STAGES = frozenset(
+    {"qualifying", "nurturing", "presenting", "objection", "ready"})
 # A hot buying signal can land while the lead is still nominally early (e.g. "gimana bayar"
 # at qualifying). Catch it with a cheap regex and force smart regardless of the stage.
 _BUY_RE = re.compile(

@@ -37,10 +37,12 @@ def test_hot_lead_stays_smart() -> None:
     assert _pick(lead_type="hot") == SMART
 
 
-def test_early_low_stakes_is_fast() -> None:
-    # past the first reply, neutral chatter rides the cheap lane
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", last_inbound="oh gitu ya") == FAST
-    assert _pick(stage=Stage.NURTURING, lead_type="unclear", last_inbound="oke makasih") == FAST
+def test_active_sales_stages_are_smart() -> None:
+    # owner 2026-07-20: every active sales stage runs on the strong model, even neutral chatter
+    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", last_inbound="oh gitu ya") == SMART
+    assert _pick(stage=Stage.NURTURING, lead_type="unclear", last_inbound="oke makasih") == SMART
+    # the cheap lane remains for the 'new' stage past the first reply (pre-discovery neutral)
+    assert _pick(stage=Stage.NEW, lead_type="cold", last_inbound="oh gitu ya") == FAST
 
 
 def test_buying_signal_forces_smart_even_early() -> None:
@@ -52,16 +54,16 @@ def test_buying_signal_forces_smart_even_early() -> None:
     # a soft-no is the save-the-sale (objection-handling) turn — it needs the strong model
     # too (sales-logic audit 2026-07-19); a neutral message still rides the cheap lane
     assert _pick(stage=Stage.QUALIFYING, last_inbound="masih mikir dulu ya") == SMART
-    assert _pick(stage=Stage.QUALIFYING, last_inbound="oke kak makasih infonya") == FAST
+    # a neutral acknowledgement in the 'new' stage still rides the cheap lane
+    assert _pick(stage=Stage.NEW, last_inbound="oke kak makasih infonya") == FAST
 
 
 def test_deep_conversation_forces_smart_regardless_of_stage() -> None:
-    # A lead 10+ turns deep represents real invested effort, even stuck in 'qualifying'
-    # with no smart_stage/lead_type/buy-signal to trigger the older rules. Was 6 — with the
-    # forever-sticky regen rule it routed 95% of live replies to smart (2026-07-12 data).
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=6) == FAST
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=9) == FAST
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", inbound_count=10) == SMART
+    # A lead 10+ turns deep represents real invested effort. Active sales stages are smart
+    # anyway now; the deep-thread rule still lifts a lingering 'new'-stage lead onto smart.
+    assert _pick(stage=Stage.NEW, lead_type="cold", inbound_count=6) == FAST
+    assert _pick(stage=Stage.NEW, lead_type="cold", inbound_count=9) == FAST
+    assert _pick(stage=Stage.NEW, lead_type="cold", inbound_count=10) == SMART
     assert _pick(stage=Stage.NEW, inbound_count=12) == SMART
 
 
