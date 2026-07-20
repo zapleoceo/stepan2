@@ -160,7 +160,8 @@ async def test_event_cards_are_always_in_full_not_just_catalog(db_session):
         ("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
         ("vibe_coding_demo_event", "Demo Event",
          "QUICK FACTS: 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live"),
-        ("open_house", "Open House", "QUICK FACTS: gratis tiap Kamis\n## Detail\nkunjungan santai")])
+        ("open_house", "Open House",
+         "QUICK FACTS: gratis tiap Kamis\n## Detail\nkunjungan santai")])
     svc = KnowledgeService(s, a)
     ctx = await svc.knowledge_context("vibe")
     assert "[event vibe_coding_demo_event]" in ctx and "lihat AI bikin app live" in ctx
