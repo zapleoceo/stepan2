@@ -353,6 +353,10 @@ class PostComment(SQLModel, table=True):
     skip_reason: str | None = Field(default=None, description="почему пропущен (спам/эмодзи/…)")
     reply_text: str | None = Field(default=None, description="что бот ответил публично")
     reply_external_id: str | None = Field(default=None, description="id нашего ответа-коммента")
+    # Кэш перевода вопроса и ответа на язык интерфейса: JSON {lang: перевод} — не биллить
+    # повторно (тот же приём, что needs_tr). Индонезийский исходник не переводится.
+    text_tr: str | None = Field(default=None, description="JSON {lang: перевод текста коммента}")
+    reply_tr: str | None = Field(default=None, description="JSON {lang: перевод ответа}")
     llm_info: str | None = Field(default=None)
     occurred_at: datetime = Field(default_factory=_utcnow, description="время самого коммента")
     created_at: datetime = Field(default_factory=_utcnow, index=True)
