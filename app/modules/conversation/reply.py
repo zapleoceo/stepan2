@@ -28,7 +28,7 @@ from app.ports.notify import NotifierPort
 from . import critic, guard
 from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
-from .needs import is_question, lead_grounded, merge_needs, parse_needs
+from .needs import _content_tokens, is_question, lead_grounded, merge_needs, parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
 from .routing import FAST, SMART, pick_capability
 from .situations import (
@@ -302,6 +302,14 @@ def _own_words(dialog) -> str:  # noqa: ANN001
     return " ".join(
         m.text or "" for m in dialog
         if m.direction == "in" and not _AD_TEMPLATE_RE.search(m.text or ""))
+
+
+def _is_substantive_statement(text: str) -> bool:
+    """The lead said something with real CONTENT (a goal/pain/context, e.g. 'nyari magang',
+    'mau switch karier'), not a bare menu tap ('4'), a one-word ack ('iya'), or a greeting.
+    Uses the same filler-stripped content tokens as the needs layer: ≥2 content words = a real
+    statement the reply must engage, never brush off with a 'be more specific' menu."""
+    return len(_content_tokens(text or "")) >= 2
 
 
 def _bump_guard_regen_count(lead: Lead) -> None:
@@ -682,10 +690,13 @@ class ReplyService:
                     SequenceMatcher(None, (m.text or "").strip().lower(),
                                     clarify_norm).ratio() >= 0.7
                     for m in ctx.dialog if m.direction == "out")
-                if _is_answerable_question(last_in_txt):
-                    # the lead asked a CONCRETE question — send the answer even if it repeats a
-                    # fact; "be more specific" is dismissive when they WERE specific (sim of
-                    # thread 2977: "Apakah harus modal?" got clarify instead of the price).
+                if _is_answerable_question(last_in_txt) or _is_substantive_statement(last_in_txt):
+                    # the lead asked a CONCRETE question, OR made a SUBSTANTIVE statement (voiced
+                    # a goal/pain/context) — a "be more specific" menu on top of that reads as not
+                    # listening. Keep the reply even if it echoes an earlier one; an on-topic near
+                    # repeat beats a dismissive clarify (thread 2977: 'Apakah harus modal?' got the
+                    # menu instead of the price; thread 4660: 'sebenernya aku nyari magang' got it
+                    # instead of an answer about the internship path).
                     pass
                 elif looping:
                     # We already asked the lead to narrow down LAST turn and still can't produce

@@ -144,6 +144,17 @@ def test_two_questions_get_the_answer_every_part_suffix() -> None:
     assert nudge is not None and "EVERY part" in nudge
 
 
+def test_substantive_statement_detected_for_clarify_carveout() -> None:
+    """thread 4660: 'sebenernya aku nyari magang' got the dismissive clarify menu because the
+    keep-answer carve-out only covered questions. A real content statement must be kept."""
+    from app.modules.conversation.reply import _is_substantive_statement
+    assert _is_substantive_statement("sebenernya aku nyari magang kak")
+    assert _is_substantive_statement("mau switch karier ke data analyst")
+    assert not _is_substantive_statement("4")        # bare menu tap
+    assert not _is_substantive_statement("iya")       # one-word ack
+    assert not _is_substantive_statement("halo kak")  # greeting
+
+
 def test_budget_objection_in_plain_words_hits_the_cheap_entry_nudge() -> None:
     txt = "Kendala saya di budget, biayanya terasa berat"
     nudge = pick_nudge(
