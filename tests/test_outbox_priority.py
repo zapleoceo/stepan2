@@ -91,3 +91,32 @@ async def test_inactive_channel_rows_never_enter_the_send_batch(db_session) -> N
 
     order = await wiring.threads_with_pending_outbox(db_session, bid)
     assert order == [live_thread]  # only the live channel's thread — no starvation
+
+
+async def test_sweep_recovers_outbox_rows_orphaned_in_sending(db_session) -> None:
+    """A worker restart (every deploy) between the committed 'sending' claim and the send
+    result strands the row in 'sending' forever — the thread hangs mute because ~pending counts
+    it as "reply in flight" (live 2026-07-20: threads 4655/4661/4689, 45 rows back to 07-17).
+    The branch-wide sweep marks a stale claim 'failed' so the thread re-enters awaiting for a
+    fresh reply; a freshly-claimed row still mid-send is left alone."""
+    from datetime import UTC, datetime, timedelta
+
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    t1 = await _thread(db_session, bid, cid, "a")
+    t2 = await _thread(db_session, bid, cid, "b")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    stale = Outbox(branch_id=bid, thread_id=t1, text="stuck", source="agent",
+                   status="sending", sent_at=now - timedelta(minutes=30))
+    fresh = Outbox(branch_id=bid, thread_id=t2, text="mid-send", source="agent",
+                   status="sending", sent_at=now - timedelta(minutes=1))
+    db_session.add(stale)
+    db_session.add(fresh)
+    await db_session.flush()
+
+    swept = await wiring.sweep_stale_sending(db_session, bid, now)
+    assert swept == 1  # only the 30-min-old claim, not the 1-min-old one
+    await db_session.refresh(stale)
+    await db_session.refresh(fresh)
+    assert stale.status == "failed" and stale.error  # recovered, visible in UI
+    assert fresh.status == "sending"  # still inside the grace window — never touched

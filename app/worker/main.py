@@ -496,6 +496,12 @@ async def send_outbox_branch(ctx: dict[str, Any], branch_id: int) -> int:
     branch cap first — the per-thread OutboxSender re-resolves it per channel."""
     attempted = 0
     async with session_scope() as session:
+        swept = await wiring.sweep_stale_sending(
+            session, branch_id, datetime.now(UTC).replace(tzinfo=None))
+        if swept:
+            logger.warning(
+                "branch=%d: swept %d outbox rows orphaned in 'sending' → failed "
+                "(they re-enter awaiting for a fresh reply)", branch_id, swept)
         channels = {c.id: c for c in await wiring.active_channels(session, branch_id)}
         thread_ids = await wiring.threads_with_pending_outbox(session, branch_id)
     for thread_id in thread_ids:

@@ -157,6 +157,31 @@ async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> 
     return list(rows.scalars().all())
 
 
+# A row is committed as 'sending' the instant before the network send (OutboxSender claims it
+# so no other tick can re-send it). A worker restart — every deploy — between that commit and
+# the send result strands the row in 'sending' forever. OutboxSender._sweep_stale_claims was
+# built to recover exactly this, but it only runs for a thread that STILL has a PENDING row
+# (that's the sole path into send_next); a thread whose ONLY row is the stuck claim is never
+# visited, so it hangs indefinitely AND blocks regeneration — threads_awaiting_reply's ~pending
+# guard counts 'sending' as "a reply is in flight", so the lead is never answered. Live
+# 2026-07-20: threads 4655/4661/4689 sat mute for hours; 45 rows stranded back to 07-17. So
+# sweep branch-wide each send tick, independent of whether any pending row exists.
+_STALE_SENDING_MIN = 10
+
+
+async def sweep_stale_sending(session: AsyncSession, branch_id: int, now: datetime) -> int:
+    """Mark outbox rows orphaned in 'sending' (claimed more than _STALE_SENDING_MIN ago) as
+    'failed', branch-wide. Never resends — a duplicate is the worse failure — so the thread
+    re-enters threads_awaiting_reply and a FRESH reply is generated. Returns rows swept."""
+    from sqlalchemy import update  # noqa: PLC0415
+    res = await session.execute(
+        update(Outbox)
+        .where(Outbox.branch_id == branch_id, Outbox.status == "sending",
+               Outbox.sent_at < now - timedelta(minutes=_STALE_SENDING_MIN))
+        .values(status="failed", error="crashed mid-send — outcome unknown, not retried"))
+    return res.rowcount or 0
+
+
 async def mark_session_status(
     session: AsyncSession, channel_id: int, status: SessionStatus
 ) -> bool:
