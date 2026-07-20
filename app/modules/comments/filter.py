@@ -44,9 +44,18 @@ _HAS_LETTER_RE = re.compile(r"[a-zA-ZÀ-ɏ]")
 
 # A comment worth a reply even without a '?': explicit interest / how-to-join / DM-me.
 _INTEREST_RE = re.compile(
-    r"\b(minat|tertarik|mau\s*(daftar|ikut|belajar|gabung)|pengen\s*(ikut|belajar|daftar)|"
-    r"info\s*(dong|kak|lengkap)?|caranya|gimana\s*cara|dm\s*(dong|ya|aku|saya)|"
-    r"pm\s*(dong|ya)|japri)\b",
+    r"\b(minat|tertarik|mau\s*(daftar|ikut|belajar|gabung|dong|nih|kak)?|"
+    r"pengen\s*(ikut|belajar|daftar)|pgn\b|"
+    r"info\s*(dong|kak|lengkap)?|caranya|gimana\s*cara|dm\s*(dong|ya|aku|saya|kak)?|"
+    r"pm\s*(dong|ya)?|japri|price\s*list|pricelist|\bpl\b|list\s*harga)\b",
+    re.IGNORECASE)
+
+# Chat-shorthand questions the standard detector misses (no '?', abbreviated). Live audit
+# (2026-07-20): 'kantor nya dmn' (where's the office), 'Harganya mulai dri brp' (from how
+# much) were skipped as 'no_question'. dmn=dimana, brp/brapa=berapa, gmn=gimana.
+_SHORTHAND_Q_RE = re.compile(
+    r"\b(dmn|dmna|dimna|brp|brapa|brpa|brapaan|brpaan|gmn|gmna|kpn|jm\s*brp|"
+    r"lokasi|kantor|alamat)\b|(mulai|dari|dr)\s*(dri|dari)?\s*brp",
     re.IGNORECASE)
 
 
@@ -70,7 +79,7 @@ def classify_comment(text: str) -> tuple[str, str]:
         return "skip", "praise_noise"
     if (is_answerable_question(t) or PRICE_QUESTION_RE.search(t)
             or PAYMENT_INTENT_RE.search(t) or BUYING_SIGNAL_RE.search(t)
-            or _INTEREST_RE.search(t)):
+            or _INTEREST_RE.search(t) or _SHORTHAND_Q_RE.search(t)):
         return "reply", "question_or_interest"
     return "skip", "no_question"  # a statement with no ask — don't force a reply
 

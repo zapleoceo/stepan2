@@ -55,3 +55,12 @@ def test_warm_intent_is_dm_worthy() -> None:
     assert is_warm("mau daftar dong")
     assert is_warm("saya minat, info caranya")
     assert not is_warm("kelasnya jam berapa?")  # a plain factual question isn't warm-to-DM
+
+
+@pytest.mark.parametrize("text", [
+    "kantor nya dmn", "Harganya mulai dri brp minn", "jm brp kelasnya",
+    "DM pricelist", "Tolong DM PL", "Mau dong", "mau", "pgn ikut", "lokasi",
+])
+def test_shorthand_and_interest_get_a_reply(text: str) -> None:
+    action, _ = classify_comment(text)
+    assert action == "reply", f"{text!r} should be answered, not skipped"

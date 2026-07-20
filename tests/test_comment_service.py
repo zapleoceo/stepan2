@@ -29,7 +29,9 @@ class _FakeLLM:
     def __init__(self, reply: str) -> None:
         self._reply = reply
 
-    async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+    async def chat(self, messages, *, workflow=None, **kw):  # noqa: ANN001, ANN003
+        if workflow == "guard":  # the fabrication verify — this fake's drafts are all clean
+            return "CLEAN", {"model": "x", "cost_usd": 0.0}
         return self._reply, {"model": "x", "cost_usd": 0.0}
 
     async def embed(self, texts, **kw):  # noqa: ANN001, ANN003
@@ -152,3 +154,39 @@ async def test_empty_fast_retries_on_smart(db_session) -> None:
     assert posted == 1
     assert llm.calls == ["chat:fast", "chat:smart"]  # retried after the blank
     assert "Menara Sudirman" in port.posted[0][1]  # the smart answer shipped, not an invite
+
+
+class _VerifyingLLM:
+    """Draft states a WRONG price (real number, wrong course); the verify pass (workflow=guard)
+    flags it; the regen fixes it; the re-verify is clean. Mirrors the DM guard cycle."""
+    def __init__(self) -> None:
+        self.drafts = 0
+        self.verifies = 0
+
+    async def chat(self, messages, *, workflow=None, **kw):  # noqa: ANN001, ANN003
+        if workflow == "guard":  # verify_grounding
+            self.verifies += 1
+            body = messages[-1]["content"]
+            # flag only the first draft (the one quoting the wrong 99jt), clean after regen
+            return ("CLEAN" if "1.882.955" in body else "harga 99.000.000 tidak sesuai KB"), \
+                   {"model": "smart"}
+        self.drafts += 1
+        if self.drafts == 1:
+            return "SMM Intensive harganya Rp 99.000.000 ya Kak", {"model": "fast"}
+        return "SMM Intensive harganya Rp 1.882.955 ya Kak", {"model": "smart"}
+
+    async def embed(self, texts, **kw):  # noqa: ANN001, ANN003
+        return [[0.0] for _ in texts]
+
+
+async def test_verify_catches_wrong_price_and_regen_fixes_it(db_session) -> None:
+    bid, ch = await _seed(db_session)
+    port = _FakePort([_comment("c1", "berapa harga SMM?")])
+    llm = _VerifyingLLM()
+    svc = CommentService(db_session, bid, llm, _kb(db_session, bid), _cfg())
+    await svc.ingest(ch, port)
+    posted = await svc.process(ch, port)
+    assert posted == 1
+    assert llm.verifies >= 1                      # the LLM fabrication verify ran
+    assert "1.882.955" in port.posted[0][1]       # the corrected price shipped
+    assert "99.000.000" not in port.posted[0][1]  # the wrong one never went public
