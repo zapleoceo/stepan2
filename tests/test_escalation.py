@@ -64,6 +64,7 @@ def _wide_window(monkeypatch):
     monkeypatch.setattr(settings(), "reping_hours_wib", "0-24")
     monkeypatch.setattr(settings(), "manager_tag", "@citraasiha")
     monkeypatch.setattr(settings(), "alert_reping_after_min", 5)
+    monkeypatch.setattr(settings(), "alert_reping_max_age_min", 180)
 
 
 async def test_stale_ready_alert_repings_manager_once(db_session) -> None:
@@ -81,6 +82,15 @@ async def test_stale_ready_alert_repings_manager_once(db_session) -> None:
 
 async def test_fresh_alert_within_sla_not_repinged(db_session) -> None:
     bid, _tid, _a, _cid = await _ready_alert(db_session, age_min=2)
+    notifier = _FakeNotifier()
+    assert await EscalationService(db_session, bid, notifier).run() == 0
+    assert notifier.sends == []
+
+
+async def test_stale_backlog_alert_past_ceiling_not_repinged(db_session) -> None:
+    # 2026-07-20 incident: the first run re-pinged alerts up to 16 days old. An alert older
+    # than alert_reping_max_age_min (180) must NEVER re-ping — the moment has passed.
+    bid, _tid, _a, _cid = await _ready_alert(db_session, age_min=16 * 24 * 60)
     notifier = _FakeNotifier()
     assert await EscalationService(db_session, bid, notifier).run() == 0
     assert notifier.sends == []

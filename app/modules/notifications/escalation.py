@@ -51,19 +51,23 @@ class EscalationService:
             return 0
         naive_now = now.replace(tzinfo=None)
         cutoff = naive_now - timedelta(minutes=cfg.alert_reping_after_min)
-        # Actionable, unworked alerts past the SLA: a ready deal / open-house RSVP always, and a
-        # needs_manager only when we actually hold a phone (a manager can't work a contact-less
-        # one). Skip any thread a manager has replied in since the alert — that IS the action.
+        floor = naive_now - timedelta(minutes=cfg.alert_reping_max_age_min)
+        # Actionable, unworked, still-FRESH alerts: past the SLA (cutoff) but not older than the
+        # ceiling (floor). The floor is critical — without it the first run re-pinged the entire
+        # multi-week backlog of old unworked alerts at once (2026-07-20 incident: ~70 pings for
+        # leads up to 16 days old). ready deal / open-house RSVP always; needs_manager only with a
+        # phone. Skip any thread a manager already replied in since the alert — that IS the action.
         rows = (await self.session.execute(text(
             "SELECT a.id, a.thread_id, a.kind, a.created_at, l.notify_topic_id "
             "FROM manager_alert a JOIN lead l ON l.id = a.lead_id "
-            "WHERE a.branch_id = :bid AND a.reping_at IS NULL AND a.created_at <= :cutoff "
+            "WHERE a.branch_id = :bid AND a.reping_at IS NULL "
+            "  AND a.created_at <= :cutoff AND a.created_at >= :floor "
             "  AND (a.kind IN ('ready_deal','ready_openhouse') "
             "       OR (a.kind = 'needs_manager' AND l.phone_e164 IS NOT NULL)) "
             "  AND NOT EXISTS (SELECT 1 FROM message m WHERE m.thread_id = a.thread_id "
             "       AND m.sent_by = 'manager' AND m.occurred_at > a.created_at) "
             "ORDER BY a.id LIMIT 20"),
-            {"bid": self.branch_id, "cutoff": cutoff})).all()
+            {"bid": self.branch_id, "cutoff": cutoff, "floor": floor})).all()
         sent = 0
         for alert_id, thread_id, kind, created_at, topic_id in rows:
             if await self._reping_one(alert_id, thread_id, kind, created_at, topic_id, naive_now):

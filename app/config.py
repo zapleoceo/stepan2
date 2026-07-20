@@ -158,6 +158,10 @@ class Settings(BaseSettings):
     alert_reping_after_min: int = Field(
         default=5, description="minutes after a ready/handoff alert with no manager action "
                                "before a single polite re-ping tagging the manager")
+    alert_reping_max_age_min: int = Field(
+        default=180, description="ceiling on alert age for a re-ping — an alert older than this "
+                                 "is stale (the moment passed), NEVER re-pinged; also stops a "
+                                 "backlog of old unworked alerts from blasting on first run")
     manager_tag: str = Field(
         default="@citraasiha", description="Telegram @username tagged in the SLA re-ping so the "
                                            "manager is notified to work a ready lead")
