@@ -58,9 +58,10 @@ def test_trust_strip_lives_below_the_hero_not_inside() -> None:
 
 
 def test_eyebrow_budget() -> None:
-    # max ~1 kick per 3 sections; the hero eyebrow is the 5th allowed label
+    # max ~1 kick per 3 sections across the ~15 sections (How it works, Account safety,
+    # Works with your stack, vs Meta, Pricing); headlines carry the rest.
     html = landing_html()
-    assert html.count('class="kick"') <= 4
+    assert html.count('class="kick"') <= 5
 
 
 def test_faq_section_with_schema() -> None:
@@ -75,6 +76,32 @@ def test_faq_section_with_schema() -> None:
 def test_nav_links_to_pricing() -> None:
     html = landing_html()
     assert 'href="#pricing"' in html and 'id="pricing"' in html
+
+
+def test_account_safety_section_answers_the_ban_fear() -> None:
+    """The #1 objection for a Meta-savvy buyer is 'will this get my account banned?'. The page
+    must name it and answer with the two real paths + the anti-ban engineering, all grounded."""
+    html = landing_html()
+    assert 'id="safety"' in html and 'href="#safety"' in html   # section + nav anchor
+    assert "banned" in html.lower()
+    # both honest paths are shown
+    assert "official" in html.lower() and "Graph API" in html
+    assert "direct DM integration" in html
+    # the concrete, code-grounded safety measures (paced/caps/quiet/session/backoff/control)
+    for claim in ("Paces like a person", "Sends within safe caps", "Sleeps on quiet hours",
+                  "One steady session", "Backs off at first friction", "your switch"):
+        assert claim in html, claim
+    # no false 'never banned' guarantee
+    assert "never get banned" not in html.lower()
+    assert "no tool" in html.lower()                            # the honest disclaimer
+
+
+def test_section_labels_are_legible_not_tiny_caps() -> None:
+    # the 'kick' labels used to render at .74rem; bumped + given a leading accent rule so they
+    # read as a real label (a repeat complaint that AI subheads are unreadably small)
+    html = landing_html()
+    assert ".kick{display:inline-flex" in html and "font-size:.82rem" in html
+    assert ".kick::before" in html                             # the accent rule
 
 
 def test_stats_strip_under_hero_with_honest_label() -> None:

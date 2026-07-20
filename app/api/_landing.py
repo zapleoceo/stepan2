@@ -223,27 +223,47 @@ h1 em{font-style:normal;color:var(--acc)}
 .sub{max-width:620px;margin:1.5rem auto 0;color:var(--mut);font-size:1.12rem;line-height:1.6;position:relative}
 .cta{margin-top:2.3rem;display:flex;gap:.75rem;justify-content:center;flex-wrap:wrap;position:relative}
 .note{margin-top:1.1rem;font-size:.82rem;color:var(--faint);position:relative}
-/* sections */
-section{padding:5rem 0;position:relative}
-.shead{max-width:620px;margin-bottom:1rem}
-.kick{color:var(--acc);font-size:.74rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;margin-bottom:.85rem}
-h2{font-family:var(--disp);font-size:clamp(1.7rem,3.8vw,2.5rem);font-weight:700;letter-spacing:-.025em;line-height:1.12}
-.lead{color:var(--mut);max-width:600px;margin-top:.9rem;font-size:1.02rem}
+/* sections: generous vertical rhythm so the eye gets to breathe between blocks */
+section{padding:6.5rem 0;position:relative}
+.shead{max-width:660px;margin-bottom:1.6rem}
+/* section label: a real, legible tag (leading accent rule), not tiny unreadable caps */
+.kick{display:inline-flex;align-items:center;gap:.55rem;color:var(--acc);font-size:.82rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin-bottom:1.05rem}
+.kick::before{content:"";width:22px;height:2px;background:var(--acc);border-radius:2px}
+h2{font-family:var(--disp);font-size:clamp(1.95rem,4.4vw,2.9rem);font-weight:700;letter-spacing:-.028em;line-height:1.08}
+.lead{color:var(--mut);max-width:620px;margin-top:1.1rem;font-size:1.12rem;line-height:1.6}
 .divide{border-top:1px solid var(--line)}
+@media (max-width:760px){section{padding:4.5rem 0}}
+/* account-safety section */
+.paths{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2.8rem}
+.path{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:1.6rem}
+.path:first-child{border-color:rgba(76,195,138,.35);background:linear-gradient(180deg,rgba(76,195,138,.07),var(--panel) 62%)}
+.path-h{display:flex;align-items:center;gap:.6rem;font-family:var(--disp);font-weight:600;font-size:1.06rem;letter-spacing:-.01em;margin-bottom:.7rem}
+.path-h .ic{flex-shrink:0}
+.path p{font-size:.94rem;color:var(--mut);line-height:1.6}
+.path-tag{display:inline-block;margin-top:1rem;font-size:.72rem;font-weight:600;letter-spacing:.04em;color:var(--mut);border:1px solid var(--line2);border-radius:999px;padding:.28rem .7rem}
+.path-tag.ok{color:var(--ok);border-color:rgba(76,195,138,.4)}
+.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1.6rem}
+.scard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.4rem 1.3rem;transition:border-color .18s,transform .12s}
+.scard:hover{border-color:var(--line2);transform:translateY(-2px)}
+.scard .ic{color:var(--acc);margin-bottom:.9rem;display:block}
+.scard h3{font-family:var(--disp);font-size:1rem;font-weight:600;margin-bottom:.4rem;letter-spacing:-.01em}
+.scard p{font-size:.88rem;color:var(--mut);line-height:1.6}
+@media (max-width:920px){.sgrid{grid-template-columns:1fr 1fr}}
+@media (max-width:600px){.paths,.sgrid{grid-template-columns:1fr}}
 /* steps */
 .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:2.8rem;background:var(--line);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .step{background:var(--panel);padding:1.6rem 1.4rem}
 .step .n{font-family:var(--mono);font-size:.74rem;color:var(--faint);margin-bottom:1.4rem;letter-spacing:.1em}
 .step .ic{color:var(--ink);margin-bottom:.9rem;display:block}
-.step h3{font-family:var(--disp);font-size:1.02rem;font-weight:600;margin-bottom:.4rem;letter-spacing:-.01em}
-.step p{font-size:.87rem;color:var(--mut);line-height:1.55}
+.step h3{font-family:var(--disp);font-size:1.08rem;font-weight:600;margin-bottom:.45rem;letter-spacing:-.01em}
+.step p{font-size:.92rem;color:var(--mut);line-height:1.6}
 /* feature grid */
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-top:2.8rem}
 .feat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.5rem 1.3rem;transition:border-color .18s,transform .12s}
 .feat:hover{border-color:var(--line2);transform:translateY(-2px)}
 .feat .ic{color:var(--acc);margin-bottom:1rem;display:block}
-.feat h3{font-family:var(--disp);font-size:.96rem;font-weight:600;margin-bottom:.4rem;letter-spacing:-.01em}
-.feat p{font-size:.83rem;color:var(--mut);line-height:1.55}
+.feat h3{font-family:var(--disp);font-size:1.02rem;font-weight:600;margin-bottom:.45rem;letter-spacing:-.01em}
+.feat p{font-size:.9rem;color:var(--mut);line-height:1.6}
 /* pricing */
 .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2.6rem}
 .pcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1.8rem}
@@ -504,6 +524,13 @@ _IC = {
                 '<path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01'
                 'M8 14h.01M12 14h.01M16 14h.01"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    "gauge": '<path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/><path d="m13.4 10.6 3.1-3.1"/>'
+             '<path d="M4 18a8 8 0 1 1 16 0"/>',
+    "moon": '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>',
+    "key": '<circle cx="8" cy="15" r="5"/><path d="m11.5 11.5 8-8"/><path d="m17 5 3 3"/>'
+           '<path d="m20 8-2 2"/>',
+    "pause": '<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>',
+    "meta": '<path d="M4 16c1.5-6 4-9 6-9s2.5 3 2 6c-.5 3 0 3 1 3 2 0 4-3 5.5-9"/>',
 }
 
 
@@ -608,6 +635,68 @@ def _meta_compare_section() -> str:
         "<p class=\"mtcap\">Meta Business Agent details from Meta's June 2026 announcement "
         "and independent reviews at time of writing; features change, so verify current specs "
         "with Meta.</p>"
+        "</div></section>"
+    )
+
+
+def _safety_section() -> str:
+    """The #1 blocker for anyone who has run Meta: will this get my account banned? Name the
+    fear, then answer it with the two real paths (official Graph API + a human-paced direct
+    integration) and the concrete engineering behind the second. Every claim is grounded in
+    how the product actually behaves (paced replies, caps, quiet hours, one session, backoff);
+    no 'you'll never be banned' guarantee, which the audience would see straight through."""
+    cards = [
+        ("gauge", "Paces like a person",
+         "Replies land after a natural 2-5s pause, and polling is jittered off the clock. "
+         "Never a machine-regular burst that automation filters look for."),
+        ("shield", "Sends within safe caps",
+         "Hourly and daily send limits per account. When it hits them it slows itself down, "
+         "it never floods a DM box the way spam tools do."),
+        ("moon", "Sleeps on quiet hours",
+         "No proactive messages overnight. It goes quiet when a real person would, and wakes "
+         "when they would."),
+        ("key", "One steady session",
+         "It logs in once and reuses that session, from a matched region. No repeated logins, "
+         "which is the pattern that actually flags an account."),
+        ("pause", "Backs off at first friction",
+         "A challenge or rate-limit signal pauses that channel and retries later. It never "
+         "pushes through a soft block, which is how accounts get escalated."),
+        ("bot", "Your account, your switch",
+         "It's your session, doing what your team would. One toggle turns it off, and every "
+         "message it sent is in the log."),
+    ]
+    grid = "".join(
+        f'<div class="scard">{_svg(_IC[ic], 22)}<h3>{tt}</h3><p>{b}</p></div>'
+        for ic, tt, b in cards
+    )
+    return (
+        "<section class=\"divide\" id=\"safety\"><div class=\"wrap\">"
+        "<div class=\"shead\">"
+        "<div class=\"kick\">Account safety</div>"
+        "<h2>\"Won't this get my Instagram banned?\"</h2>"
+        "<p class=\"lead\">The honest question everyone who has run Meta asks first. Here is "
+        "the honest answer: you choose how Stepan runs, and either way it is built to look "
+        "like your most disciplined employee, not a bot.</p></div>"
+        # two-path diagram
+        "<div class=\"paths\">"
+        f"<div class=\"path\"><div class=\"path-h\">{_svg(_IC['meta'], 20)}"
+        "<span>Run it on Meta's official API</span></div>"
+        "<p>Connect through the Instagram Graph API, the same sanctioned interface Meta's own "
+        "business tools use. There is no automation to detect and no grey area. This is the "
+        "zero-risk path when your account is eligible for it.</p>"
+        "<span class=\"path-tag ok\">No policy grey area</span></div>"
+        f"<div class=\"path\"><div class=\"path-h\">{_svg(_IC['chat'], 20)}"
+        "<span>Or the direct DM integration</span></div>"
+        "<p>For reach the official API doesn't cover, Stepan works the DMs the way a careful "
+        "human on your team would, at human speed and within human limits. The engineering "
+        "below is what keeps that safe.</p>"
+        "<span class=\"path-tag\">Paced like a person</span></div>"
+        "</div>"
+        f"<div class=\"sgrid reveal\">{grid}</div>"
+        "<p class=\"mnote\" style=\"margin-top:1.4rem;max-width:70ch\">Straight talk: no tool "
+        "can promise a platform will never act, and anyone who does is lying to you. What we "
+        "can promise is that Stepan is engineered to behave like a disciplined human, not a "
+        "script, and that you can run it entirely on Meta's official API when eligible.</p>"
         "</div></section>"
     )
 
@@ -795,8 +884,10 @@ _FAQ: list[tuple[str, str]] = [
      "Connect your Instagram or WhatsApp, paste in your real facts and prices, and Stepan "
      "can take its first lead the same day. No flow-building, no scripts."),
     ("Will it put my account at risk?",
-     "Stepan is built to protect the account: human-paced replies, hourly and daily send "
-     "caps, quiet hours, and warm follow-ups that never read as spam."),
+     "You can run Stepan on Meta's official Graph API, the sanctioned path with no policy "
+     "grey area. The direct DM integration is built to protect the account too: human-paced "
+     "replies, hourly and daily caps, quiet hours, one steady session and an instant back-off "
+     "at the first sign of friction. See the Account safety section for the full picture."),
     ("What happens when it doesn't know the answer?",
      "It never guesses. Stepan answers only from the facts you gave it; when something is "
      "missing, it asks your team and flags the gap, so a wrong promise never reaches a lead."),
@@ -892,6 +983,7 @@ def landing_html() -> str:
         "<div class=\"brand\"><span class=\"logo\">S</span>Stepan"
         "<small>AI Sales Agent</small></div>"
         "<div style=\"display:flex;align-items:center;gap:1.1rem\">"
+        "<a href=\"#safety\" style=\"font-size:.9rem;color:var(--mut)\">Safety</a>"
         "<a href=\"#pricing\" style=\"font-size:.9rem;color:var(--mut)\">Pricing</a>"
         "<a href=\"/whats-new\" style=\"font-size:.9rem;color:var(--mut)\">What's new</a>"
         "<a class=\"login\" href=\"/login\">Log in</a></div>"
@@ -923,6 +1015,8 @@ def landing_html() -> str:
         "would, then hands you the ready-to-buy leads.</p></div>"
         f"<div class=\"steps\">{steps}</div>"
         "</div></section>"
+        # account safety — the #1 objection, answered early and visually
+        + _safety_section() +
         # ── a peek inside (illustrative mockups) ──
         "<section class=\"divide\"><div class=\"wrap\">"
         "<div class=\"shead\">"
