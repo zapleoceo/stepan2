@@ -542,7 +542,10 @@ def wrong_channel_claims(reply: str) -> list[str]:
 # price - Rp 700.000/600.000 - was right there in context, and the bot silently muted
 # itself instead of using it).
 _PRICE_QUESTION_RE = re.compile(
-    r"\b(gratis|free|berapa|harga|biaya|tarif|cicilan|angsuran|murah|mahal)\b",
+    # 'brp/brpa/brapa/berpa' are the everyday chat misspellings of 'berapa' (how much) — leads
+    # type them constantly (thread 4710: 'Brpa aja kak' never registered as a price question, so
+    # the hand-off guard let a KB-answerable price question escalate to a human).
+    r"\b(gratis|free|be?rapa|brp|brpa|harga|biaya|tarif|cicilan|angsuran|murah|mahal)\b",
     re.IGNORECASE)
 
 # Thread 2664 (2026-07-11): a HOT lead ("saya bayar sekarang atau nunggu?") — ready to pay —

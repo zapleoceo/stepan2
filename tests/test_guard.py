@@ -221,6 +221,12 @@ def test_premature_manager_handoff_catches_price_question_answered_in_kb() -> No
     assert not guard.premature_manager_handoff("berapa harganya?", "no price figure here")
     # a price context alone doesn't make an enrol question answerable (no payment facts)
     assert not guard.premature_manager_handoff("gimana cara daftarnya?", context)
+    # 'brp/brpa' — the everyday chat misspelling of 'berapa' — must count (thread 4710)
+    assert guard.premature_manager_handoff("brp aja kak saya mah", context)
+    assert guard.premature_manager_handoff("brpa harganya kak", context)
+    # the price question can sit a turn back, with the phone number the lead sent in between
+    # (the call site now passes the last few inbounds joined) — still catch it
+    assert guard.premature_manager_handoff("Brpa aja kak 085187772258 Phone number", context)
 
 
 def test_premature_manager_handoff_catches_payment_question_answered_in_kb() -> None:

@@ -367,8 +367,14 @@ async def guard_decision(
         # gets the targeted correction; anything else with no stated reason gets the generic
         # one. Only ONE extra regen per turn either way — never chain both on the same
         # decision.
-        last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
-        if guard.premature_manager_handoff(last_in, context):
+        # A price/pay question can sit 1-2 turns back: thread 4710 — 'Brpa aja kak' → the bot
+        # asked for the phone → the lead sent it → THIS turn handed off, so the last inbound is
+        # the phone number, not the question, and a last-message-only check missed it. Scan the
+        # last few inbounds so a just-asked, KB-answerable price/pay question still blocks the
+        # hand-off, not only when it is the very last message.
+        recent_in = " ".join(
+            reversed([m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"][:3]))
+        if guard.premature_manager_handoff(recent_in, context):
             logger.warning(
                 "guard: branch=%d thread=%d premature needs_manager on a price question "
                 "already answered in KB → regen", branch_id, thread_id)
