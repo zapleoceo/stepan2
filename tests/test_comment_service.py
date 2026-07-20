@@ -125,3 +125,30 @@ async def test_per_post_cap_holds(db_session) -> None:
 def _kb(session, branch_id: int):  # noqa: ANN001, ANN201
     from app.modules.knowledge.service import KnowledgeService
     return KnowledgeService(session, branch_id, _FakeLLM("x"))
+
+
+class _BlankThenReal:
+    """chat:fast returns empty (the live gpt-oss-120b behaviour), chat:smart answers."""
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def chat(self, messages, *, capability="chat:fast", **kw):  # noqa: ANN001, ANN003
+        self.calls.append(capability)
+        if capability == "chat:fast":
+            return "", {"model": "fast"}
+        return "Kelasnya offline di Menara Sudirman atau online ya Kak 😊", {"model": "smart"}
+
+    async def embed(self, texts, **kw):  # noqa: ANN001, ANN003
+        return [[0.0] for _ in texts]
+
+
+async def test_empty_fast_retries_on_smart(db_session) -> None:
+    bid, ch = await _seed(db_session)
+    port = _FakePort([_comment("c1", "kelasnya online atau offline?")])
+    llm = _BlankThenReal()
+    svc = CommentService(db_session, bid, llm, _kb(db_session, bid), _cfg())
+    await svc.ingest(ch, port)
+    posted = await svc.process(ch, port)
+    assert posted == 1
+    assert llm.calls == ["chat:fast", "chat:smart"]  # retried after the blank
+    assert "Menara Sudirman" in port.posted[0][1]  # the smart answer shipped, not an invite

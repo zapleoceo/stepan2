@@ -121,7 +121,13 @@ class CommentService:
         return result.ok
 
     async def _draft(self, c: PostComment) -> tuple[str, dict]:
-        """One grounded public line, or a safe DM-invite if it can't be grounded."""
+        """One grounded public line, or a safe DM-invite if it can't be grounded.
+
+        Tries chat:fast first, then chat:smart if that returns nothing usable. The free
+        chat:fast model (gpt-oss-120b) intermittently returns an EMPTY content (it stuffs the
+        answer into a reasoning field ~half the time) — measured live. Comments are low
+        volume (hourly, capped) and PUBLIC, so one smart retry buys reliability cheaply rather
+        than degrading a real question to an invite just because the cheap model blanked."""
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch else "id"
         context = await self.knowledge.knowledge_context(
@@ -129,21 +135,26 @@ class CommentService:
         prompt = _COMMENT_PROMPT.format(
             lang=lang, kb=context, caption=(c.media_caption or "")[:400], comment=c.text,
             invite=_DM_INVITE if is_warm(c.text) else "")
-        try:
-            raw, meta = await self.llm.chat(
-                [{"role": "user", "content": prompt}],
-                capability="chat:fast", workflow="comment", branch_id=self.branch_id,
-                max_tokens=200, temperature=0.6)
-        except Exception as exc:  # noqa: BLE001 — never let a broker hiccup post garbage
-            logger.warning("comment draft failed branch=%d: %s", self.branch_id, exc)
-            return _INVITE_ONLY, {}
-        text = _clean(raw)
-        if not text or _fabricated(text, context):
-            # Can't trust the draft publicly → drop the fact, keep only the DM pull.
-            logger.info("comment draft ungrounded branch=%d comment=%s → invite-only",
-                        self.branch_id, c.external_id)
-            return _INVITE_ONLY, meta
-        return text, meta
+        meta: dict = {}
+        for capability in ("chat:fast", "chat:smart"):
+            try:
+                raw, meta = await self.llm.chat(
+                    [{"role": "user", "content": prompt}],
+                    capability=capability, workflow="comment", branch_id=self.branch_id,
+                    max_tokens=200, temperature=0.6)
+            except Exception as exc:  # noqa: BLE001 — never let a broker hiccup post garbage
+                logger.warning("comment draft failed branch=%d (%s): %s",
+                               self.branch_id, capability, exc)
+                continue
+            text = _clean(raw)
+            if not text:
+                continue  # empty content — retry on the stronger model
+            if _fabricated(text, context):
+                logger.info("comment draft ungrounded branch=%d comment=%s → invite-only",
+                            self.branch_id, c.external_id)
+                return _INVITE_ONLY, meta
+            return text, meta
+        return _INVITE_ONLY, meta  # both models blanked → safe pull into DMs
 
 
 def _fabricated(text: str, context: str) -> bool:
