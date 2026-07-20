@@ -85,10 +85,12 @@ async def translate_text(
     # Cyrillic/Indonesian output is token-heavy (mistral encodes Cyrillic at ~2-3x the
     # char count); 400 truncated real translations mid-sentence. Cap input at 800 chars,
     # so ~1500 output tokens comfortably covers a full translation.
-    # The free pool almost never emits Cyrillic, so for a Russian target the chat:fast attempt
-    # is wasted (~0% passes _looks_translated) — go straight to smart. Latin targets still try
-    # the cheap pool first.
-    caps = (SMART,) if "ussian" in target else ("chat:fast", SMART)
+    # Try the cheap pool first for EVERY target. Russian used to go straight to smart because
+    # the free pool emitted ~0% Cyrillic — but gpt-oss-120b joined chat:fast (2026-07-20) and
+    # DOES emit clean Cyrillic (measured 5/6 indo->ru on 2026-07-21; the one miss was a timeout,
+    # not wrong-script). _looks_translated still catches the rare non-Cyrillic miss and falls
+    # back to smart, so the guard costs nothing when fast succeeds and protects when it doesn't.
+    caps = ("chat:fast", SMART)
     for capability in caps:
         out, _ = await llm.chat(messages, capability=capability,
                                 max_tokens=settings().translate_max_tokens,

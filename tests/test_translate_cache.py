@@ -162,14 +162,24 @@ async def test_looks_translated_flags_untranslated_russian_output() -> None:
     assert _looks_translated("Hello there", "English")
 
 
-async def test_translate_text_russian_skips_fast_and_uses_smart() -> None:
+async def test_translate_text_russian_uses_fast_first_now() -> None:
     from app.modules.conversation.translate import translate_text
-    # The free pool ~never emits Cyrillic, so a Russian target goes STRAIGHT to smart — the
-    # chat:fast attempt was wasted (0/5 sampled produced real Cyrillic).
+    # gpt-oss-120b joined chat:fast (2026-07-20) and emits clean Cyrillic (5/6 indo->ru), so a
+    # Russian target now tries the cheap pool FIRST — no smart call when fast returns Cyrillic.
     llm = _SequenceLLM("Привет! уже по-русски")
     out = await translate_text(llm, "halo apa kabar", target="Russian")
     assert out == "Привет! уже по-русски"
-    assert llm.caps == ["chat:smart"]  # fast skipped for Russian
+    assert llm.caps == ["chat:fast"]  # fast handled it, smart not spent
+
+
+async def test_translate_text_russian_falls_back_to_smart_on_non_cyrillic() -> None:
+    from app.modules.conversation.translate import translate_text
+    # The safety net still holds: when fast returns a NON-Cyrillic body (the source unchanged,
+    # a Latin mashup), _looks_translated rejects it and the smart retry produces the real one.
+    llm = _SequenceLLM("halo apa kabar", "Привет, как дела")  # fast miss → smart hit
+    out = await translate_text(llm, "halo apa kabar", target="Russian")
+    assert out == "Привет, как дела"
+    assert llm.caps == ["chat:fast", "chat:smart"]
 
 
 async def test_translate_text_latin_target_uses_fast_only() -> None:
