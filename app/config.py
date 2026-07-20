@@ -155,6 +155,15 @@ class Settings(BaseSettings):
     max_bubbles: int = Field(
         default=3, description="max messages one reply is split into; 4+ rapid DMs raises spam "
                                "detection risk")
+    alert_reping_after_min: int = Field(
+        default=5, description="minutes after a ready/handoff alert with no manager action "
+                               "before a single polite re-ping tagging the manager")
+    manager_tag: str = Field(
+        default="@citraasiha", description="Telegram @username tagged in the SLA re-ping so the "
+                                           "manager is notified to work a ready lead")
+    reping_hours_wib: str = Field(
+        default="8-21", description="local (branch tz) hour window the SLA re-ping may fire in, "
+                                    "'start-end'; outside it the re-ping waits for the window")
     seen_delay_min_s: float = Field(
         default=2.0, description="min pause after marking a chat seen before sending (fake "
                                  "human read time)")

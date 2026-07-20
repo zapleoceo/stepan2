@@ -23,7 +23,7 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
-from app.domain.enums import SessionStatus
+from app.domain.enums import ChannelKind, SessionStatus
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reactivation import ReactivationService
@@ -32,7 +32,7 @@ from app.modules.conversation.repository import ThreadRepo
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.knowledge.source import effective_kb_branch
 from app.modules.leads.ingest import IngestService
-from app.modules.settings.service import get_settings
+from app.modules.settings.service import get_channel_settings, get_settings
 from app.ports.notify import NotifierPort
 
 from . import breaker, wiring
@@ -677,6 +677,49 @@ async def crm_rescue(ctx: dict[str, Any]) -> int:
     return total
 
 
+async def ingest_comments(ctx: dict[str, Any]) -> int:
+    """Hourly: fan out comment ingest+reply, one job per branch. Gated by the platform
+    kill-switch — it posts PUBLIC replies, so an operator stopping the bot stops this too."""
+    return await _fan_out_per_branch(ctx, "ingest_comments_branch",
+                                     gate_platform=True, gate_broker=True)
+
+
+async def ingest_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch: for each IG channel with comment replies ON, pull new comments under our
+    posts and answer the ones worth it (within the comment caps). Returns replies posted.
+
+    Its own transaction; per-channel try so one channel's failure can't abort the branch.
+    Anti-ban jitter up front — the cron fires on a fixed second, so offset the private-API
+    walk off the machine tick (same reason as ingest_branch)."""
+    from app.modules.comments.service import CommentService  # noqa: PLC0415
+
+    await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
+    posted = 0
+    async with session_scope() as session:
+        channels = await wiring.active_channels(session, branch_id)
+    for channel in channels:
+        if channel.kind != ChannelKind.INSTAGRAM:
+            continue
+        try:
+            async with session_scope() as session:
+                ch_cfg = await get_channel_settings(session, branch_id, channel.id)
+                if not (ch_cfg.agent_enabled and ch_cfg.comment_replies_enabled):
+                    continue
+                kb = await effective_kb_branch(session, branch_id)
+                knowledge = KnowledgeService(session, kb, BrokerLLM())
+                svc = CommentService(session, branch_id, BrokerLLM(), knowledge, ch_cfg)
+                port = await wiring.build_channel_port(session, channel)
+                await svc.ingest(channel, port)
+                posted += await svc.process(channel, port)
+        except (NotImplementedError, KeyError, RuntimeError) as exc:
+            logger.warning("comment ingest skip branch=%d channel=%s: %s",
+                           branch_id, channel.id, exc)
+        except Exception:
+            logger.exception("comment ingest failed branch=%d channel=%s",
+                             branch_id, channel.id)
+    return posted
+
+
 async def sync_ads(ctx: dict[str, Any]) -> int:
     """Fan out the Meta ad map + insight sync, one job per branch.
 
@@ -915,6 +958,25 @@ async def aggregate_needs_branch(ctx: dict[str, Any], branch_id: int) -> int:
         return 0
 
 
+async def escalate_stale_alerts(ctx: dict[str, Any]) -> int:
+    """Re-ping the manager on ready/handoff alerts left unworked past the SLA — one polite,
+    tagged nudge per lead. Fans out per branch so a slow branch can't stall the others."""
+    return await _fan_out_per_branch(ctx, "escalate_stale_alerts_branch", gate_platform=False)
+
+
+async def escalate_stale_alerts_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's SLA re-ping pass. Independent of the agent kill switch: a ready lead needs
+    a human whether or not the bot is answering new leads."""
+    from app.modules.notifications.escalation import EscalationService  # noqa: PLC0415
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            return await EscalationService(session, branch_id, _build_notifier(cfg)).run()
+    except Exception:
+        logger.exception("escalate_stale_alerts: branch=%d failed", branch_id)
+        return 0
+
+
 def _redis_settings() -> RedisSettings:
     """ARQ broker connection from the app's redis_url (parsed, never reconstructed)."""
     return RedisSettings.from_dsn(settings().redis_url)
@@ -943,9 +1005,9 @@ class WorkerSettings:
         # Cron dispatchers: each fans out one per-branch job so branches run concurrently and
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, ingest_active_conversations, reply_pending, send_outbox,
-        schedule_followups, reactivate_dormant, learning_audit,
+        schedule_followups, reactivate_dormant, learning_audit, escalate_stale_alerts,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
-        daily_digest, crm_rescue,
+        daily_digest, crm_rescue, ingest_comments,
         reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
@@ -953,9 +1015,10 @@ class WorkerSettings:
         # id the instant the job ends, so the dedup never outlives the run.
         ingest_branch, ingest_active_branch, reply_pending_branch, send_outbox_branch,
         schedule_followups_branch, reactivate_dormant_branch, learning_audit_branch,
+        escalate_stale_alerts_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
-        daily_digest_branch,
+        daily_digest_branch, ingest_comments_branch,
         sync_ads_branch, backfill_ads_branch,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
         # timeout re-dispatches next tick rather than immediately re-hitting the same slow broker
@@ -1006,6 +1069,10 @@ class WorkerSettings:
         # the owner's Monday morning coffee. Propose-only; per-branch opt-in flag.
         cron(learning_audit, weekday={0}, hour={2}, minute={0}, second=0,
              run_at_startup=False),
+        # SLA re-ping: every 2 min, nudge the manager on a ready/handoff alert left unworked
+        # past alert_reping_after_min (default 5). Fires once per alert, working-hours only.
+        cron(escalate_stale_alerts, minute=set(range(0, 60, 2)), second=40,
+             run_at_startup=False),
         # CRM push every 5 minutes (only branches with crm_enabled + webhook URL)
         cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
         # Rescue of CRM missed-call leads: hourly, work hours only (service-enforced),
@@ -1027,6 +1094,11 @@ class WorkerSettings:
         # after aggregate_needs (17:00 UTC = midnight Jakarta), so the needs cloud in the
         # file is that same night's freshly-classified one.
         cron(daily_digest, hour={0}, minute={0}, second=0, run_at_startup=False),
+        # Comments under our own posts: once an hour (minute={17}, offset from the other
+        # hourly jobs). Opt-in per channel (comment_replies_enabled) and platform-gated —
+        # a public reply is higher-stakes than a DM, so the kill switch stops it too. IG
+        # throttles comment automation hard, hence hourly + the low comment caps.
+        cron(ingest_comments, minute={17}, second=30, run_at_startup=False),
         # Meta ad map + insights every 20 min. Deliberately slow: Meta throttles an ad account
         # account-wide after a burst (code 80004 — hit live while building this), and its own
         # attribution lags ~7 days, so a faster cadence would buy nothing but 429s. Costs zero

@@ -327,6 +327,39 @@ class Message(SQLModel, table=True):
     preview_url: str | None = Field(default=None, description="превью карточки (CDN, протухает)")
 
 
+class PostComment(SQLModel, table=True):
+    """Комментарий под нашим постом + наш ответ на него. Публичный канал, отдельный от
+    директа: под постом пишут МНОГО разных людей, поэтому это не ChannelThread (тот привязан
+    к одному лиду). Одна строка = один комментарий; `external_id` (нативный comment id) даёт
+    дедуп через unique-constraint — тот же приём, что защищает Message от повторной обработки
+    при перекрывающихся почасовых ранах."""
+    __tablename__ = "post_comment"
+    __table_args__ = (UniqueConstraint("channel_id", "external_id", name="uq_comment_ext"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    channel_id: int = Field(foreign_key="channel.id")
+    external_id: str = Field(description="нативный comment id из IG")
+    media_id: str = Field(index=True, description="id поста, под которым комментарий")
+    media_caption: str | None = Field(default=None, description="подпись поста — контекст ответа")
+    media_permalink: str | None = Field(default=None)
+    author_username: str | None = Field(default=None)
+    author_pk: str | None = Field(default=None, description="numeric IG user id — для DM-увода")
+    text: str = Field(default="")
+    # skipped=мусор/фильтр, replied=публичный ответ ушёл, dm_sent=увели в директ,
+    # hidden=скрыт, error=сбой отправки, pending=ждёт обработки
+    status: str = Field(default="pending", index=True,
+                        description="pending|skipped|replied|dm_sent|hidden|error")
+    skip_reason: str | None = Field(default=None, description="почему пропущен (спам/эмодзи/…)")
+    reply_text: str | None = Field(default=None, description="что бот ответил публично")
+    reply_external_id: str | None = Field(default=None, description="id нашего ответа-коммента")
+    llm_info: str | None = Field(default=None)
+    occurred_at: datetime = Field(default_factory=_utcnow, description="время самого коммента")
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    handled_at: datetime | None = Field(default=None, description="когда бот обработал")
+    attempts: int = Field(default=0, description="soft-block ретраи отправки")
+
+
 class Outbox(SQLModel, table=True):
     """Единственный исходящий путь — очередь на отправку (caps/окна применяются раз)."""
     __tablename__ = "outbox"
@@ -360,6 +393,7 @@ class ManagerAlert(SQLModel, table=True):
     summary_en: str = Field(default="")
     summary_ru: str = Field(default="")
     synced_at: datetime | None = Field(default=None)
+    reping_at: datetime | None = Field(default=None)  # SLA re-ping to the manager was sent
     created_at: datetime = Field(default_factory=_utcnow)
 
 
