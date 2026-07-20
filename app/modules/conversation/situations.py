@@ -92,6 +92,15 @@ SOFT_NO_RE = re.compile(
     # "saya tidak jadi") — a clear refusal the soft-no detector was missing entirely.
     r"(tidak|tdk|gak|ga|nggak|ngga|ndak|gk)\s*jadi\b|"
     r"insya\s*allah|liat\s*(nanti|dulu)|kapan[- ]?kapan|(?:nggak|ngga|ndak|gak|ga|gk)\s*dulu|"
+    # Blunt slang refusals the polite-postpone forms above all miss — 'ga usah' (no need),
+    # 'ga ikutan' (not joining), 'ogah' (a hard no), bare 'g dulu' (the 'ga dulu' chat
+    # abbreviation). Thread 4280: a self-identified schoolkid said 'GA USAH' / 'Ga ikutan gw' /
+    # 'G dulu makasih' and the bot kept pitching student-discount + Diploma + Open House because
+    # none of these registered as a decline, so the soft-no ease-off never fired. The negation
+    # prefix keeps 'mau ikutan' (a YES) out; 'males' is deliberately NOT here — 'males kerja
+    # gini' is a career PAIN, not a course refusal.
+    r"(?:nggak|ngga|ndak|gak|ga|gk|g)\s*usah\b|ga+usah\b|"
+    r"(?:nggak|ngga|ndak|gak|ga|gk)\s*ikut(?:an)?\b|\bogah\b|\bg\s+dulu\b|"
     r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
     r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",
     re.IGNORECASE)

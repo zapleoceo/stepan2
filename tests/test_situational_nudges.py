@@ -146,7 +146,10 @@ def test_soft_no_detects_polite_refusals() -> None:
               "aku cuman mau ngamanin informasi dulu",
               # graceful-close forms (thread 4520 second pass)
               "nanti ya kak aku sembari kerja jadinya ngumpulin duitnya dulu",
-              "nanti kalo aku ngerasa udah pengen banget aku langsung kabarin kakanya"]:
+              "nanti kalo aku ngerasa udah pengen banget aku langsung kabarin kakanya",
+              # blunt slang refusals the bot pitched over (thread 4280, a schoolkid)
+              "GA USAH", "ga usah kak", "gausah", "Ga ikutan gw", "gak ikutan",
+              "ogah ah", "G dulu makasih"]:
         assert _SOFT_NO_RE.search(s), s
 
 
@@ -158,7 +161,11 @@ def test_soft_no_ignores_engaged_replies() -> None:
               # 'simpanan' / 'mikir positif' must not trip the postponer forms
               "simpanan aku cukup kok", "mikir positif dong",
               # 'kabarin kalo ada promo' / 'kalo bayar pakai apa' are engaged, not a close
-              "kabarin aku kalo ada promo ya", "kalo bayar pakai apa kak"]:
+              "kabarin aku kalo ada promo ya", "kalo bayar pakai apa kak",
+              # 'mau ikutan' is a YES; 'males kerja gini' is a career PAIN, not a course
+              # refusal — neither may read as a blunt-slang decline
+              "mau ikutan kak", "aku ikutan ya", "males kerja gini terus",
+              "udah males sama kerjaan sekarang"]:
         assert not _SOFT_NO_RE.search(s), s
 
 
