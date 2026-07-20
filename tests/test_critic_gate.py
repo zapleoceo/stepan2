@@ -122,9 +122,9 @@ async def test_suggest_workflow_skips_the_critic() -> None:
     """A manager 'suggest' draft must NOT go through the critic's fail-closed hand-off — the
     manager is the human reviewer. apply_critic returns the draft untouched for workflow=
     'suggest', before it would even touch the engine (so a None engine here proves the skip)."""
+    from app.domain.enums import Stage
     from app.modules.conversation.decision import Decision
     from app.modules.conversation.reply import apply_critic
-    from app.domain.enums import Stage
 
     settings_on = type("S", (), {"critic_gate": "on"})()
     draft = Decision(reply="Vibe Coding 13jt, DP 500rb ya Kak", stage=Stage.PRESENTING,
