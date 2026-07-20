@@ -127,7 +127,7 @@ def _parse_critique(raw: str) -> Critique:
 async def critique_reply(
     llm: LLMPort, *, reply: str, last_inbound: str, dialog: list, context: str,
     needs: NeedsProfile, open_objections: list[str], lang: str,
-    branch_id: int, thread_id: int, bill: bool = True,
+    branch_id: int, thread_id: int, bill: bool = True, budget: object = None,
 ) -> Critique:
     """Judge one draft against the five-dimension rubric. Returns a Critique; on any broker or
     parse error returns Critique(ok=False, errored=True) so the caller fails CLOSED — the
@@ -150,6 +150,8 @@ async def critique_reply(
             workflow="critic", thread_id=thread_id, branch_id=branch_id)
         if not bill:
             meta.pop("cost_usd", None)
+        elif budget is not None:
+            await budget.record(float(meta.get("cost_usd") or 0.0))
         return _parse_critique(raw)
     except Exception as exc:  # noqa: BLE001 — an errored check must fail CLOSED, never pass
         logger.warning("critic failed branch=%d thread=%d: %s", branch_id, thread_id, exc)

@@ -877,10 +877,11 @@ def price_claims_grounded(reply: str, context: str) -> bool:
 
 async def verify_grounding(
     llm: LLMPort, reply: str, context: str, *, branch_id: int,
-    thread_id: int, bill: bool = True, system: str | None = None,
+    thread_id: int, bill: bool = True, budget: object = None, system: str | None = None,
 ) -> list[str]:
     """LLM grounding check on a risky reply; returns unsupported claims ([] = clean).
-    `system` overrides the checker prompt (from the editable `guard_verify` KB doc)."""
+    `system` overrides the checker prompt (from the editable `guard_verify` KB doc). `budget`
+    (a BudgetService, duck-typed) records this call's cost so the daily cap counts it."""
     messages = [
         {"role": "system", "content": system or _VERIFY_SYSTEM},
         {"role": "user", "content": f"KNOWLEDGE BASE:\n{context[:12000]}\n\nDRAFT:\n{reply}"},
@@ -898,6 +899,8 @@ async def verify_grounding(
             workflow="guard", thread_id=thread_id, branch_id=branch_id)
         if not bill:
             meta.pop("cost_usd", None)  # sandbox verify shouldn't distort cost meta
+        elif budget is not None:
+            await budget.record(float(meta.get("cost_usd") or 0.0))
         return _parse_unsupported(raw)
     except Exception as exc:  # noqa: BLE001 — a failed verify must not block the reply
         logger.warning("guard verify failed branch=%d thread=%d: %s", branch_id, thread_id, exc)

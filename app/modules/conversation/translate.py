@@ -85,7 +85,11 @@ async def translate_text(
     # Cyrillic/Indonesian output is token-heavy (mistral encodes Cyrillic at ~2-3x the
     # char count); 400 truncated real translations mid-sentence. Cap input at 800 chars,
     # so ~1500 output tokens comfortably covers a full translation.
-    for capability in ("chat:fast", SMART):
+    # The free pool almost never emits Cyrillic, so for a Russian target the chat:fast attempt
+    # is wasted (~0% passes _looks_translated) — go straight to smart. Latin targets still try
+    # the cheap pool first.
+    caps = (SMART,) if "ussian" in target else ("chat:fast", SMART)
+    for capability in caps:
         out, _ = await llm.chat(messages, capability=capability,
                                 max_tokens=settings().translate_max_tokens,
                                 workflow="translate", branch_id=branch_id,

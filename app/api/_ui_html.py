@@ -1409,13 +1409,17 @@ def chat_header_html(
     bot_pill = chat_bot_pill_html(tid, agent_enabled)
     block_pill = chat_block_pill_html(tid, is_blocked)
     clear_btn = _clear_ctx_btn(tid)
+    tr_all_btn = (
+        f'<button class="act-btn" onclick="trAll({tid})" tabindex="-1"'
+        f' data-help="{_h.escape(t("chat.translate_all"))}">🌐</button>'
+    )
     return (
         f'<div id="chat-hdr-{tid}">'
         f'<div class="ch">'
         f'{av_html}'
         f'<span class="ch-n">{name_html}{handle_html}</span>'
         f'{src_chip}{product_badge}{ig_chip}'
-        f'<div class="ch-acts">{bot_pill}{block_pill}{clear_btn}{stage_sel}</div>'
+        f'<div class="ch-acts">{tr_all_btn}{bot_pill}{block_pill}{clear_btn}{stage_sel}</div>'
         f'{meta_row}'
         f'</div>'
         f'{src_bar}'
@@ -1878,6 +1882,11 @@ def app_shell(
         "el.dataset.tr=html;el.innerHTML=html;"
         "el.dataset.state='tr';el.classList.add('trview');}})"
         ".catch(function(){el.style.opacity='';});}"
+        # translate every bubble in the thread at once — loops trMsg over the not-yet-translated
+        # bubbles (each cached in message.tr_text, so re-opening the chat never re-bills)
+        "function trAll(tid){"
+        "document.querySelectorAll('[id^=\"bt-\"]').forEach(function(el){"
+        "if(el.dataset.state!=='tr'){trMsg(el.id.slice(3),tid);}});}"
         # close the stage-reason popup without saving (Skip, or click the backdrop)
         "function closeNotePopup(tid){var el=document.getElementById('note-popup-'+tid);"
         "if(el)el.innerHTML='';}"

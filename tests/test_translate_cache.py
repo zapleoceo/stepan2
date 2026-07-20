@@ -162,19 +162,31 @@ async def test_looks_translated_flags_untranslated_russian_output() -> None:
     assert _looks_translated("Hello there", "English")
 
 
-async def test_translate_text_retries_on_smart_when_fast_fails_to_translate() -> None:
+async def test_translate_text_russian_skips_fast_and_uses_smart() -> None:
     from app.modules.conversation.translate import translate_text
-    # chat:fast echoes the Indonesian source back untranslated; chat:smart gets it right
-    llm = _SequenceLLM("Halo! masih Indonesia aja", "Привет! уже по-русски")
+    # The free pool ~never emits Cyrillic, so a Russian target goes STRAIGHT to smart — the
+    # chat:fast attempt was wasted (0/5 sampled produced real Cyrillic).
+    llm = _SequenceLLM("Привет! уже по-русски")
     out = await translate_text(llm, "halo apa kabar", target="Russian")
     assert out == "Привет! уже по-русски"
-    assert llm.caps == ["chat:fast", "chat:smart"]
+    assert llm.caps == ["chat:smart"]  # fast skipped for Russian
 
 
-async def test_translate_text_no_retry_when_fast_already_translated() -> None:
+async def test_translate_text_latin_target_uses_fast_only() -> None:
     from app.modules.conversation.translate import translate_text
-    llm = _SequenceLLM("Привет, как дела")
-    out = await translate_text(llm, "halo apa kabar", target="Russian")
-    assert out == "Привет, как дела"
-    assert llm.caps == ["chat:fast"]  # no wasted smart-model call
+    # A Latin-script target can use the cheap pool — it passes the _looks_translated gate, so
+    # no smart fallback is spent.
+    llm = _SequenceLLM("Halo, apa kabar")
+    out = await translate_text(llm, "hello how are you", target="Indonesian")
+    assert out == "Halo, apa kabar"
+    assert llm.caps == ["chat:fast"]
+
+
+async def test_translate_text_retries_on_smart_when_fast_returns_empty() -> None:
+    from app.modules.conversation.translate import translate_text
+    # The cheap pool has been caught returning an empty body; one retry on smart before giving up.
+    llm = _SequenceLLM("", "Halo, apa kabar")
+    out = await translate_text(llm, "hello", target="Indonesian")
+    assert out == "Halo, apa kabar"
+    assert llm.caps == ["chat:fast", "chat:smart"]
 

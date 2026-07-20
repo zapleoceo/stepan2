@@ -386,13 +386,16 @@ async def guard_decision(
     lead_spoke = _lead_spoke_own_words(ctx.dialog)
     lead_words = _own_words(ctx.dialog)
     issues = _deterministic_issues(decision.reply, context, lead_spoke, lead_words)
-    # Skip the LLM verify when the reply's only risk is a price that string-matches the KB —
-    # the single most common verify trigger, and a pure repetition of a grounded fact.
-    if mode == "full" and guard.is_risky(decision.reply) \
+    # Skip the LLM verify when (a) the critic-gate is ON — its `grounded` dimension is a stricter,
+    # fail-closed version of this exact check and it runs on EVERY reply, so verify would be a
+    # redundant second smart grounding pass — or (b) the reply's only risk is a price that
+    # string-matches the KB (a pure repetition of a grounded fact).
+    critic_on = branch_settings is not None and branch_settings.critic_gate == "on"
+    if mode == "full" and not critic_on and guard.is_risky(decision.reply) \
             and not guard.price_claims_grounded(decision.reply, context):
         issues += await guard.verify_grounding(
-            llm, decision.reply, context, branch_id=branch_id,
-            thread_id=thread_id, bill=bill, system=await guard_prompt(session, branch_id))
+            llm, decision.reply, context, branch_id=branch_id, thread_id=thread_id,
+            bill=bill, budget=ctx.budget, system=await guard_prompt(session, branch_id))
     if not issues:
         if regenerated and ctx.lead is not None:
             _bump_guard_regen_count(ctx.lead)
@@ -458,7 +461,7 @@ async def apply_critic(
             engine.llm, reply=text, last_inbound=last_inbound, dialog=ctx.dialog,
             context=engine.last_context, needs=ctx.stored_needs,
             open_objections=open_objections, lang=lang, branch_id=engine.branch_id,
-            thread_id=thread_id, bill=bill)
+            thread_id=thread_id, bill=bill, budget=ctx.budget)
 
     crit = await _judge(decision.reply)
     if mode == "shadow":
@@ -580,7 +583,8 @@ class ReplyService:
                     "%s: unparseable fast decision branch=%d thread=%d — retrying on smart",
                     workflow, self.branch_id, thread_id)
                 raw, meta = await engine.complete(
-                    ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill)
+                    ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+                    extra_user_msg=extra_user_msg)  # keep the turn's situational nudge on retry
                 try:
                     decision = parse_decision(raw)
                 except ValueError:
@@ -650,6 +654,13 @@ class ReplyService:
             self.session, self.branch_id, self.settings, self.llm,
             engine, ctx, thread_id, lang, workflow, bill, decision, meta,
             situational=extra_user_msg)
+        if workflow == "suggest":
+            # Manager DRAFT preview: return the guard-checked draft (fabrications still blocked)
+            # WITHOUT the live-send flow — dedup-vs-history, clarify-loop, premature-contact and
+            # the phone-gate stubs would overwrite the draft with a canned line, defeating the
+            # feature. The critic is skipped for suggest inside apply_critic anyway; the caller
+            # rolls the session back so no needs/stage is persisted.
+            return decision
         # guard_decision's own regen (for an UNRELATED violation) is never re-checked against
         # dialog history, so it can silently reintroduce the exact duplicate rejected above —
         # same precedent as followup.py. A live reply can't just drop the send like a nudge

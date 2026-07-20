@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import CoachingEdit
-from app.modules.knowledge.repository import KnowledgeRepo
+from app.modules.knowledge.repository import KnowledgeRepo, ProductRepo
 from app.ports.llm import LLMPort
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,17 @@ _SYSTEM = (
 )
 
 
+async def _kb_text(session: AsyncSession, branch_id: int) -> str:
+    """The WHOLE KB for the coach: every knowledge doc PLUS every active product card. Product
+    cards live in a separate table, so without them the coach was blind to per-course facts
+    (prices, durations, curriculum) — which now live only on the cards after the KB restructure."""
+    docs = await KnowledgeRepo(session, branch_id).list()
+    products = await ProductRepo(session, branch_id).active()
+    parts = [f"=== {d.slug} ({d.title or d.slug}) ===\n{d.content}" for d in docs]
+    parts += [f"=== PRODUCT {p.slug} ({p.title}) ===\n{p.content}" for p in products]
+    return "\n\n".join(parts)
+
+
 async def create_pending_edit(
     session: AsyncSession, branch_id: int, request: str,
 ) -> CoachingEdit:
@@ -78,19 +89,19 @@ async def generate_into_edit(
 
     Latency isn't critical (a manager waits, not a live lead), so the WHOLE KB goes in uncut
     and chat:deep absorbs it — full context beats truncated snippets."""
-    docs = await KnowledgeRepo(session, branch_id).list()
-    docs_text = "\n\n".join(
-        f"=== {d.slug} ({d.title or d.slug}) ===\n{d.content}" for d in docs
-    )
+    docs_text = await _kb_text(session, branch_id)
     messages = [
         {"role": "system", "content": _SYSTEM.format(docs=docs_text)},
         {"role": "user", "content": edit.request},
     ]
     data: dict = {"intent": "clarify", "summary": "Ошибка LLM"}
-    for attempt in range(3):  # reasoning model can return an empty/non-JSON body — retry
+    for attempt in range(3):  # the model can return an empty/non-JSON body — retry
         try:
-            raw, _meta = await llm.chat_deep(
-                messages, require_json_schema=True,
+            # chat:smart, not chat:deep: the reasoning model missed facts that WERE in the KB
+            # (Open House time in facts_market) — smart is more reliable at fact-lookup here,
+            # and the whole KB fits its window fine. Cheaper too.
+            raw, _meta = await llm.chat(
+                messages, capability="chat:smart", require_json_schema=True,
                 max_tokens=8000, temperature=0.1, workflow="coach", branch_id=branch_id,
             )
             cleaned = (
@@ -156,8 +167,7 @@ async def analyze_chat(
     # base + a full chat overran the broker gateway; the restructured KB no longer does.)
     from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
     kb = await effective_kb_branch(session, branch_id)
-    docs = await KnowledgeRepo(session, kb).list()
-    docs_text = "\n\n".join(f"=== {d.slug} ===\n{d.content}" for d in docs)[:20000]
+    docs_text = await _kb_text(session, kb)  # docs + product cards (prices/schedules live there)
     messages = [
         {"role": "system", "content": _ANALYZE_SYSTEM.format(docs=docs_text, lang=lang)},
         {"role": "user", "content": convo},
