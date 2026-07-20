@@ -697,7 +697,10 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
         try:
             decision = await reply_service.decide(thread_id, workflow="suggest")
             if decision is not None:
-                draft = (decision.reply or "").strip()
+                # '|||' is the auto-send bubble separator; a manager reads/edits the draft in a
+                # textarea, so render the bubbles as plain line breaks instead of a raw '|||'.
+                draft = "\n".join(
+                    p.strip() for p in (decision.reply or "").split("|||") if p.strip())
         except Exception as exc:  # noqa: BLE001 — a draft failure must not 500 the panel
             _log.warning("suggest draft error tid=%s: %s", thread_id, exc)
         finally:
