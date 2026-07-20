@@ -855,30 +855,6 @@ async def prune_broker_log(ctx: dict[str, Any]) -> int:
     return res.rowcount or 0
 
 
-async def reindex_knowledge(ctx: dict[str, Any]) -> int:
-    """Watcher: reindex the RAG store for any branch whose KB changed since its last index.
-
-    Each branch reindexes in its own transaction so one embedding failure doesn't drop the
-    others. Returns the number of branches reindexed this tick."""
-    return await _fan_out_per_branch(ctx, "reindex_knowledge_branch")
-
-
-async def reindex_knowledge_branch(ctx: dict[str, Any], branch_id: int) -> int:
-    """Reindex ONE branch's RAG store if its KB changed since the last index — its own
-    transaction so a slow embedding run on one branch never blocks another's."""
-    from app.modules.knowledge.reindex import branch_needs_reindex, reindex_branch  # noqa: PLC0415
-    llm = BrokerLLM()
-    try:
-        async with session_scope() as session:
-            if not await branch_needs_reindex(session, branch_id):
-                return 0
-            await reindex_branch(session, branch_id, llm)
-            return 1
-    except Exception:
-        logger.exception("reindex failed branch=%d", branch_id)
-        return 0
-
-
 _DIGEST_THREADS = 300
 
 
@@ -1008,7 +984,7 @@ class WorkerSettings:
         schedule_followups, reactivate_dormant, learning_audit, escalate_stale_alerts,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         daily_digest, crm_rescue, ingest_comments,
-        reindex_knowledge, aggregate_needs, sync_ads, backfill_ads,
+        aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
         # the next tick's enqueue; the worker-level keep_result=0 (see WorkerSettings) frees the
@@ -1017,7 +993,7 @@ class WorkerSettings:
         schedule_followups_branch, reactivate_dormant_branch, learning_audit_branch,
         escalate_stale_alerts_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
-        backfill_media_branch, reindex_knowledge_branch, aggregate_needs_branch,
+        backfill_media_branch, aggregate_needs_branch,
         daily_digest_branch, ingest_comments_branch,
         sync_ads_branch, backfill_ads_branch,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
@@ -1084,9 +1060,6 @@ class WorkerSettings:
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
         # Broker-log retention: prune old rows daily at 03:30 (broker_log_retention_days)
         cron(prune_broker_log, hour={3}, minute={30}, second=0, run_at_startup=False),
-        # RAG reindex watcher every 5 min: rebuilds only branches whose KB changed
-        cron(reindex_knowledge, minute={2, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57},
-             second=45, run_at_startup=False),
         # Needs-cloud aggregation once a day at 17:00 UTC = 00:00 WIB (midnight Jakarta), all
         # branches. Incremental + analytics-only, so it's cheap and safe to run platform-wide.
         cron(aggregate_needs, hour={17}, minute={0}, second=0, run_at_startup=False),

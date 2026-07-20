@@ -469,12 +469,11 @@ _BODY_EN = r"""
   <details>
     <summary>How the smart search works (RAG)</summary>
     <div class="body">
-      <p>Every document is cut into chunks along headings (~1,400 characters), and every chunk gets a numeric "meaning fingerprint" (an embedding via the broker). When a client writes, the recent turns get a fingerprint too, and the closest-by-meaning chunks are slotted into the prompt. A watcher notices edited documents every 5 minutes and rebuilds the branch index.</p>
+      <p>There is no retrieval step. The knowledge base is facts-only and small enough to fit in one context window, so every reply is given the whole thing: the persona, the policy/market facts, the full card of the product in focus, and a one-line facts summary of every other product. No embeddings, no index, no reindex watcher — an edit in the KB editor is live on the next reply.</p>
       <details class="l3"><summary>All the way down</summary><div class="body">
         <ul>
-          <li><code>app/modules/knowledge/rag.py</code>, <code>chunking.py</code>, <code>reindex.py</code>. Fingerprints are stored as JSON arrays and similarity is computed in Python — so it behaves identically on production PostgreSQL and on SQLite in tests (the pgvector extension is installed but unused — an honest review topic).</li>
-          <li>The index is rebuilt wholesale (delete + insert). If some chunks failed to embed, the watermark does not advance — a partial index is never sealed.</li>
-          <li>Changing the embedding model requires a full re-index of all branches: <code>scripts/reembed_all_branches.py</code>.</li>
+          <li><code>app/modules/knowledge/service.py</code> assembles the context deterministically; the sales tactics that used to live in KB "playbook" docs now live in the reply prompt, so the KB carries only facts.</li>
+          <li>A hard character budget caps the assembled context defensively (cheap JSON-mode providers stop returning valid JSON past ~30k chars); in practice the facts-only KB sits well under it.</li>
           <li>The persona never enters the search index — it is already in every prompt.</li>
         </ul>
       </div></details>
@@ -1064,13 +1063,11 @@ _BODY_UK = r"""
   <details>
     <summary>Як працює розумний пошук (RAG)</summary>
     <div class="body">
-      <p>Кожен документ ріжеться на шматки за заголовками (~1 400 символів), кожен шматок перетворюється на числовий «відбиток сенсу» (ембединг через брокера). Коли клієнт пише, останні репліки діалогу теж отримують відбиток, і в промпт підкладаються найближчі за сенсом шматки. Сторож раз на 5 хвилин помічає змінені документи і перебудовує індекс філії.</p>
+      <p>Пошукового кроку немає. База знань — тільки факти й достатньо мала, щоб уміститися в одне вікно контексту, тож кожній відповіді дається вся: персона, факти політик/ринку, повна картка продукту у фокусі та однорядкове зведення фактів по кожному іншому продукту. Без ембедингів, без індексу, без сторожа — правка в редакторі БЗ жива вже в наступній відповіді.</p>
       <details class="l3"><summary>До дна</summary><div class="body">
         <ul>
-          <li><code>app/modules/knowledge/rag.py</code>, <code>chunking.py</code>, <code>reindex.py</code>. Відбитки зберігаються JSON-масивами, близькість рахується в Python — щоб однаково працювало і на бойовому PostgreSQL, і на SQLite у тестах (розширення pgvector встановлене, але не використовується — чесна тема для рев'ю).</li>
-          <li>Індекс перебудовується цілком (видалити + вставити). Якщо частина шматків не отримала відбиток — «водяний знак» не рухається, щоб не зафіксувати частковий індекс.</li>
-          <li>Зміна моделі ембедингів вимагає повного переіндексу всіх філій: <code>scripts/reembed_all_branches.py</code>.</li>
-          <li>Персона в пошуковий індекс не потрапляє — вона й так завжди у промпті.</li>
+          <li><code>app/modules/knowledge/service.py</code> детерміновано збирає контекст; продажні тактики, що колись жили в «playbook»-документах БЗ, тепер у промпті відповіді, тож БЗ несе лише факти.</li>
+          <li>Жорсткий ліміт символів захисно обмежує зібраний контекст (дешеві JSON-провайдери перестають повертати валідний JSON після ~30k символів); на практиці факт-БЗ значно менша.</li>
         </ul>
       </div></details>
     </div>

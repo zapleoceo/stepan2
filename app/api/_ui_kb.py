@@ -26,15 +26,11 @@ def _tabs(active: str) -> str:
         cls = "kb-tab on" if key == active else "kb-tab"
         return (f'<button class="{cls}" hx-get="{url}" hx-target="#kb-side"'
                 f' hx-swap="innerHTML">{_h.escape(label)}</button>')
-    reindex = (
-        f'<button class="kb-reix" title="{_h.escape(t("kb.reindex"))}"'
-        f' hx-post="/ui/knowledge/reindex" hx-target="#kb-reix-out" hx-swap="innerHTML">⟳</button>'
-    )
     return (
         '<div class="kb-tabs">'
         f'{tab("persona", "/ui/knowledge/tree", t("kb.tab_persona"))}'
         f'{tab("products", "/ui/knowledge/products", t("nav.products"))}'
-        f'{reindex}</div><div id="kb-reix-out"></div>'
+        '</div>'
     )
 
 

@@ -209,11 +209,6 @@ class Settings(BaseSettings):
                                 "token-cost bound (was 40; a chat rarely needs more than "
                                 "~15 turns back to stay coherent, and the focus+RAG blocks "
                                 "carry the facts, not the raw history depth)")
-    rag_top_k: int = Field(
-        default=8, description="knowledge chunks retrieved per reply; higher = better recall "
-                               "but more tokens/cost (was 12 — the focused product's own "
-                               "chunks are now excluded via exclude_slug, so fewer slots are "
-                               "needed to cover the OTHER docs/products a query might touch)")
     dialog_char_budget: int = Field(
         default=8000, description="char bound on the dialog history fed to the reply LLM, on "
                                   "top of max_context_msgs — trims the oldest tail of a wordy "

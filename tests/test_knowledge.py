@@ -104,75 +104,47 @@ async def test_knowledge_context_lang_override(db_session):
     assert "lang=en" in ctx  # explicit param wins over Branch.lang
 
 
-class _FixedChunkLLM:
-    """Returns identical embeddings, so every chunk 'matches' any query — retrieval order
-    is by DB order, and the test controls total volume purely by chunk count/size."""
-
-    async def chat(self, *a, **k):  # noqa: ANN001, ANN002, ANN003, ANN201
-        raise NotImplementedError
-
-    async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201
-        return [[1.0] for _ in texts]
-
-
-async def test_knowledge_context_trims_rag_chunks_to_the_char_budget(db_session):
-    """Past ~30k chars the cheap JSON-mode providers return empty bodies instead of JSON —
-    the ceiling drops the lowest-ranked chunks so the assembled context always fits."""
-    from app.adapters.db.models import KnowledgeChunk
-    from app.modules.knowledge import service as ksvc
-
+async def test_focus_card_is_sent_in_full_no_rag(db_session):
+    """No retrieval: the whole focus card (every section) is sent — the restructured cards are
+    compact enough to send verbatim, so no section is deferred to a chunk index anymore."""
     s = db_session
     a = await _branch(s, "Jakarta", "id")
-    await _seed(s, a, "persona " * 100, [("vibe", "Vibe", "card " * 200)])
-    # 40 fat chunks × ~900 chars ≈ 36k — far past the 16k budget
-    for i in range(40):
-        s.add(KnowledgeChunk(branch_id=a, source_type="doc", source_slug=f"d{i}",
-                             title=f"Doc {i}", seq=0, text="z" * 900, embedding="[1.0]"))
-    await s.flush()
-    svc = KnowledgeService(s, a, llm=_FixedChunkLLM())
-    ctx = await svc.knowledge_context("vibe", query="anything")
-    assert len(ctx) <= ksvc._CTX_CHAR_BUDGET
-    assert "focus product=vibe" in ctx      # persona/focus/catalog never trimmed
-    assert "[relevant knowledge]" in ctx    # some chunks still made it in
-
-
-async def test_knowledge_context_light_retrieves_fewer_chunks(db_session):
-    """workflow='followup' passes light=True — a nudge leans on the focus card, not broad
-    recall, so it asks the index for fewer chunks (cheaper and smaller every time)."""
-    from app.adapters.db.models import KnowledgeChunk
-    from app.modules.knowledge import service as ksvc
-
-    s = db_session
-    a = await _branch(s, "Jakarta", "id")
-    await _seed(s, a, "persona", [("vibe", "Vibe", "card")])
-    for i in range(12):
-        s.add(KnowledgeChunk(branch_id=a, source_type="doc", source_slug=f"d{i}",
-                             title=f"Doc {i}", seq=0, text=f"chunk {i}", embedding="[1.0]"))
-    await s.flush()
-    svc = KnowledgeService(s, a, llm=_FixedChunkLLM())
-    full = await svc.knowledge_context("vibe", query="anything")
-    light = await svc.knowledge_context("vibe", query="anything", light=True)
-    assert light.count("--- Doc") == ksvc._FOLLOWUP_RAG_K
-    assert full.count("--- Doc") > light.count("--- Doc")
-
-
-def test_core_card_keeps_facts_drops_bulk() -> None:
-    from app.modules.knowledge.service import _core_card
     card = (
-        "> Quick facts — Vibe: Rp 13jt, mulai akhir Juli.\n\n"
-        "## Essence\nBikin aplikasi pakai AI dari nol.\n\n"
-        "## Curriculum (modules)\n1. HTML\n2. CSS\n3. JS\n4. Python\n5. Deploy\n\n"
-        "## Price (IDR)\nRp 13.000.000 atau cicil 4x.\n\n"
-        "## Schedule & duration\n4 bulan, 2x/minggu.\n\n"
-        "## Success cases\nPieter Levels bikin startup pakai AI.\n\n"
-        "## Links\nhttps://itstep.id/vibe-coding"
-    )
-    out = _core_card(card)
-    # core facts stay
-    assert "Quick facts" in out and "Rp 13.000.000" in out and "4 bulan" in out
-    assert "Bikin aplikasi pakai AI" in out          # essence kept
-    # bulk deferred to RAG
-    assert "1. HTML" not in out and "Curriculum" not in out
-    assert "Pieter Levels" not in out and "Success cases" not in out
-    assert "itstep.id/vibe-coding" not in out
-    assert len(out) < len(card)                        # genuinely smaller
+        "# Vibe Coding\nQUICK FACTS: durasi 4 bulan | harga Rp 13.000.000 | DP Rp 500.000\n"
+        "## Kurikulum\nHTML, CSS, JS, Python, Deploy\n## Success cases\nPieter Levels startup AI")
+    await _seed(s, a, "persona-A", [("vibe", "Vibe Coding", card)])
+    svc = KnowledgeService(s, a)  # no llm at all — no RAG
+    ctx = await svc.knowledge_context("vibe")
+    assert "focus product=vibe" in ctx
+    assert "Kurikulum" in ctx and "Success cases" in ctx  # full card, nothing trimmed away
+    assert "Rp 13.000.000" in ctx
+
+
+async def test_catalog_shows_quick_facts_for_other_products(db_session):
+    """A non-focus product is summarised by its one-line QUICK FACTS in the catalog, so a
+    cross-product question is answerable without dumping all 15 full cards."""
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    data_card = ("# Data Analyst\nQUICK FACTS: durasi 9 bulan | harga Rp 15.030.000\n"
+                 "## Kurikulum\nSQL, Python, Power BI")
+    await _seed(s, a, "persona-A",
+                [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
+                 ("data", "Data Analyst", data_card)])
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("vibe")
+    assert "focus product=vibe" in ctx                 # vibe is the full focus card
+    assert "- data: Data Analyst — durasi 9 bulan | harga Rp 15.030.000" in ctx  # data summarised
+    assert "SQL, Python, Power BI" not in ctx           # the OTHER card's bulk is NOT dumped
+
+
+async def test_context_stays_within_the_char_budget(db_session):
+    """Defensive cap: an over-large KB is truncated to the budget rather than shipped whole
+    (cheap JSON-mode providers stop returning JSON past ~30k chars)."""
+    from app.modules.knowledge import service as ksvc
+
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona " * 200, [("vibe", "Vibe", "card " * 2000)])  # ~10k+ focus card
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("vibe")
+    assert len(ctx) <= ksvc._CTX_CHAR_BUDGET

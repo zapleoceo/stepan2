@@ -70,6 +70,12 @@ class BranchSettings:
     # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
     # verify on risky replies), 'urls' (deterministic only), 'off'. See conversation.guard.
     reply_guard: str = "full"
+    # Critic-gate: a positive sales-quality check (grounded/responsive/sales-move/objection/
+    # register) on EVERY reply via chat:smart, failing CLOSED to a human. 'on' blocks+regens+
+    # hands off; 'shadow' runs and logs the verdict but never alters the reply (measurement);
+    # 'off' disables it. Default OFF so sims/tests see the raw model draft (their purpose);
+    # the live sales branch opts in via an AppSetting. See conversation.critic.
+    critic_gate: str = "off"
     # Trunk country code for phones mined from a lead's free-text message (see
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
@@ -214,6 +220,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
         reply_guard=raw.get("reply_guard", "full"),
+        critic_gate=raw.get("critic_gate", "off"),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),

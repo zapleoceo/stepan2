@@ -151,19 +151,13 @@ async def analyze_chat(
     )[:12000]
     if not convo:
         return ""
-    # RAG-retrieve the KB chunks this chat actually touches, not the whole 32k-token base:
-    # the full KB + a full chat through the reasoning model overran the broker's ~100s
-    # gateway (504). The relevant chunks are exactly the facts to grade the bot against.
-    from app.modules.knowledge.rag import RagService  # noqa: PLC0415 (avoid import cycle)
+    # The KB is facts-only now and fits in one context window, so grade the bot against the
+    # WHOLE doc set — no retrieval. (It used to RAG-retrieve chunks because the old 32k-token
+    # base + a full chat overran the broker gateway; the restructured KB no longer does.)
     from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
     kb = await effective_kb_branch(session, branch_id)
-    chunks = await RagService(session, kb, llm).retrieve(convo[-3000:], k=20,
-                                                         thread_id=thread_id)
-    if chunks:
-        docs_text = "\n\n".join(f"=== {title} ===\n{txt}" for title, txt in chunks)
-    else:  # index empty (never reindexed) → fall back to the raw docs
-        docs = await KnowledgeRepo(session, branch_id).list()
-        docs_text = "\n\n".join(f"=== {d.slug} ===\n{d.content}" for d in docs)[:20000]
+    docs = await KnowledgeRepo(session, kb).list()
+    docs_text = "\n\n".join(f"=== {d.slug} ===\n{d.content}" for d in docs)[:20000]
     messages = [
         {"role": "system", "content": _ANALYZE_SYSTEM.format(docs=docs_text, lang=lang)},
         {"role": "user", "content": convo},
@@ -196,7 +190,7 @@ async def apply_edit(
         doc = await KnowledgeRepo(session, branch_id).by_slug(edit.slug)
         if doc and edit.old_text in doc.content:
             doc.content = doc.content.replace(edit.old_text, edit.new_text, 1)
-            doc.updated_at = datetime.now(UTC).replace(tzinfo=None)  # → RAG watcher reindexes
+            doc.updated_at = datetime.now(UTC).replace(tzinfo=None)  # live on the next reply
             session.add(doc)
             edit.status = "applied"
             edit.applied_at = datetime.now(UTC).replace(tzinfo=None)

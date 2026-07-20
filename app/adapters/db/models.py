@@ -167,8 +167,8 @@ class KnowledgeDoc(SQLModel, table=True):
     category: str | None = Field(default=None, description="группа дерева: persona/playbook/…")
     sort_order: int = Field(default=0)
     content: str = Field(default="")
-    # onupdate bumps this on ANY ORM edit so the RAG watcher (branch_needs_reindex) detects
-    # the change and rebuilds — without it, a content edit left the index stale on old text.
+    # onupdate bumps this on ANY ORM edit so the KB-revision history and edit-tracking see the
+    # change; the reply prompt reads the live content directly (no index to rebuild).
     updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
     updated_by: str | None = Field(default=None, description="кто правил (owner id)")
 
@@ -553,23 +553,6 @@ class BrokerLog(SQLModel, table=True):
     ok: bool = Field(default=True)
     error: str | None = Field(default=None, description="сообщение ошибки при ok=false")
     created_at: datetime = Field(default_factory=_utcnow, index=True)
-
-
-class KnowledgeChunk(SQLModel, table=True):
-    """Кусок базы знаний с эмбеддингом для RAG-поиска. Пересобирается целиком при
-    переиндексации (DELETE+INSERT, без UPDATE). embedding — JSON-массив float (cosine
-    в Python, чтобы работать и на SQLite-тестах, и на Postgres-проде)."""
-    __tablename__ = "knowledge_chunk"
-
-    id: int | None = Field(default=None, primary_key=True)
-    branch_id: int = Field(foreign_key="branch.id", index=True)
-    source_type: str = Field(default="doc", description="doc | product")
-    source_slug: str = Field(default="")
-    title: str = Field(default="")
-    seq: int = Field(default=0)
-    text: str = Field(default="")
-    embedding: str = Field(default="[]", description="JSON-массив float (Voyage-вектор)")
-    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class KnowledgeRevision(SQLModel, table=True):
