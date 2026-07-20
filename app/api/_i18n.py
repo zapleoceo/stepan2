@@ -263,6 +263,14 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Sending: OFF — the queue keeps building, nothing goes out (for a ban/checkpoint).",
         "id": "Pengiriman: OFF — antrean menumpuk, tidak ada yang terkirim (saat banned).",
     },
+    "hint.comments_global": {
+        "ru": "Ответы на комментарии под нашими постами. ON — раз в час (в :17) бот собирает "
+              "новые и отвечает. По умолчанию OFF.",
+        "en": "Replies to comments under our posts. ON — hourly (at :17) the bot collects new "
+              "ones and answers. Off by default.",
+        "id": "Balasan komentar di postingan kami. ON — tiap jam (menit :17) bot mengumpulkan "
+              "dan membalas. Default OFF.",
+    },
     "hint.lang": {
         "ru": "Язык интерфейса админки. На язык ответов бота не влияет.",
         "en": "Admin UI language. Does not affect the bot's reply language.",
@@ -1080,6 +1088,8 @@ _TR: dict[str, dict[str, str]] = {
                       "id": "Stepan — cabang ini"},
     "bot.sending":   {"ru": "Отправка (исходящие)", "en": "Sending (outbound)",
                       "id": "Pengiriman (keluar)"},
+    "bot.comments":  {"ru": "Ответы на комментарии", "en": "Comment replies",
+                      "id": "Balas komentar"},
     "bot.pick_branch": {"ru": "Выберите один филиал в фильтре, чтобы управлять его ботом",
                         "en": "Pick a single branch in the filter to control its bot",
                         "id": "Pilih satu cabang di filter untuk mengatur botnya"},

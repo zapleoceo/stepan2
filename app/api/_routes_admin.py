@@ -582,6 +582,56 @@ async def sending_toggle(request: Request, branch_id: int = Form(default=1)) -> 
     return HTMLResponse(_sending_toggle_html(selected, sending_on))
 
 
+_COMMENTS_KEY = "comment_replies_enabled"  # per-branch reply-to-comments switch (schema)
+
+
+@router.get("/comment-status", response_class=HTMLResponse)
+async def comment_status(request: Request) -> HTMLResponse:
+    apply_lang(request)
+    branch_id = await _single_selected_branch(request)
+    async with session_scope() as session:
+        # Default OFF (unlike bot/sending which default ON) — read with a false fallback.
+        on = await _read_flag_off(session, branch_id, _COMMENTS_KEY) if branch_id else None
+    return HTMLResponse(_comment_toggle_html(branch_id, on))
+
+
+@router.post("/comment-toggle", response_class=HTMLResponse)
+async def comment_toggle(request: Request, branch_id: int = Form(default=1)) -> HTMLResponse:
+    apply_lang(request)
+    allowed = branch_ids_from_request(request)
+    if allowed and branch_id not in allowed:
+        branch_id = allowed[0]
+    selected = await _single_selected_branch(request)
+    async with session_scope() as session:
+        if selected is not None and not is_branch_write_forbidden(
+            selected, writable_branch_ids(request)
+        ):
+            new = not await _read_flag_off(session, selected, _COMMENTS_KEY)
+            await _write_flag(session, selected, _COMMENTS_KEY, new)
+            invalidate(selected)
+        on = await _read_flag_off(session, selected, _COMMENTS_KEY) if selected else None
+    return HTMLResponse(_comment_toggle_html(selected, on))
+
+
+async def _read_flag_off(session, branch_id: int | None, key: str) -> bool:
+    """Like _read_flag but defaults to FALSE when unset — for opt-in switches (comments)."""
+    clause = "branch_id = :bid" if branch_id is not None else "branch_id IS NULL"
+    row = (await session.execute(
+        text(f"SELECT value FROM app_setting WHERE {clause} AND key=:k"),  # noqa: S608
+        {"bid": branch_id, "k": key})).first()
+    return _truthy(row[0]) if row else False
+
+
+def _comment_toggle_html(branch_id: int | None, on: bool | None) -> str:
+    """Sidebar quick-switch for reply-to-comments (opt-in, per branch). Writes the same
+    comment_replies_enabled key the channel Settings expose, as a branch-level override."""
+    if branch_id is None or on is None:
+        return f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
+    return _switch(
+        "comments", branch_id, t("bot.comments"), on,
+        post_url="/ui/comment-toggle", target="#comment-tog-wrap")
+
+
 def _switch(
     scope: str, branch_id: int, label: str, on: bool, *,
     post_url: str = "/ui/agent-toggle", target: str = "#bot-tog-wrap",
