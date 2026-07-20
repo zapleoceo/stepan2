@@ -898,6 +898,31 @@ def test_kb_editor_parses_existing_sections() -> None:
     assert "We take cards" in html
 
 
+def test_kb_editor_has_translate_all_button() -> None:
+    """One-click 'translate all' in the KB editor, like the chat translate. Reversible; while
+    translated the form is read-only and Save is locked so a translation can't be saved over
+    the source."""
+    from app.api._ui_kb import kb_editor_html
+    _set_lang("en")
+    html = kb_editor_html(138, "facts", "Facts", "## Pay\nbayar dulu")
+    assert 'onclick="kbTrAll(this)"' in html and "Translate all" in html
+    assert 'id="kb-form-138"' in html and 'id="kb-save-138"' in html   # JS targets
+    assert 'id="kb-tr-note-138"' in html                                # read-only hint slot
+    assert 'name="body_0"' in html                                      # a translatable field
+
+
+def test_kb_translate_all_js_and_route_wired() -> None:
+    from app.api._auth import _is_read_support_post
+    from app.api._ui_html import app_shell
+    _set_lang("ru")
+    shell = app_shell("ru", "", active_nav="know")
+    assert "function kbTrAll(" in shell
+    assert "trFetch('/ui/knowledge/'+doc+'/tr'" in shell   # reuses the 504-guarded fetch
+    assert "save.disabled=true" in shell                    # locks Save while translated
+    # the translate POST is read-support (a viewer may translate; it never mutates)
+    assert _is_read_support_post("/ui/knowledge/138/tr") is True
+
+
 def test_kb_history_html_shows_branch_local_time() -> None:
     """Revision timestamps must honor set_render_tz — previously the route never called it,
     so this rendered whatever tz happened to be left over (usually UTC/0) from a prior request."""

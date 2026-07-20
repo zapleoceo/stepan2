@@ -1,12 +1,15 @@
 """Knowledge-base routes — tabbed tree, section editor, edit history."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from starlette.datastructures import FormData
 
 from app.adapters.db.session import session_scope
+from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import actor_from_request as _actor
 from app.admin._branch import (
     branch_ids_from_request,
@@ -14,6 +17,7 @@ from app.admin._branch import (
     is_branch_write_forbidden,
     writable_branch_ids,
 )
+from app.modules.conversation.translate import target_for_lang, translate_text
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
 from app.modules.knowledge.sections import reassemble
 
@@ -22,6 +26,7 @@ from ._query import _branch_where
 from ._ui_kb import kb_editor_html, kb_history_html, kb_products_html, kb_tree_html
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
 
 _DOC_COLS = "id, slug, title, content, category, sort_order, updated_by"
 _DOC_Q = f"SELECT {_DOC_COLS} FROM knowledge_doc {{where}} ORDER BY sort_order, id"  # noqa: S608
@@ -66,6 +71,36 @@ async def knowledge_edit(doc_id: int, request: Request) -> HTMLResponse:
         return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
     return HTMLResponse(kb_editor_html(
         row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""), row[4]))
+
+
+@router.post("/knowledge/{doc_id}/tr", response_class=HTMLResponse)
+async def knowledge_translate_text(
+    doc_id: int, request: Request, text_body: str = Form(alias="text"),
+) -> HTMLResponse:
+    """Translate one KB section's text into the operator's UI language for reading (the
+    'Translate all' button loops this over every section). Read-support: it never mutates the
+    doc, so read access to the doc's branch is enough. Returns the plain translation, or an
+    empty body on failure so the client can toast a retry (same contract as the chat translate).
+    """
+    lang_code = apply_lang(request)
+    body = text_body.strip()
+    if not body:
+        return HTMLResponse("")
+    async with session_scope() as session:
+        row = (await session.execute(
+            text("SELECT branch_id FROM knowledge_doc WHERE id = :id"),
+            {"id": doc_id})).first()
+    if row is None or is_branch_forbidden(row[0], branch_ids_from_request(request)):
+        return HTMLResponse("", status_code=404)
+    try:
+        tr = await translate_text(BrokerLLM(), body, target=target_for_lang(lang_code),
+                                  branch_id=row[0])
+    except Exception as exc:  # noqa: BLE001 — empty body → client shows a retry toast
+        _log.warning("kb translate error doc=%s: %s", doc_id, exc)
+        return HTMLResponse("")
+    # Raw text: the client writes it into a <textarea>.value (plain text, not parsed as HTML),
+    # so escaping would surface literal &amp; etc. in the field.
+    return HTMLResponse(tr or "")
 
 
 def _content_from_form(form: FormData) -> str:

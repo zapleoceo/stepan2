@@ -140,6 +140,15 @@ _TR: dict[str, dict[str, str]] = {
     "kb.restore":   {"ru": "Восстановить", "en": "Restore",     "id": "Pulihkan"},
     "kb.no_history": {"ru": "Правок пока нет", "en": "No edits yet", "id": "Belum ada edit"},
     "kb.back":      {"ru": "Назад",        "en": "Back",        "id": "Kembali"},
+    "kb.tr_all":    {"ru": "Перевести всё", "en": "Translate all", "id": "Terjemahkan semua"},
+    "kb.tr_orig":   {"ru": "Показать оригинал", "en": "Show original",
+                     "id": "Tampilkan asli"},
+    "kb.tr_note":   {"ru": "Показан перевод — поля только для чтения. Верните оригинал, "
+                           "чтобы редактировать или сохранить.",
+                     "en": "Showing a translation — fields are read-only. Switch back to the "
+                           "original to edit or save.",
+                     "id": "Menampilkan terjemahan — kolom hanya-baca. Kembali ke asli untuk "
+                           "mengedit atau menyimpan."},
     # products panel
     "prod.sort_hint": {
         "ru": "Порядок в промпте ИИ: 0 = первый. Чем меньше — тем раньше продукт упоминается.",
