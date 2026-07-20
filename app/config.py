@@ -216,12 +216,14 @@ class Settings(BaseSettings):
                                   "their newest 30 messages) while the newest turns stay "
                                   "verbatim for the dedup/don't-repeat checks")
     knowledge_context_char_budget: int = Field(
-        default=16000, description="char ceiling on the assembled KB context (persona + focus "
-                                   "card + catalog + RAG chunks) — lowest-ranked RAG chunks "
-                                   "are dropped to fit. Past ~30k chars the cheap JSON-mode "
-                                   "providers stop returning valid JSON at all (verified live "
-                                   "on deepseek), so an oversized context buys empty "
-                                   "responses, not recall")
+        default=24000, description="char ceiling on the assembled KB context (persona + policy/"
+                                   "market facts + the full focus card + the facts catalog). "
+                                   "Raised from 16000 with the facts-only-KB redesign: the whole "
+                                   "fact surface is now sent every turn (~18-21k assembled), and "
+                                   "16k truncated the catalog. Stays well under ~30k, where the "
+                                   "cheap JSON-mode providers stop returning valid JSON at all "
+                                   "(verified live on deepseek); active sales turns route to "
+                                   "chat:smart (128k window) anyway")
     translate_max_tokens: int = Field(
         default=1500, description="output token budget for a per-bubble translation (Cyrillic "
                                   "is token-heavy)")
