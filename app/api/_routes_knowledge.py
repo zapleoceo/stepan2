@@ -1,4 +1,4 @@
-"""Knowledge-base routes — tabbed tree, section editor, edit history, RAG reindex."""
+"""Knowledge-base routes — tabbed tree, section editor, edit history."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Form, Request
@@ -7,7 +7,6 @@ from sqlalchemy import text
 from starlette.datastructures import FormData
 
 from app.adapters.db.session import session_scope
-from app.adapters.llm.broker import BrokerLLM
 from app.admin._branch import actor_from_request as _actor
 from app.admin._branch import (
     branch_ids_from_request,
@@ -16,10 +15,9 @@ from app.admin._branch import (
     writable_branch_ids,
 )
 from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
-from app.modules.knowledge.reindex import reindex_branch
 from app.modules.knowledge.sections import reassemble
 
-from ._i18n import apply_lang, t
+from ._i18n import apply_lang
 from ._query import _branch_where
 from ._ui_kb import kb_editor_html, kb_history_html, kb_products_html, kb_tree_html
 
@@ -151,20 +149,3 @@ async def knowledge_restore(request: Request, rev_id: int = Form(...)) -> HTMLRe
     return resp
 
 
-@router.post("/knowledge/reindex", response_class=HTMLResponse)
-async def knowledge_reindex(request: Request) -> HTMLResponse:
-    apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    if not branch_ids:
-        return HTMLResponse(f'<span class="kb-reix-msg">{t("kb.reindex_pick")}</span>')
-    # Reindex only the selected branches the caller may WRITE (super: writable=None → all).
-    writable = writable_branch_ids(request)
-    targets = [b for b in branch_ids if not is_branch_write_forbidden(b, writable)]
-    if not targets:
-        return HTMLResponse('<span class="kb-reix-msg">Forbidden</span>', status_code=403)
-    stored = 0
-    async with session_scope() as session:
-        for bid in targets:
-            stored += await reindex_branch(session, bid, BrokerLLM())
-    return HTMLResponse(
-        f'<span class="kb-reix-msg">{t("kb.reindexed")}: {stored}</span>')

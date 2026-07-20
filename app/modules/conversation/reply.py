@@ -25,7 +25,7 @@ from app.modules.settings.service import BranchSettings
 from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
-from . import guard
+from . import critic, guard
 from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
 from .needs import is_question, lead_grounded, merge_needs, parse_needs
@@ -432,6 +432,68 @@ async def guard_decision(
                    kb_gap=fixed.kb_gap or guard.GUARD_HANDOFF_REASON), regen_meta
 
 
+async def apply_critic(
+    branch_settings: BranchSettings | None, engine: DecisionEngine, ctx, thread_id: int,
+    *, lang: str, workflow: str, bill: bool, decision: Decision, meta: dict,
+    situational: str | None, last_inbound: str, open_objections: list[str],
+) -> tuple[Decision, dict]:
+    """Positive quality gate on the FINAL draft: judge it against critic.DIMENSIONS, and on
+    failure regen ONCE with the critic's feedback, re-judge, then FAIL CLOSED to a human — the
+    last word on quality, so nothing downstream can resurrect a rejected reply. Deliberate
+    hand-offs and canned safety replies are skipped (the critic judges genuine sales replies,
+    not a considered 'let me check with the team'). See critic.py."""
+    mode = branch_settings.critic_gate if branch_settings is not None else "off"
+    reply = (decision.reply or "").strip()
+    canned = {guard.SAFE_FALLBACK.strip(), guard.CLARIFY_FALLBACK.strip(),
+              guard.ASK_PHONE_BEFORE_HANDOFF.strip()}
+    if mode == "off" or not reply or decision.needs_manager or reply in canned:
+        return decision, meta
+
+    async def _judge(text: str) -> critic.Critique:
+        return await critic.critique_reply(
+            engine.llm, reply=text, last_inbound=last_inbound, dialog=ctx.dialog,
+            context=engine.last_context, needs=ctx.stored_needs,
+            open_objections=open_objections, lang=lang, branch_id=engine.branch_id,
+            thread_id=thread_id, bill=bill)
+
+    crit = await _judge(decision.reply)
+    if mode == "shadow":
+        logger.info("critic[shadow] branch=%d thread=%d ok=%s: %s",
+                    engine.branch_id, thread_id, crit.ok, crit.summary())
+        return decision, meta
+    if crit.ok:
+        return decision, meta
+    logger.warning("critic branch=%d thread=%d rejected draft → regen: %s",
+                   engine.branch_id, thread_id, crit.summary())
+    raw, regen_meta = await engine.complete(
+        ctx, thread_id, lang=lang, workflow=workflow, capability=SMART, bill=bill,
+        extra_user_msg=with_situation(
+            critic.CRITIC_CORRECTION.format(
+                failures="; ".join(crit.failures[:5]), fix=crit.fix), situational))
+    if ctx.lead is not None:
+        _bump_guard_regen_count(ctx.lead)
+    try:
+        fixed = parse_decision(raw)
+    except ValueError:
+        fixed = None
+    from dataclasses import replace  # noqa: PLC0415
+    if fixed is not None and fixed.reply:
+        recrit = await _judge(fixed.reply)
+        det = _deterministic_issues(
+            fixed.reply, engine.last_context,
+            _lead_spoke_own_words(ctx.dialog), _own_words(ctx.dialog))
+        if recrit.ok and not det:
+            return fixed, regen_meta
+        logger.warning(
+            "critic branch=%d thread=%d regen still not top-tier (%s / det=%s) → hand-off",
+            engine.branch_id, thread_id, recrit.summary(), det[:2])
+    # Two drafts couldn't clear the bar — hand the lead to a human rather than send a sub-par
+    # reply. This is the guarantee's teeth: only proven-good replies reach the lead.
+    base = fixed if fixed is not None and fixed.reply else decision
+    return replace(base, reply=guard.SAFE_FALLBACK, needs_manager=True,
+                   kb_gap=base.kb_gap or critic.CRITIC_HANDOFF_REASON), regen_meta
+
+
 class ReplyService:
     """Decide and enqueue the agent's reply for one branch's thread."""
 
@@ -765,6 +827,15 @@ class ReplyService:
                     "contact", self.branch_id, thread_id)
                 decision = replace(decision, needs_manager=False, manager_question=None,
                                    kb_gap=None, reply=guard.ASK_PHONE_BEFORE_HANDOFF)
+        # QUALITY GATE (last word): judge the final draft against the positive sales rubric and
+        # fail closed to a human if it can't be made top-tier. Runs after every deterministic
+        # safety net so it sees exactly what would be sent; open_objections wires in with the
+        # objection-state layer.
+        decision, meta = await apply_critic(
+            self.settings, engine, ctx, thread_id, lang=lang, workflow=workflow, bill=bill,
+            decision=decision, meta=meta, situational=extra_user_msg, last_inbound=last_in_txt,
+            open_objections=sorted(set(ctx.stored_needs.objections)
+                                   | set(decision.open_objections)))
         self._last_llm_meta = meta
         if lead is not None:
             # Needs are recorded ONLY once the lead has typed something of their own. An ad's
@@ -781,8 +852,9 @@ class ReplyService:
                 jobs = lead_grounded(decision.jobs, own)
                 gains = lead_grounded(decision.gains, own)
                 pains = [p for p in lead_grounded(decision.pains, own) if not is_question(p)]
+                objections = lead_grounded(decision.open_objections, own)
                 merged = merge_needs(ctx.stored_needs, jobs, pains, gains,
-                                     decision.discovery_complete)
+                                     decision.discovery_complete, objections=objections)
                 lead.needs = merged.to_json()
                 self.session.add(lead)
         return decision

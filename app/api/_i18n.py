@@ -132,13 +132,8 @@ _TR: dict[str, dict[str, str]] = {
     "cloud.pains":  {"ru": "Боли",   "en": "Pains", "id": "Masalah"},
     "cloud.jobs":   {"ru": "Цели",   "en": "Goals", "id": "Tujuan"},
     "cloud.gains":  {"ru": "Выгоды", "en": "Gains", "id": "Manfaat"},
-    # knowledge-base tree / editor / history / reindex
+    # knowledge-base tree / editor / history
     "kb.tab_persona": {"ru": "Персона",   "en": "Persona",     "id": "Persona"},
-    "kb.reindex":   {"ru": "Переиндексировать RAG", "en": "Reindex RAG", "id": "Reindex RAG"},
-    "kb.reindexed": {"ru": "Проиндексировано чанков", "en": "Chunks indexed",
-                     "id": "Chunk terindeks"},
-    "kb.reindex_pick": {"ru": "Выбери филиал в шапке", "en": "Pick a branch first",
-                        "id": "Pilih cabang dulu"},
     "kb.preamble":  {"ru": "Вступление",  "en": "Intro",       "id": "Intro"},
     "kb.history":   {"ru": "История",      "en": "History",     "id": "Riwayat"},
     "kb.edited_by": {"ru": "правил:",      "en": "edited by",   "id": "diedit oleh"},

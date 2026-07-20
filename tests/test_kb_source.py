@@ -12,7 +12,6 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 from sqlalchemy import func, select  # noqa: E402
 
 from app.adapters.db.models import Branch, KnowledgeDoc, Product  # noqa: E402
-from app.modules.knowledge.reindex import branch_needs_reindex  # noqa: E402
 from app.modules.knowledge.source import copy_kb, effective_kb_branch  # noqa: E402
 
 
@@ -45,16 +44,6 @@ async def test_effective_branch_self_then_linked(db_session) -> None:
     await db_session.flush()
     assert await effective_kb_branch(db_session, dst) == src   # linked → source
 
-
-async def test_linked_branch_never_reindexes(db_session) -> None:
-    src = await _src(db_session)
-    dst = await _empty(db_session)
-    b = await db_session.get(Branch, dst)
-    b.kb_source_branch_id = src
-    db_session.add(b)
-    await db_session.flush()
-    # dst has no own docs AND is linked → nothing to index
-    assert await branch_needs_reindex(db_session, dst) is False
 
 
 async def test_copy_kb_clones_and_replaces(db_session) -> None:

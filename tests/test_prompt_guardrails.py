@@ -1,44 +1,49 @@
 """Funnel guardrails baked into the decision prompt — regression cover so a future edit
-can't silently drop the anti-repeat / buying-signal / one-product / soft-qualify rules
-(added after a 20-transcript review found the funnel stalling on qualifying)."""
+can't silently drop the anti-repeat / buying-signal / one-product / objection / close rules.
+
+The prompt was rewritten (2026-07-20) to absorb the former playbook KB docs and to strip the
+thread-NNNN incident noise the model can't read; these assertions pin the NEW canonical
+phrasing of each rule, so the guidance can't silently disappear even though it moved."""
 from __future__ import annotations
 
 from app.modules.conversation.prompt import _DECISION_CONTRACT
 
 
 def test_anti_repeat_builds_on_partial_answer() -> None:
-    # lead already answered → advance, don't re-ask reworded
-    assert "IF THE LEAD ALREADY ANSWERED" in _DECISION_CONTRACT
+    assert "If the lead ALREADY answered, BUILD ON IT" in _DECISION_CONTRACT
     assert "narrowing follow-up" in _DECISION_CONTRACT
 
 
 def test_enroll_signal_collects_contact_before_format() -> None:
     assert "ENROLL / PAYMENT REFLEX" in _DECISION_CONTRACT
-    assert "COLLECT THE CONTACT FIRST" in _DECISION_CONTRACT
+    assert "take the contact" in _DECISION_CONTRACT
+    assert "don't first ask which format/group" in _DECISION_CONTRACT
 
 
 def test_one_product_facts_no_mixing() -> None:
-    assert "ONE PRODUCT'S FACTS ONLY" in _DECISION_CONTRACT
+    assert "ONE product's facts only" in _DECISION_CONTRACT
 
 
-def test_soft_qualify_gate_present() -> None:
-    assert "SOFT-QUALIFY EARLY" in _DECISION_CONTRACT
-    assert "genuine dead end" in _DECISION_CONTRACT.lower()  # soft-close reserved for these
+def test_handle_open_objection_before_pitching() -> None:
+    assert "HANDLE A LIVE OBJECTION FIRST" in _DECISION_CONTRACT
+    assert "talking over an objection" in _DECISION_CONTRACT
 
 
 def test_catch_all_answer_is_narrowed_not_reasked() -> None:
-    assert "CATCH-ALL ANSWERS" in _DECISION_CONTRACT
+    assert "vague catch-all" in _DECISION_CONTRACT
+    assert "narrow it FOR" in _DECISION_CONTRACT
 
 
 def test_capture_contact_early_but_not_ready() -> None:
-    assert "CAPTURE CONTACT EARLY" in _DECISION_CONTRACT
+    assert "CONTACT CAPTURE" in _DECISION_CONTRACT
     # a WhatsApp shared for materials must NOT flip the lead to ready/handoff
-    assert "is NOT 'ready'" in _DECISION_CONTRACT
+    assert "is NOT ready" in _DECISION_CONTRACT
     assert "AND wants to ENROL" in _DECISION_CONTRACT
 
 
 def test_proactive_close_and_openhouse_bridge() -> None:
-    assert "PROACTIVELY CLOSE" in _DECISION_CONTRACT
+    assert "CLOSING" in _DECISION_CONTRACT
+    assert "don't wait to be asked" in _DECISION_CONTRACT
     assert "OPEN HOUSE" in _DECISION_CONTRACT
 
 
@@ -74,6 +79,12 @@ def test_decision_parses_stage_reason() -> None:
     assert d2.stage_reason is None
 
 
+def test_decision_parses_open_objections() -> None:
+    from app.modules.conversation.decision import parse_decision
+    d = parse_decision('{"reply":"hi","stage":"objection","open_objections":["mahal"]}')
+    assert d.open_objections == ["mahal"]
+
+
 def test_students_are_a_target_segment() -> None:
     assert "STUDENTS (school-age) ARE A TARGET" in _DECISION_CONTRACT
     assert "10% student discount" in _DECISION_CONTRACT
@@ -81,45 +92,34 @@ def test_students_are_a_target_segment() -> None:
 
 
 def test_no_invented_proof_or_cross_product_trial() -> None:
-    assert "DON'T OFFER WHAT YOU CAN'T DELIVER" in _DECISION_CONTRACT
-    assert "no invented alumni success stories" in _DECISION_CONTRACT
+    assert "NO FABRICATION" in _DECISION_CONTRACT
     assert "NO Vibe Coding Skill Booster" in _DECISION_CONTRACT
 
 
-def test_early_adult_vs_student_split() -> None:
-    assert "split ADULT vs SCHOOL-AGE early" in _DECISION_CONTRACT
-    assert "NEVER soft-close someone just for being a student" in _DECISION_CONTRACT
+def test_students_never_soft_closed_just_for_being_a_student() -> None:
+    assert "never dismiss a student or mark them non_target" in _DECISION_CONTRACT
+    assert "route toward the parent" in _DECISION_CONTRACT
 
 
 def test_compound_question_gets_every_part_answered() -> None:
-    # thread 2159, 2026-07-08: "price list and the syllabus" got only the price answered,
-    # lead had to chase the rest ("btw syllabus nya td gmn ya")
-    assert "TWO OR MORE ASKS" in _DECISION_CONTRACT
+    assert "TWO OR MORE asks" in _DECISION_CONTRACT
     assert "EVERY part answered" in _DECISION_CONTRACT
 
 
 def test_plain_acknowledgment_never_needs_manager() -> None:
-    # threads 2324/2337/2272/2403, 2026-07-09/10: "boleh min" / "Minat ka" /
-    # "Thanks untuk infonya" / "kayanya mau serius jadi spesialis SMM" all got escalated to
-    # a human with nothing to actually resolve — judge INTENT, not exact wording
-    assert "ANY POSITIVE, AGREEING OR READY SIGNAL" in _DECISION_CONTRACT
-    assert "Judge the INTENT" in _DECISION_CONTRACT
+    assert "ANY POSITIVE / AGREEING / READY SIGNAL" in _DECISION_CONTRACT
+    assert "judge the INTENT" in _DECISION_CONTRACT
     assert "NEVER for a lead simply agreeing" in _DECISION_CONTRACT
 
 
 def test_undecipherable_slang_is_non_target_not_needs_manager() -> None:
-    # thread 2397, 2026-07-09: PUBG gaming slang ("main epep", "ratain satu squad di bermuda")
-    # escalated to a human who can't decode it either — should be non_target + soft close
-    assert "UNDECIPHERABLE SLANG" in _DECISION_CONTRACT
-    assert "non_target, NOT needs_manager" in _DECISION_CONTRACT
+    assert "Undecipherable slang" in _DECISION_CONTRACT
+    assert "non_target, not needs_manager" in _DECISION_CONTRACT
 
 
 def test_lead_auto_reply_is_not_escalated() -> None:
-    # thread 2058, 2026-07-11: the lead's OWN business auto-responder ("terima kasih telah
-    # menghubungi kami, akan segera kami balas") got escalated to a manager — it's a robot,
-    # not the lead talking. The prompt rule was removed: situations.is_auto_reply now owns
-    # this deterministically (it gates lead_spoke_own_words), so assert the detector, and
-    # that the prompt doesn't grow the rule back.
+    # situations.is_auto_reply owns this deterministically (it gates lead_spoke_own_words);
+    # assert the detector, and that the prompt doesn't grow the rule back.
     from app.modules.conversation.situations import is_auto_reply
 
     assert is_auto_reply(
@@ -127,20 +127,23 @@ def test_lead_auto_reply_is_not_escalated() -> None:
     assert "AUTO-REPLY / AWAY MESSAGE" not in _DECISION_CONTRACT
 
 
+def test_no_thread_number_noise_in_the_prompt() -> None:
+    # the rewrite stripped every "thread NNNN" incident reference — they carry zero signal to
+    # the model and only cost tokens. Guard against them creeping back in.
+    import re
+    assert not re.search(r"thread \d{3,}", _DECISION_CONTRACT)
+
+
 def test_stage_reason_required_not_optional() -> None:
-    assert "REQUIRED (not optional)" in _DECISION_CONTRACT
+    assert "REQUIRED whenever" in _DECISION_CONTRACT
 
 
 def test_followup_contract_is_lighter_but_keeps_the_same_json_schema() -> None:
-    """A follow-up nudge doesn't need the full sales-methodology teaching — only the
-    JSON schema (so parse_decision/_apply_decision behave identically) and the
-    anti-fabrication/escalation guardrails that still apply regardless of workflow."""
     from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT, _JSON_SCHEMA_BLOCK
 
     assert len(_FOLLOWUP_CONTRACT) < len(_DECISION_CONTRACT) / 2
     assert _JSON_SCHEMA_BLOCK in _FOLLOWUP_CONTRACT
     assert _JSON_SCHEMA_BLOCK in _DECISION_CONTRACT
-    # the essential guardrails still carry over
     assert "NEVER FABRICATE" in _FOLLOWUP_CONTRACT
     assert "ANY POSITIVE, AGREEING OR READY SIGNAL" in _FOLLOWUP_CONTRACT
     assert "PHONE BEFORE HAND-OFF" in _FOLLOWUP_CONTRACT
@@ -148,17 +151,15 @@ def test_followup_contract_is_lighter_but_keeps_the_same_json_schema() -> None:
 
 
 def test_followup_never_re_addresses_a_handled_concern() -> None:
-    # threads 2047/2143: nudges re-sent the opener and re-reassured "we're official" 7×
     from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
     assert "ADVANCES" in _FOLLOWUP_CONTRACT
     assert "ALREADY addressed" in _FOLLOWUP_CONTRACT
     assert "better to stay silent" in _FOLLOWUP_CONTRACT
 
 
-def test_interested_but_blocked_is_advanced_not_deferred() -> None:
-    # thread 2143: "tertarik tapi lagi nabung untuk laptop" got a passive "kabari kalau siap"
-    assert "INTERESTED-BUT-BLOCKED" in _DECISION_CONTRACT
-    assert "fixable blocker" in _DECISION_CONTRACT
+def test_followup_handles_open_objection() -> None:
+    from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
+    assert "HANDLE A LIVE OBJECTION" in _FOLLOWUP_CONTRACT
 
 
 def test_build_messages_uses_the_light_contract_for_followup_workflow() -> None:
@@ -174,37 +175,28 @@ def test_build_messages_uses_the_light_contract_for_followup_workflow() -> None:
 
 
 def test_followup_has_the_what_changed_angle() -> None:
-    # PKO-portal technique (deferred-decision repeat call): the strongest re-engagement asks
-    # what changed since the last talk, instead of re-pitching the same offer
     from app.modules.conversation.prompt import _FOLLOWUP_CONTRACT
     assert "WHAT-CHANGED ANGLE" in _FOLLOWUP_CONTRACT
     assert "never a re-pitch" in _FOLLOWUP_CONTRACT
 
 
 def test_ad_opener_is_not_permission_to_present() -> None:
-    # thread 2983: an ad-click prefilled opener got the full product pitch on turn one
-    assert "is a CLICK, not the lead's words - NOT permission to present" in _DECISION_CONTRACT
-    assert "thread 2983" in _DECISION_CONTRACT
-    # C2: a TYPED question (own words) must still be answered, not deferred
+    assert "is a CLICK, not the lead's words" in _DECISION_CONTRACT
+    assert "no presentation until a real need surfaces" in _DECISION_CONTRACT
+    # a TYPED question (own words) must still be answered, not deferred
     assert "gets a REAL answer THIS turn" in _DECISION_CONTRACT
 
 
 def test_money_question_leads_with_paid_not_no() -> None:
-    # thread 2951: "apakah harus modal?" got "Tidak, tidak perlu modal besar", hiding that the
-    # course is paid — the manager had to jump in with the price
-    assert "IS-IT-PAID / MONEY QUESTIONS" in _DECISION_CONTRACT
-    assert "NEVER open with 'Tidak/No'" in _DECISION_CONTRACT
-    assert "memang berbayar" in _DECISION_CONTRACT
+    assert "IS IT PAID" in _DECISION_CONTRACT
+    assert "NEVER open with 'Tidak'" in _DECISION_CONTRACT
 
 
 def test_answer_first_then_ask_for_contact() -> None:
-    # sim of thread 2951: "bakal dapat uang?" got only a WhatsApp request, no actual answer
-    assert "ANSWER FIRST, THEN ASK FOR CONTACT" in _DECISION_CONTRACT
-    assert "rides ON TOP of a real answer" in _DECISION_CONTRACT
+    assert "ANSWER a real question FIRST" in _DECISION_CONTRACT
+    assert "add the contact ask on top" in _DECISION_CONTRACT
 
 
 def test_need_payoff_gain_is_pulled_before_presenting() -> None:
-    # thread 2903: captured the pain (fear) but presented with gains empty, never drawing out
-    # what success would look like — the GAIN is what the pitch sells back to the lead
-    assert "ALWAYS attempt this before you present" in _DECISION_CONTRACT
-    assert "the GAIN (the future they want)" in _DECISION_CONTRACT
+    assert "Always attempt this before presenting" in _DECISION_CONTRACT
+    assert "the gain is what your pitch sells back" in _DECISION_CONTRACT

@@ -1,8 +1,10 @@
-"""Knowledge service — assembles the branch's persona + product + retrieved context.
+"""Knowledge service — assembles the branch's persona + facts + product cards for the prompt.
 
-RAG-only: the prompt gets persona (identity, direct) + the product catalog + a focused
-product card + the chunks most relevant to the current dialog. The bulky playbooks/faq/
-stories are NOT dumped in full — they reach the model only through retrieval. No branch_id
+No retrieval. The KB was restructured to FACTS-ONLY (the tactic playbooks moved into the reply
+prompt), so the whole fact surface — persona identity, the policy/market facts, the FULL focus
+card, and a one-line facts summary of every other product — fits the char budget and is sent
+on EVERY turn. That removes RAG's failure mode (a retrieval miss letting the model invent a
+fact the right card would have grounded) and the reindex machinery entirely. No branch_id
 filtering lives here; all reads go through the BranchScoped repos."""
 from __future__ import annotations
 
@@ -15,7 +17,6 @@ from app.adapters.db.models import Branch, Product
 from app.config import settings
 from app.ports.llm import LLMPort
 
-from .rag import _TOP_K, PERSONA_SLUGS, RagService
 from .repository import KnowledgeRepo, ProductRepo
 
 logger = logging.getLogger(__name__)
@@ -23,20 +24,28 @@ logger = logging.getLogger(__name__)
 PERSONA_SLUG = "persona"
 # Persona identity is injected directly, persona_core first when present.
 _PERSONA_ORDER = ("persona_core", "persona")
-# Docs injected on EVERY turn (not left to RAG) — central, small, close-critical.
-# policy_prohibitions carries the cross-product NEVER-list the reply-guard enforces: the
-# Open-House bans (mentor/class-demo/alumni-work) apply even when the OH card wasn't the
-# focus/retrieved product, so the verifier only sees them if they're always present (2879).
-_ALWAYS_DOC_SLUGS = ("payment_policy", "policy_prohibitions")
-# Hard ceiling on the assembled context (chars) — see knowledge_context's docstring.
+_PERSONA_SLUGS = frozenset(_PERSONA_ORDER)
+# Facts docs injected on EVERY turn — the single source of truth for policy and market facts.
+# facts_policy carries payment/discounts/certificates/referral/student rules + the cross-product
+# NEVER-list; facts_market carries the institution facts, competitor contrasts, platform (Teams)
+# and the success cases. Everything the model may need to state is here or on a product card.
+# The trailing legacy slugs keep a branch that hasn't been migrated to facts_* yet working (and
+# cover the migration window where both exist); whichever slugs are present load, the rest are
+# skipped. Loading a slug that isn't there is a no-op, so there is no double-cost in steady state.
+_ALWAYS_DOC_SLUGS = ("facts_policy", "facts_market", "payment_policy", "policy_prohibitions")
+# Hard ceiling on the assembled context (chars) — the KB is authored to fit well under this;
+# the cap is only a defensive backstop (past ~30k chars the cheap JSON-mode providers stop
+# returning valid JSON at all).
 _CTX_CHAR_BUDGET = settings().knowledge_context_char_budget
-# A follow-up nudge retrieves fewer chunks — it leans on the focus card, not broad recall.
-_FOLLOWUP_RAG_K = 4
+
+# The one-line headline every restructured card carries, shown for non-focus products so a
+# cross-product question is answerable without dumping all 15 full cards.
+_QUICK_FACTS_RE = re.compile(r"(?im)^\s*QUICK FACTS:\s*(.+)$")
 
 
 class KnowledgeService:
-    """Knowledge access for one branch — the LLM prompt's context source. `llm` enables
-    RAG retrieval; without it (unit tests) the context is persona + catalog + focus only."""
+    """Knowledge access for one branch — the LLM prompt's context source. `llm` is accepted for
+    call-site compatibility (retrieval no longer needs it) and unused here."""
 
     def __init__(
         self, session: AsyncSession, branch_id: int, llm: LLMPort | None = None
@@ -48,10 +57,10 @@ class KnowledgeService:
         self.products = ProductRepo(session, branch_id)
 
     async def persona_block(self) -> str:
-        """Every knowledge doc concatenated under [slug] headers (persona first). Retained
-        for tooling/inspection; the prompt uses the RAG assembly, not this full dump."""
+        """Every knowledge doc concatenated under [slug] headers (persona first). Retained for
+        tooling/inspection; the prompt uses knowledge_context, not this full dump."""
         docs = await self.docs.all()
-        docs.sort(key=lambda d: (d.slug not in PERSONA_SLUGS, d.slug))
+        docs.sort(key=lambda d: (d.slug not in _PERSONA_SLUGS, d.slug))
         parts = [f"[{d.slug}]\n{d.content.strip()}" for d in docs if d.content.strip()]
         return "\n\n".join(parts)
 
@@ -78,15 +87,10 @@ class KnowledgeService:
         self, product_slug: str | None, lang: str | None = None, query: str | None = None,
         thread_id: int | None = None, light: bool = False,
     ) -> str:
-        """Persona (direct) + catalog + focused card + RAG-retrieved chunks for `query`.
-        Chunks are added only when an llm is available and a query is given.
-
-        light=True (follow-up nudges) retrieves fewer chunks — a re-engagement message
-        leans on the focus card + persona, not broad KB recall. Either way the assembled
-        context is capped at _CTX_CHAR_BUDGET by dropping the LOWEST-RANKED chunks first
-        (never persona/focus/catalog): past ~30k chars the cheap JSON-mode providers stop
-        returning valid JSON at all, so an oversized context doesn't buy recall — it buys
-        empty responses and broker retries."""
+        """Persona + policy/market facts + the FULL focus card + a compact facts catalog of the
+        other products. Deterministic and complete every turn — no retrieval. `query`/`thread_id`
+        are accepted for call-site compatibility and ignored; `light` is unused (kept so the
+        follow-up caller's signature is unchanged)."""
         resolved_lang = await self._lang(lang)
         blocks = [_persona_block(await self._persona_text(), resolved_lang)]
         focused = await self._focused(product_slug)
@@ -95,38 +99,18 @@ class KnowledgeService:
         always = await self._always_docs_block()
         if always:
             blocks.append(always)
-        blocks.append(_catalog_block(await self.products.active(), resolved_lang))
-        if self.llm is not None and query:
-            try:
-                # NOTE: the focus product is NO LONGER excluded from RAG. Its bulky sections
-                # (curriculum, success cases) were dropped from the slim focus block above, so
-                # RAG must be free to pull them back in when the lead asks about them. The core
-                # sections that stay in the focus block may occasionally re-rank here — a small,
-                # char-budget-bounded overlap, far cheaper than shipping the whole card always.
-                chunks = await RagService(self.session, self.branch_id, self.llm).retrieve(
-                    query, k=_FOLLOWUP_RAG_K if light else _TOP_K, thread_id=thread_id)
-            except Exception:
-                # A transient broker embed failure must degrade to persona+catalog, NOT abort
-                # the whole reply — otherwise one dead embed endpoint knocks out every thread's
-                # reply that tick. RAG chunks are additive; losing them is a soft downgrade.
-                logger.warning("RAG retrieve failed branch=%d — replying without chunks",
-                               self.branch_id, exc_info=True)
-            else:
-                base_len = sum(len(b) + 2 for b in blocks if b)
-                kept = _fit_chunks(chunks, _CTX_CHAR_BUDGET - base_len)
-                if len(kept) < len(chunks):
-                    logger.info(
-                        "knowledge_context branch=%d: trimmed RAG %d→%d chunks to fit the "
-                        "%d-char budget", self.branch_id, len(chunks), len(kept),
-                        _CTX_CHAR_BUDGET)
-                blocks.append(_rag_block(kept))
-        return "\n\n".join(b for b in blocks if b)
+        catalog = _catalog_block(await self.products.active(), resolved_lang, exclude=product_slug)
+        if catalog:
+            blocks.append(catalog)
+        text = "\n\n".join(b for b in blocks if b)
+        if len(text) > _CTX_CHAR_BUDGET:
+            logger.warning("knowledge_context branch=%d assembled %d chars > %d budget — the KB "
+                           "has grown past the fits-in-context assumption; consider trimming",
+                           self.branch_id, len(text), _CTX_CHAR_BUDGET)
+            text = text[:_CTX_CHAR_BUDGET]
+        return text
 
     async def _always_docs_block(self) -> str:
-        """Docs too central to leave to RAG chance — injected on EVERY turn. payment_policy
-        carries the bank requisites + DP flow the model needs to close a ready-to-pay lead and
-        to answer 'when/how do I pay', which RAG didn't reliably surface so the bot escalated a
-        payment question the KB already answers (thread 2664)."""
         parts = []
         for slug in _ALWAYS_DOC_SLUGS:
             doc = await self.docs.by_slug(slug)
@@ -146,58 +130,22 @@ def _persona_block(content: str, lang: str) -> str:
     return f"[persona lang={lang}]\n{content}"
 
 
-# Focus-card sections kept ALWAYS (the facts almost every turn needs): identity, price,
-# schedule, format, the headline outcome. Everything else on the card — the full curriculum
-# module list, success cases, who-it's-for, links — is BULK the model rarely needs verbatim
-# each turn; it reaches the model via RAG (the product IS indexed) exactly when the lead asks
-# about it. Keeps the always-sent focus block ~2-3k instead of up to ~7.3k, no fact lost —
-# just deferred to on-demand retrieval. Matched on the ## heading, case-insensitive.
-_CORE_SECTION_RE = re.compile(
-    r"(essence|essensi|price|harga|biaya|invest|schedule|jadwal|durasi|duration|"
-    r"format|lokasi|location|outcome|hasil|quick facts)", re.IGNORECASE)
-
-
-def _core_card(content: str) -> str:
-    """The focus card trimmed to its CORE sections. The pre-heading preamble (title + quick
-    facts) is always kept; each `## section` is kept only if its heading is a core one."""
-    parts = re.split(r"(?m)^(?=##\s)", content or "")
-    kept: list[str] = []
-    for i, sec in enumerate(parts):
-        head = sec.splitlines()[0] if sec.strip() else ""
-        if i == 0 or not head.startswith("##") or _CORE_SECTION_RE.search(head):
-            kept.append(sec.rstrip())
-    return "\n".join(k for k in kept if k.strip())
-
-
 def _focus_block(product: Product, lang: str) -> str:
+    """The FULL focus card — the restructured cards are compact (~2.5k), so the whole card is
+    sent when the lead is on this product; no section trimming needed anymore."""
     header = f"[focus product={product.slug} lang={lang}]"
-    return f"{header}\n{product.title}\n{_core_card(product.content)}".rstrip()
+    return f"{header}\n{product.title}\n{(product.content or '').strip()}".rstrip()
 
 
-def _catalog_block(products: list[Product], lang: str) -> str:
-    if not products:
+def _quick_facts(product: Product) -> str:
+    """The card's one-line QUICK FACTS headline for the catalog; falls back to the title."""
+    m = _QUICK_FACTS_RE.search(product.content or "")
+    return f"{product.title} — {m.group(1).strip()}" if m else product.title
+
+
+def _catalog_block(products: list[Product], lang: str, exclude: str | None = None) -> str:
+    lines = [f"- {p.slug}: {_quick_facts(p)}" for p in products if p.slug != exclude]
+    if not lines:
         return ""
-    lines = [f"- {p.slug}: {p.title}" for p in products]
-    return f"[catalog lang={lang}]\n" + "\n".join(lines)
-
-
-def _fit_chunks(chunks: list[tuple[str, str]], budget: int) -> list[tuple[str, str]]:
-    """The highest-ranked prefix of `chunks` whose rendered size fits `budget` chars.
-    retrieve() returns them best-first, so dropping from the tail sheds the least-relevant
-    material first. A non-positive budget (persona+focus already past the cap) keeps zero
-    chunks — the focus card and persona still carry the product facts."""
-    kept: list[tuple[str, str]] = []
-    used = 0
-    for title, text in chunks:
-        used += len(title) + len(text) + 12  # the "--- … ---\n" framing per chunk
-        if used > budget:
-            break
-        kept.append((title, text))
-    return kept
-
-
-def _rag_block(chunks: list[tuple[str, str]]) -> str:
-    if not chunks:
-        return ""
-    parts = [f"--- {title} ---\n{text}" for title, text in chunks]
-    return "[relevant knowledge]\n" + "\n\n".join(parts)
+    return (f"[catalog lang={lang}] (ringkasan produk lain — kalau lead fokus ke salah satu, "
+            "kartunya akan tampil penuh)\n" + "\n".join(lines))

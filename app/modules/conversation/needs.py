@@ -18,6 +18,12 @@ class NeedsProfile:
     pains: list[str] = field(default_factory=list)
     gains: list[str] = field(default_factory=list)
     discovery_complete: bool = False
+    # Objections the lead has raised that are NOT yet resolved (budget/time/trust/job-doubt/
+    # distance/confusion, in their words). Unlike jobs/pains/gains this REPLACES each turn — an
+    # open objection set shrinks as objections get handled — so the bot carries the memory
+    # 'this objection is still live' across turns and never pitches over it (the structural
+    # cause of the hammering the 30-day audit found: 68% of objections answered 'мимо').
+    objections: list[str] = field(default_factory=list)
 
     def has_needs(self) -> bool:
         """A pain AND a gain captured — the emotional layer (cost of inaction) reached, not
@@ -43,7 +49,7 @@ class NeedsProfile:
     def to_json(self) -> str:
         return json.dumps({
             "jobs": self.jobs, "pains": self.pains, "gains": self.gains,
-            "discovery_complete": self.discovery_complete,
+            "discovery_complete": self.discovery_complete, "objections": self.objections,
         }, ensure_ascii=False)
 
 
@@ -59,24 +65,29 @@ def parse_needs(raw: str | None) -> NeedsProfile:
     return NeedsProfile(
         jobs=_clean(d.get("jobs")), pains=_clean(d.get("pains")),
         gains=_clean(d.get("gains")), discovery_complete=bool(d.get("discovery_complete")),
+        objections=_clean(d.get("objections")),
     )
 
 
 def merge_needs(
     stored: NeedsProfile, jobs: list[str], pains: list[str], gains: list[str],
-    discovery_complete: bool,
+    discovery_complete: bool, objections: list[str] | None = None,
 ) -> NeedsProfile:
-    """Union the newly-discovered lists into the stored profile (order-preserving, capped)."""
+    """Union the newly-discovered jobs/pains/gains into the stored profile (order-preserving,
+    capped). objections REPLACE the stored set (the model re-reports what's still open each
+    turn, dropping resolved ones); None leaves the stored set untouched for callers that don't
+    track objections."""
     return NeedsProfile(
         jobs=_union(stored.jobs, jobs), pains=_union(stored.pains, pains),
         gains=_union(stored.gains, gains),
         discovery_complete=stored.discovery_complete or discovery_complete,
+        objections=(_dedup_near(objections) if objections is not None else stored.objections),
     )
 
 
 def needs_summary(p: NeedsProfile) -> str:
     """A compact block injected into the prompt so the model keeps working the same need."""
-    if not (p.jobs or p.pains or p.gains):
+    if not (p.jobs or p.pains or p.gains or p.objections):
         return ""
     lines = ["KNOWN LEAD NEEDS (keep refining, present against these — don't re-ask what's here):"]
     if p.jobs:
@@ -85,6 +96,9 @@ def needs_summary(p: NeedsProfile) -> str:
         lines.append("- pains (fears/obstacles): " + "; ".join(p.pains))
     if p.gains:
         lines.append("- gains (desired outcomes): " + "; ".join(p.gains))
+    if p.objections:
+        lines.append("- OPEN OBJECTIONS (still unresolved — HANDLE the relevant one before any "
+                     "pitch, never talk over it): " + "; ".join(p.objections))
     return "\n".join(lines)
 
 

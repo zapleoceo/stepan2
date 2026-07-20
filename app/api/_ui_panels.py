@@ -2067,7 +2067,6 @@ _LOG_KIND = {
     "embed": {"ru": "эмбеддинг", "en": "embedding"},
     "embed:query": {"ru": "эмбед: поиск по базе (ответ боту)",
                     "en": "embed: KB search (per reply)"},
-    "embed:index": {"ru": "эмбед: индексация базы", "en": "embed: KB reindex"},
     "coach": {"ru": "правка базы (Coach)", "en": "KB edit (Coach)"},
     "suggest": {"ru": "черновик менеджеру", "en": "draft for manager"},
     "chat": {"ru": "chat", "en": "chat"},
