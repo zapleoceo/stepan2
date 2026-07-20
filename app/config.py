@@ -36,6 +36,11 @@ class Settings(BaseSettings):
                             description="public base URL (e.g. https://host) for chat "
                                         "deep-links in manager Telegram alerts; empty = no link")
 
+    # Meta pixel on the PUBLIC landing (selling Stepan itself) — NOT a client's pixel. Empty =
+    # no tracking injected, so the page stays clean until an ad actually runs against it.
+    landing_pixel_id: str = Field(default="",
+                                  description="Meta pixel id for the / landing; empty = off")
+
     # Admin/super-admin bootstrap (Telegram id of the first super_admin)
     bootstrap_super_admin: int = Field(default=0)
     demo_notify_tg_id: int = Field(

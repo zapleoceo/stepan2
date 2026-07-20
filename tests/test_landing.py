@@ -127,3 +127,47 @@ def test_seo_endpoints_render() -> None:
     sm = sitemap_xml()
     assert "/whats-new" in sm and "<urlset" in sm
     assert og_svg().startswith("<svg") and "Stepan" in og_svg()
+
+
+# ─── Meta pixel on the landing (selling Stepan) ───────────────────────────────
+# Off by default so the public page stays clean; on when a pixel id is set, it fires Lead on
+# demo-open and Contact on the first message — turning a cold-traffic ad from optimise-for-
+# clicks into optimise-for-engagement, the thing this very page advertises.
+
+def test_no_pixel_without_a_configured_id() -> None:
+    from app.config import settings
+    settings.cache_clear()
+    html = landing_html()
+    # The guarded fbq('track',...) calls are always in the widget JS (inert no-ops without a
+    # pixel). What must be ABSENT is the base loader that actually installs tracking.
+    assert "connect.facebook.net" not in html
+    assert "fbq('init'" not in html
+
+
+def test_pixel_injected_and_events_wired_when_id_set(monkeypatch) -> None:
+    from app.config import settings
+    monkeypatch.setenv("STEPAN2_LANDING_PIXEL_ID", "111222333444555")
+    settings.cache_clear()
+    try:
+        html = landing_html()
+        assert "fbq('init','111222333444555')" in html   # base code with the id
+        assert "fbq('track','PageView')" in html
+        assert "fbq('track','Lead'" in html              # fired on demo open
+        assert "fbq('track','Contact'" in html           # fired on first message
+        assert "window.fbq&&" in html                    # every call guarded — never throws
+    finally:
+        settings.cache_clear()
+
+
+def test_pixel_id_is_escaped() -> None:
+    from app.config import settings
+    monkeypatch_id = '99"><script>x'
+    import os
+    os.environ["STEPAN2_LANDING_PIXEL_ID"] = monkeypatch_id
+    settings.cache_clear()
+    try:
+        html = landing_html()
+        assert "<script>x" not in html.split("fbevents")[0][-200:]  # not injected raw
+    finally:
+        del os.environ["STEPAN2_LANDING_PIXEL_ID"]
+        settings.cache_clear()
