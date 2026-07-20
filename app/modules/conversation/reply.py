@@ -304,12 +304,25 @@ def _own_words(dialog) -> str:  # noqa: ANN001
         if m.direction == "in" and not _AD_TEMPLATE_RE.search(m.text or ""))
 
 
+# Vague continuations / particles that carry no goal-content: 'terus gimana', 'jelasin dong'
+# must NOT count as substantive (they're exactly when a clarify IS warranted), while
+# 'nyari magang', 'mau switch karier' must.
+_VAGUE_WORDS = frozenset({
+    "terus", "trus", "lanjut", "gimana", "gmn", "kenapa", "napa", "jelasin", "jelaskan",
+    "ceritain", "dong", "sih", "deh", "nah", "kok", "lah", "aja", "kan", "nih", "tuh",
+    "kek", "kayak", "gitu", "gtu", "gimanaa",
+})
+
+
 def _is_substantive_statement(text: str) -> bool:
     """The lead said something with real CONTENT (a goal/pain/context, e.g. 'nyari magang',
-    'mau switch karier'), not a bare menu tap ('4'), a one-word ack ('iya'), or a greeting.
-    Uses the same filler-stripped content tokens as the needs layer: ≥2 content words = a real
-    statement the reply must engage, never brush off with a 'be more specific' menu."""
-    return len(_content_tokens(text or "")) >= 2
+    'mau switch karier') — NOT a bare menu tap ('4'), an ack ('iya'), a greeting, or a vague
+    continuation ('terus gimana', 'jelasin dong'). Such a statement must be engaged, never
+    brushed off with a 'be more specific' menu. Requires: not a question, and ≥2 content words
+    once fillers (needs._STOP) and vague continuations are removed."""
+    if is_question(text):
+        return False
+    return len(_content_tokens(text or "") - _VAGUE_WORDS) >= 2
 
 
 def _bump_guard_regen_count(lead: Lead) -> None:
