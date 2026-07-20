@@ -319,8 +319,11 @@ POSTPONE_NUDGE = (
     "2) WEAVE ONE short, gentle opportunity-cost line — stated as a fact, never a threat or fake "
     "scarcity: in this field the ones who start earlier finish earlier and take the projects/"
     "clients earlier, and with AI the moment to start is now.\n"
-    "3) LOWER THE FRICTION so 'later' becomes a small step NOW: the FREE Open House / paid Demo "
-    "Event to see it live first, or lock today's price with a DP and decide fully later.\n"
+    "3) LOWER THE FRICTION so 'later' becomes a small step NOW: prefer the paid Demo Event (a "
+    "real dated try-before-you-buy session) or locking today's price with a DP and deciding "
+    "fully later. If you mention the free Open House, frame it as a RELAXED office drop-by "
+    "whenever suits them ('kapan cocok mampir santai-santai?') and ask if it's convenient — "
+    "NEVER a fixed 'datang Kamis ini' event.\n"
     "4) End with ONE soft question, never a hard close. NO 'now or never', NO invented scarcity "
     "('sisa 2 kursi' only if the KB says so). If the lead postpones AGAIN after this, ease off "
     "fully. Facts ONLY from the KB. Return the JSON as usual.]")
