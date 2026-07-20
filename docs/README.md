@@ -11,7 +11,7 @@ Stepan-1.
 | [multitenant-design.md](multitenant-design.md) | Архитектура мультиарендности, каналы, личность лида, миграция, фазы |
 | [lead-identity-and-deletion.md](lead-identity-and-deletion.md) | Объединение лидов по телефону, каскад удаления канала, инвариант лида-сироты |
 | [broker-log.md](broker-log.md) | Лог вызовов брокера: что логируется, поля, страница `/settings/log`, ретенция |
-| [knowledge-base.md](knowledge-base.md) | База знаний: каноническая структура, RAG + вотчер, язык, UI-дерево, история правок |
+| [knowledge-base.md](knowledge-base.md) | База знаний (факты-только): каноническая структура, факты целиком в промпт каждый ход, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
 | [reply-pipeline.md](reply-pipeline.md) | Ведение лида по ходам: слои пайплайна, ситуативные нуджи (`situations.py`) с приоритетами и комбо, гейты, фолоапы |
 | [dialogue-qa-checklist.md](dialogue-qa-checklist.md) | **Регрессия диалогов**: чеклист найденных-и-починенных ошибок + как прогонять sim (только на ClodeCouch, branch 8). Обновляется при каждой новой ошибке |

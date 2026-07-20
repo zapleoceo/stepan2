@@ -1,10 +1,19 @@
 # Reply-guard — draft-quality verification layer
 
-The verification layer between generation and send. RAG + prompt only *ask* the model to
+The verification layer between generation and send. The prompt only *asks* the model to
 stay grounded and to write well; the guard *checks* the draft and refuses to send it when it
 violates a rule. It started (chat 1736) as an anti-fabrication check against the exact KB
 context the model saw, and has since grown a second tier of **conversation-quality** checks
 that need no KB context at all (see below).
+
+The guard blocks known-bad shapes (fabrication); by construction it cannot tell whether a
+clean, non-fabricated reply actually *sells*. That is the job of the newer **critic-gate**
+(`conversation/critic.py`, `reply.apply_critic`) — a positive-rubric `chat:smart` check
+(grounded / responsive / sales-move / objection-handled / register) that runs on EVERY reply
+as the LAST pipeline step and fails CLOSED to a human. When the critic is `on` for a branch,
+the guard's LLM-verify tier below is skipped as redundant (its `grounded` dimension is a
+stricter, fail-closed version of the same check); the deterministic guard tiers always run.
+See [reply-pipeline.md](reply-pipeline.md).
 
 Motivated by chat 1736, where the bot invented a personalised lab URL
 (`lab.itstep.id/...?access=HANDAYANI2024`), "free 3-day lab access", a Cisco cert track,

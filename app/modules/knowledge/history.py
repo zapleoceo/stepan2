@@ -55,9 +55,10 @@ async def restore_revision(
         return None
     entity_type, slug, content = rev[0], rev[1], rev[2] or ""
     # entity_type comes from our own row, mapped to a whitelisted table name (not user input)
-    # updated_at MUST bump here: a raw UPDATE bypasses the ORM's onupdate, and a restore
-    # that leaves the old timestamp is invisible to the reindex watcher — the restored
-    # content then never reaches the RAG index (bug found 2026-07-17).
+    # updated_at MUST bump here: a raw UPDATE bypasses the ORM's onupdate, and a restore that
+    # leaves the old timestamp misreports when the doc last changed (edit-recency in the KB UI
+    # and history ordering) — the KB itself is loaded whole every reply, so a restore is live
+    # at once with no index to refresh.
     if entity_type == "product":
         sel = ("SELECT content FROM product WHERE slug=:slug"
                " AND (:bid IS NULL OR branch_id=:bid)")

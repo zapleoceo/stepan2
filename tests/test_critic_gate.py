@@ -136,6 +136,39 @@ async def test_suggest_workflow_skips_the_critic() -> None:
     assert out is draft  # unchanged — critic skipped (a None engine would crash if it ran)
 
 
+async def test_needs_manager_draft_skips_the_critic() -> None:
+    """A deliberate hand-off (needs_manager=true) skips the critic — the manager is the human,
+    a fail-closed 'let me check with the team' on top of it is pointless. None engine proves it."""
+    from app.modules.conversation.decision import Decision
+    from app.modules.conversation.reply import apply_critic
+    from app.domain.enums import Stage
+
+    on = type("S", (), {"critic_gate": "on"})()
+    d = Decision(reply="Aku cek dulu ke tim ya Kak", stage=Stage.QUALIFYING, product_slug=None,
+                 ready=False, needs_manager=True)
+    out, _ = await apply_critic(on, None, None, 1, lang="id", workflow="reply", bill=False,
+                                decision=d, meta={}, situational=None, last_inbound="x",
+                                open_objections=[])
+    assert out is d
+
+
+async def test_canned_fallback_skips_the_critic() -> None:
+    """A canned safety reply (SAFE_FALLBACK/CLARIFY/ASK_PHONE) is a deliberate non-answer — the
+    critic must not judge it as a sales reply."""
+    from app.modules.conversation import guard
+    from app.modules.conversation.decision import Decision
+    from app.modules.conversation.reply import apply_critic
+    from app.domain.enums import Stage
+
+    on = type("S", (), {"critic_gate": "on"})()
+    d = Decision(reply=guard.SAFE_FALLBACK, stage=Stage.QUALIFYING, product_slug=None,
+                 ready=False, needs_manager=False)
+    out, _ = await apply_critic(on, None, None, 1, lang="id", workflow="reply", bill=False,
+                                decision=d, meta={}, situational=None, last_inbound="x",
+                                open_objections=[])
+    assert out is d
+
+
 async def test_off_skips_the_critic(db_session) -> None:
     bid = await _branch(db_session, "off")
     llm = _CriticLLM([_DRAFT_A], verdicts=[_bad("never consulted")])

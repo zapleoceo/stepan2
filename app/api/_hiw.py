@@ -196,7 +196,7 @@ _BODY_EN = r"""
     <div class="stats">
       <div class="stat"><b>146</b><span>Python source files</span></div>
       <div class="stat"><b>~1,070</b><span>automated tests in 98 files</span></div>
-      <div class="stat"><b>11</b><span>scheduled background jobs</span></div>
+      <div class="stat"><b>10</b><span>scheduled background jobs</span></div>
       <div class="stat"><b>3</b><span>channels: Instagram · WhatsApp · Meta</span></div>
       <div class="stat"><b>0–5</b><span>build phases — all closed</span></div>
     </div>
@@ -281,7 +281,7 @@ _BODY_EN = r"""
     <button role="tab" aria-selected="true" data-panel="p1"><span class="n">STEP 1</span><span class="t">Client writes</span><span class="s">Instagram / WhatsApp</span></button>
     <button role="tab" aria-selected="false" data-panel="p2"><span class="n">STEP 2</span><span class="t">Intake</span><span class="s">who is it, what is new</span></button>
     <button role="tab" aria-selected="false" data-panel="p3"><span class="n">STEP 3</span><span class="t">Decision</span><span class="s">the AI thinks</span></button>
-    <button role="tab" aria-selected="false" data-panel="p4"><span class="n">STEP 4</span><span class="t">Verification</span><span class="s">catching fabrications</span></button>
+    <button role="tab" aria-selected="false" data-panel="p4"><span class="n">STEP 4</span><span class="t">Verification</span><span class="s">no fabrication, and it must sell</span></button>
     <button role="tab" aria-selected="false" data-panel="p5"><span class="n">STEP 5</span><span class="t">Queue</span><span class="s">human-like pacing</span></button>
     <button role="tab" aria-selected="false" data-panel="p6"><span class="n">STEP 6</span><span class="t">Sending</span><span class="s">limits and courtesy</span></button>
   </div>
@@ -323,15 +323,17 @@ _BODY_EN = r"""
   </div>
 
   <div class="pipe-panel" id="p4" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Verification: a fabrication never reaches the client</h3>
-    <p>Between "the AI drafted a reply" and "the reply went out" stands a safety layer (reply-guard). First, instant free checks: a link that does not exist in the knowledge base; the phrase "I already sent you the file" (the bot cannot send files); two questions in one message; an offer to hop on a call (the bot only types). Then a selective check by a second model — only for "risky" replies. A problem caught → one regeneration; still bad → the safe phrase "let me check with the team" and a handoff to a manager.</p>
+    <h3 style="margin-top:0">Verification: a fabrication never reaches the client — and the reply has to actually sell</h3>
+    <p>Between "the AI drafted a reply" and "the reply went out" stand two checks. First a safety layer (reply-guard) that catches known-bad shapes: instant free checks — a link that does not exist in the knowledge base; the phrase "I already sent you the file" (the bot cannot send files); two questions in one message; an offer to hop on a call (the bot only types) — then a selective check by a second model, only for "risky" replies. A problem caught → one regeneration; still bad → the safe phrase "let me check with the team" and a handoff to a manager.</p>
+    <p>Then, as the <b>last</b> step, a critic-gate: the guard can only tell that a reply is not fabricated, not whether it actually <i>sells</i>. So a strong model judges every reply against a positive rubric — is every fact grounded in the knowledge base, does it answer what the client actually said, does it advance the sale by one sound step, is a live objection handled, is the register right. If it can't clear the bar even after one rewrite (or the check itself errors) the reply is <b>not sent</b> — it fails closed and the client goes to a human.</p>
     <details class="l3"><summary>All the way down</summary><div class="body">
       <ul>
-        <li>Born after a real incident: the bot invented a link to a "lab", free access and a Cisco certificate. Files: <code>app/modules/conversation/guard.py</code>, orchestration in <code>reply.py</code>, the doc <code>docs/reply-guard.md</code>.</li>
+        <li>The guard was born after a real incident: the bot invented a link to a "lab", free access and a Cisco certificate. Files: <code>app/modules/conversation/guard.py</code>, orchestration in <code>reply.py</code>, the doc <code>docs/reply-guard.md</code>.</li>
         <li>A clever saving: the most frequent "risk" is the price. If the price in the reply matches the knowledge base verbatim, the paid LLM check is skipped (hundreds of replies a day).</li>
         <li>False escalations are caught separately: the model wants to call a manager over a price question whose answer is already in the context — it gets a regeneration instead.</li>
         <li>Every regeneration increments a per-client counter — after two, that client is permanently routed to the expensive model.</li>
-        <li>Per-branch modes: full / links only / off. The verifier prompt is edited like any other knowledge-base document.</li>
+        <li>Per-branch guard modes: full / links only / off. The verifier prompt is edited like any other knowledge-base document.</li>
+        <li>The critic (<code>app/modules/conversation/critic.py</code>, <code>reply.apply_critic</code>) is per-branch too: <code>off</code> / <code>shadow</code> (logs its verdict without changing the reply, to measure the reject rate) / <code>on</code> (blocks, regenerates, hands off). When it is on, the guard's paid LLM check is skipped as redundant — the critic already re-checks grounding, more strictly.</li>
       </ul>
     </div></details>
   </div>
@@ -408,17 +410,16 @@ _BODY_EN = r"""
     <div class="body">
       <ol style="padding-left:22px">
         <li><b>The persona</b> — Stepan's character and voice (always whole, first block).</li>
-        <li><b>The card of the course under discussion</b> — trimmed to the core: essence, price, schedule, format, outcome. The bulky curriculum moves into knowledge search.</li>
-        <li><b>Mandatory documents</b> — payment rules and the prohibition list (every turn; too important to trust to search).</li>
-        <li><b>The course catalogue</b> — the list of active products.</li>
-        <li><b>Retrieved knowledge</b> — base chunks relevant to the recent turns (smart search, see "Knowledge").</li>
+        <li><b>The full card of the course under discussion</b> — the whole card: essence, price, schedule, format, outcome. The restructured cards are compact, so it goes in whole.</li>
+        <li><b>The facts documents</b> — payment/discount/student policy and the market/competitor facts, plus the prohibition list (every turn — this is where policy and market facts live).</li>
+        <li><b>The course catalogue</b> — a one-line QUICK FACTS summary of every other product, so a cross-course question is answerable without dumping all fifteen full cards.</li>
         <li><b>Today's date</b> in the branch's timezone — so past class dates are never offered.</li>
         <li><b>Manager notes</b>: branch-wide rules plus a per-client note ("verified, not ready yet").</li>
         <li><b>The client's known needs</b> — everything past turns have accumulated.</li>
         <li><b>The sales contract</b> + the chat history.</li>
       </ol>
       <details class="l3"><summary>All the way down: limits and caching</summary><div class="body">
-        <p>The total context budget is capped (~30k characters): beyond that, cheap models stop returning valid JSON. On overflow the least-relevant knowledge chunks are dropped — the persona, the course card and the catalogue are never touched. Context assembly is cached for one client turn, so regenerations (guard, dedup, escalation) do not redo the expensive search. Files: <code>prompt.py</code> (a pure function, no database access), <code>app/modules/knowledge/service.py</code> (<code>knowledge_context</code>).</p>
+        <p>The total context budget is capped (24k characters): beyond ~30k, cheap models stop returning valid JSON. The facts-only KB is authored to sit well under the cap, which is only a defensive backstop — on overflow the assembled context is simply truncated. Context assembly is cheap and deterministic (no retrieval), so regenerations (guard, dedup, escalation, critic) reuse it freely. Files: <code>prompt.py</code> (a pure function, no database access), <code>app/modules/knowledge/service.py</code> (<code>knowledge_context</code>).</p>
       </div></details>
     </div>
   </details>
@@ -465,9 +466,9 @@ _BODY_EN = r"""
 <section class="card reveal" id="kb">
   <div class="kicker">05 · Knowledge</div>
   <h2>The knowledge base: the single source of truth</h2>
-  <p class="gist">Everything Stepan says about the school lives in the branch's knowledge base: <b>documents</b> (character, sales playbooks, reference) and <b>course cards</b> — the only place prices come from. Knowledge enters the prompt only through smart search — no "backup" paths.</p>
+  <p class="gist">Everything Stepan says about the school lives in the branch's knowledge base: <b>documents</b> (the persona, plus the policy and market facts) and <b>course cards</b> — the only place prices come from. The base is facts-only, and the whole of it enters every prompt — no search, no "backup" paths.</p>
   <details>
-    <summary>How the smart search works (RAG)</summary>
+    <summary>How the knowledge reaches the prompt (facts-only, whole KB)</summary>
     <div class="body">
       <p>There is no retrieval step. The knowledge base is facts-only and small enough to fit in one context window, so every reply is given the whole thing: the persona, the policy/market facts, the full card of the product in focus, and a one-line facts summary of every other product. No embeddings, no index, no reindex watcher — an edit in the KB editor is live on the next reply.</p>
       <details class="l3"><summary>All the way down</summary><div class="body">
@@ -550,7 +551,7 @@ _BODY_EN = r"""
 <!-- THE CONVEYOR -->
 <section class="card reveal" id="worker">
   <div class="kicker">08 · The conveyor</div>
-  <h2>The background worker: 11 scheduled jobs</h2>
+  <h2>The background worker: 10 scheduled jobs</h2>
   <p class="gist">One shared worker runs all the routine. Every job is a "dispatcher" that hands out a separate task per branch: branches are processed in parallel and independently, one failure never touches the others.</p>
   <div class="tablewrap"><table>
     <tr><th>Job</th><th>How often</th><th>What it does</th></tr>
@@ -562,7 +563,6 @@ _BODY_EN = r"""
     <tr><td>CRM sync</td><td>5 min</td><td>events to the CRM + state reads</td></tr>
     <tr><td>Client profiles</td><td>30 min</td><td>followers and avatars of the active funnel</td></tr>
     <tr><td>Media backfill</td><td>3 min</td><td>downloading and recognising voice notes/images</td></tr>
-    <tr><td>Knowledge re-index</td><td>5 min</td><td>catches edited bases</td></tr>
     <tr><td>Needs cloud</td><td>daily</td><td>overnight analytics (Jakarta midnight)</td></tr>
     <tr><td>Log pruning</td><td>daily</td><td>broker call log older than 30 days</td></tr>
   </table></div>
@@ -616,7 +616,7 @@ _BODY_EN = r"""
       <ul>
         <li>The write is atomic — one "insert or add" SQL statement with no races (<code>app/modules/budget/service.py</code>). The code records a real incident: an ambiguous column reference crashed the write on PostgreSQL and an already-paid reply was silently dropped (SQLite in tests swallowed it).</li>
         <li>The limit check happens <b>before</b> the model call; the charge — after a successful reply. Sandbox simulations are billed too — they run on the dedicated sandbox branch and charge its own ledger, so nothing escapes the accounting.</li>
-        <li>Every broker call is a row in the <code>broker_log</code> journal: scenario (reply/reminder/guard/translation/search), provider, model, tokens, price, latency, success. Kept 30 days, viewed in the admin with a histogram. A journal-write failure never breaks the client's reply.</li>
+        <li>Every broker call is a row in the <code>broker_log</code> journal: scenario (reply/reminder/guard/critic/translation), provider, model, tokens, price, latency, success. Kept 30 days, viewed in the admin with a histogram. A journal-write failure never breaks the client's reply.</li>
       </ul>
     </div>
   </details>
@@ -697,7 +697,7 @@ _BODY_EN = r"""
 <section class="card reveal" id="quality">
   <div class="kicker">13 · Quality and delivery</div>
   <h2>Tests, CI/CD and the road to production</h2>
-  <p class="gist">~1,070 automated tests in 98 files cover every subsystem: branch isolation, client merging, the worker, the guard, knowledge search, the budget, MCP. Plus a separate "live" dialogue regression suite — scenarios where the bot once broke and was fixed.</p>
+  <p class="gist">~1,070 automated tests in 98 files cover every subsystem: branch isolation, client merging, the worker, the guard, the knowledge base, the budget, MCP. Plus a separate "live" dialogue regression suite — scenarios where the bot once broke and was fixed.</p>
   <details>
     <summary>How code reaches production</summary>
     <div class="body">
@@ -774,8 +774,9 @@ _BODY_EN = r"""
     <tr><td><b>Thread</b></td><td>one chat of a lead in one channel (a lead may have several)</td></tr>
     <tr><td><b>Funnel</b></td><td>the client's path: new → discovery → presenting → objections → ready → handed off</td></tr>
     <tr><td><b>Broker (AIbroker)</b></td><td>the external gateway to all models; returns the price of every call</td></tr>
-    <tr><td><b>RAG</b></td><td>smart search: the prompt gets the knowledge chunks closest in meaning to the dialogue</td></tr>
+    <tr><td><b>Knowledge base</b></td><td>facts-only: the persona, the policy/market facts and the course cards — loaded whole into every prompt, no search step</td></tr>
     <tr><td><b>Reply-guard</b></td><td>the safety layer: a fabrication check on the draft reply before sending</td></tr>
+    <tr><td><b>Critic-gate</b></td><td>the last check: a strong model judges every reply against a positive rubric (grounded, responsive, sells) and fails closed to a human</td></tr>
     <tr><td><b>Outbox</b></td><td>the outgoing queue — the single door to the outside, where all limits apply</td></tr>
     <tr><td><b>Follow-up</b></td><td>a scheduled reminder to a client who went quiet</td></tr>
     <tr><td><b>24-hour window</b></td><td>the period after a client's message in which Meta officially allows a reply</td></tr>
@@ -803,7 +804,7 @@ _BODY_UK = r"""
     <div class="stats">
       <div class="stat"><b>146</b><span>файлів коду (Python)</span></div>
       <div class="stat"><b>~1 070</b><span>автотести у 98 файлах</span></div>
-      <div class="stat"><b>11</b><span>фонових задач за розкладом</span></div>
+      <div class="stat"><b>10</b><span>фонових задач за розкладом</span></div>
       <div class="stat"><b>3</b><span>канали: Instagram · WhatsApp · Meta</span></div>
       <div class="stat"><b>0–5</b><span>фази розвитку — всі закриті</span></div>
     </div>
@@ -888,7 +889,7 @@ _BODY_UK = r"""
     <button role="tab" aria-selected="true" data-panel="p1"><span class="n">КРОК 1</span><span class="t">Клієнт пише</span><span class="s">Instagram / WhatsApp</span></button>
     <button role="tab" aria-selected="false" data-panel="p2"><span class="n">КРОК 2</span><span class="t">Приймання</span><span class="s">хто це і що нового</span></button>
     <button role="tab" aria-selected="false" data-panel="p3"><span class="n">КРОК 3</span><span class="t">Рішення</span><span class="s">ШІ думає над відповіддю</span></button>
-    <button role="tab" aria-selected="false" data-panel="p4"><span class="n">КРОК 4</span><span class="t">Перевірка</span><span class="s">ловимо вигадки</span></button>
+    <button role="tab" aria-selected="false" data-panel="p4"><span class="n">КРОК 4</span><span class="t">Перевірка</span><span class="s">без вигадок, і має продавати</span></button>
     <button role="tab" aria-selected="false" data-panel="p5"><span class="n">КРОК 5</span><span class="t">Черга</span><span class="s">по-людськи</span></button>
     <button role="tab" aria-selected="false" data-panel="p6"><span class="n">КРОК 6</span><span class="t">Відправлення</span><span class="s">ліміти та ввічливість</span></button>
   </div>
@@ -930,15 +931,17 @@ _BODY_UK = r"""
   </div>
 
   <div class="pipe-panel" id="p4" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Перевірка: вигадка ніколи не йде клієнту</h3>
-    <p>Між «ШІ придумав відповідь» і «відповідь пішла» стоїть страхувальний шар (reply-guard). Спершу — миттєві безкоштовні перевірки: посилання, якого немає в базі знань; фраза «вже надіслав вам файл» (бот не вміє надсилати файли); два запитання в одному повідомленні; пропозиція подзвонити (бот лише пише). Потім — вибіркова перевірка другою нейромережею, тільки для «ризикованих» відповідей. Впіймали проблему → одна регенерація; не допомогло → безпечна фраза «уточню в команди» і передавання менеджеру.</p>
+    <h3 style="margin-top:0">Перевірка: вигадка ніколи не йде клієнту — і відповідь мусить продавати</h3>
+    <p>Між «ШІ придумав відповідь» і «відповідь пішла» стоять дві перевірки. Спершу страхувальний шар (reply-guard), що ловить відомо-погані форми: миттєві безкоштовні перевірки — посилання, якого немає в базі знань; фраза «вже надіслав вам файл» (бот не вміє надсилати файли); два запитання в одному повідомленні; пропозиція подзвонити (бот лише пише) — потім вибіркова перевірка другою нейромережею, тільки для «ризикованих» відповідей. Впіймали проблему → одна регенерація; не допомогло → безпечна фраза «уточню в команди» і передавання менеджеру.</p>
+    <p>Потім, <b>останнім</b> кроком, — критик-гейт: страховка вміє сказати лише, що відповідь не вигадана, але не те, чи вона справді <i>продає</i>. Тож сильна модель оцінює кожну відповідь за позитивною рубрикою — чи кожен факт заземлений у базі знань, чи вона відповідає на те, що клієнт справді сказав, чи просуває продаж на один розумний крок, чи опрацьоване живе заперечення, чи правильний регістр. Якщо не дотягує навіть після одного переписування (або сама перевірка збоїть) — відповідь <b>не відправляється</b>: критик спрацьовує «в закритий бік», і клієнт іде до людини.</p>
     <details class="l3"><summary>До дна</summary><div class="body">
       <ul>
-        <li>З'явився після реального випадку: бот вигадав посилання на «лабораторію», безкоштовний доступ і сертифікат Cisco. Файли: <code>app/modules/conversation/guard.py</code>, оркестрування в <code>reply.py</code>, документ <code>docs/reply-guard.md</code>.</li>
+        <li>Страховка з'явилася після реального випадку: бот вигадав посилання на «лабораторію», безкоштовний доступ і сертифікат Cisco. Файли: <code>app/modules/conversation/guard.py</code>, оркестрування в <code>reply.py</code>, документ <code>docs/reply-guard.md</code>.</li>
         <li>Хитра економія: найчастіший «ризик» — ціна. Якщо ціна у відповіді дослівно збігається з базою знань, платна LLM-перевірка пропускається (це сотні відповідей на день).</li>
         <li>Окремо ловляться «хибні ескалації»: модель хоче покликати менеджера на запитання про ціну, відповідь на яке вже є в контексті — натомість регенерація.</li>
         <li>Кожна регенерація збільшує лічильник у клієнта — після двох такий клієнт назавжди переводиться на дорогу модель.</li>
-        <li>Режими на філію: повний / лише посилання / вимкнено. Текст промпта-перевіряльника редагується як звичайний документ бази знань.</li>
+        <li>Режими страховки на філію: повний / лише посилання / вимкнено. Текст промпта-перевіряльника редагується як звичайний документ бази знань.</li>
+        <li>Критик (<code>app/modules/conversation/critic.py</code>, <code>reply.apply_critic</code>) теж налаштовується на філію: <code>off</code> / <code>shadow</code> (лише логує вердикт, не змінюючи відповідь, — щоб виміряти частку відхилень) / <code>on</code> (блокує, регенерує, передає людині). Коли він увімкнений, платна LLM-перевірка страховки пропускається як надлишкова — критик і так суворіше переперевіряє заземлення.</li>
       </ul>
     </div></details>
   </div>
@@ -1002,17 +1005,16 @@ _BODY_UK = r"""
     <div class="body">
       <ol style="padding-left:22px">
         <li><b>Персона</b> — характер і голос Степана (завжди цілком, першим блоком).</li>
-        <li><b>Картка обговорюваного курсу</b> — але урізана до ядра: суть, ціна, розклад, формат, результат. Об'ємна програма їде в пошук по знаннях.</li>
-        <li><b>Обов'язкові документи</b> — правила оплати і список заборон (кожен хід, надто важливі, щоб довіряти пошуку).</li>
-        <li><b>Каталог курсів</b> — список активних продуктів.</li>
-        <li><b>Знайдені знання</b> — шматки бази, релевантні останнім реплікам (розумний пошук, див. «Знання»).</li>
+        <li><b>Повна картка обговорюваного курсу</b> — картка цілком: суть, ціна, розклад, формат, результат. Реструктуровані картки компактні, тож ідуть повністю.</li>
+        <li><b>Факт-документи</b> — правила оплати/знижок/школярів і факти ринку/конкурентів плюс список заборон (кожен хід — саме тут живуть політики й ринкові факти).</li>
+        <li><b>Каталог курсів</b> — однорядкове зведення QUICK FACTS по кожному іншому продукту, щоб міжкурсове запитання було відповідним без вивалювання всіх п'ятнадцяти повних карток.</li>
         <li><b>Сьогоднішня дата</b> за часом філії — щоб не пропонувати минулі заняття.</li>
         <li><b>Нотатки менеджера</b>: правила на всю філію + особиста позначка на клієнта («перевірено, ще не готовий»).</li>
         <li><b>Відомі потреби клієнта</b> — все, що накопичили минулі ходи.</li>
         <li><b>Контракт продажів</b> + історія листування.</li>
       </ol>
       <details class="l3"><summary>До дна: обмеження і кеш</summary><div class="body">
-        <p>Загальний бюджет контексту обмежений (~30 тис. символів): далі дешеві моделі перестають повертати валідний JSON. У разі переповнення викидаються найменш релевантні шматки знань — персона, картка курсу і каталог не чіпаються ніколи. Збирання контексту кешується на один хід клієнта, щоб регенерації (страховка, дедуп, ескалація) не перераховували дорогий пошук. Файли: <code>prompt.py</code> (чиста функція, без звернень до бази), <code>app/modules/knowledge/service.py</code> (<code>knowledge_context</code>).</p>
+        <p>Загальний бюджет контексту обмежений (24 тис. символів): за ~30 тис. дешеві моделі перестають повертати валідний JSON. Факт-БЗ написана так, щоб сидіти значно нижче ліміту, а сам ліміт — лише захисний запобіжник: у разі переповнення зібраний контекст просто обрізається. Збирання контексту дешеве й детерміноване (без ретриву), тож регенерації (страховка, дедуп, ескалація, критик) вільно його перевикористовують. Файли: <code>prompt.py</code> (чиста функція, без звернень до бази), <code>app/modules/knowledge/service.py</code> (<code>knowledge_context</code>).</p>
       </div></details>
     </div>
   </details>
@@ -1059,9 +1061,9 @@ _BODY_UK = r"""
 <section class="card reveal" id="kb">
   <div class="kicker">05 · Знання</div>
   <h2>База знань: єдине джерело правди</h2>
-  <p class="gist">Усе, що Степан каже про школу, лежить у базі знань філії: <b>документи</b> (характер, сценарії продажів, довідник) і <b>картки курсів</b> — єдине місце, звідки беруться ціни. У промпт знання потрапляють лише через розумний пошук — жодних «запасних» шляхів.</p>
+  <p class="gist">Усе, що Степан каже про школу, лежить у базі знань філії: <b>документи</b> (персона плюс факти політик і ринку) і <b>картки курсів</b> — єдине місце, звідки беруться ціни. База — тільки факти, і вся вона потрапляє в кожен промпт — без пошуку, без «запасних» шляхів.</p>
   <details>
-    <summary>Як працює розумний пошук (RAG)</summary>
+    <summary>Як знання потрапляють у промпт (тільки факти, БЗ цілком)</summary>
     <div class="body">
       <p>Пошукового кроку немає. База знань — тільки факти й достатньо мала, щоб уміститися в одне вікно контексту, тож кожній відповіді дається вся: персона, факти політик/ринку, повна картка продукту у фокусі та однорядкове зведення фактів по кожному іншому продукту. Без ембедингів, без індексу, без сторожа — правка в редакторі БЗ жива вже в наступній відповіді.</p>
       <details class="l3"><summary>До дна</summary><div class="body">
@@ -1143,7 +1145,7 @@ _BODY_UK = r"""
 <!-- КОНВЕЄР -->
 <section class="card reveal" id="worker">
   <div class="kicker">08 · Конвеєр</div>
-  <h2>Фоновий воркер: 11 задач за розкладом</h2>
+  <h2>Фоновий воркер: 10 задач за розкладом</h2>
   <p class="gist">Усю рутину крутить один спільний воркер. Кожна задача — «диспетчер», що роздає по окремому завданню на філію: філії обробляються паралельно й незалежно, збій однієї не чіпає інших.</p>
   <div class="tablewrap"><table>
     <tr><th>Задача</th><th>Як часто</th><th>Що робить</th></tr>
@@ -1155,7 +1157,6 @@ _BODY_UK = r"""
     <tr><td>Синк CRM</td><td>5 хв</td><td>події в CRM + читання стану</td></tr>
     <tr><td>Профілі клієнтів</td><td>30 хв</td><td>підписники й аватарки активної воронки</td></tr>
     <tr><td>Дозавантаження медіа</td><td>3 хв</td><td>завантаження і розпізнавання голосових/картинок</td></tr>
-    <tr><td>Переіндексація знань</td><td>5 хв</td><td>ловить змінені бази</td></tr>
     <tr><td>Хмара потреб</td><td>1 р/добу</td><td>нічна аналітика (північ Джакарти)</td></tr>
     <tr><td>Чищення логів</td><td>1 р/добу</td><td>журнал викликів брокера старший за 30 днів</td></tr>
   </table></div>
@@ -1209,7 +1210,7 @@ _BODY_UK = r"""
       <ul>
         <li>Запис атомарний — одна SQL-команда «вставити або доповнити» без гонок (<code>app/modules/budget/service.py</code>). У коді зафіксований реальний інцидент: неоднозначне посилання на колонку валило запис у PostgreSQL, і вже оплачена відповідь тихо губилася (SQLite у тестах це ковтав).</li>
         <li>Перевірка ліміту — <b>до</b> виклику нейромережі; списання — після успішної відповіді. Пісочничні симуляції теж тарифікуються — вони живуть в окремій тестовій філії і списуються з її власної «касової книги», тож повз облік не проходить нічого.</li>
-        <li>Кожен виклик брокера — рядок у журналі <code>broker_log</code>: сценарій (відповідь/нагадування/страховка/переклад/пошук), провайдер, модель, токени, ціна, затримка, успіх. Зберігається 30 днів, переглядається в адмінці з гістограмою. Помилка запису журналу ніколи не валить відповідь клієнту.</li>
+        <li>Кожен виклик брокера — рядок у журналі <code>broker_log</code>: сценарій (відповідь/нагадування/страховка/критик/переклад), провайдер, модель, токени, ціна, затримка, успіх. Зберігається 30 днів, переглядається в адмінці з гістограмою. Помилка запису журналу ніколи не валить відповідь клієнту.</li>
       </ul>
     </div>
   </details>
@@ -1288,7 +1289,7 @@ _BODY_UK = r"""
 <section class="card reveal" id="quality">
   <div class="kicker">13 · Якість і доставлення</div>
   <h2>Тести, CI/CD і шлях у прод</h2>
-  <p class="gist">~1 070 автотестів у 98 файлах покривають усі підсистеми: ізоляцію філій, склеювання клієнтів, воркер, страховку, пошук по знаннях, бюджет, MCP. Плюс окремий «живий» регресійний набір діалогів — сценарії, на яких бот колись ламався і був полагоджений.</p>
+  <p class="gist">~1 070 автотестів у 98 файлах покривають усі підсистеми: ізоляцію філій, склеювання клієнтів, воркер, страховку, базу знань, бюджет, MCP. Плюс окремий «живий» регресійний набір діалогів — сценарії, на яких бот колись ламався і був полагоджений.</p>
   <details>
     <summary>Як код потрапляє в прод</summary>
     <div class="body">
@@ -1365,8 +1366,9 @@ _BODY_UK = r"""
     <tr><td><b>Тред</b></td><td>один чат ліда в одному каналі (у ліда їх може бути кілька)</td></tr>
     <tr><td><b>Воронка</b></td><td>шлях клієнта: новий → виявлення → презентація → заперечення → готовий → переданий</td></tr>
     <tr><td><b>Брокер (AIbroker)</b></td><td>зовнішній шлюз до всіх нейромереж; повертає ціну кожного виклику</td></tr>
-    <tr><td><b>RAG</b></td><td>розумний пошук: у промпт потрапляють шматки бази знань, близькі за сенсом до діалогу</td></tr>
+    <tr><td><b>База знань</b></td><td>тільки факти: персона, факти політик/ринку і картки курсів — вантажаться в кожен промпт цілком, без кроку пошуку</td></tr>
     <tr><td><b>Reply-guard</b></td><td>страховка: перевірка чернетки відповіді на вигадки до відправлення</td></tr>
+    <tr><td><b>Критик-гейт</b></td><td>остання перевірка: сильна модель оцінює кожну відповідь за позитивною рубрикою (заземлена, доречна, продає) і за провалу передає людині</td></tr>
     <tr><td><b>Outbox</b></td><td>вихідна черга — єдині двері назовні, де застосовуються всі ліміти</td></tr>
     <tr><td><b>Follow-up</b></td><td>нагадування клієнту, що замовк, за розкладом</td></tr>
     <tr><td><b>24-годинне вікно</b></td><td>строк після повідомлення клієнта, у який Meta офіційно дозволяє відповісти</td></tr>

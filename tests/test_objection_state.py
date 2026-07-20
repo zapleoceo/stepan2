@@ -86,6 +86,20 @@ async def _branch(s) -> int:
     return b.id
 
 
+async def test_ungrounded_objection_is_dropped(db_session) -> None:
+    bid = await _branch(db_session)
+    # the lead said nothing about price, but the model invents an objection — grounding drops it
+    llm = _RecordingLLM([
+        {"reply": "Halo Kak!", "stage": "qualifying", "open_objections": ["mahal"]},
+        {"reply": "Siap.", "stage": "qualifying"},
+    ])
+    sim = SimService(db_session, llm)
+    await sim.say(bid, "obj2", "halo kak mau tanya")
+    await sim.say(bid, "obj2", "ok")
+    # the invented "mahal" was not grounded in the lead's words → never reaches the next prompt
+    assert "OPEN OBJECTIONS" not in llm.systems[-1]
+
+
 async def test_objection_roundtrips_into_next_prompt(db_session) -> None:
     bid = await _branch(db_session)
     # Turn 1: the lead voices a budget objection; the model records it as open.

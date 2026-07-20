@@ -137,6 +137,20 @@ async def test_catalog_shows_quick_facts_for_other_products(db_session):
     assert "SQL, Python, Power BI" not in ctx           # the OTHER card's bulk is NOT dumped
 
 
+async def test_catalog_falls_back_to_title_without_quick_facts(db_session):
+    """A product card lacking a QUICK FACTS: line is summarised by its title alone in the
+    catalog (never dropped)."""
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona-A",
+                [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
+                 ("data", "Data Analyst", "# Data Analyst\nNo quick-facts headline here.")])
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("vibe")
+    assert "- data: Data Analyst" in ctx        # title fallback present
+    assert "- data: Data Analyst —" not in ctx  # no ' — <facts>' suffix when line absent
+
+
 async def test_context_stays_within_the_char_budget(db_session):
     """Defensive cap: an over-large KB is truncated to the budget rather than shipped whole
     (cheap JSON-mode providers stop returning JSON past ~30k chars)."""
