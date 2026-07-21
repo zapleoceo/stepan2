@@ -67,9 +67,12 @@ def pick_capability(
     followup_attempt = nudges already sent (0 = first). inbound_count = lead messages so far.
     guard_regen_count = times guard regenerated for this LEAD across their whole history."""
     if workflow == "followup":
-        # The first nudge is low-stakes (cheap). From the 2nd on, varying the angle without
-        # repeating an earlier opener needs the strong model's instruction-following (chat 1830).
-        return SMART if followup_attempt >= 1 else FAST
+        # ALL follow-ups use the strong model (owner-set 2026-07-21). A proactive touch is
+        # unprompted and content-sensitive, and the free pool (gpt-oss) fabricated on them —
+        # wrong course durations, Zoom, 'max 14 orang' / 'tiap Kamis' scarcity (thread 4141);
+        # varying the angle without repeating an earlier opener needs strong instruction-
+        # following anyway (chat 1830). Reliability wins over the cheap lane here.
+        return SMART
     # The FIRST reply to a brand-new lead is the single highest-leverage message — the opener
     # is where ~76% of leads ghost (funnel audit 2026-07-19). Never gamble it on the free pool.
     if inbound_count <= 1:
