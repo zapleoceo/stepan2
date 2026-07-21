@@ -152,20 +152,18 @@ async def test_catalog_falls_back_to_title_without_quick_facts(db_session):
 
 
 async def test_event_cards_are_always_in_full_not_just_catalog(db_session):
-    """Open House + Demo Event are the universal low-friction step, so their FULL cards ride in
-    every context (grounding the offer), not just a terse catalog line."""
+    """The Demo Event is the universal low-friction step, so its FULL card rides in every
+    context (grounding the offer), not just a terse catalog line. (Open House retired
+    2026-07-21 — no longer an always-included event.)"""
     s = db_session
     a = await _branch(s, "Jakarta", "id")
     await _seed(s, a, "persona-A", [
         ("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
         ("vibe_coding_demo_event", "Demo Event",
-         "QUICK FACTS: 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live"),
-        ("open_house", "Open House",
-         "QUICK FACTS: gratis tiap Kamis\n## Detail\nkunjungan santai")])
+         "QUICK FACTS: 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live")])
     svc = KnowledgeService(s, a)
     ctx = await svc.knowledge_context("vibe")
     assert "[event vibe_coding_demo_event]" in ctx and "lihat AI bikin app live" in ctx
-    assert "[event open_house]" in ctx and "kunjungan santai" in ctx
     assert "- vibe_coding_demo_event:" not in ctx  # not duplicated in the compact catalog
 
 

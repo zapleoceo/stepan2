@@ -41,10 +41,11 @@ def test_capture_contact_early_but_not_ready() -> None:
     assert "AND wants to ENROL" in _DECISION_CONTRACT
 
 
-def test_proactive_close_and_openhouse_bridge() -> None:
+def test_proactive_close() -> None:
     assert "CLOSING" in _DECISION_CONTRACT
     assert "don't wait to be asked" in _DECISION_CONTRACT
-    assert "OPEN HOUSE" in _DECISION_CONTRACT
+    # Open House retired 2026-07-21 — must be gone from the contract entirely
+    assert "Open House" not in _DECISION_CONTRACT and "OPEN HOUSE" not in _DECISION_CONTRACT
 
 
 def test_events_vs_courses_recognizes_cheap_price() -> None:

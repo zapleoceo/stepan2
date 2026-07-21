@@ -46,7 +46,7 @@ _QUICK_FACTS_RE = re.compile(r"(?im)^\s*QUICK FACTS:\s*(.+)$")
 # offered in almost every objection handling, so their FULL cards ride in EVERY context — a
 # terse catalog line isn't enough to ground a real offer, and the model offering them from
 # memory got the critic to false-reject ('Demo Event not in KB') and cascade to a hand-off.
-_ALWAYS_PRODUCT_SLUGS = ("vibe_coding_demo_event", "open_house")
+_ALWAYS_PRODUCT_SLUGS = ("vibe_coding_demo_event",)  # Open House retired 2026-07-21
 
 
 class KnowledgeService:

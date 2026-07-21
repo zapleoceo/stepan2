@@ -278,9 +278,10 @@ MINOR_NUDGE = (
     "sekolah') — either the lead themselves, or a PARENT asking for their child. The parent is "
     "the payer and decision-maker in both cases, so never push DP or the full price at a "
     "student. If the LEAD is the student: encourage them warmly, mention the 10% student "
-    "discount, and suggest coming to the free Open House with a parent. If the lead is the "
-    "PARENT: talk to them as the decision-maker directly — what their child would learn and "
-    "the Open House to see it live; answer their questions normally (a parent asking the price "
+    "discount, and suggest the Demo Event (Rp 100rb) or a quick campus drop-by with a parent. "
+    "If the lead is the PARENT: talk to them as the decision-maker directly — what their child "
+    "would learn and the Demo Event to see it live; answer their questions normally (a parent "
+    "asking the price "
     "may hear it honestly). Positive, no pressure. Return the JSON as usual.]"
 )
 
@@ -311,8 +312,8 @@ OBJECTION_HANDLE_NUDGE = (
     "duration exists (hands-on practice/projects); TRUST/bad-reviews → a real Success Case from "
     "the KB, never fabricated; NO MONEY NOW → the cheaper 1-day Skill Booster or free Open "
     "House; NOT SURE IT FITS → tie one concrete outcome to their stated goal.\n"
-    "4) End with ONE soft, low-pressure next step - a light question or the free Open House - "
-    "NEVER a 'lock your seat today' hard close.\n"
+    "4) End with ONE soft, low-pressure next step - a light question or the low-friction Demo "
+    "Event (Rp 100rb) - NEVER a 'lock your seat today' hard close.\n"
     "This is the ONE attempt. If the lead declines AGAIN after this, ease off fully. If they "
     "ALSO asked a real question, answer it first (KB fact), then handle the objection. Facts "
     "ONLY from the KB, never fabricate a number, case, or claim. Return the JSON as usual.]"
@@ -346,9 +347,7 @@ POSTPONE_NUDGE = (
     "clients earlier, and with AI the moment to start is now.\n"
     "3) LOWER THE FRICTION so 'later' becomes a small step NOW: prefer the paid Demo Event (a "
     "real dated try-before-you-buy session) or locking today's price with a DP and deciding "
-    "fully later. If you mention the free Open House, frame it as a RELAXED office drop-by "
-    "whenever suits them ('kapan cocok mampir santai-santai?') and ask if it's convenient — "
-    "NEVER a fixed 'datang Kamis ini' event.\n"
+    "fully later.\n"
     "4) End with ONE soft question, never a hard close. NO 'now or never', NO invented scarcity "
     "('sisa 2 kursi' only if the KB says so). If the lead postpones AGAIN after this, ease off "
     "fully. Facts ONLY from the KB. Return the JSON as usual.]")
@@ -416,7 +415,8 @@ SOFT_NO_NUDGE = (
     "usually a real 'no' wrapped to save face, AND they've already had one objection-handling "
     "turn — so now ease off for real. Do NOT push price, DP, scarcity or a new "
     "pitch this turn — that makes them ghost. Acknowledge sincerely, give a graceful out, and "
-    "offer AT MOST one low-commitment option (free Open House OR a cheap 1-day Skill Booster). "
+    "offer AT MOST one low-commitment option (a cheap 1-day Skill Booster or the Demo Event Rp "
+    "100rb). "
     "If they haven't named WHEN they'd revisit, you may ask ONE light timing question - "
     "'mau aku ingetin lagi kapan enaknya - minggu depan, atau abis gajian? 😊' - a dated "
     "'later' becomes a real plan; a vague 'later' is a lost lead. If they DID name a time "
@@ -482,7 +482,7 @@ ANSWER_FIRST_TIGHT_BUDGET_NUDGE = (
     "[System: the lead asked a DIRECT question AND signalled tight/no budget in the same "
     "message. Answer the question honestly with the real fact (never dodge a price question), "
     "but put the CHEAPEST real entry right beside it as the main path — the 1-day Skill "
-    "Booster / mini course or the free Open House — so the answer doesn't read as 'this is "
+    "Booster / mini course or the Demo Event Rp 100rb — so the answer doesn't read as 'this is "
     "not for you'. No DP push, never guarantee income. Return the JSON as usual.]"
 )
 
@@ -510,7 +510,7 @@ LOW_BUDGET_NUDGE = (
     "'amankan seat sekarang' at someone who just said they have no money. Then give a CONCRETE "
     "path, not a brush-off:\n"
     "- Genuinely can't afford it → the CHEAPEST real entry as the main path (1-day Skill Booster "
-    "500-700rb, or the Vibe Demo Event 100rb, or the free Open House).\n"
+    "500-700rb, or the Vibe Demo Event 100rb).\n"
     "- Wants the full course but is SAVING UP ('ngumpulin duit dulu') → show the affordability "
     "ladder so 'later' becomes doable NOW: DP cuma 500rb mengunci harga & kursi, sisanya "
     "cicilan 0% (bisa dibayar sambil jalan) — this is the real answer to 'ngumpulin duit', not "
@@ -589,7 +589,7 @@ _FOLLOWUP_ANGLE_LADDER = (
     # ad-opener rules still forbid schedules, and a conflicting example made the model pick
     # arbitrarily (sales-logic audit 2026-07-19, #8).
     "LOWER the barrier: offer the cheapest real next step from the KB — a Skill Booster, the "
-    "free weekly Open House, or a low-friction yes/no ('mau aku ceritain singkat gimana "
+    "Demo Event, or a low-friction yes/no ('mau aku ceritain singkat gimana "
     "kelasnya jalan?'). The goal now is a tiny yes, NOT selling the full program.]",
     # attempt 4+ (n>=4): graceful soft close
     "this is likely the LAST touch — a graceful, no-pressure close. Acknowledge they may be "
