@@ -745,6 +745,7 @@ class ReplyService:
             decision.reply, last_in_txt,
             has_pains=bool(ctx.stored_needs.pains), has_phone=_has_phone,
             ready=bool(decision.ready),
+            has_open_objection=bool(decision.open_objections),
         ):
             logger.info("%s: branch=%d thread=%d premature contact ask on a cold lead → regen",
                         workflow, self.branch_id, thread_id)
@@ -755,7 +756,8 @@ class ReplyService:
                 fixed = parse_decision(raw)
                 if fixed.reply and not premature_contact_ask(
                     fixed.reply, last_in_txt, has_pains=bool(ctx.stored_needs.pains),
-                    has_phone=False, ready=bool(fixed.ready)):
+                    has_phone=False, ready=bool(fixed.ready),
+                    has_open_objection=bool(fixed.open_objections)):
                     decision, meta = fixed, regen_meta
             except ValueError:
                 pass  # keep the guarded draft rather than drop the reply

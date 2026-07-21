@@ -717,17 +717,30 @@ PREMATURE_CONTACT_CORRECTION = (
 )
 
 
-def premature_contact_ask(reply, last_inbound, *, has_pains, has_phone, ready) -> bool:  # noqa: ANN001
-    """True when the reply asks for the lead's number while they're still cold — no pain on
-    record, no phone, not ready, and this turn carries no price/pay/buying signal."""
+def premature_contact_ask(reply, last_inbound, *, has_pains, has_phone, ready,  # noqa: ANN001
+                          has_open_objection=False) -> bool:
+    """True when the reply asks for the lead's number but the lead isn't actually ready for it.
+
+    A contact-grab is legitimate only on a genuinely warm turn: a price/pay/buying signal in the
+    CURRENT message, or a phone already in hand. It's PREMATURE when the model reaches for it
+    over a lead who is still exploring — and the model's own `ready`/`has_pains` self-assessment
+    does NOT license overriding that. `ready` alone is untrusted: a REAL ready turn has the phone
+    in hand (→ has_phone), but the model over-sets ready before that (thread 4725: ready=true on
+    'lihat contohnya' with empty discovery → phone-grab). An UNRESOLVED objection or a fresh
+    direct question in the current message must be answered/reassured first, never swapped for a
+    number (thread 4715: 'belum paham SQL' — an open doubt — got a phone-grab instead of help)."""
     if not CONTACT_ASK_RE.search(reply or ""):
         return False
-    if has_pains or has_phone or ready:
-        return False
+    if has_phone:
+        return False  # already have it — not a cold grab
     txt = last_inbound or ""
     warm = (PRICE_QUESTION_RE.search(txt) or PAYMENT_INTENT_RE.search(txt)
             or BUYING_SIGNAL_RE.search(txt))
-    return not warm
+    if warm:
+        return False
+    if has_open_objection or is_answerable_question(txt):
+        return True  # handle the objection / answer the question first; contact comes after
+    return not has_pains
 
 
 PAYMENT_INTENT_NUDGE = (

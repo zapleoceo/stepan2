@@ -272,6 +272,23 @@ def test_premature_contact_ask_flags_cold_wa_grab_spares_warm() -> None:
         "boleh minta nomor WA?", "1", has_pains=True, has_phone=False, ready=False)
     # a reply with no contact ask is never flagged
     assert not premature_contact_ask("Keren Kak! Mau bikin aplikasi buat apa?", "1", **cold)
+    # ready=true no longer bypasses: the model over-sets it before a phone is in hand (thread
+    # 4725 — ready=true on 'lihat contohnya' with empty discovery got a phone-grab)
+    assert premature_contact_ask(
+        "boleh minta nomor WA?", "jasa bisa lihat contohnya",
+        has_pains=False, has_phone=False, ready=True)
+    # an OPEN OBJECTION must be handled first — even with a captured pain (thread 4715: the
+    # 'pain' was a competence worry 'belum paham SQL', re-voiced, and got a phone-grab)
+    assert premature_contact_ask(
+        "boleh minta nomor WA?", "belum paham sql nya kak",
+        has_pains=True, has_phone=False, ready=True, has_open_objection=True)
+    # a fresh answerable question must be answered first, not swapped for a number
+    assert premature_contact_ask(
+        "boleh minta nomor WA?", "kelasnya online ga kak?",
+        has_pains=True, has_phone=False, ready=True)
+    # a phone already in hand is never a 'cold grab', whatever else is true
+    assert not premature_contact_ask(
+        "boleh minta nomor WA?", "1", has_pains=False, has_phone=True, ready=False)
 
 
 def test_fake_serendipity_regex_flags_canned_openers() -> None:
