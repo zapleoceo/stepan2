@@ -55,7 +55,13 @@ _HARD_REFUSAL_RE = re.compile(
     r"|(tidak|tdk|gak|ga|nggak|ngga|ndak|gk)\s*jadi\b|sudah\s*tidak", re.IGNORECASE)
 
 MIN_DORMANT_DAYS = 3
-MAX_DORMANT_DAYS = 21
+# 2026-07-22: widened from 21 to cover the account's full IG history (oldest thread predates
+# Stepan, ~460 days) at Dima's explicit request — reach every stalled lead, not just recent
+# ones. Pace stays SLOW on purpose: this does NOT change BATCH_PER_RUN/cron cadence/CAP/GAP, so
+# the ~1283-thread backlog drains at the same ~40 new touches/day this always ran at, and
+# reactivation is already lowest send-priority behind live replies (see outbox has_reply
+# ordering) — a wider window means more ELIGIBLE leads, not a faster or bigger blast.
+MAX_DORMANT_DAYS = 550
 REACTIVATION_GAP_DAYS = 14
 REACTIVATION_CAP = 2
 BATCH_PER_RUN = 20
