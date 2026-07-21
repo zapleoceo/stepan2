@@ -175,16 +175,18 @@ class OutboxSender:
         return row
 
     async def _sweep_stale_claims(self, thread_id: int, now: datetime) -> None:
-        """A row stuck in 'sending' means we crashed between the IG call and the final
-        status — the message may or may not have reached the lead. Never resend it (the
-        duplicate is the worse failure); after 10 minutes mark it failed so the queue moves
-        on and the error is visible in the UI."""
+        """A row stuck in 'sending' means we crashed between the IG call and the final status —
+        the message may or may not have reached the lead. Never resend it (the duplicate is the
+        worse failure); after 10 minutes mark it 'canceled' so the queue moves on. Canceled, NOT
+        failed: the outcome is unknown and it's never retried, so a red '✗ retry?' bubble in the
+        chat would mislead (retry = double-send risk) — the thread self-heals via a fresh reply.
+        A real send error stays 'failed' (marked in send_next), visible and retryable."""
         from sqlalchemy import update  # noqa: PLC0415
         await self.session.execute(
             update(Outbox)
             .where(Outbox.thread_id == thread_id, Outbox.status == "sending",
                    Outbox.sent_at < now - timedelta(minutes=10))
-            .values(status="failed",
+            .values(status="canceled",
                     error="crashed mid-send — outcome unknown, not retried"))
 
     async def _crm_gate(self, thread, row: Outbox) -> Outbox | None:

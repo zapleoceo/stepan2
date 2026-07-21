@@ -170,15 +170,20 @@ _STALE_SENDING_MIN = 10
 
 
 async def sweep_stale_sending(session: AsyncSession, branch_id: int, now: datetime) -> int:
-    """Mark outbox rows orphaned in 'sending' (claimed more than _STALE_SENDING_MIN ago) as
-    'failed', branch-wide. Never resends — a duplicate is the worse failure — so the thread
-    re-enters threads_awaiting_reply and a FRESH reply is generated. Returns rows swept."""
+    """Recover outbox rows orphaned in 'sending' (claimed more than _STALE_SENDING_MIN ago),
+    branch-wide. Marked 'canceled', NOT 'failed': a crashed-mid-send is a silent system artifact
+    (outcome unknown, never resent — a duplicate is the worse failure), so it must NOT surface in
+    the chat as a red '✗ send failed · retry?' bubble (fetch_pending shows 'failed', not
+    'canceled') — that retry button would risk a double-send, and the thread already self-heals
+    (canceled ∉ ~pending, so it re-enters threads_awaiting_reply and a FRESH reply is generated).
+    A REAL send failure (Meta window, IG error) is marked 'failed' by OutboxSender and stays
+    visible/retryable. Returns rows swept."""
     from sqlalchemy import update  # noqa: PLC0415
     res = await session.execute(
         update(Outbox)
         .where(Outbox.branch_id == branch_id, Outbox.status == "sending",
                Outbox.sent_at < now - timedelta(minutes=_STALE_SENDING_MIN))
-        .values(status="failed", error="crashed mid-send — outcome unknown, not retried"))
+        .values(status="canceled", error="crashed mid-send — outcome unknown, not retried"))
     return res.rowcount or 0
 
 

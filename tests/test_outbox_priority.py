@@ -118,5 +118,7 @@ async def test_sweep_recovers_outbox_rows_orphaned_in_sending(db_session) -> Non
     assert swept == 1  # only the 30-min-old claim, not the 1-min-old one
     await db_session.refresh(stale)
     await db_session.refresh(fresh)
-    assert stale.status == "failed" and stale.error  # recovered, visible in UI
+    # 'canceled', NOT 'failed': a crashed-mid-send is a silent artifact (unknown outcome, never
+    # retried), so it must not show as a red '✗ retry?' bubble — fetch_pending hides 'canceled'.
+    assert stale.status == "canceled" and stale.error
     assert fresh.status == "sending"  # still inside the grace window — never touched
