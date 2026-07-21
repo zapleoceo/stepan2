@@ -53,3 +53,39 @@ async def test_push_reports_failures_without_raising() -> None:
 def test_comment_handles_missing_product_and_message() -> None:
     c = _comment_for(_lead(1, "+628111", product=None, last_msg=""))
     assert "belum jelas" in c and '"-"' in c  # graceful fallbacks, no crash
+
+
+async def _seed_lead_with_phone(db_session, phone: str):  # noqa: ANN001
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead
+    from app.domain.enums import ChannelKind, Stage
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM, is_active=True)
+    db_session.add(ch)
+    lead = Lead(branch_id=b.id, stage=Stage.PRESENTING, phone_e164=phone)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="x",
+                                 product_slug="smm_intensive"))
+    await db_session.flush()
+    return b.id, lead.id
+
+
+async def test_drain_marks_success_idempotently_and_retries_failure(db_session) -> None:
+    from app.modules.crm.push_mcp import drain_writeback
+
+    bid, lid = await _seed_lead_with_phone(db_session, "+628111222333")
+    # a FAILING push must NOT mark the lead → it stays eligible next run
+    fail = _FakePusher(fail_phones={"+628111222333"})
+    r1 = await drain_writeback(db_session, bid, fail)
+    assert r1 == {"eligible": 1, "pushed": 0, "failed": 1}
+    r2 = await drain_writeback(db_session, bid, fail)
+    assert r2["eligible"] == 1  # still eligible — a failed push is retried
+
+    # a SUCCESS marks it → the next run no longer sees it (idempotent)
+    ok = _FakePusher()
+    r3 = await drain_writeback(db_session, bid, ok)
+    assert r3 == {"eligible": 1, "pushed": 1, "failed": 0}
+    r4 = await drain_writeback(db_session, bid, ok)
+    assert r4["eligible"] == 0 and r4["pushed"] == 0  # already pushed, never again

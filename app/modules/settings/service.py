@@ -60,6 +60,10 @@ class BranchSettings:
     # Rescue of CRM missed-call leads (Stepan DMs leads the phone couldn't reach) — off
     # until a branch explicitly opts in.
     crm_rescue_enabled: bool = False
+    # Push Stepan's warm leads into the CRM funnel over MCP (crm_lead_add_event). Off until a
+    # branch opts in AND the CRM's /lead/add-contact endpoint works — fail-open + retry, so a
+    # broken CRM endpoint only logs 404s and drains automatically once it's fixed.
+    crm_writeback_enabled: bool = False
     reactivation_enabled: bool = False
     learning_audit_enabled: bool = False
     # Reply to comments under our own posts (hourly). Off until a branch opts in; caps are
@@ -217,6 +221,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_mcp_url=raw.get("crm_mcp_url", ""),
         crm_mcp_city_alias=raw.get("crm_mcp_city_alias", "jakarta"),
         crm_rescue_enabled=_b(raw, "crm_rescue_enabled"),
+        crm_writeback_enabled=_b(raw, "crm_writeback_enabled"),
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
         reply_guard=raw.get("reply_guard", "full"),

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy import text
@@ -20,6 +21,12 @@ logger = logging.getLogger(__name__)
 # wait_call | thinking | contract | reject | event | material | waiting_registration | ...
 EVENT_WAIT_CALL = "wait_call"
 EVENT_THINKING = "thinking"
+
+# StageEvent marker so a lead pushed once is never re-pushed — idempotency across cron runs.
+# A FAILED push is NOT marked, so it retries next run (and auto-drains once the CRM endpoint
+# is fixed). Keyed the same way reactivation keys its cap/gap off a StageEvent reason.
+PUSHED_REASON = "crm_pushed"
+DRAIN_BATCH = 25
 
 
 class CrmPusherPort(Protocol):
@@ -79,6 +86,17 @@ def _content_text(res: Any) -> str:
     return " ".join(p for p in parts if p)[:300]
 
 
+def _coerce_dt(v: Any) -> datetime | None:
+    """Timestamp columns come back as datetime on Postgres but as a string via raw text() on
+    SQLite — normalize to a naive datetime for the days-idle math."""
+    if v is None or isinstance(v, datetime):
+        return v.replace(tzinfo=None) if isinstance(v, datetime) and v.tzinfo else v
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "").split("+")[0].strip())
+    except ValueError:
+        return None
+
+
 def _comment_for(lead: LeadToPush) -> str:
     prod = lead.product or "belum jelas"
     last = (lead.last_msg or "").strip()[:120] or "-"
@@ -89,27 +107,38 @@ def _comment_for(lead: LeadToPush) -> str:
 
 
 async def fetch_leads_with_phone(
-    session: AsyncSession, branch_id: int, limit: int = 100,
+    session: AsyncSession, branch_id: int, limit: int = 100, *, exclude_pushed: bool = True,
+    now: datetime | None = None,
 ) -> list[LeadToPush]:
-    """Non-closed leads (not ready/manager/handed_off) that have a phone — pushable by phone."""
+    """Non-closed leads (not ready/manager/handed_off) that have a phone — pushable by phone.
+    exclude_pushed skips leads already synced to the CRM (the PUSHED_REASON marker). Portable
+    SQL (SQLite + Postgres): days-idle is computed in Python, not with now()/EXTRACT/GREATEST."""
+    now = now or datetime.now(UTC).replace(tzinfo=None)
+    not_pushed = (
+        " AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
+        "   AND se.reason=:pushed)" if exclude_pushed else "")
     rows = (await session.execute(text(
-        "SELECT l.id, l.phone_e164,"
+        "SELECT l.id, l.phone_e164,"  # noqa: S608 — not_pushed is a fixed fragment, values bound
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
-        " l.stage, ct.product_slug,"
-        " round(EXTRACT(EPOCH FROM now()-GREATEST(l.created_at,"
-        "   coalesce(l.last_active_at,l.created_at)))/86400)::int AS days_idle,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage NOT IN ('ready','manager','handed_off')"
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
-        " ORDER BY days_idle LIMIT :lim"),
-        {"bid": branch_id, "lim": limit})).all()
-    return [
-        LeadToPush(lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
-                   product=r[4], days_idle=int(r[5] or 0), last_msg=r[6] or "")
-        for r in rows
-    ]
+        + not_pushed +
+        " ORDER BY l.created_at DESC LIMIT :lim"),
+        {"bid": branch_id, "lim": limit, "pushed": PUSHED_REASON})).all()
+    out = []
+    for r in rows:
+        created, last_active = _coerce_dt(r[5]), _coerce_dt(r[6])
+        cands = [x for x in (created, last_active) if x is not None]
+        recency = max(cands) if cands else now
+        days_idle = max(0, (now - recency).days)
+        out.append(LeadToPush(
+            lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
+            product=r[4], days_idle=days_idle, last_msg=r[7] or ""))
+    return out
 
 
 async def push_leads(
@@ -126,3 +155,31 @@ async def push_leads(
             failed += 1
             errors.append({"lead_id": lead.lead_id, "phone": lead.phone, "error": detail})
     return {"pushed": pushed, "failed": failed, "errors": errors}
+
+
+async def drain_writeback(
+    session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
+    event_type: str = EVENT_WAIT_CALL, limit: int = DRAIN_BATCH,
+) -> dict[str, Any]:
+    """One background pass: push a batch of not-yet-pushed warm leads to the CRM, marking each
+    SUCCESS with a PUSHED_REASON StageEvent so it's never re-pushed. A FAILURE is left unmarked
+    → retried next run, so a broken CRM endpoint (404) just logs and auto-drains once fixed."""
+    from app.adapters.db.models import StageEvent  # noqa: PLC0415
+
+    leads = await fetch_leads_with_phone(session, branch_id, limit=limit, exclude_pushed=True)
+    pushed, failed = 0, 0
+    for lead in leads:
+        ok, detail = await pusher.add_lead_event(
+            lead.phone, event_type, comment=_comment_for(lead), name=lead.name)
+        if ok:
+            pushed += 1
+            session.add(StageEvent(
+                branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
+                from_stage=lead.stage, to_stage=lead.stage,
+                actor="system", reason=PUSHED_REASON))
+        else:
+            failed += 1
+            logger.warning("crm writeback failed lead=%d: %s", lead.lead_id, detail)
+    if pushed:
+        await session.flush()
+    return {"eligible": len(leads), "pushed": pushed, "failed": failed}

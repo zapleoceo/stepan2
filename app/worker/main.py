@@ -460,6 +460,34 @@ async def _reactivate_one(
         return False
 
 
+async def sync_crm_writeback(ctx: dict[str, Any]) -> int:
+    """Dispatcher: fan out one CRM write-back drain per branch (opt-in, gated)."""
+    return await _fan_out_per_branch(ctx, "sync_crm_writeback_branch", gate_platform=True)
+
+
+async def sync_crm_writeback_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch's CRM write-back: push a batch of not-yet-synced warm leads to the CRM funnel
+    (crm_lead_add_event, keyed by phone). Fail-open — a broken /lead/add-contact just logs a 404
+    and the lead stays unmarked, so it retries next run and auto-drains once the endpoint is
+    fixed. Gated by crm_writeback_enabled + a configured crm_mcp_url."""
+    from app.modules.crm.push_mcp import CrmMcpPusher, drain_writeback  # noqa: PLC0415
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            if not cfg.crm_writeback_enabled or not (cfg.crm_mcp_url or "").strip():
+                return 0
+            pusher = CrmMcpPusher(
+                cfg.crm_mcp_url, cfg.crm_mcp_city_alias, settings().crm_mcp_timeout_s)
+            res = await drain_writeback(session, branch_id, pusher)
+        if res["pushed"] or res["failed"]:
+            logger.info("crm writeback branch=%d: pushed=%d failed=%d eligible=%d",
+                        branch_id, res["pushed"], res["failed"], res["eligible"])
+        return int(res["pushed"])
+    except Exception:
+        logger.exception("crm writeback: branch=%s failed, skipping", branch_id)
+        return 0
+
+
 async def learning_audit(ctx: dict[str, Any]) -> int:
     """Dispatcher: weekly learning-audit report per branch (propose-only, TG report)."""
     return await _fan_out_per_branch(ctx, "learning_audit_branch", gate_platform=True)
@@ -988,6 +1016,7 @@ class WorkerSettings:
         # independently (a slow/failing branch can't stall or abort the tick for the others).
         ingest_active_channels, ingest_active_conversations, reply_pending, send_outbox,
         schedule_followups, reactivate_dormant, learning_audit, escalate_stale_alerts,
+        sync_crm_writeback,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
         daily_digest, crm_rescue, ingest_comments,
         aggregate_needs, sync_ads, backfill_ads,
@@ -997,6 +1026,7 @@ class WorkerSettings:
         # id the instant the job ends, so the dedup never outlives the run.
         ingest_branch, ingest_active_branch, reply_pending_branch, send_outbox_branch,
         schedule_followups_branch, reactivate_dormant_branch, learning_audit_branch,
+        sync_crm_writeback_branch,
         escalate_stale_alerts_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, aggregate_needs_branch,
@@ -1047,6 +1077,10 @@ class WorkerSettings:
         # (UTC+7: 04:00 UTC = 11:00 WIB, 08:00 UTC = 15:00 WIB) so a cold touch lands in
         # business hours; small batch, quiet hours still held by the outbox send layer.
         cron(reactivate_dormant, hour={4, 8}, minute={20}, second=30, run_at_startup=False),
+        # CRM write-back: hourly drain of not-yet-synced warm leads into the CRM funnel. Opt-in
+        # (crm_writeback_enabled) + fail-open, so while the CRM's /lead/add-contact is down it
+        # just logs 404s and retries; it auto-drains the moment the endpoint is fixed.
+        cron(sync_crm_writeback, minute={35}, second=15, run_at_startup=False),
         # Learning audit: Monday 02:00 UTC = 09:00 WIB — the week's self-review lands with
         # the owner's Monday morning coffee. Propose-only; per-branch opt-in flag.
         cron(learning_audit, weekday={0}, hour={2}, minute={0}, second=0,
