@@ -93,6 +93,22 @@ async def test_inactive_channel_rows_never_enter_the_send_batch(db_session) -> N
     assert order == [live_thread]  # only the live channel's thread — no starvation
 
 
+async def test_reactivation_drains_after_a_real_reply(db_session) -> None:
+    """A dormant-reactivation touch is proactive, not a reply — it must go BEHIND a live
+    agent reply so a mass dormant harvest never delays an answer to an active lead."""
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    tr = await _thread(db_session, bid, cid, "react")
+    ta = await _thread(db_session, bid, cid, "reply")
+    # the reactivation was queued FIRST (lower id) — without deprioritization it would win
+    db_session.add(Outbox(branch_id=bid, thread_id=tr, text="eh Kak", source="reactivation"))
+    db_session.add(Outbox(branch_id=bid, thread_id=ta, text="reply", source="agent"))
+    await db_session.flush()
+
+    order = await wiring.threads_with_pending_outbox(db_session, bid)
+    assert order == [ta, tr]  # the live reply drains before the reactivation
+
+
 async def test_sweep_recovers_outbox_rows_orphaned_in_sending(db_session) -> None:
     """A worker restart (every deploy) between the committed 'sending' claim and the send
     result strands the row in 'sending' forever — the thread hangs mute because ~pending counts
