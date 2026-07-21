@@ -227,7 +227,9 @@ NON_TARGET_NUDGE = (
 # back, and the bare "apa tujuan utama Kakak?" this used to produce is why — the lead pressed
 # a button that PROMISED details, got an interview question, and had to compose an essay
 # about their goals to continue. Give a little, prove we're a real campus (penipuan fear),
-# and make answering cost one tap.
+# and keep answering easy by naming concrete options they can pick in a few words. The options
+# are shown NUMBERED for skimmability but the lead answers in words, not by sending a digit —
+# bare-number replies ('1 2') were being misparsed into the wrong option (thread 4719).
 AD_OPENER_NUDGE = (
     "[System: the lead's ONLY message so far is the ad's prefilled opener (a BUTTON CLICK, not "
     "their own words) — they tapped an ad, nothing more. This single reply decides the whole "
@@ -240,13 +242,14 @@ AD_OPENER_NUDGE = (
     "2) ONE short hook: why this topic is worth their time, in THEIR world — what it lets a "
     "person actually DO. One or two lines, concrete, no hype. This is what they clicked for, so "
     "do not leave them empty-handed.\n"
-    "3) ONE easy question with 4 NUMBERED options (1️⃣ 2️⃣ 3️⃣ 4️⃣) covering the usual reasons "
-    "people come — switch career / build their own thing or level up at work / mencari kursus "
-    "buat anaknya / just curious — and tell them to simply send the number. ALWAYS include the "
-    "for-my-child option: parents shopping for a kid are a real segment with their own "
-    "programs, and knowing it on turn one sets the whole sell path (the parent decides and "
-    "pays). Tapping a number is effortless; composing a sentence about their goals is not — "
-    "that gap is where these leads are lost.\n"
+    "3) ONE easy question that lays out the usual reasons people come as a short NUMBERED list "
+    "(1️⃣ 2️⃣ 3️⃣ 4️⃣ — the numbers are just to keep it skimmable) — switch career / build their "
+    "own thing or level up at work / mencari kursus buat anaknya / just curious. But do NOT ask "
+    "them to reply with a digit ('cukup kirim nomornya' / 'balas angkanya'): invite them to "
+    "answer in THEIR OWN WORDS — which one fits, or cerita sedikit. Bare-number replies like "
+    "'1 2' get misread (thread 4719: '1 2' was parsed as the wrong option). ALWAYS include the "
+    "for-my-child option: parents shopping for a kid are a real segment with their own programs, "
+    "and knowing it on turn one sets the whole sell path (the parent decides and pays).\n"
     "⛔ Still NO price, NO schedule, NO module list, NO brochure dump — those come once they "
     "tell you which way they lean. This holds EVEN THOUGH the button's canned text asks for "
     "them ('…dan biaya kursusnya', 'ceritakan lebih detail'): that wording is the ad's, not the "
@@ -491,10 +494,11 @@ FOLLOWUP_SILENT_CLICKER_EXTRA = (
     "theirs). They clicked an ad for a SPECIFIC skill — NAME that skill/topic as the hook "
     "('soal kelas <skill> yang Kakak lihat tadi …', topic only, never its price or schedule) "
     "so the message is obviously about what THEY looked at, not a generic blast. Then one "
-    "light, concrete line about what that skill lets a person actually DO, then ONE effortless "
-    "question with 3-4 NUMBERED options (career switch / own project / level up at work / "
-    "mencari kursus buat anaknya / just curious) and 'cukup balas angkanya'. Return the JSON "
-    "as usual.]"
+    "light, concrete line about what that skill lets a person actually DO, then ONE easy "
+    "question listing 3-4 NUMBERED options (career switch / own project / level up at work / "
+    "mencari kursus buat anaknya / just curious) — numbers just for skimmability — but ask them "
+    "to answer in their OWN WORDS, NOT with a bare digit (a '1 2' reply gets misread). Return "
+    "the JSON as usual.]"
 )
 
 # Fake-serendipity opener — 'kebetulan nih baru aja ada alumni/project…', 'eh baru inget…'.
