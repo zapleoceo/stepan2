@@ -289,6 +289,11 @@ def test_premature_contact_ask_flags_cold_wa_grab_spares_warm() -> None:
     # a phone already in hand is never a 'cold grab', whatever else is true
     assert not premature_contact_ask(
         "boleh minta nomor WA?", "1", has_pains=False, has_phone=True, ready=False)
+    # the ad prefill carries 'biaya' but is a BUTTON CLICK, not a warm price question — a
+    # phone-grab at a silent ad-clicker is still premature (thread 4755)
+    assert premature_contact_ask(
+        "boleh minta nomor WhatsApp-nya ya Kak?",
+        "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?", **cold)
 
 
 def test_fake_serendipity_regex_flags_canned_openers() -> None:

@@ -741,8 +741,13 @@ def premature_contact_ask(reply, last_inbound, *, has_pains, has_phone, ready,  
     if has_phone:
         return False  # already have it — not a cold grab
     txt = last_inbound or ""
-    warm = (PRICE_QUESTION_RE.search(txt) or PAYMENT_INTENT_RE.search(txt)
-            or BUYING_SIGNAL_RE.search(txt))
+    # An ad's prefilled opener is a BUTTON CLICK, never a warm signal — even though its canned
+    # text carries 'biaya' (which PRICE_QUESTION_RE matches). Without this exclusion the template
+    # 'Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?' reads as a price question and
+    # licenses a phone-grab at a lead who has said nothing of their own (thread 4755).
+    warm = not AD_TEMPLATE_RE.search(txt) and (
+        PRICE_QUESTION_RE.search(txt) or PAYMENT_INTENT_RE.search(txt)
+        or BUYING_SIGNAL_RE.search(txt))
     if warm:
         return False
     if has_open_objection or is_answerable_question(txt):
