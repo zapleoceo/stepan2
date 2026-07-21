@@ -209,6 +209,7 @@ from app.modules.conversation.situations import (  # noqa: E402
     NEED_PAYOFF_NUDGE,
     NO_TIME_NUDGE,
     OBJECTION_HANDLE_NUDGE,
+    PAID_SHOCK_NUDGE,
     SOFT_NO_NUDGE,
     SOFT_NO_WITH_QUESTION_NUDGE,
     pick_nudge,
@@ -311,6 +312,21 @@ def test_no_time_objection_gets_the_grounded_schedule_reframe() -> None:
     assert NO_TIME_NUDGE in (_pick("waktunya padet kak belum ada waktu") or "")
     assert NO_TIME_NUDGE in (_pick("aku lagi sibuk banget kak") or "")
     assert NO_TIME_NUDGE in (_pick("gak sempat kak") or "")
+
+
+def test_paid_shock_gets_the_value_reframe_not_a_price_dump() -> None:
+    # a 'wait, it's PAID?' reaction (objection audit 2026-07-21: 0/8 handled well) must get the
+    # free=info vs course=transformation reframe, not a bare number/rekening
+    for s in ["Haa bayar", "berbayar ya kak?", "kok bayar", "trus saya bayar gituu?",
+              "kita yang bayar?", "loh ga gratis?", "bayar?"]:
+        assert PAID_SHOCK_NUDGE in (_pick(s) or ""), s
+    from app.modules.conversation.situations import PAID_SHOCK_RE
+    # NOT a paid-shock: an amount question or a how-to-pay signal (handled elsewhere), and the
+    # ad prefill's canned 'biaya' must never trip it
+    for s in ["berapa biayanya kak", "cara bayar gimana", "mau bayar sekarang",
+              "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"]:
+        assert PAID_SHOCK_NUDGE not in (_pick(s) or ""), s
+    assert not PAID_SHOCK_RE.search("berapa biayanya")
     # a positive 'free time' and a schedule question must NOT read as the objection
     assert NO_TIME_NUDGE not in (_pick("kapan waktunya kelas kak?") or "")
 

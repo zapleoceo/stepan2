@@ -437,6 +437,31 @@ SOFT_NO_WITH_QUESTION_NUDGE = (
     "JSON as usual.]"
 )
 
+# A surprise / mild-resistance reaction to the course being PAID — NOT a request for the amount
+# ('berapa') and NOT a how-to-pay question ('cara bayar' = a buying signal handled earlier). The
+# bot kept answering these with bare numbers or the bank account and skipping the value reframe
+# (objection audit 2026-07-21: paid-shock 0/8 handled well — 'Haa bayar' 4755, 'trus saya bayar
+# gituu?' 4581, 'kita yang bayar??' 4161, 'bayar ka?' 4411 got the rekening dumped).
+PAID_SHOCK_RE = re.compile(
+    r"\bberbayar\b"
+    r"|\b(kok|haa+|masa|emang|mesti|harus|kudu|napa|kenapa)\s+bayar\b"
+    r"|\bbayar\s*(ya+|gitu|juga|toh|dong|nih|kah)"
+    r"|\bkita\s+yang\s+bayar\b"
+    r"|\b(ga|gak|nggak|ngga|tdk|tidak|bukan)\s+gratis\b"
+    r"|^\s*bayar\s*\??\s*$",
+    re.IGNORECASE)
+
+PAID_SHOCK_NUDGE = (
+    "[System: the lead just reacted to the course being PAID ('berbayar?', 'kok bayar', 'haa "
+    "bayar', 'kita yang bayar?', 'ga gratis?') — surprise / mild resistance, NOT a request for "
+    "the exact amount and NOT a how-to-pay question. Do NOT lead with numbers and NEVER paste "
+    "the bank account. FIRST give ONE honest value reframe: konten gratis (YouTube/IG) cuma "
+    "kasih INFO; kelas berbayar kasih TRANSFORMASI — mentor praktisi yang dampingi langsung, "
+    "portfolio nyata, dan feedback ke hasil kerja Kakak. THEN, lightly, the smallest step only: "
+    "'masuknya cukup DP 500rb, sisanya bisa nyicil 0%'. 1-2 warm bubbles, sopan, no pressure, no "
+    "wall of text, no rekening. Facts only from the KB. Return the JSON as usual.]"
+)
+
 ANSWER_FIRST_NUDGE = (
     "[System: the lead just asked a DIRECT question in their OWN words. ANSWER IT IN THIS "
     "REPLY, up front, with the concrete fact from the product card (price → the real number; "
@@ -467,21 +492,31 @@ NO_TIME_NUDGE = (
     "sale on the table) and do NOT hard-push. WORK it: reframe the time cost using the ACTUAL "
     "schedule of the product in the knowledge context — name how SMALL the real weekly "
     "commitment is (the sessions-per-week and minutes from the card), that it can be taken "
-    "ONLINE (no commute), and that the class day/time can be chosen to fit around work or "
-    "study, exactly as the card states. Acknowledge warmly first ('paham banget Kak, jadwal "
-    "padat itu nyata'), land that it fits a busy life, tie it to their goal if you know it, "
-    "then ONE soft step (e.g. 'hari apa yang paling longgar buat Kakak?'), never a hard close. "
-    "Use ONLY schedule facts present in the KB context — never invent a session count, an "
-    "evening time, a class recording, or an income figure. Return the JSON as usual.]"
+    "ONLINE (no commute), that ALL sessions are RECORDED (this IS a real KB fact — 'semua sesi "
+    "direkam') so a missed class can be rewatched anytime — the single strongest answer to a "
+    "busy lead's 'takut ketinggalan' — and that the class day/time can be chosen to fit around "
+    "work or study, exactly as the card states. Acknowledge warmly first ('paham banget Kak, "
+    "jadwal padat itu nyata'), land that it fits a busy life, tie it to their goal if you know "
+    "it, then ONE soft step (e.g. 'hari apa yang paling longgar buat Kakak?'), never a hard "
+    "close. Use ONLY schedule facts present in the KB context — never invent a session count, "
+    "an evening time, or an income figure (recordings ARE real — always name them). Return the "
+    "JSON as usual.]"
 )
 
 LOW_BUDGET_NUDGE = (
     "[System: the lead signaled tight or no budget (no money, unemployed, 'mahal banget', "
-    "'gratisan', 'ga sanggup'). Do NOT lead with the full course price or a DP request. "
-    "Acknowledge honestly, then offer the CHEAPEST real entry FIRST (1-day Skill Booster / "
-    "mini course, or the free Open House) as the main path; mention the full program only as "
-    "a 'later, once you've tried it' option. Never guarantee income or 'balik modal'. Return "
-    "the JSON as usual.]"
+    "'gratisan', 'ga sanggup', 'lagi ngumpulin duit'). ACKNOWLEDGE with real empathy FIRST "
+    "('paham banget Kak') — never just say 'semangat ngumpulin ya' and drop it, and never push "
+    "'amankan seat sekarang' at someone who just said they have no money. Then give a CONCRETE "
+    "path, not a brush-off:\n"
+    "- Genuinely can't afford it → the CHEAPEST real entry as the main path (1-day Skill Booster "
+    "500-700rb, or the Vibe Demo Event 100rb, or the free Open House).\n"
+    "- Wants the full course but is SAVING UP ('ngumpulin duit dulu') → show the affordability "
+    "ladder so 'later' becomes doable NOW: DP cuma 500rb mengunci harga & kursi, sisanya "
+    "cicilan 0% (bisa dibayar sambil jalan) — this is the real answer to 'ngumpulin duit', not "
+    "the cheap entry.\n"
+    "Never lead with the full total, never guarantee income or 'balik modal'. Return the JSON "
+    "as usual.]"
 )
 
 # SPIN's need-payoff beat — the audits found discovery breaking EXACTLY where it starts
@@ -983,6 +1018,11 @@ def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count)
     # canned facts answer beats anything else this turn (thread 4435: 'Apakah ini real' → menu).
     if TRUST_DOUBT_RE.search(turn_txt):
         return TRUST_DOUBT_NUDGE
+    # A 'wait, it's PAID?' reaction needs the value reframe (free=info vs course=transformation),
+    # NOT a bare price/rekening dump — so it must beat answer-first/price. On the LAST message
+    # (a fresh reaction), not the whole-turn scan, and never the ad prefill's canned 'biaya'.
+    if PAID_SHOCK_RE.search(last_txt) and not AD_TEMPLATE_RE.search(last_txt):
+        return PAID_SHOCK_NUDGE
     # TIME is a specific objection ('sibuk'/'nggak ada waktu') that hides inside SOFT_NO and
     # capitulates there — give it the grounded schedule reframe FIRST; on a repeat, ease off.
     if NO_TIME_RE.search(turn_txt):
