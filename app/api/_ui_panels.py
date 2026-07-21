@@ -428,12 +428,14 @@ def product_edit_html(
     action = f"/ui/products/{prod_id}/save" if prod_id else "/ui/products/create"
     delete_btn = ""
     if prod_id:
+        # A <form method=post> here was NESTED inside the outer edit form (invalid HTML — the
+        # browser drops the inner form), so the button did nothing. Use an hx-post button with
+        # hx-confirm (the warning) instead; the delete route 303s back to the product list,
+        # which htmx swaps into #main. type=button so it never submits the outer edit form.
         delete_btn = (
-            f'<form style="display:inline" method="post"'
-            f' action="/ui/products/{prod_id}/delete"'
-            f' onsubmit="return confirm(\'{del_lbl}?\')">'
-            f'<button class="btn-sm" style="background:#862e2e;color:#fff">{del_lbl}</button>'
-            f'</form>'
+            f'<button type="button" class="btn-sm" style="background:#862e2e;color:#fff"'
+            f' hx-post="/ui/products/{prod_id}/delete" hx-target="#main" hx-swap="innerHTML"'
+            f' hx-confirm="{del_lbl}?">{del_lbl}</button>'
         )
     chk = "checked" if is_active else ""
     hist_btn = (

@@ -881,6 +881,19 @@ def test_product_edit_html_existing() -> None:
     assert "vibe-coding" in html
 
 
+def test_product_delete_button_is_not_a_nested_form() -> None:
+    """The delete control used to be a <form> nested inside the edit <form> — invalid HTML,
+    so the browser dropped it and Delete did nothing. It must be an hx-post button (type=button
+    so it never submits the edit form) with a confirm warning, and there is exactly one <form>."""
+    from app.api._ui_panels import product_edit_html
+    _set_lang("en")
+    html = product_edit_html(30, "prod", "Prod", "x", True, 0)
+    body = html[html.find('<div class="pnl-body">'):]     # the editor body (skip the header)
+    assert body.count("<form") == 1                         # only the edit form, no nested one
+    assert 'hx-post="/ui/products/30/delete"' in html       # button posts to the delete route
+    assert 'type="button"' in html and "hx-confirm=" in html  # never submits the form; warns first
+
+
 def test_kb_editor_section_skeleton_for_empty_canonical_doc() -> None:
     from app.api._ui_kb import kb_editor_html
     _set_lang("en")
