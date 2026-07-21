@@ -80,7 +80,12 @@ class OutboxSender:
         cfg = await get_channel_settings(self.session, self.branch_id, thread.channel_id)
         if not cfg.sending_enabled:
             return None  # connector sending paused (soft-block) — queue keeps building
-        if row.source in ("followup", "reactivation") and cfg.is_quiet_hour():
+        # 2026-07-22: reactivation deliberately excluded from the quiet-hour hold (Dima's call,
+        # for the one-time full-history backfill) — nights have near-zero live traffic, so
+        # letting reactivation send then uses otherwise-idle cap headroom instead of competing
+        # with daytime live replies. Cold ad-click followups stay held; they're not personalized
+        # re-engagements and waking a fresh lead at 3am has no upside the way reactivation does.
+        if row.source == "followup" and cfg.is_quiet_hour():
             return None  # proactive touches hold at night; live replies still go out (S1)
         if row.source != "manager" and await self._cap_reached(now, cfg, thread.channel_id):
             logger.info(
