@@ -61,12 +61,18 @@ REACTIVATION_CAP = 2
 BATCH_PER_RUN = 20
 _REASON = "reactivation"
 
-# Dormant leads with a real dialog, quiet for [MIN, MAX] days, not reactivated recently or too
+# Stalled leads with a real dialog, quiet for [MIN, MAX] days, not reactivated recently or too
 # often, not annoyed. `now - MAX` bounds the archaeology; `now - MIN` enforces the cooldown.
+# NOT limited to stage='dormant': that label is model self-reported (same unreliable pattern as
+# open_objections) and a lead that stalls in qualifying/nurturing without the model ever calling
+# it dormant was invisible to this whole safety net — followups exhaust at 120h (5 days) and
+# nothing picked it up after. Any non-terminal stage that's been quiet long enough is eligible;
+# 'ready'/'handed_off'/'manager' are the only stages where the bot is deliberately silent.
 _DUE_Q = (  # noqa: S608
     "SELECT ct.id, ct.product_slug, l.id"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-    " WHERE l.branch_id = :bid AND l.stage = 'dormant' AND l.is_blocked = false"
+    " WHERE l.branch_id = :bid AND l.stage NOT IN ('ready', 'handed_off', 'manager')"
+    "   AND l.is_blocked = false"
     "   AND ct.last_in_at IS NOT NULL"
     "   AND ct.last_in_at < :min_cutoff AND ct.last_in_at > :max_cutoff"
     "   AND (SELECT count(*) FROM stage_event se WHERE se.lead_id = l.id"
