@@ -19,34 +19,20 @@ from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.domain.enums import Stage
 from app.modules.settings.service import BranchSettings, get_channel_settings
 
-from . import guard
+from .decision_v3 import generate
+from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
-from .reply import (
-    _BUBBLE_GAP_S,
-    _DUPLICATE_RATIO,
-    _REPEAT_CORRECTION,
-    _most_similar_prior,
-    _reply_bubble_cap,
-    _split_bubbles,
-    guard_decision,
-    raise_manager_alert,
+from .guard_v3 import money_issues
+from .prompt_v3 import build_messages_v3, followup_framing
+from .reply import _BUBBLE_GAP_S, _reply_bubble_cap, _split_bubbles
+from .repository import (
+    CoachingNoteRepo,
+    DossierRepo,
+    MessageRepo,
+    OutboxRepo,
+    ThreadRepo,
 )
-from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
-from .situations import (
-    AD_TEMPLATE_RE,
-    FAKE_SERENDIPITY_RE,
-    FOLLOWUP_BREVITY_SUFFIX,
-    FOLLOWUP_NEED_ANCHOR,
-    FOLLOWUP_PRODUCT_DISCIPLINE,
-    FOLLOWUP_SILENT_CLICKER_EXTRA,
-    NO_REPEAT_SERENDIPITY_NUDGE,
-    followup_angle,
-    lead_spoke_own_words,
-    with_situation,
-)
-from .situations import (
-    is_answerable_question as _is_answerable_question,
-)
+from .routing import FAST, SMART
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -214,173 +200,62 @@ class FollowupService:
     async def _queue_followup(
         self, thread_id: int, product_slug: str | None, sent_so_far: int, now: datetime,
     ) -> bool:
+        """One nudge, generated from the dossier.
+
+        v2 assembled this from five hardcoded suffixes plus a four-rung angle ladder, then
+        policed the result with SequenceMatcher regens — and never wrote back a word of what
+        it learned, so a follow-up that uncovered an objection threw it away. Here the dossier
+        both drives the nudge and records it."""
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
         ctx = await engine.prepare(thread_id, workflow="followup")
         if ctx is None:
             return False
-        last_in = next((m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
-        if guard.lead_signaled_annoyance(last_in):
-            # Cancel the timer outright, not just skip: a skipped-but-still-due thread was
-            # re-picked every 10-min tick forever. An annoyed lead gets NO more nudges; a
-            # fresh inbound resets the cycle anyway (ingest._reset_followup_cycle).
-            logger.warning(
-                "followup: branch=%d thread=%d lead signaled annoyance at being contacted "
-                "— cancelling further nudges", self.branch_id, thread_id)
-            thread = await self.threads.by_id(thread_id)
-            if thread is not None:
-                thread.next_followup_at = None
-                self.session.add(thread)
-                await self.session.flush()
-            return False
-        lang = await self._lang()
-        total = len(self.settings.followup_schedule_h)
-        from .decision import parse_decision  # noqa: PLC0415 (avoid circular at module level)
-        from .routing import FAST, SMART, pick_capability  # noqa: PLC0415
-        # A nudge to a quiet lead is the lowest-stakes traffic → cheap model; escalate once if
-        # the cheap model returns a broken decision so the follow-up still goes out.
-        cap = pick_capability(workflow="followup", stage=None, lead_type=None,
-                              last_inbound="", followup_attempt=sent_so_far)
-        nudge = _FOLLOWUP_NUDGE.format(lang=lang, n=sent_so_far + 1, total=total)
-        nudge += FOLLOWUP_PRODUCT_DISCIPLINE
-        nudge += followup_angle(sent_so_far)
-        # A follow-up that re-opens with the lead's OWN stated pain/goal re-engages far better
-        # than a generic "masih tertarik?" — it proves we listened. Only when we actually have
-        # their words on record (never invent one); the model already has the full needs block.
-        needs = getattr(ctx, "stored_needs", None)
-        anchor = ((needs.pains or needs.gains or needs.jobs)[:1] if needs else [])
-        if anchor:
-            nudge += FOLLOWUP_NEED_ANCHOR.format(need=anchor[0])
-        if not lead_spoke_own_words(ctx.dialog):
-            # a button click is not the lead speaking — no price/pitch in their follow-ups
-            nudge += FOLLOWUP_SILENT_CLICKER_EXTRA
-        else:
-            # …and that clicker nudge asks for a short numbered menu, so its length is earned;
-            # every other follow-up has no such excuse.
-            nudge += FOLLOWUP_BREVITY_SUFFIX
-        raw, meta = await engine.complete(
-            ctx, thread_id, lang=lang, workflow="followup",
-            extra_user_msg=nudge, capability=cap,
-        )
-        try:
-            decision = parse_decision(raw)
-        except ValueError:
-            if cap == FAST:
-                raw, meta = await engine.complete(
-                    ctx, thread_id, lang=lang, workflow="followup",
-                    extra_user_msg=nudge, capability=SMART)
-                try:
-                    decision = parse_decision(raw)
-                except ValueError:
-                    logger.warning(
-                        "followup: unparseable decision branch=%d thread=%d — attempt not burned",
+        dossiers = DossierRepo(self.session, self.branch_id)
+        lead_id = ctx.lead.id if ctx.lead is not None else None
+        stored = await dossiers.load(lead_id)
+        if stored.refusal == "blunt":
+            # A flat no ends outreach. v2 needed a regex over the last message to notice; the
+            # dossier carries it, so it also survives the lead never repeating themselves.
+            logger.info("followup: branch=%d thread=%d lead refused outright — no more nudges",
                         self.branch_id, thread_id)
-                    return False
-            else:
-                logger.warning(
-                    "followup: unparseable decision branch=%d thread=%d — attempt not burned",
-                    self.branch_id, thread_id)
-                return False
-        if not decision.reply:
+            await self._cancel_timer(thread_id)
             return False
-        prior, ratio = _most_similar_prior(decision.reply, ctx.dialog)
-        if ratio >= _DUPLICATE_RATIO:
-            logger.warning(
-                "followup: branch=%d thread=%d near-duplicate nudge (ratio=%.2f) → regen",
-                self.branch_id, thread_id, ratio)
-            last_in = next(
-                (m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"), "")
-            raw, meta = await engine.complete(
-                ctx, thread_id, lang=lang, workflow="followup", capability=SMART,
-                extra_user_msg=with_situation(
-                    _REPEAT_CORRECTION.format(prior=prior, last_in=last_in), nudge))
-            try:
-                decision = parse_decision(raw)
-            except ValueError:
-                logger.warning(
-                    "followup: unparseable regen branch=%d thread=%d — attempt not burned",
-                    self.branch_id, thread_id)
-                return False
-            if not decision.reply:
-                return False
-        decision, meta = await guard_decision(
-            self.session, self.branch_id, self.settings, self.llm,
-            engine, ctx, thread_id, lang, "followup", True, decision, meta,
-            situational=nudge)
-        if not decision.reply:
+
+        lang = await self._lang()
+        context = await engine.kb_context(ctx, thread_id, light=True)
+        messages = build_messages_v3(
+            context, ctx.dialog, lang, stored,
+            coaching_notes=await self.coaching.active_manager_notes(),
+            manager_note=ctx.lead.manager_note if ctx.lead is not None else None,
+            now_block=await engine._now_block())  # noqa: SLF001 — engine owns the branch clock
+        messages.append({"role": "user", "content": followup_framing(
+            sent_so_far + 1, len(self.settings.followup_schedule_h), stored.refusal)})
+        capability = SMART if stored.open_objections() else FAST
+
+        decision, meta = await generate(
+            engine, ctx, messages, thread_id, workflow="followup",
+            capability=capability, branch_id=self.branch_id)
+        if decision is None:
             return False
-        # Don't reuse the fake-serendipity opener ('kebetulan…', 'baru aja ada alumni…') twice
-        # in one chat — it reads as a canned script the second time (thread 1754: sent 17:23
-        # then 21:31). Regen once with a different opening if an earlier bot message used it too.
-        if FAKE_SERENDIPITY_RE.search(decision.reply) and any(
-                m.direction == "out" and FAKE_SERENDIPITY_RE.search(m.text or "")
-                for m in ctx.dialog):
-            raw, meta = await engine.complete(
-                ctx, thread_id, lang=lang, workflow="followup", capability=SMART,
-                extra_user_msg=with_situation(NO_REPEAT_SERENDIPITY_NUDGE, nudge))
-            try:
-                reworded = parse_decision(raw)
-                if reworded.reply:
-                    decision = reworded
-            except ValueError:
-                pass  # keep the guarded draft rather than drop the nudge
-        # guard_decision can regenerate the draft too (for an UNRELATED violation elsewhere
-        # in the text) — that regeneration is never re-checked against dialog history, so it
-        # can silently reintroduce the exact near-duplicate the check above already rejected
-        # once. Live case (thread 2087, 2026-07-08): the dedup check passed on a fresh draft
-        # about a fabricated "Rp 750rb bootcamp"; guard caught the fabrication and
-        # regenerated, and that correction converged word-for-word onto an answer already
-        # sent as a live reply an hour earlier. Re-check the FINAL text — a repeat nudge is
-        # low-value; skip sending rather than risk another regen loop, next attempt retries.
-        _, post_guard_ratio = _most_similar_prior(decision.reply, ctx.dialog)
-        if post_guard_ratio >= _DUPLICATE_RATIO:
-            # We had nothing new to say — a nudge that would only repeat ourselves. Burn the
-            # STEP, not just the attempt: leaving the timer due meant this thread regenerated
-            # (and dropped) a nudge every 10-min tick — the single biggest token sink measured
-            # (~1.3k followup generations/day vs ~0.6k live replies, ~48% of all input tokens).
-            logger.warning(
-                "followup: branch=%d thread=%d still near-duplicate after guard regen "
-                "(ratio=%.2f) — dry step, backing off", self.branch_id, thread_id,
-                post_guard_ratio)
+        if not decision.reply.strip():
+            # The model was told to say nothing rather than repeat itself. Burn the step: a
+            # thread with nothing left to say used to regenerate a dropped nudge every tick,
+            # the single biggest token sink measured (~48% of all input tokens).
+            logger.info("followup: branch=%d thread=%d nothing new to say — step burned",
+                        self.branch_id, thread_id)
+            await self._burn_dry_step(thread_id, now)
+            return False
+        issues = money_issues(decision.reply, context)
+        if issues:
+            # Nobody asked, so there is nothing to escalate — just don't send a wrong number.
+            logger.warning("followup: branch=%d thread=%d ungrounded money claim (%s) — dropped",
+                           self.branch_id, thread_id, "; ".join(issues))
             await self._burn_dry_step(thread_id, now)
             return False
         if await self._lead_replied_meanwhile(thread_id):
-            return False  # race: lead answered while we were generating (S1 guard)
-        # A nudge can trip needs_manager too (an unfixable guard violation, or the model
-        # itself surfacing a KB gap) — it must alert same as a live reply, or a human never
-        # finds out (the pre-2026-07-07 gap: this used to queue the nudge silently).
-        #
-        # BUT here the lead is SILENT by definition — that's why we're nudging. `manager_question`
-        # ("the lead's question in their words") then has nothing to quote and the model INVENTS
-        # one: thread 3072 alerted "⚠️ Jadwal kelas kapan?" 30h after the lead's last message,
-        # about a schedule the BOT itself raised in its own follow-up; the owner opened the chat
-        # and found no such question. 24 of 87 needs_manager alerts in a week were this. So alert
-        # only when the lead's OWN last message really does ask something, and only once per
-        # silence — thread 2532 pinged twice, three days apart, for one question.
-        # …and the "question" must be the LEAD's, not the ad button's: the prefill text
-        # contains 'biaya', so _is_answerable_question alone let thread 3926 raise a phantom
-        # "Berapa biaya?" alert for a lead who never typed a word (and whose price the
-        # follow-up itself had already quoted).
-        if (decision.needs_manager and ctx.lead is not None
-                and lead_spoke_own_words(ctx.dialog)
-                and _is_answerable_question(last_in)
-                and not AD_TEMPLATE_RE.match(last_in)
-                and not await self._already_alerted_since_lead(thread_id)):
-            await raise_manager_alert(
-                self.session, self.branch_id, self.notifier, self.llm,
-                thread_id, ctx.lead.id, decision, ctx.lead.phone_e164)
-        # A follow-up nobody asked for must never ship a canned stub. SAFE_FALLBACK ("I'll
-        # check with the team") answers a question the lead never asked (thread 1230,
-        # 2026-07-17: sent into a 14-day silence), the clarify menu clarifies nothing, and
-        # an unprompted hand-off promise strands the lead waiting for a call. The alert (if
-        # genuinely due) is already raised above — the text itself has no value: burn the
-        # step instead of sending it.
-        if decision.reply.strip() in (guard.SAFE_FALLBACK, guard.CLARIFY_FALLBACK) \
-                or guard.promised_handoff(decision.reply):
-            logger.warning(
-                "followup: branch=%d thread=%d canned stub / hand-off promise as a nudge — "
-                "dropped, step burned", self.branch_id, thread_id)
-            await self._burn_dry_step(thread_id, now)
-            return False
+            return False  # race: the lead answered while we were generating
+
+        await dossiers.save(lead_id, merge_dossier(stored, decision.dossier))
         meta_line = _fmt_llm_meta(meta)
         for i, bubble in enumerate(
             _split_bubbles(decision.reply, max_parts=_reply_bubble_cap(decision.reply))):
@@ -392,14 +267,17 @@ class FollowupService:
                 scheduled_at=now + timedelta(seconds=i * _BUBBLE_GAP_S),
                 llm_info=meta_line,
             ))
-        # consume the timer so run() won't re-pick it; the step count is bumped only
-        # when the row actually sends (OutboxSender), so a failed send never burns a step
+        # Consume the timer so run() won't re-pick it; the step count is bumped only when the
+        # row actually sends (OutboxSender), so a failed send never burns a step.
+        await self._cancel_timer(thread_id)
+        return True
+
+    async def _cancel_timer(self, thread_id: int) -> None:
         thread = await self.threads.by_id(thread_id)
         if thread is not None:
             thread.next_followup_at = None
             self.session.add(thread)
             await self.session.flush()
-        return True
 
     async def _burn_dry_step(self, thread_id: int, now: datetime) -> None:
         """A nudge we couldn't compose without repeating ourselves shouldn't exist — consume

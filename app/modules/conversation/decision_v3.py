@@ -68,6 +68,38 @@ class DecisionV3:
         )
 
 
+async def generate(  # noqa: PLR0913
+    engine: object, ctx: object, messages: list[dict], thread_id: int, *,
+    workflow: str, capability: str, branch_id: int,
+) -> tuple[DecisionV3 | None, dict]:
+    """One generation, with a single escalation when the cheap model returns broken JSON.
+
+    Two attempts is the ceiling everywhere — replies and follow-ups alike. A third rewrite is
+    what v2 did, and it is what produced answers written to conflicting corrections.
+    `engine` is anything with .run(); typed loosely to keep this free of an import cycle."""
+    from .routing import FAST, SMART  # noqa: PLC0415 — routing imports enums, not this module
+
+    raw, meta = await engine.run(ctx, messages, thread_id,
+                                 workflow=workflow, capability=capability)
+    try:
+        return parse_decision_v3(raw), meta
+    except ValueError:
+        if capability != FAST:
+            logger.warning("%s: unparseable decision branch=%d thread=%d — skip",
+                           workflow, branch_id, thread_id)
+            return None, meta
+    logger.warning("%s: unparseable cheap decision branch=%d thread=%d — retry on smart",
+                   workflow, branch_id, thread_id)
+    raw, meta = await engine.run(ctx, messages, thread_id,
+                                 workflow=workflow, capability=SMART)
+    try:
+        return parse_decision_v3(raw), meta
+    except ValueError:
+        logger.warning("%s: unparseable on both tiers branch=%d thread=%d — skip",
+                       workflow, branch_id, thread_id)
+        return None, meta
+
+
 def parse_decision_v3(raw_json: str) -> DecisionV3:
     """Parse the model's JSON; raises ValueError on a broken contract."""
     try:

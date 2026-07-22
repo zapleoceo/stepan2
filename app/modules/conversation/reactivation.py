@@ -27,19 +27,14 @@ from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.domain.enums import Stage
 from app.modules.settings.service import BranchSettings
 
-from . import guard
-from .decision import parse_decision
+from .decision_v3 import generate
+from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
-from .reply import (
-    _BUBBLE_GAP_S,
-    _DUPLICATE_RATIO,
-    _most_similar_prior,
-    _split_bubbles,
-    guard_decision,
-)
-from .repository import OutboxRepo, ThreadRepo
+from .guard_v3 import money_issues
+from .prompt_v3 import build_messages_v3
+from .reply import _BUBBLE_GAP_S, _split_bubbles
+from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import FAST
-from .situations import lead_spoke_own_words
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -89,17 +84,13 @@ _DUE_Q = (  # noqa: S608
     " ORDER BY ct.last_in_at DESC LIMIT :batch"
 )
 
-_REACTIVATION_NUDGE = (
+_REACTIVATION_FRAMING = (
     "[System: this lead went quiet days ago and is parked as dormant. This is ONE personalized "
-    "reactivation in {lang} - your only job is to earn a single reply, not to close. READ the "
-    "prior dialog first and build the message ON WHAT THEY ACTUALLY SAID: reopen on their own "
-    "stated goal/pain or the exact point the chat stalled, and give ONE fresh, concrete reason "
-    "to look again - a real upcoming intake/event from the KB, a genuine answer to the doubt "
-    "they left on, or a low-friction yes/no. Signal that time has passed ('eh Kak, kepikiran "
-    "obrolan kita soal ...') like a real person re-opening a quiet chat, never a cold generic "
-    "blast and never a bare 'masih tertarik?'. ONE short message, warm, no pressure. FACTS ONLY "
-    "from the KB - never invent an intake date, a discount, a case, or a number. If you have no "
-    "real fresh hook for this lead, return an empty reply and we skip them. Return JSON as usual.]"
+    "attempt to earn a single reply — not to close. Reopen on what the dossier says they "
+    "actually cared about, or the exact point the conversation stalled, and give ONE concrete "
+    "reason to look again that they have not already been given. Signal that time has passed, "
+    "the way a person re-opening a quiet chat does. If you have no genuinely fresh hook, "
+    "return an empty reply — a stale echo costs more than staying quiet.]"
 )
 
 
@@ -144,58 +135,46 @@ class ReactivationService:
             return False
 
     async def _reactivate(self, thread_id: int, lead_id: int, now: datetime) -> bool:
+        """One re-engagement touch, decided from the dossier.
+
+        v2 read the last three messages through two refusal regexes and policed the draft with
+        SequenceMatcher. The dossier already records how firmly this lead said no and what they
+        have already been told, so both go away — and unlike v2, what the touch learns is
+        written back."""
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge)
         ctx = await engine.prepare(thread_id, workflow="followup")
         if ctx is None:
             return False
-        if not lead_spoke_own_words(ctx.dialog):
-            return False  # never spoke → nothing to adapt to; leave dormant
-        recent_in = [m.text or "" for m in reversed(ctx.dialog) if m.direction == "in"][:3]
-        # Suppress HARD refusals and annoyance ('gak tertarik', 'tidak jadi', 'spam') - that's
-        # a made choice, touching again earns a report. But a POSTPONER ('nanti dulu', 'nabung
-        # dulu', 'pikir dulu') literally asked for later - they're the warmest dormant segment
-        # and exactly whom reactivation exists for; the 3-21 day window IS the 'later' they
-        # asked about (sales-logic audit 2026-07-19, #7). Scan the last 3 messages: a refusal
-        # is often followed by a polite 'makasih' (thread 3060).
-        if any(guard.lead_signaled_annoyance(t) or _HARD_REFUSAL_RE.search(t)
-               for t in recent_in):
+        dossiers = DossierRepo(self.session, self.branch_id)
+        stored = await dossiers.load(lead_id)
+        if stored.refusal in ("blunt", "vague"):
+            # A made choice. Touching again earns a report, and a polite close-out is still a
+            # close-out. Only the postponer — the warmest dormant segment, who literally asked
+            # for later — is worth waking.
             await self._suppress(thread_id, lead_id, now)
             return False
+
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch is not None else "id"
-        nudge = _REACTIVATION_NUDGE.format(lang=lang)
-        # 2026-07-22 cost/capacity fix: reactivation touches month+-old dormant leads (lowest
-        # stakes of all smart-tier traffic) - drafting on FAST instead of SMART cuts broker
-        # load on the day the widened reactivation backlog (MAX_DORMANT_DAYS 21->550) adds real
-        # extra volume on top of live replies/follow-ups. The critic-gate safety net (below,
-        # via guard_decision) is untouched: any rejected draft still escalates its regen to
-        # SMART automatically, so quality only costs extra when the cheap draft wasn't good
-        # enough - never silently worse.
-        raw, meta = await engine.complete(
-            ctx, thread_id, lang=lang, workflow="followup",
-            extra_user_msg=nudge, capability=FAST)
-        try:
-            decision = parse_decision(raw)
-        except ValueError:
-            return False
-        # No usable re-engagement (model found no fresh hook, or it would just repeat / stall):
-        # suppress so this lead isn't re-picked and re-generated every run, blocking a slot other
-        # dormant leads could use. A transient bad-JSON above is NOT suppressed — that retries.
-        if not decision.reply:
+        context = await engine.kb_context(ctx, thread_id, light=True)
+        messages = build_messages_v3(context, ctx.dialog, lang, stored,
+                                     now_block=await engine._now_block())  # noqa: SLF001
+        messages.append({"role": "user", "content": _REACTIVATION_FRAMING})
+        # The lowest-stakes traffic there is: a month-old dormant lead. Draft cheap; the money
+        # gate below is the only thing that can stop it, and it costs nothing when there is no
+        # figure in the text.
+        decision, meta = await generate(
+            engine, ctx, messages, thread_id, workflow="followup",
+            capability=FAST, branch_id=self.branch_id)
+        if decision is None:
+            return False  # transient bad JSON — retries next run, not suppressed
+        if not decision.reply.strip() or money_issues(decision.reply, context):
+            # No fresh hook, or a figure we cannot stand behind. Suppress so this lead is not
+            # re-picked and re-generated every run, blocking a slot another dormant lead could use.
             await self._suppress(thread_id, lead_id, now)
             return False
-        _, ratio = _most_similar_prior(decision.reply, ctx.dialog)
-        if ratio >= _DUPLICATE_RATIO:
-            await self._suppress(thread_id, lead_id, now)
-            return False  # nothing new to say → don't send a stale echo
-        decision, meta = await guard_decision(
-            self.session, self.branch_id, self.settings, self.llm,
-            engine, ctx, thread_id, lang, "followup", True, decision, meta, situational=nudge)
-        if not decision.reply or decision.reply.strip() in (
-                guard.SAFE_FALLBACK, guard.CLARIFY_FALLBACK) \
-                or guard.promised_handoff(decision.reply):
-            await self._suppress(thread_id, lead_id, now)
-            return False
+
+        await dossiers.save(lead_id, merge_dossier(stored, decision.dossier))
         meta_line = _fmt_llm_meta(meta)
         for i, bubble in enumerate(_split_bubbles(decision.reply)):
             await self.outbox.add(Outbox(

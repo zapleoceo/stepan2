@@ -22,7 +22,7 @@ from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 
 from . import critic_v3
 from .decision import Decision
-from .decision_v3 import DecisionV3, parse_decision_v3
+from .decision_v3 import DecisionV3, generate
 from .dossier import merge_dossier
 from .engine import DecisionEngine
 from .guard_v3 import MONEY_CORRECTION, money_issues
@@ -30,7 +30,7 @@ from .prompt import lead_name_hint, source_hint
 from .prompt_v3 import build_messages_v3
 from .reply import ReplyService, _script_lang
 from .repository import DossierRepo
-from .routing_v3 import FAST, SMART, pick_capability_v3
+from .routing_v3 import SMART, pick_capability_v3
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,9 @@ class ReplyServiceV3(ReplyService):
             now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
         )
 
-        decision = await self._generate(engine, ctx, messages, thread_id,
-                                        workflow=workflow, capability=capability)
+        decision, _meta = await generate(
+            engine, ctx, messages, thread_id, workflow=workflow,
+            capability=capability, branch_id=self.branch_id)
         if decision is None:
             return None
         decision = await self._vet(
@@ -147,42 +148,12 @@ class ReplyServiceV3(ReplyService):
     ) -> DecisionV3 | None:
         """One rewrite on the strong model. None when it comes back unparseable, in which case
         the caller keeps the original draft rather than losing the turn."""
-        raw, _meta = await engine.run(
-            ctx, [*messages, {"role": "user", "content": correction}], thread_id,
-            workflow=workflow, capability=SMART)
-        try:
-            return parse_decision_v3(raw)
-        except ValueError:
-            logger.warning("v3: unparseable rewrite branch=%d thread=%d — keeping the draft",
-                           self.branch_id, thread_id)
-            return None
+        rewritten, _meta = await generate(
+            engine, ctx, [*messages, {"role": "user", "content": correction}], thread_id,
+            workflow=workflow, capability=SMART, branch_id=self.branch_id)
+        return rewritten
 
-    async def _generate(  # noqa: PLR0913
-        self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
-        workflow: str, capability: str,
-    ) -> DecisionV3 | None:
-        """Generate once; a cheap model that returns unparseable JSON is retried on the strong
-        one. Two attempts is the ceiling — a third rewrite is what v2 did, and it is what
-        produced answers written to conflicting corrections."""
-        raw, _meta = await engine.run(ctx, messages, thread_id,
-                                      workflow=workflow, capability=capability)
-        try:
-            return parse_decision_v3(raw)
-        except ValueError:
-            if capability != FAST:
-                logger.warning("v3: unparseable smart decision branch=%d thread=%d — skip",
-                               self.branch_id, thread_id)
-                return None
-        logger.warning("v3: unparseable fast decision branch=%d thread=%d — retry on smart",
-                       self.branch_id, thread_id)
-        raw, _meta = await engine.run(ctx, messages, thread_id,
-                                      workflow=workflow, capability=SMART)
-        try:
-            return parse_decision_v3(raw)
-        except ValueError:
-            logger.warning("v3: unparseable on both tiers branch=%d thread=%d — skip",
-                           self.branch_id, thread_id)
-            return None
+
 
 def _awaiting_media(dialog: list) -> bool:
     """The newest inbound is a voice/image the broker hasn't transcribed yet — hold the turn so

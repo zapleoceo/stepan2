@@ -118,6 +118,29 @@ dossier: your updated read. Carry forward what's above and add what this turn re
 """
 
 
+FOLLOWUP_FRAMING = """\
+[System: the lead has gone quiet — there is no new message to answer, so the answer-first rule \
+doesn't apply this turn. This is nudge {n} of {total}. Write ONE short message that earns a \
+reply: something concrete they have NOT heard yet, tied to what the dossier says they care \
+about. Never "masih minat?" or "ada yang bisa dibantu?" — that is begging, not selling. \
+{refusal_note}If you have nothing genuinely new to say, return an empty reply rather than \
+padding — a nudge that repeats you costs more than silence.]"""
+
+_REFUSAL_NOTES = {
+    "soft": "They already said they'd think about it, so do NOT argue or re-pitch: one light, "
+            "easy-to-ignore touch that gives them a reason to come back. ",
+    "vague": "They already closed the conversation politely — keep this minimal and graceful, "
+             "and make it easy to say nothing at all. ",
+}
+
+
+def followup_framing(attempt: int, total: int, refusal: str) -> str:
+    """The extra turn-instruction for a nudge. Refusal degree changes the tone, not the fact
+    that we're writing — except for a blunt no, which the caller drops before it gets here."""
+    return FOLLOWUP_FRAMING.format(
+        n=attempt, total=total, refusal_note=_REFUSAL_NOTES.get(refusal, ""))
+
+
 def contract(lang: str) -> str:
     """The full instruction block for one live turn."""
     return (_CONTRACT.format(lang=lang, moves=", ".join(MOVES))

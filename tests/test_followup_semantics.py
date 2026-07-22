@@ -226,134 +226,6 @@ async def test_followup_needs_manager_no_alert_when_lead_silent(db_session) -> N
     assert notifier.sends == []
 
 
-async def test_followup_needs_manager_alerts_on_a_real_question(db_session) -> None:
-    """When the lead's OWN last message really does ask something, the follow-up needs_manager
-    still alerts — the genuine case this path was built for."""
-    from app.adapters.db.models import ManagerAlert, Message
-
-    bid, tid, lead, thread = await _world(db_session, timer_due=True)
-    lead.phone_e164 = "+6281234567890"
-    db_session.add(lead)
-    # the lead's last message is a real question (still older than last_out → timer stays due)
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="q1", direction="in", sent_by="lead",
-                           text="ada diskon ga kak?", occurred_at=_NOW - timedelta(hours=5)))
-    await db_session.flush()
-    notifier = _Notifier()
-    svc = FollowupService(db_session, bid, FakeLLM(_NM_PAYLOAD), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=notifier)
-    assert await svc.run() == 1
-    alert = (await db_session.exec(select(ManagerAlert))).first()
-    assert alert is not None and alert.kind == "needs_manager"
-    assert alert.lead_phone == "+6281234567890"
-    assert len(notifier.sends) == 1
-
-
-_AD_PREFILL = "Halo, saya ingin tahu detail program SMM dan biaya kursusnya 😊"
-
-
-async def test_followup_needs_manager_no_alert_on_ad_template_question(db_session) -> None:
-    """Thread 3926: the ad button's canned text contains 'biaya', so the question-gate alone
-    read it as the lead asking a price — and raised a phantom 'Berapa biaya?' alert for a lead
-    who never typed a word. The button's text is the ad's, never the lead's."""
-    from app.adapters.db.models import ManagerAlert, Message
-
-    bid, tid, lead, thread = await _world(db_session, timer_due=True)
-    lead.phone_e164 = "+6281234567890"
-    db_session.add(lead)
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="ad1", direction="in", sent_by="lead",
-                           text=_AD_PREFILL, occurred_at=_NOW - timedelta(hours=5)))
-    await db_session.flush()
-    notifier = _Notifier()
-    svc = FollowupService(db_session, bid, FakeLLM(_NM_PAYLOAD), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=notifier)
-    assert await svc.run() == 1                                   # nudge still goes out
-    assert (await db_session.exec(select(ManagerAlert))).first() is None
-    assert notifier.sends == []
-
-
-async def test_followup_to_silent_clicker_carries_no_price_constraint(db_session) -> None:
-    """A lead whose ONLY message is the ad button must not get a price in a follow-up either
-    (thread 3926: the first-ever follow-up dumped 'Rp 1.882.955 — DP 500.000'). The nudge to
-    the model must carry the silent-clicker constraint block."""
-    from app.adapters.db.models import Message
-    from app.modules.conversation.situations import FOLLOWUP_SILENT_CLICKER_EXTRA
-
-    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
-    # make the ONLY inbound the ad prefill — the lead never spoke their own words
-    msg = (await db_session.exec(select(Message).where(Message.thread_id == tid,
-                                                       Message.direction == "in"))).first()
-    msg.text = _AD_PREFILL
-    db_session.add(msg)
-    await db_session.flush()
-
-    captured: list[str] = []
-
-    class _CaptureLLM(FakeLLM):
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            captured.append(messages[-1]["content"] if messages else "")
-            return await super().chat(messages, **kw)
-
-    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=None)
-    assert await svc.run() == 1
-    assert any(FOLLOWUP_SILENT_CLICKER_EXTRA.strip() in c for c in captured), \
-        "silent-clicker follow-up must carry the no-price constraint"
-
-
-async def test_followup_to_a_lead_who_spoke_is_held_to_one_short_bubble(db_session) -> None:
-    """Follow-ups are the longest thing the bot sends and nobody asked for them (measured
-    2026-07-16: 316 chars avg vs 162 for live replies, and MORE of them). Unlike live replies
-    they never went through pick_nudge, so the format mirror never reached them."""
-    from app.modules.conversation.situations import FOLLOWUP_BREVITY_SUFFIX
-
-    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
-    captured: list[str] = []
-
-    class _CaptureLLM(FakeLLM):
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            captured.append(messages[-1]["content"] if messages else "")
-            return await super().chat(messages, **kw)
-
-    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=None)
-    assert await svc.run() == 1
-    assert any(FOLLOWUP_BREVITY_SUFFIX.strip() in c for c in captured), \
-        "an unprompted follow-up must carry the brevity constraint"
-
-
-async def test_silent_clicker_followup_keeps_its_menu_instead_of_brevity(db_session) -> None:
-    """The clicker nudge asks for a short numbered menu — brevity would fight it, the same way
-    the format mirror steps aside for AD_OPENER_NUDGE in live replies."""
-    from app.adapters.db.models import Message
-    from app.modules.conversation.situations import (
-        FOLLOWUP_BREVITY_SUFFIX,
-        FOLLOWUP_SILENT_CLICKER_EXTRA,
-    )
-
-    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
-    msg = (await db_session.exec(select(Message).where(Message.thread_id == tid,
-                                                       Message.direction == "in"))).first()
-    msg.text = _AD_PREFILL
-    db_session.add(msg)
-    await db_session.flush()
-
-    captured: list[str] = []
-
-    class _CaptureLLM(FakeLLM):
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            captured.append(messages[-1]["content"] if messages else "")
-            return await super().chat(messages, **kw)
-
-    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=None)
-    assert await svc.run() == 1
-    assert any(FOLLOWUP_SILENT_CLICKER_EXTRA.strip() in c for c in captured)
-    assert not any(FOLLOWUP_BREVITY_SUFFIX.strip() in c for c in captured), \
-        "the two length rules must never stack — they contradict each other"
-
-
 async def test_followup_drops_nudge_still_duplicate_after_guard_regen(db_session) -> None:
     """Live case (thread 2087, 2026-07-08): the dedup check runs BEFORE guard_decision, so
     it only sees the FIRST draft. If that draft is fresh (passes dedup) but guard flags an
@@ -395,143 +267,6 @@ async def test_followup_drops_nudge_still_duplicate_after_guard_regen(db_session
     assert refreshed.followups_sent == 1
     assert refreshed.next_followup_at is not None
     assert refreshed.next_followup_at > _NOW + timedelta(hours=3)  # step 2 = +4h, not +10min
-
-
-async def test_dry_drop_on_last_step_winds_down_to_dormant(db_session) -> None:
-    """A dry drop on the LAST schedule step exhausts the cycle exactly like a sent last
-    nudge would: timer cleared, lead → dormant, bot off (no due-forever regeneration)."""
-    bid, tid, lead, thread = await _world(db_session, timer_due=True, followups_sent=3)
-    prior_line = "Program SMM Intensive ini formatnya hybrid, 3 sesi per minggu online."
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="out1", direction="out", sent_by="agent",
-                           text=prior_line, occurred_at=_NOW - timedelta(hours=1)))
-    await db_session.flush()
-    # the draft itself is a near-duplicate → regen (smart) converges onto the same line
-    llm = FakeLLM(json.dumps({"reply": prior_line, "stage": "qualifying"}))
-    assert await _svc(db_session, bid, llm=llm).run() == 0
-    refreshed = (await db_session.exec(
-        select(ChannelThread).where(ChannelThread.id == tid))).first()
-    assert refreshed.next_followup_at is None  # exhausted — no more attempts
-    assert lead.stage == Stage.DORMANT and lead.agent_enabled is False
-    ev = (await db_session.exec(select(StageEvent).where(
-        StageEvent.to_stage == str(Stage.DORMANT)))).first()
-    assert ev is not None and "dry" in ev.reason
-
-
-async def test_followup_regenerates_a_near_duplicate_nudge(db_session) -> None:
-    """Chat 1830: the 2nd follow-up re-greeted the lead and re-asked the exact same
-    discovery question already sent — must regenerate on the strong model instead of
-    shipping a near-verbatim repeat."""
-    bid, tid, _lead, thread = await _world(db_session, timer_due=True, followups_sent=1)
-    prior_line = ("Halo Kak! Seneng banget Kakak tertarik dengan SMM. Boleh cerita dulu, "
-                 "Kakak pengen belajar SMM untuk apa ya?")
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="out1", direction="out", sent_by="agent",
-                           text=prior_line, occurred_at=_NOW - timedelta(hours=5)))
-    await db_session.flush()
-
-    class _ScriptLLM:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            self.calls += 1
-            reply = prior_line if self.calls == 1 else \
-                "Btw, kalau budget masih jadi kendala, ada Skill Booster lebih ringan lho 😊"
-            return json.dumps({"reply": reply, "stage": "qualifying"}), \
-                {"model": "fake", "cost_usd": 0.0}
-
-        async def embed(self, texts):  # noqa: ANN001
-            return [[0.0] for _ in texts]
-
-    llm = _ScriptLLM()
-    assert await _svc(db_session, bid, llm=llm).run() == 1
-    assert llm.calls == 2  # first draft (near-duplicate) + one regen
-    row = await _pending(db_session, tid)
-    assert row is not None and "Skill Booster" in row.text
-
-
-async def test_followup_dedup_regen_prompt_anchors_to_the_leads_last_message(
-    db_session,
-) -> None:
-    """Thread 2085: the regen instruction only said 'pick a different angle', with no
-    anchor to what the lead actually said — the model answered with a bare 'Mantap, Kak!'
-    and the lead replied 'Mantap apa nya kak?' (great about what?). The correction prompt
-    sent to the model must carry the lead's own last message forward."""
-    bid, tid, _lead, thread = await _world(db_session, timer_due=True, followups_sent=1)
-    prior_line = "Halo Kak! Seneng banget Kakak tertarik. Boleh cerita dulu, mau belajar apa?"
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="out1", direction="out", sent_by="agent",
-                           text=prior_line, occurred_at=_NOW - timedelta(hours=5)))
-    await db_session.flush()
-
-    class _SpyLLM:
-        def __init__(self) -> None:
-            self.calls = 0
-            self.regen_prompt: str | None = None
-
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            self.calls += 1
-            if self.calls == 1:
-                reply = prior_line
-            else:
-                self.regen_prompt = messages[-1]["content"]
-                reply = "Boleh, langsung aku kirim silabusnya ya"
-            return json.dumps({"reply": reply, "stage": "qualifying"}), \
-                {"model": "fake", "cost_usd": 0.0}
-
-        async def embed(self, texts):  # noqa: ANN001
-            return [[0.0] for _ in texts]
-
-    llm = _SpyLLM()
-    assert await _svc(db_session, bid, llm=llm).run() == 1
-    assert llm.regen_prompt is not None
-    assert "halo" in llm.regen_prompt.lower()  # the lead's own last message ("halo")
-
-
-async def test_followup_regenerates_when_only_one_bubble_of_several_is_a_duplicate(
-    db_session,
-) -> None:
-    """Thread 237: a 3-bubble followup opened with a bubble byte-for-byte identical to an
-    earlier live reply ("Untuk Sabtu/Minggu kantor kami memang tutup Kak..."), but the two
-    EXTRA bubbles that followed diluted the whole-message ratio well under the dedup gate.
-    Must catch a duplicate in ANY one bubble, not just the message as a whole."""
-    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
-    prior_line = "Untuk Sabtu/Minggu kantor kami memang tutup Kak, jadi kunjungan belum bisa 🙏"
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="out1", direction="out", sent_by="agent",
-                           text=prior_line, occurred_at=_NOW - timedelta(hours=1)))
-    await db_session.flush()
-
-    # A future date, so the stale_dates guard (which uses the real clock) never fires on the
-    # fixture — a hardcoded day was a time bomb that flipped stale the day after it.
-    _id_months = ("Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli",
-                  "Agustus", "September", "Oktober", "November", "Desember")
-    _future = (_NOW + timedelta(days=5)).date()
-    event_date = f"{_future.day} {_id_months[_future.month - 1]}"
-
-    class _ScriptLLM:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            self.calls += 1
-            if self.calls == 1:
-                reply = (f"{prior_line}|||Tapi ada Demo Event {event_date} jam 9 pagi|||"
-                         "Tiketnya cuma Rp 100.000 aja")
-            else:
-                reply = f"Kalau mau, Demo Event {event_date} masih ada slot - mau aku catat?"
-            return json.dumps({"reply": reply, "stage": "qualifying"}), \
-                {"model": "fake", "cost_usd": 0.0}
-
-        async def embed(self, texts):  # noqa: ANN001
-            return [[0.0] for _ in texts]
-
-    llm = _ScriptLLM()
-    assert await _svc(db_session, bid, llm=llm, cfg=_cfg(reply_guard="urls")).run() == 1
-    assert llm.calls == 2  # first draft (duplicate bubble) + one regen
-    row = await _pending(db_session, tid)
-    assert row is not None and prior_line not in row.text
 
 
 async def test_followup_nudge_goes_through_the_reply_guard(db_session) -> None:
@@ -591,27 +326,6 @@ async def test_pending_outbox_blocks_followup(db_session) -> None:
     db_session.add(Outbox(branch_id=bid, thread_id=tid, text="queued", source="agent"))
     await db_session.flush()
     assert await _svc(db_session, bid).run() == 0
-
-
-async def test_followup_skipped_when_lead_signaled_annoyance(db_session) -> None:
-    """Threads 2045/1996: the lead showed clear irritation ('Sok asik banget', 'Gak usah
-    ganggu aku lagi') in a live reply, but the next SCHEDULED follow-up fired anyway and
-    re-pitched the same price, ignoring the signal entirely. A follow-up is proactive (the
-    lead didn't ask for it) and must never fire on top of an unaddressed annoyance signal."""
-    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
-    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
-                           external_id="in2", direction="in", sent_by="lead",
-                           text="Gak usah ganggu aku lagi",
-                           occurred_at=_NOW - timedelta(minutes=5)))
-    await db_session.flush()
-    llm = FakeLLM()
-    assert await _svc(db_session, bid, llm=llm).run() == 0
-    assert await _pending(db_session, tid) is None
-    refreshed = (await db_session.exec(
-        select(ChannelThread).where(ChannelThread.id == tid))).first()
-    # timer CANCELLED, not merely skipped — a skipped-but-due thread was re-picked (and its
-    # annoyance re-checked) every 10-min tick forever; an annoyed lead gets no more nudges
-    assert refreshed.next_followup_at is None
 
 
 async def test_new_stage_excluded_from_followups(db_session) -> None:
@@ -682,54 +396,6 @@ async def test_awaiting_reply_respects_agent_toggle_and_pending(db_session) -> N
     assert tid not in await threads_awaiting_reply(db_session, bid)
 
 
-async def test_followup_is_told_an_angle_is_not_a_different_product(db_session) -> None:
-    """Thread 2503: the lead typed "It" and went quiet; the next four follow-ups pitched
-    Open House, Vibe Coding, Graphic Design and Skill Booster — one program each. The nudge's
-    own "CHANGE THE ANGLE each attempt" was being read as "change the product"."""
-    from app.modules.conversation.situations import FOLLOWUP_PRODUCT_DISCIPLINE
-
-    bid, tid, _lead, _thread = await _world(db_session, timer_due=True)
-    captured: list[str] = []
-
-    class _CaptureLLM(FakeLLM):
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            captured.append(messages[-1]["content"] if messages else "")
-            return await super().chat(messages, **kw)
-
-    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=None)
-    assert await svc.run() == 1
-    assert any(FOLLOWUP_PRODUCT_DISCIPLINE.strip() in c for c in captured), \
-        "every follow-up must carry the stay-on-this-product rule"
-
-
-async def test_followup_reopens_with_the_leads_own_need(db_session) -> None:
-    """A follow-up that names the lead's own captured pain/goal re-engages better than a
-    generic 'masih tertarik?'. The anchor text must be the lead's stored phrase, verbatim."""
-    from app.adapters.db.models import Lead
-    from app.modules.conversation.situations import FOLLOWUP_NEED_ANCHOR
-
-    bid, tid, lead, _thread = await _world(db_session, timer_due=True)
-    row = await db_session.get(Lead, lead.id)
-    row.needs = '{"jobs": [], "pains": ["followers mentok di 800"], "gains": []}'
-    db_session.add(row)
-    await db_session.flush()
-
-    captured: list[str] = []
-
-    class _CaptureLLM(FakeLLM):
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            captured.append(messages[-1]["content"] if messages else "")
-            return await super().chat(messages, **kw)
-
-    svc = FollowupService(db_session, bid, _CaptureLLM(), KnowledgeService(db_session, bid),
-                          _cfg(), notifier=None)
-    assert await svc.run() == 1
-    assert any("followers mentok di 800" in c for c in captured), \
-        "the follow-up must re-open with the lead's own captured need"
-    assert any(FOLLOWUP_NEED_ANCHOR.split("{need}")[0].strip()[:20] in c for c in captured)
-
-
 async def test_failed_generation_backs_off_instead_of_immediate_retry(db_session) -> None:
     """Cost leak (2026-07-22): a failed queue_one (broker error/timeout) left next_followup_at
     untouched, so the exact same thread got re-picked and re-billed on the very next 10-min
@@ -748,3 +414,148 @@ async def test_failed_generation_backs_off_instead_of_immediate_retry(db_session
         select(ChannelThread).where(ChannelThread.id == tid))).first()
     assert refreshed.next_followup_at is not None
     assert refreshed.next_followup_at > _NOW + timedelta(minutes=10)  # not due next tick
+
+
+# ── v3 nudges: driven by the dossier, and recording what they learn ───────────
+
+class _CapturingLLM(FakeLLM):
+    """Remembers the prompts it was handed and which tier each call ran on."""
+
+    def __init__(self, payload: str | None = None) -> None:
+        super().__init__(payload)
+        self.messages: list[list[dict]] = []
+        self.capabilities: list[str] = []
+
+    async def chat(self, messages, **kw) -> tuple[str, dict]:  # noqa: ANN001, ANN003
+        self.messages.append(messages)
+        self.capabilities.append(kw.get("capability", ""))
+        return await super().chat(messages, **kw)
+
+
+def _v3(reply: str = "Eh iya kak, btw batch berikutnya mulai bulan depan", **over) -> str:  # noqa: ANN003
+    payload = {"reply": reply, "move": "give_value", "stage": "qualifying"}
+    payload.update(over)
+    return json.dumps(payload)
+
+
+async def _dossier_of(s, bid: int, lead_id: int):  # noqa: ANN001, ANN202
+    from app.modules.conversation.repository import DossierRepo
+    return await DossierRepo(s, bid).load(lead_id)
+
+
+async def _set_dossier(s, lead: Lead, dossier) -> None:  # noqa: ANN001
+    lead.dossier = dossier.to_json()
+    s.add(lead)
+    await s.flush()
+
+
+async def test_a_lead_who_refused_outright_gets_no_further_nudges(db_session) -> None:  # noqa: ANN001
+    """v2 needed a regex over the last message to notice; the dossier remembers it, so it
+    survives the lead never repeating themselves."""
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, tid, lead, thread = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(refusal="blunt"))
+    llm = _CapturingLLM(_v3())
+
+    assert await _svc(db_session, bid, llm).run() == 0
+    assert llm.capabilities == []                       # not even generated
+    assert await _pending(db_session, tid) is None
+    assert (await db_session.get(ChannelThread, tid)).next_followup_at is None  # timer cancelled
+
+
+async def test_a_softly_refused_lead_still_gets_a_gentler_touch(db_session) -> None:  # noqa: ANN001
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, tid, lead, _ = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(refusal="soft"))
+    llm = _CapturingLLM(_v3())
+
+    assert await _svc(db_session, bid, llm).run() == 1
+    framing = llm.messages[0][-1]["content"]
+    assert "do NOT argue" in framing
+
+
+async def test_the_nudge_is_told_not_to_beg(db_session) -> None:  # noqa: ANN001
+    bid, _tid, _lead, _ = await _world(db_session, timer_due=True)
+    llm = _CapturingLLM(_v3())
+    await _svc(db_session, bid, llm).run()
+
+    framing = llm.messages[0][-1]["content"]
+    assert "masih minat?" in framing and "begging" in framing
+
+
+async def test_what_the_lead_already_heard_reaches_the_nudge_prompt(db_session) -> None:  # noqa: ANN001
+    """Repetition is prevented by telling the model what it already used, not by diffing text."""
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(
+        pains=["takut telat mulai"], cases_used=["alumni Dimas"]))
+    llm = _CapturingLLM(_v3())
+    await _svc(db_session, bid, llm).run()
+
+    system = llm.messages[0][0]["content"]
+    assert "takut telat mulai" in system
+    assert "ALREADY USED" in system and "alumni Dimas" in system
+
+
+async def test_a_nudge_records_what_it_learned(db_session) -> None:  # noqa: ANN001
+    """The v2 leak this closes: follow-ups never wrote back a word, so an objection uncovered
+    by a nudge was thrown away."""
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(pains=["takut telat mulai"]))
+    llm = _CapturingLLM(_v3(dossier={"objections": [{"text": "mahal", "status": "open"}]}))
+
+    assert await _svc(db_session, bid, llm).run() == 1
+    stored = await _dossier_of(db_session, bid, lead.id)
+    assert stored.open_objections() == ["mahal"]
+    assert stored.pains == ["takut telat mulai"]        # nothing already known was lost
+
+
+async def test_an_open_objection_buys_the_strong_model(db_session) -> None:  # noqa: ANN001
+    from app.modules.conversation.dossier import LeadDossier, Objection
+
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(objections=[Objection("mahal")]))
+    llm = _CapturingLLM(_v3())
+    await _svc(db_session, bid, llm).run()
+    assert llm.capabilities == ["chat:smart"]
+
+
+async def test_an_ordinary_nudge_runs_cheap(db_session) -> None:  # noqa: ANN001
+    bid, _tid, _lead, _ = await _world(db_session, timer_due=True)
+    llm = _CapturingLLM(_v3())
+    await _svc(db_session, bid, llm).run()
+    assert llm.capabilities == ["chat:fast"]
+
+
+async def test_nothing_new_to_say_burns_the_step_instead_of_sending(db_session) -> None:  # noqa: ANN001
+    """A thread with nothing left to say used to regenerate a dropped nudge every tick — the
+    single biggest token sink measured."""
+    bid, tid, _lead, _ = await _world(db_session, timer_due=True)
+
+    assert await _svc(db_session, bid, _CapturingLLM(_v3(reply="  "))).run() == 0
+    assert await _pending(db_session, tid) is None
+    thread = await db_session.get(ChannelThread, tid)
+    assert thread.next_followup_at is None or thread.next_followup_at > _NOW
+
+
+async def test_a_nudge_quoting_a_price_that_is_not_in_the_kb_is_dropped(db_session) -> None:  # noqa: ANN001
+    """Nobody asked, so there is nothing to escalate — just don't send a wrong number."""
+    bid, tid, _lead, _ = await _world(db_session, timer_due=True)
+    llm = _CapturingLLM(_v3(reply="Promo khusus kak, cuma Rp 26.000.000 aja!"))
+
+    assert await _svc(db_session, bid, llm).run() == 0
+    assert await _pending(db_session, tid) is None
+
+
+async def test_a_grounded_price_still_goes_out(db_session) -> None:  # noqa: ANN001
+    bid, tid, _lead, _ = await _world(db_session, timer_due=True)
+    llm = _CapturingLLM(_v3(reply="DP-nya Rp 500.000 aja kak, bisa dicicil"))
+
+    assert await _svc(db_session, bid, llm).run() == 1
+    row = await _pending(db_session, tid)
+    assert row is not None and "500.000" in row.text
