@@ -38,7 +38,7 @@ from .reply import (
     guard_decision,
 )
 from .repository import OutboxRepo, ThreadRepo
-from .routing import SMART
+from .routing import FAST
 from .situations import lead_spoke_own_words
 
 if TYPE_CHECKING:
@@ -164,9 +164,16 @@ class ReactivationService:
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch is not None else "id"
         nudge = _REACTIVATION_NUDGE.format(lang=lang)
+        # 2026-07-22 cost/capacity fix: reactivation touches month+-old dormant leads (lowest
+        # stakes of all smart-tier traffic) - drafting on FAST instead of SMART cuts broker
+        # load on the day the widened reactivation backlog (MAX_DORMANT_DAYS 21->550) adds real
+        # extra volume on top of live replies/follow-ups. The critic-gate safety net (below,
+        # via guard_decision) is untouched: any rejected draft still escalates its regen to
+        # SMART automatically, so quality only costs extra when the cheap draft wasn't good
+        # enough - never silently worse.
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow="followup",
-            extra_user_msg=nudge, capability=SMART)
+            extra_user_msg=nudge, capability=FAST)
         try:
             decision = parse_decision(raw)
         except ValueError:
