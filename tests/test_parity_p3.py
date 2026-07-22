@@ -197,8 +197,13 @@ async def test_decide_appends_user_turn_when_dialog_ends_on_assistant(db_session
             self.seen_messages: list[dict] | None = None
 
         async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
-            self.seen_messages = messages
-            return '{"reply":"ok","stage":"presenting"}', {"model": "fake", "cost_usd": 0.0}
+            if self.seen_messages is None:  # only the FIRST call is what this test examines
+                self.seen_messages = messages
+            # A discovery move so the pitch gate (which fires on an unlabelled "give_value"
+            # default against an empty dossier) doesn't spend a second call and overwrite
+            # seen_messages with the correction turn instead.
+            return ('{"reply":"ok","stage":"presenting","move":"discover_situation"}',
+                    {"model": "fake", "cost_usd": 0.0})
 
         async def embed(self, texts):  # noqa: ANN001, ANN201
             return [[0.0] for _ in texts]

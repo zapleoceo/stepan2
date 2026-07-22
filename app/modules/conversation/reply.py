@@ -26,7 +26,13 @@ from .decision import Decision, TurnDecision, generate
 from .delivery import ReplyDelivery, _script_lang
 from .dossier import merge_dossier
 from .engine import _ASSISTANT_LAST_NUDGE, DecisionEngine
-from .money_gate import MONEY_CORRECTION, MONEY_ESCALATION_REASON, money_issues
+from .money_gate import (
+    MONEY_CORRECTION,
+    MONEY_ESCALATION_REASON,
+    PITCH_CORRECTION,
+    money_issues,
+    premature_pitch,
+)
 from .prompt import lead_name_hint, source_hint
 from .repository import DossierRepo
 from .routing import SMART, pick_capability
@@ -99,7 +105,7 @@ class ReplyService(ReplyDelivery):
             engine, ctx, messages, thread_id, decision,
             workflow=workflow, capability=capability, context=context, lang=lang,
             last_inbound=(last_in.text if last_in is not None else "") or "",
-            lead_typed_a_question=_typed_a_question(last_in))
+            lead_typed_a_question=_typed_a_question(last_in), stored=stored)
 
         merged = merge_dossier(stored, decision.dossier)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
@@ -111,18 +117,21 @@ class ReplyService(ReplyDelivery):
     async def _vet(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
         decision: TurnDecision, *, workflow: str, capability: str, context: str, lang: str,
-        last_inbound: str, lead_typed_a_question: bool = False,
+        last_inbound: str, lead_typed_a_question: bool = False, stored: object = None,
     ) -> TurnDecision:
-        """Three gates, deliberately asymmetric.
+        """Four gates, deliberately asymmetric.
 
         The money gate fails CLOSED, because quoting a price the school never set is a promise
         it has to honour. The critic fails OPEN, because an unreviewed real answer beats a stub
         — v2 had this the wrong way round and converted broker hiccups into lost leads.
 
-        The answer gate sits between them: it reads the move the model DECLARED rather than its
-        prose, so no other instruction can argue with it.
+        The answer gate and the pitch gate sit in between: both read the move the model
+        DECLARED rather than its prose, so no other instruction can argue with them. v2
+        enforced "no pitch before discovery" in code; the v3 rebuild only asked for it in
+        prose, and thread 452 showed that wasn't enough on its own.
 
-        At most ONE of the three spends a rewrite, so a turn stays capped at three calls."""
+        Each fires independently, but the common case spends at most ONE rewrite, so a turn
+        stays capped at three calls."""
         issues = money_issues(decision.reply, context)
         if issues:
             logger.warning("v3 money gate branch=%d thread=%d: %s",
@@ -152,6 +161,18 @@ class ReplyService(ReplyDelivery):
                 correction=ANSWER_FIRST_CORRECTION)
             if answered is not None:
                 return answered  # shipped as-is; a second rewrite is what v2 did
+
+        if stored is not None and premature_pitch(decision.move, stored, lead_typed_a_question):
+            # v2 enforced "no pitch before pain+gain" in code (_stage_for). The v3 rebuild only
+            # asked for it in prose, and thread 452 showed that wasn't enough: two turns after a
+            # context clear, dossier empty, Stepan pitched Vibe Coding anyway.
+            logger.info("pitch gate branch=%d thread=%d: move=%s with no discovery yet",
+                       self.branch_id, thread_id, decision.move)
+            discovered = await self._regenerate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                correction=PITCH_CORRECTION)
+            if discovered is not None:
+                return discovered
 
         if capability != SMART:
             return decision  # routine turn — not worth a second call

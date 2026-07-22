@@ -44,7 +44,7 @@ def test_the_contract_scopes_answer_first_to_words_the_lead_typed() -> None:
     one at random — which is exactly what live threads showed."""
     text = contract("id")
     assert "If the lead TYPED a question" in text
-    assert "a prefilled ad button is a tap, not a question" in text
+    assert "prefilled button text is a tap, not a" in text
 
 
 def test_an_unknown_entry_point_adds_nothing() -> None:

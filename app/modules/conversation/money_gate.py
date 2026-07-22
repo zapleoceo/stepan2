@@ -24,6 +24,13 @@ MONEY_ESCALATION_REASON = (
     "Степан дважды назвал сумму или ссылку, которых нет в базе знаний — "
     "нужен ручной ответ менеджера с точной цифрой")
 
+PITCH_CORRECTION = (
+    "[System: you don't know this lead's pain or goal yet, and your draft pitched a product "
+    "or asked for a commitment anyway. Rewrite the SAME message as one honest discovery move "
+    "instead — a question about their situation or motive. Save the pitch for once you "
+    "actually know why they're here.]"
+)
+
 MONEY_CORRECTION = (
     "[System: your draft states something about money or a link that is NOT in the knowledge "
     "base: {issues}. Rewrite the SAME message keeping its intent and warmth, but state only "
@@ -31,6 +38,24 @@ MONEY_CORRECTION = (
     "number, say what you do know and offer to confirm the precise figure — do not go silent "
     "and do not hand the lead off.]"
 )
+
+
+# Moves that pitch — name a product, quote a price, or ask for a commitment — before
+# discovery is done. v2 enforced "no presenting without a pain and a gain" in CODE
+# (_stage_for rolled the stage back); the v3 rebuild only asked for it in prose (CLOSING:
+# "save it until you know why they came"), and thread 452 showed prose alone isn't enough —
+# two turns after a context clear, with the dossier empty, Stepan pitched Vibe Coding anyway.
+_PITCH_MOVES = frozenset({"give_value", "quote_price", "invite_campus", "close"})
+
+
+def premature_pitch(move: str, dossier: object, lead_asked_directly: bool) -> bool:
+    """True when the model pitched before earning the right to.
+
+    Never fires when the lead asked outright (answer-first already covers that turn) or once
+    discovery has actually landed a pain and a desired outcome."""
+    if lead_asked_directly or move not in _PITCH_MOVES:
+        return False
+    return not dossier.has_discovery()
 
 
 def money_issues(reply: str, context: str) -> list[str]:

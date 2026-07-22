@@ -66,3 +66,42 @@ def test_the_correction_demands_a_rewrite_never_a_retreat() -> None:
     learned to go quiet on answerable questions."""
     text = MONEY_CORRECTION.format(issues="x")
     assert "do not go silent" in text and "do not hand the lead off" in text
+
+
+# ── the premature-pitch gate ───────────────────────────────────────────────────
+
+def test_a_pitch_with_no_discovery_yet_is_caught() -> None:
+    """The exact thread 452 shape: two turns after a context clear, dossier empty, Stepan
+    pitched Vibe Coding anyway. v2 enforced this in code; v3 only asked for it in prose."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    assert premature_pitch("give_value", LeadDossier(), lead_asked_directly=False)
+    assert premature_pitch("quote_price", LeadDossier(), lead_asked_directly=False)
+    assert premature_pitch("invite_campus", LeadDossier(), lead_asked_directly=False)
+    assert premature_pitch("close", LeadDossier(), lead_asked_directly=False)
+
+
+def test_a_pitch_after_real_discovery_is_fine() -> None:
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    discovered = LeadDossier(pains=["takut telat"], desired_state=["kerja remote"])
+    assert not premature_pitch("give_value", discovered, lead_asked_directly=False)
+
+
+def test_a_lead_who_asked_directly_is_never_gated() -> None:
+    """Answer-first already covers this turn — the pitch gate must not fight it."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    assert not premature_pitch("quote_price", LeadDossier(), lead_asked_directly=True)
+
+
+def test_discovery_moves_are_never_gated() -> None:
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    for move in ("discover_situation", "discover_motive", "probe_suppose",
+                "need_payoff", "handle_objection", "accept_refusal", "escalate_human"):
+        assert not premature_pitch(move, LeadDossier(), lead_asked_directly=False)

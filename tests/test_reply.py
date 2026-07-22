@@ -372,3 +372,56 @@ def test_the_gate_reads_the_declared_move_not_the_prose() -> None:
     assert not _typed_a_question(_M(_AD_PREFILL))
     assert not _typed_a_question(_M("   "))
     assert not _typed_a_question(None)
+
+
+# ── the pitch gate: no product pitch before discovery has actually landed ─────
+
+async def test_a_premature_pitch_is_rewritten_into_discovery(db_session) -> None:  # noqa: ANN001
+    """Thread 452, reproduced: dossier empty, no direct question, and the model pitches a
+    product anyway. v2 enforced this in code; the rewrite here is the v3 equivalent."""
+    bid, tid, _ = await _thread(db_session, texts=(("in", "halo"), ("out", "hai kak")))
+    from app.adapters.db.models import Message
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=1, external_id="q1",
+                           direction="in", sent_by="lead", text="saya cari kursus buat istri",
+                           occurred_at=_NOW))
+    await db_session.flush()
+    llm = _LLM(_answer(reply="Untuk pemula ada Vibe Coding, kursusnya AI-assisted",
+                       move="give_value"),
+               _answer(reply="Istrinya udah ada pengalaman IT sebelumnya, Kak?",
+                       move="discover_situation"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert "pengalaman" in decision.reply
+    assert "Vibe Coding" not in decision.reply
+
+
+async def test_a_pitch_after_real_discovery_is_not_gated(db_session) -> None:  # noqa: ANN001
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, tid, _lead_id = await _thread(
+        db_session, texts=(("in", "halo"), ("out", "hai kak")),
+        dossier=LeadDossier(pains=["takut nggak sempat"],
+                            desired_state=["ganti karier ke IT"]).to_json())
+    llm = _LLM(_answer(reply="Untuk itu ada Vibe Coding, cocok buat mulai dari nol",
+                       move="give_value"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert "Vibe Coding" in decision.reply
+    assert len(llm.capabilities) == 1  # no rewrite spent
+
+
+async def test_the_pitch_gate_never_fights_the_answer_gate(db_session) -> None:  # noqa: ANN001
+    """A lead who asked directly is answer-first's turn, not the pitch gate's."""
+    bid, tid, _ = await _thread(db_session, texts=(("in", "halo"), ("out", "hai kak")))
+    from app.adapters.db.models import Message
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=1, external_id="q1",
+                           direction="in", sent_by="lead", text="berapa harga vibe coding?",
+                           occurred_at=_NOW))
+    await db_session.flush()
+    llm = _LLM(_answer(reply="Rp 13.360.000 kak, bisa dicicil", move="answer_question"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None and "13.360.000" in decision.reply
+    assert len(llm.capabilities) == 1
