@@ -68,6 +68,14 @@ class MessageRepo(BranchScoped[Message]):
     def __init__(self, session: AsyncSession, branch_id: int) -> None:
         super().__init__(session, branch_id)
 
+    async def has_inbound(self, thread_id: int) -> bool:
+        """True once the lead has sent anything on this thread. Used to tell the ad PREFILL
+        (the first message after a tap) from everything the lead types afterwards — Meta keeps
+        returning the same referral metadata on every later message."""
+        q = self._q().where(
+            Message.thread_id == thread_id, Message.direction == "in").limit(1)
+        return (await self.session.exec(q)).first() is not None
+
     async def by_external(self, channel_id: int, external_id: str) -> Message | None:
         """Branch-scoped dedup lookup for an inbound message."""
         q = self._q().where(

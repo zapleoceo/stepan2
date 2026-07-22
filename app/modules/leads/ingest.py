@@ -197,14 +197,17 @@ class IngestService:
         ):
             return None  # IG echoed our own outgoing message back as if the lead sent it
         # Structural signal from IG itself (ad_id/ad_media_id/lead_source), not a text guess:
-        # this specific inbound item rode in on an ad click, so its text is the ad's own
-        # caption/CTA prefill, never the lead's own words — however it happens to be phrased.
-        # Downstream (situations.lead_spoke_own_words/unseen_media_in_turn, critic.py) must
-        # treat it as product-identification-only, never as dialogue to answer or judge
-        # (thread 4849: an unrecognized ad caption fragment slipped through every text-pattern
-        # guess and got answered as if the lead had said it).
-        is_ad_referral = bool(
+        # The AD PREFILL: the ad's own caption/CTA text, which the lead never typed. It marks
+        # exactly ONE message — the first thing that arrives after the tap. Meta's referral
+        # metadata (ad_id/ad_media_id/lead_source) is THREAD-level and keeps coming back on
+        # every later message, so taking it at face value marked everything the lead
+        # subsequently typed as "not their words" (33 live threads on branch 1). That silently
+        # disabled the answer gate, told the critic to ignore real questions, and kept the
+        # dossier from recording them. The referral only means "this conversation started from
+        # an ad" — the prefill is the first inbound and nothing after it.
+        has_referral = bool(
             inbound.ad_id or inbound.ad_media_id or inbound.lead_source == "ad_clicktomsg")
+        is_ad_referral = has_referral and not await self.messages.has_inbound(thread.id)
         msg = await self.messages.add(
             Message(
                 branch_id=self.branch_id,
