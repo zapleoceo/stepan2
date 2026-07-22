@@ -121,7 +121,9 @@ async def test_focus_card_is_sent_in_full_no_rag(db_session):
 
 
 async def test_catalog_shows_quick_facts_for_other_products(db_session):
-    """A non-focus product is summarised by its one-line QUICK FACTS in the catalog, so a
+    """A non-focus product is summarised by duration+price ONLY in the catalog (architecture
+    review 2026-07-22: format/DP/outcome dropped — the catalog is a cross-reference anchor,
+    the FULL card loads separately once the lead actually focuses on that product), so a
     cross-product question is answerable without dumping all 15 full cards."""
     s = db_session
     a = await _branch(s, "Jakarta", "id")
@@ -133,8 +135,28 @@ async def test_catalog_shows_quick_facts_for_other_products(db_session):
     svc = KnowledgeService(s, a)
     ctx = await svc.knowledge_context("vibe")
     assert "focus product=vibe" in ctx                 # vibe is the full focus card
-    assert "- data: Data Analyst — durasi 9 bulan | harga Rp 15.030.000" in ctx  # data summarised
+    assert "- data: Data Analyst — durasi 9 bulan · harga Rp 15.030.000" in ctx  # data summarised
     assert "SQL, Python, Power BI" not in ctx           # the OTHER card's bulk is NOT dumped
+
+
+async def test_catalog_drops_format_dp_outcome_keeps_duration_and_price(db_session):
+    """The anchor keeps ONLY the durasi/harga segments — format, DP and outcome (present in the
+    full QUICK FACTS line) are dropped from the OTHER-products catalog to save context; they're
+    still fully available once that product becomes the focus card."""
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    smm_card = (
+        "# SMM Intensive\nQUICK FACTS: durasi 2 minggu | format hybrid (offline/online) | "
+        "harga Rp 1.882.955 | DP Rp 500.000 | hasil Diploma IT STEP\n## Kurikulum\nX")
+    await _seed(s, a, "persona-A",
+                [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
+                 ("smm", "SMM Intensive", smm_card)])
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("vibe")
+    assert "- smm: SMM Intensive — durasi 2 minggu · harga Rp 1.882.955" in ctx
+    assert "format hybrid" not in ctx
+    assert "DP Rp 500.000" not in ctx
+    assert "Diploma IT STEP" not in ctx
 
 
 async def test_catalog_falls_back_to_title_without_quick_facts(db_session):

@@ -166,11 +166,29 @@ def _quick_facts(product: Product) -> str:
     return f"{product.title} — {m.group(1).strip()}" if m else product.title
 
 
+def _catalog_anchor(product: Product) -> str:
+    """ONE-LINE anchor for the OTHER-products catalog: just duration + price, not the full
+    QUICK FACTS headline (format/DP/outcome too). Architecture review 2026-07-22: this catalog
+    exists so the model KNOWS a product exists and roughly what it costs/how long — for cross-
+    reference and product-switching, never for presenting (that needs the FULL card, which
+    loads separately once the lead actually focuses on it). Every other detail is duplicated
+    work most turns never use. Falls back to the full quick_facts line if a card doesn't follow
+    the 'durasi ... | ... | harga ...' convention, so no product silently loses its anchor."""
+    m = _QUICK_FACTS_RE.search(product.content or "")
+    if not m:
+        return product.title
+    segments = [s.strip() for s in m.group(1).split("|")]
+    anchor = [s for s in segments if s[:6].lower() in ("durasi", "harga ")]
+    if not anchor:
+        return _quick_facts(product)
+    return f"{product.title} — {' · '.join(anchor)}"
+
+
 def _catalog_block(products: list[Product], lang: str,
                    exclude: str | set[str] | None = None) -> str:
     ex = {exclude} if isinstance(exclude, str) else set(exclude or ())
-    lines = [f"- {p.slug}: {_quick_facts(p)}" for p in products if p.slug not in ex]
+    lines = [f"- {p.slug}: {_catalog_anchor(p)}" for p in products if p.slug not in ex]
     if not lines:
         return ""
-    return (f"[catalog lang={lang}] (ringkasan produk lain — kalau lead fokus ke salah satu, "
-            "kartunya akan tampil penuh)\n" + "\n".join(lines))
+    return (f"[catalog lang={lang}] (ringkasan produk lain — durasi & harga saja; kalau lead "
+            "fokus ke salah satu, kartu LENGKAPNYA akan tampil terpisah)\n" + "\n".join(lines))
