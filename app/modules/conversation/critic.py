@@ -39,7 +39,12 @@ DIMENSIONS = (
      "or absent) — never for a general description that matches the card."),
     ("responsive", "The reply directly addresses what the lead's LAST message actually said or "
      "asked. Answering a different question, ignoring their point, or a generic reaction "
-     "('Mantap Kak!') that doesn't engage their message FAILS."),
+     "('Mantap Kak!') that doesn't engage their message FAILS. EXCEPTION: when RECENT DIALOG "
+     "shows '(none yet)' (this is the first turn) and the lead's message is a bare "
+     "acknowledgment with no real content ('iya', 'oke', 'ya', 'boleh') and nothing precedes "
+     "it to be agreeing TO - there is no implied context to ignore, so a warm exploratory "
+     "opener (who they are, what brought them) IS the sound responsive move. Do not fail "
+     "'responsive' for 'ignoring context' that provably does not exist in the dialog given."),
     ("sales_move", "The reply advances the sale by ONE sound step: it answers/adds value AND "
      "carries a clear next step or one engaging question. Rambling, stalling, repeating an "
      "earlier message, or dropping the thread with no forward motion FAILS."),
