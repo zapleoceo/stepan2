@@ -55,6 +55,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Cooldown after a failed generation attempt (broker error/timeout) — see queue_one's except
+# block. Short enough that a real broker blip only costs one missed cycle, long enough that a
+# sustained outage doesn't get re-billed every 10-min cron tick.
+_FAILURE_BACKOFF_MIN = 30
+
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
 # `new` is excluded: an untouched lead gets a live reply, not a nudge).
@@ -166,6 +171,17 @@ class FollowupService:
             logger.exception(
                 "followup failed branch=%d thread=%d", self.branch_id, thread_id
             )
+            # Cost leak (2026-07-22): a failed attempt (broker timeout/error) left
+            # next_followup_at untouched, so the SAME thread got re-picked and re-billed every
+            # 10-min tick until it happened to succeed — 763 followup broker calls that day for
+            # only 196 sent messages, mostly wasted retries during a broker-instability window.
+            # Push the timer forward so a failure gets one cooldown before the next attempt,
+            # instead of an immediate, likely-doomed retry.
+            thread = await self.threads.by_id(thread_id)
+            if thread is not None:
+                thread.next_followup_at = now + timedelta(minutes=_FAILURE_BACKOFF_MIN)
+                self.session.add(thread)
+                await self.session.flush()
             return False
 
     async def run(self) -> int:

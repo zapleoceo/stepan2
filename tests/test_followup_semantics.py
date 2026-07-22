@@ -728,3 +728,23 @@ async def test_followup_reopens_with_the_leads_own_need(db_session) -> None:
     assert any("followers mentok di 800" in c for c in captured), \
         "the follow-up must re-open with the lead's own captured need"
     assert any(FOLLOWUP_NEED_ANCHOR.split("{need}")[0].strip()[:20] in c for c in captured)
+
+
+async def test_failed_generation_backs_off_instead_of_immediate_retry(db_session) -> None:
+    """Cost leak (2026-07-22): a failed queue_one (broker error/timeout) left next_followup_at
+    untouched, so the exact same thread got re-picked and re-billed on the very next 10-min
+    cron tick, over and over, during a broker-instability window (763 followup broker calls
+    that day for only 196 sent messages). A failure must push the timer forward instead."""
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+
+    class _RaisingLLM(FakeLLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            raise RuntimeError("broker 502")
+
+    svc = _svc(db_session, bid, llm=_RaisingLLM())
+    ok = await svc.queue_one(tid, None, 0)
+    assert ok is False
+    refreshed = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.id == tid))).first()
+    assert refreshed.next_followup_at is not None
+    assert refreshed.next_followup_at > _NOW + timedelta(minutes=10)  # not due next tick
