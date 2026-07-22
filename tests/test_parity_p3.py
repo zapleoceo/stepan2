@@ -55,8 +55,8 @@ def test_parse_decision_ready_subtype() -> None:
 
 def test_source_hint_only_for_known_entry_points() -> None:
     from app.modules.conversation.prompt import source_hint
-    assert "paid ad" in (source_hint("ad_clicktomsg") or "")
-    assert "story" in (source_hint("story") or "")
+    assert "paid ads" in (source_hint("ad_clicktomsg") or "")
+    assert "stories" in (source_hint("story") or "")
     assert source_hint(None) is None
     assert source_hint("organic") is None  # unknown source → no assumption
 
