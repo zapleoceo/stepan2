@@ -50,13 +50,30 @@ async def _msg(s, bid, cid, tid, *, ext, out=True, requested=True, minutes_ago=0
     return m
 
 
-async def test_successful_revoke_deletes_local(db_session) -> None:
+async def test_successful_revoke_tombstones_locally(db_session) -> None:
+    """The row is kept: it is the only evidence the message was OURS. Hard-deleting it made
+    the inbox poll re-import it as a manager's manual reply and hand the thread to a human
+    with the bot muted (thread 4954)."""
     bid, cid, tid, _ = await _thread(db_session)
     await _msg(db_session, bid, cid, tid, ext="m1")
     rev = FakeRevoker(ok=True)
     assert await DeletionService(db_session, bid).process(cid, "ig-1", rev) == 1
     assert rev.calls == [("ig-1", "m1")]
-    assert (await db_session.exec(select(Message))).first() is None
+
+    msg = (await db_session.exec(select(Message))).first()
+    assert msg is not None
+    assert msg.revoked_at is not None
+    assert msg.delete_requested is False   # done, never retried
+
+
+async def test_a_revoked_message_is_invisible_to_the_model(db_session) -> None:
+    from app.modules.conversation.repository import MessageRepo
+
+    bid, cid, tid, _ = await _thread(db_session)
+    await _msg(db_session, bid, cid, tid, ext="m1")
+    await DeletionService(db_session, bid).process(cid, "ig-1", FakeRevoker(ok=True))
+
+    assert await MessageRepo(db_session, bid).dialog(tid) == []
 
 
 async def test_failed_revoke_keeps_message_and_flag(db_session) -> None:

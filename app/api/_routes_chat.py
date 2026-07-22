@@ -446,6 +446,16 @@ async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
             text("UPDATE channel_thread SET context_cleared_at=:t WHERE id=:tid"),
             {"t": now, "tid": thread_id},
         )
+        # The dossier is memory too, and a human who clears the context expects a clean slate.
+        # Leaving it behind gave the opposite: Stepan forgot the conversation but still knew
+        # the lead's goal and which product they'd been shown, so he resumed mid-sale into a
+        # blank chat (thread 452 — a lead whose discovery was not finished got offered the
+        # event straight away).
+        await session.execute(
+            text("UPDATE lead SET dossier=NULL, needs=NULL WHERE id ="
+                 " (SELECT lead_id FROM channel_thread WHERE id=:tid)"),
+            {"tid": thread_id},
+        )
         session.add(ThreadLog(
             branch_id=branch_id, thread_id=thread_id, kind="context_cleared",
             actor=_actor_name(request),

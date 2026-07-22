@@ -381,7 +381,8 @@ async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
                 f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
                 f"{_MEDIA_JOIN}"
-                " WHERE m.thread_id = :tid ORDER BY m.occurred_at, m.id"
+                " WHERE m.thread_id = :tid AND m.revoked_at IS NULL"
+                " ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id},
         )
@@ -395,7 +396,7 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
                 f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
                 f"{_MEDIA_JOIN}"
-                " WHERE m.thread_id = :tid AND m.id > :after"
+                " WHERE m.thread_id = :tid AND m.id > :after AND m.revoked_at IS NULL"
                 " ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id, "after": after_id},

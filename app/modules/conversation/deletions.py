@@ -89,8 +89,18 @@ class DeletionService:
         return done
 
     async def _delete_local(self, msg: Message) -> None:
+        """Tombstone, not a hard delete.
+
+        The row is the only evidence the message was OURS. Deleting it meant the inbox poll —
+        which runs every two minutes and had already seen the message — found no match in the
+        content dedup, filed it as a manager's manual reply, and handed the whole thread to a
+        human with the bot muted (thread 4954). Keeping a revoked row costs nothing: it is
+        hidden from the chat, excluded from the model's dialog, and still answers the one
+        question the dedup asks."""
         thread_id = msg.thread_id
-        await self.session.delete(msg)
+        msg.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+        msg.delete_requested = False
+        self.session.add(msg)
         await self.session.flush()
         # rewind BOTH watermarks to the newest remaining message per direction (or NULL).
         # last_out_at gates the reply loop; last_in_at drives the sidebar's activity sort
@@ -99,14 +109,16 @@ class DeletionService:
         newest_out = (
             await self.session.execute(
                 select(func.max(Message.occurred_at)).where(
-                    Message.thread_id == thread_id, Message.direction == "out"
+                    Message.thread_id == thread_id, Message.direction == "out",
+                    Message.revoked_at.is_(None),  # type: ignore[union-attr]
                 )
             )
         ).scalar_one_or_none()
         newest_in = (
             await self.session.execute(
                 select(func.max(Message.occurred_at)).where(
-                    Message.thread_id == thread_id, Message.direction == "in"
+                    Message.thread_id == thread_id, Message.direction == "in",
+                    Message.revoked_at.is_(None),  # type: ignore[union-attr]
                 )
             )
         ).scalar_one_or_none()

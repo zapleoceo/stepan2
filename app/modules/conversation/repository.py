@@ -48,7 +48,10 @@ class MessageRepo(_LeadMessageRepo):
         comparison in _most_similar_prior and adds a broker call per turn on the busiest
         threads — the broker is the scarce resource this protects. `since` (a thread's
         context_cleared_at) drops history before a manual clear."""
-        q = self._q().where(Message.thread_id == thread_id)
+        q = self._q().where(
+            Message.thread_id == thread_id,
+            Message.revoked_at.is_(None),  # type: ignore[union-attr] — unsent, never happened
+        )
         if since is not None:
             q = q.where(Message.occurred_at > since)
         q = q.order_by(Message.occurred_at.desc(), Message.id.desc()).limit(_MAX_CONTEXT_MSGS)

@@ -330,6 +330,12 @@ class Message(SQLModel, table=True):
         description="не пробовать раньше этого времени (экспоненциальный back-off)")
     link_url: str | None = Field(default=None, description="кликабельная цель (шэр поста/ссылки)")
     preview_url: str | None = Field(default=None, description="превью карточки (CDN, протухает)")
+    revoked_at: datetime | None = Field(
+        default=None, index=True,
+        description="исходящее, отозванное из IG. Строка НЕ удаляется: она — единственное "
+                    "доказательство, что сообщение было нашим. Без неё опрос инбокса видит "
+                    "его снова, не находит совпадения и пишет как ручной ответ менеджера, "
+                    "отдавая тред человеку и глуша бота (тред 4954)")
     is_ad_referral: bool = Field(
         default=False, index=True,
         description="структурный признак от IG (ad_id/ad_media_id/lead_source='ad_clicktomsg' "
