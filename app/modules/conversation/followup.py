@@ -53,7 +53,7 @@ _FOLLOWUP_Q = (  # noqa: S608
     "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid"
-    "   AND l.stage IN ('nurturing', 'qualifying', 'presenting', 'objection')"
+    "   AND l.stage IN ('qualifying', 'presenting', 'objection', 'nurturing')"
     "   AND l.agent_enabled = :on"
     "   AND ct.next_followup_at IS NOT NULL"
     "   AND ct.next_followup_at <= :now"

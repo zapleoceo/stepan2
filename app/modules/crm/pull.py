@@ -20,7 +20,7 @@ from app.modules.settings.service import get_settings
 logger = logging.getLogger(__name__)
 
 # Stages the bot still actively works — the only leads worth gating against the CRM.
-_ACTIVE = ("new", "nurturing", "qualifying", "presenting", "objection")
+_ACTIVE = ("new", "qualifying", "presenting", "objection", "nurturing")
 
 
 class CrmPullService:

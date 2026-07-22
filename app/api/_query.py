@@ -17,7 +17,7 @@ from app.adapters.db.models import (
 from app.config import settings
 from app.domain.clock import utc_now
 
-_PIPELINE_STAGES = ("nurturing", "qualifying", "presenting", "objection")
+_PIPELINE_STAGES = ("qualifying", "presenting", "objection", "nurturing")
 _WON_STAGES = ("ready", "handed_off")
 
 # Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked,

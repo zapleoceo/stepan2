@@ -226,3 +226,14 @@ def test_the_model_is_told_not_to_invent_details_about_the_lead() -> None:
     text = contract("id")
     assert "NEVER ASSUME" in text
     assert "for them or for" in text
+
+
+def test_the_model_is_told_to_match_mood_and_humor_not_just_length() -> None:
+    """Live thread 2126: a lead's self-deprecating joke about the price ("rumah saya lagi
+    krisis moneter 😂") got the old stub as if it needed escalation. That stub no longer
+    exists in v3, but nothing said explicitly that a joke deserves a real reaction — it was
+    left to implicit model competence, which the same thread also showed working elsewhere
+    ("hahaha betul kak..."). Explicit beats implicit, same as everything else fixed today."""
+    text = contract("id")
+    assert "mood, and humor" in text
+    assert "never treated as a problem to escalate" in text

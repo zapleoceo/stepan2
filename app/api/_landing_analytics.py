@@ -18,14 +18,15 @@ _SEGMENTS = [
 ]
 _TOTAL = 1805
 
-# name, count, color
+# name, count, color. Order matches the real app's funnel (2026-07-23): Nurturing is a side
+# state re-entered from any active stage, not step 2 — see _ui_html._SIDE_STAGES.
 _FUNNEL = [
     ("Entry", 1793, "#4d8dff"),
-    ("Nurturing", 78, "#f5a623"),
     ("Qualified", 643, "#9b8cff"),
     ("Presenting", 1038, "#4cc38a"),
     ("Objection", 61, "#ff5c5c"),
     ("Ready", 91, "#4cc38a"),
+    ("Nurturing", 78, "#f5a623"),
     ("Handed off", 12, "#2dd4bf"),
 ]
 
