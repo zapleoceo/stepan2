@@ -17,10 +17,11 @@ _COACHING_HEADER = "MANDATORY RULES (from manager — follow strictly):"
 # a lighter, more casual entry. Organic/unknown gets no hint (no assumptions).
 _SOURCE_HINTS = {
     "ad_clicktomsg": (
-        "ENTRY: this chat opened when the lead tapped one of our paid ads, so their first "
-        "message is the ad's prefilled text rather than words they typed. It still says what "
-        "they want to know — so answer it. What it does NOT tell you is anything about them: "
-        "no goal, no age, no background, no budget until they say so themselves."
+        "ENTRY: this chat opened when the lead TAPPED one of our paid ads. Their first message "
+        "is the ad's own prefilled text — they did not type it and did not ask you anything, "
+        "so there is nothing to answer yet. It tells you the topic they tapped on and NOTHING "
+        "else: no goal, no age, no background, no budget. Open warmly with ONE question about "
+        "them. The answer-first rule applies from the moment they type something themselves."
     ),
     "story": (
         "ENTRY: the lead replied to one of our Instagram stories — a light, casual opening."

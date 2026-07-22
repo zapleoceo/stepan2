@@ -289,3 +289,86 @@ async def test_an_unreachable_reviewer_ships_the_draft(db_session) -> None:  # n
     assert decision is not None
     assert decision.reply == "jawaban asli"
     assert decision.needs_manager is False
+
+
+# ── the answer gate: only for words the lead typed themselves ────────────────
+
+_AD_PREFILL = "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"
+
+
+async def _ask(db_session, text: str, *, ad: bool = False, move: str = "discover_situation"):  # noqa: ANN001, ANN201
+    """One turn where the lead's last message is `text`; returns (llm, decision)."""
+    bid, tid, _ = await _thread(db_session, texts=(("in", "halo"), ("out", "hai kak")))
+    from app.adapters.db.models import Message
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=1, external_id="q1",
+                           direction="in", sent_by="lead", text=text, occurred_at=_NOW,
+                           is_ad_referral=ad))
+    await db_session.flush()
+    # The gate fires BEFORE the critic and returns straight away, so the scripted order is
+    # generation → rewrite; a compliant draft falls through to the critic instead.
+    llm = _LLM(_answer(reply="Kakak lagi kerja atau sekolah?", move=move),
+               _answer(reply="Durasinya 6 bulan kak, biayanya mulai Rp 13.360.000",
+                       move="answer_question"),
+               json.dumps({"sells": True}))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+    return llm, decision
+
+
+async def test_a_typed_question_that_was_not_answered_is_rewritten(db_session) -> None:  # noqa: ANN001
+    """A prompt rule alone wasn't enough — live threads showed the same input answered on one
+    and deflected on the next. The gate reads the declared move, which nothing can argue with."""
+    llm, decision = await _ask(db_session, "berapa lama durasinya kak?")
+    assert decision is not None
+    assert "6 bulan" in decision.reply
+
+
+async def test_a_typed_question_already_answered_costs_no_rewrite(db_session) -> None:  # noqa: ANN001
+    bid, tid, _ = await _thread(db_session, texts=(("in", "halo"), ("out", "hai kak")))
+    from app.adapters.db.models import Message
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=1, external_id="q1",
+                           direction="in", sent_by="lead", text="berapa harganya?",
+                           occurred_at=_NOW))
+    await db_session.flush()
+    llm = _LLM(_answer(reply="Rp 13.360.000 kak", move="answer_question"),
+               json.dumps({"sells": True}))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None and "13.360.000" in decision.reply
+    assert len(llm.capabilities) <= 2   # generation + critic, no rewrite
+
+
+async def test_an_ad_prefill_is_a_tap_and_never_trips_the_gate(db_session) -> None:  # noqa: ANN001
+    """The button's text reads like a question, but the lead never typed it. Opening a tap with
+    a warm question is the CORRECT move — answering it with a price list is the old opener."""
+    llm, decision = await _ask(db_session, _AD_PREFILL, ad=True)
+    assert decision is not None
+    assert decision.reply == "Kakak lagi kerja atau sekolah?"
+
+
+async def test_the_ad_template_is_caught_even_without_the_referral_flag(db_session) -> None:  # noqa: ANN001
+    """Messages ingested before IG's referral metadata was stored have no flag — the text
+    template is the fallback."""
+    llm, decision = await _ask(db_session, _AD_PREFILL, ad=False)
+    assert decision is not None
+    assert decision.reply == "Kakak lagi kerja atau sekolah?"
+
+
+async def test_a_statement_is_not_a_question(db_session) -> None:  # noqa: ANN001
+    """A lead saying something is not a lead asking something."""
+    llm, decision = await _ask(db_session, "oke kak, nanti aku pikirin")
+    assert decision is not None
+    assert decision.reply == "Kakak lagi kerja atau sekolah?"
+
+
+def test_the_gate_reads_the_declared_move_not_the_prose() -> None:
+    from app.modules.conversation.reply import _typed_a_question
+
+    class _M:
+        def __init__(self, text: str, ad: bool = False) -> None:
+            self.text, self.is_ad_referral = text, ad
+
+    assert _typed_a_question(_M("berapa biayanya?"))
+    assert not _typed_a_question(_M(_AD_PREFILL, ad=True))
+    assert not _typed_a_question(_M(_AD_PREFILL))
+    assert not _typed_a_question(_M("   "))
+    assert not _typed_a_question(None)

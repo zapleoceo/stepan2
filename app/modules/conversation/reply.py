@@ -30,8 +30,17 @@ from .money_gate import MONEY_CORRECTION, MONEY_ESCALATION_REASON, money_issues
 from .prompt import lead_name_hint, source_hint
 from .repository import DossierRepo
 from .routing import SMART, pick_capability
+from .signals import AD_TEMPLATE_RE, is_answerable_question
 
 logger = logging.getLogger(__name__)
+
+ANSWER_FIRST_CORRECTION = (
+    "[System: the lead asked you something directly and your draft did not answer it. Rewrite "
+    "the SAME message so the FIRST sentence gives them the actual answer from the knowledge "
+    "base, then continue as you intended. If you genuinely don't have the fact, say what you "
+    "do know and offer to confirm the rest — never reply to a direct question with only a "
+    "question back.]"
+)
 
 class ReplyService(ReplyDelivery):
     """Produce one reply for one thread, and remember what it learned.
@@ -88,7 +97,8 @@ class ReplyService(ReplyDelivery):
         decision = await self._vet(
             engine, ctx, messages, thread_id, decision,
             workflow=workflow, capability=capability, context=context, lang=lang,
-            last_inbound=(last_in.text if last_in is not None else "") or "")
+            last_inbound=(last_in.text if last_in is not None else "") or "",
+            lead_typed_a_question=_typed_a_question(last_in))
 
         merged = merge_dossier(stored, decision.dossier)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
@@ -100,16 +110,18 @@ class ReplyService(ReplyDelivery):
     async def _vet(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
         decision: TurnDecision, *, workflow: str, capability: str, context: str, lang: str,
-        last_inbound: str,
+        last_inbound: str, lead_typed_a_question: bool = False,
     ) -> TurnDecision:
-        """Two gates, deliberately asymmetric.
+        """Three gates, deliberately asymmetric.
 
         The money gate fails CLOSED, because quoting a price the school never set is a promise
         it has to honour. The critic fails OPEN, because an unreviewed real answer beats a stub
         — v2 had this the wrong way round and converted broker hiccups into lost leads.
 
-        Together with generation this caps a turn at three calls: the money gate and the critic
-        never both spend a rewrite."""
+        The answer gate sits between them: it reads the move the model DECLARED rather than its
+        prose, so no other instruction can argue with it.
+
+        At most ONE of the three spends a rewrite, so a turn stays capped at three calls."""
         issues = money_issues(decision.reply, context)
         if issues:
             logger.warning("v3 money gate branch=%d thread=%d: %s",
@@ -125,6 +137,20 @@ class ReplyService(ReplyDelivery):
                 return replace(fixed or decision, needs_human=True,
                                human_reason=MONEY_ESCALATION_REASON)
             return fixed
+
+        if lead_typed_a_question and decision.move != "answer_question":
+            # Checked against the move the model DECLARED, not against its prose: cheap, exact,
+            # and impossible for another instruction to argue with. Two live threads showed why
+            # a prompt rule alone isn't enough — the same input got answered on one and
+            # deflected on the next. Only fires when the lead TYPED the question; a prefilled
+            # ad button is a tap, and opening a tap with a warm question is correct.
+            logger.info("answer gate branch=%d thread=%d: lead asked, move was %s",
+                        self.branch_id, thread_id, decision.move)
+            answered = await self._regenerate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                correction=ANSWER_FIRST_CORRECTION)
+            if answered is not None:
+                return answered  # shipped as-is; a second rewrite is what v2 did
 
         if capability != SMART:
             return decision  # routine turn — not worth a second call
@@ -153,6 +179,22 @@ class ReplyService(ReplyDelivery):
             workflow=workflow, capability=SMART, branch_id=self.branch_id)
         return rewritten
 
+
+
+def _typed_a_question(last_in: object) -> bool:
+    """The lead asked something IN THEIR OWN WORDS.
+
+    An ad's prefilled button text reads like a question ("Boleh info jadwal, durasi, dan
+    biaya?") but the lead never typed it — they tapped an ad. Answering a tap with a price list
+    is what the old opener did; the right move there is a warm question. IG's own referral
+    metadata (`is_ad_referral`) settles it structurally, with the text template as the fallback
+    for messages ingested before that flag existed."""
+    if last_in is None:
+        return False
+    text = (getattr(last_in, "text", "") or "").strip()
+    if not text or getattr(last_in, "is_ad_referral", False) or AD_TEMPLATE_RE.match(text):
+        return False
+    return is_answerable_question(text)
 
 
 def _awaiting_media(dialog: list) -> bool:

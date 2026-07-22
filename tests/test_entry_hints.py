@@ -13,7 +13,7 @@ import pytest
 from app.modules.conversation.contract import contract
 from app.modules.conversation.prompt import source_hint
 
-_ORDERS = ("don't present", "do not present", "open with one", "ask what brought",
+_ORDERS = ("don't present", "do not present", "ask what brought",
            "build rapport before", "details come after")
 
 
@@ -25,10 +25,12 @@ def test_an_entry_hint_gives_no_behavioural_order(source: str) -> None:
         assert order not in hint, f"{source} hint still commands: {order}"
 
 
-def test_the_ad_hint_says_the_prefill_is_still_worth_answering() -> None:
-    """It is not the lead's own words, but it is what they want to know."""
-    hint = source_hint("ad_clicktomsg") or ""
-    assert "answer it" in hint.lower()
+def test_the_ad_hint_says_a_tap_is_not_a_question() -> None:
+    """The button's text reads like a question, but the lead never typed it — so there is
+    nothing to answer, and opening with a warm question is the correct move."""
+    hint = (source_hint("ad_clicktomsg") or "").lower()
+    assert "nothing to answer" in hint
+    assert "tapped" in hint
 
 
 def test_the_ad_hint_still_blocks_inventing_facts_about_the_lead() -> None:
@@ -37,10 +39,12 @@ def test_the_ad_hint_still_blocks_inventing_facts_about_the_lead() -> None:
     assert "no goal" in hint and "no budget" in hint
 
 
-def test_no_entry_hint_contradicts_the_answer_first_rule() -> None:
-    assert "FIRST sentence answers it" in contract("id")
-    for source in ("ad_clicktomsg", "story"):
-        assert "discovery question" not in (source_hint(source) or "").lower()
+def test_the_contract_scopes_answer_first_to_words_the_lead_typed() -> None:
+    """Otherwise it collides with the ad hint, and two rules in conflict make the model pick
+    one at random — which is exactly what live threads showed."""
+    text = contract("id")
+    assert "If the lead TYPED a question" in text
+    assert "a prefilled ad button is a tap, not a question" in text
 
 
 def test_an_unknown_entry_point_adds_nothing() -> None:
