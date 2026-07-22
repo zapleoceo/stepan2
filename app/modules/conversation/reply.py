@@ -457,9 +457,15 @@ async def guard_decision(
                  branch_id, thread_id)
     # Guard-origin escalation: stamp its own reason so the alert and chat log don't
     # misattribute it to the lead or to the model's stage_reason (keep a real model-named
-    # gap if it happened to set one).
+    # gap if it happened to set one). The alert reads kb_gap verbatim - carry the actual
+    # deterministic violations + rejected draft so it's diagnosable from the Telegram alert
+    # alone, same as the critic-gate handoff below.
+    enriched_gap = (
+        f"{guard.GUARD_HANDOFF_REASON}\nПроблема: {'; '.join(remaining[:5])[:300]}\n"
+        f"Черновик: «{(fixed.reply or '').strip()[:250]}»"
+    )
     return replace(fixed, reply=guard.SAFE_FALLBACK, needs_manager=True,
-                   kb_gap=fixed.kb_gap or guard.GUARD_HANDOFF_REASON), regen_meta
+                   kb_gap=fixed.kb_gap or enriched_gap), regen_meta
 
 
 async def apply_critic(
@@ -524,8 +530,20 @@ async def apply_critic(
     # Two drafts couldn't clear the bar — hand the lead to a human rather than send a sub-par
     # reply. This is the guarantee's teeth: only proven-good replies reach the lead.
     base = fixed if fixed is not None and fixed.reply else decision
+    last_crit = recrit if fixed is not None and fixed.reply else crit
+    last_draft = (base.reply or decision.reply or "").strip()
+    # The Telegram alert reads kb_gap verbatim (raise_manager_alert) - a model-set kb_gap is
+    # kept as-is (it named a real fact gap), but the GENERIC handoff reason told a human nothing
+    # actionable: no visibility into WHAT the critic actually objected to or what the model
+    # tried to say, so every incident needed live container logs (lost on the next deploy/
+    # restart) to diagnose. Carry the critic's own verdict + the rejected draft into the alert
+    # itself - real AI-generated diagnostic data, not a guess reconstructed after the fact.
+    enriched_gap = (
+        f"{critic.CRITIC_HANDOFF_REASON}\nКритик: {last_crit.summary()[:300]}\n"
+        f"Черновик: «{last_draft[:250]}»"
+    )
     return replace(base, reply=guard.SAFE_FALLBACK, needs_manager=True,
-                   kb_gap=base.kb_gap or critic.CRITIC_HANDOFF_REASON), regen_meta
+                   kb_gap=base.kb_gap or enriched_gap), regen_meta
 
 
 class ReplyService:
