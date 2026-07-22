@@ -45,6 +45,9 @@ class _Knowledge:
     async def knowledge_context(self, product_slug, **kw):  # noqa: ANN001, ANN003, ANN201
         return self._context
 
+    async def objection_snippets(self, categories):  # noqa: ANN001, ANN201
+        return ""
+
 
 def _answer(**over) -> str:  # noqa: ANN003
     payload = {"reply": "halo kak", "move": "answer_question", "stage": "qualifying"}
@@ -425,3 +428,46 @@ async def test_the_pitch_gate_never_fights_the_answer_gate(db_session) -> None: 
 
     assert decision is not None and "13.360.000" in decision.reply
     assert len(llm.capabilities) == 1
+
+
+# ── objection playbook: only the matching category reaches the model ─────────
+
+async def test_only_the_open_objections_category_is_pulled_into_context(db_session) -> None:  # noqa: ANN001
+    from app.modules.conversation.dossier import LeadDossier, Objection
+
+    class _KnowledgeWithPlaybook(_Knowledge):
+        async def objection_snippets(self, categories):  # noqa: ANN001, ANN201
+            return " | ".join(f"[{c}]" for c in sorted(categories)) if categories else ""
+
+    bid, tid, _lead_id = await _thread(
+        db_session, texts=(("in", "halo"), ("out", "hai kak")),
+        dossier=LeadDossier(pains=["takut telat"], desired_state=["ganti karier"],
+                            objections=[Objection("mahal", category="price"),
+                                       Objection("takut ga dapat kerja", category="job_outcome")]
+                            ).to_json())
+    llm = _LLM(_answer())
+    svc = ReplyService(db_session, bid, llm, _KnowledgeWithPlaybook(), branch_settings=None)
+    await svc.decide(tid)
+
+    system = llm.messages[0][0]["content"]
+    assert "[job_outcome]" in system and "[price]" in system
+    assert "[time]" not in system and "[trust]" not in system
+
+
+async def test_a_handled_objection_no_longer_pulls_its_category(db_session) -> None:  # noqa: ANN001
+    from app.modules.conversation.dossier import LeadDossier, Objection
+
+    class _KnowledgeWithPlaybook(_Knowledge):
+        async def objection_snippets(self, categories):  # noqa: ANN001, ANN201
+            return " | ".join(f"[{c}]" for c in sorted(categories)) if categories else ""
+
+    bid, tid, _lead_id = await _thread(
+        db_session, texts=(("in", "halo"), ("out", "hai kak")),
+        dossier=LeadDossier(pains=["takut telat"], desired_state=["ganti karier"],
+                            objections=[Objection("mahal", "handled", category="price")]
+                            ).to_json())
+    llm = _LLM(_answer())
+    svc = ReplyService(db_session, bid, llm, _KnowledgeWithPlaybook(), branch_settings=None)
+    await svc.decide(tid)
+
+    assert "[price]" not in llm.messages[0][0]["content"]

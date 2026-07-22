@@ -105,7 +105,8 @@ Return ONLY this JSON, no prose and no markdown fences:
 "phone": str|null, "needs_human": bool, "human_reason": str|null, "reply_language": str|null, \
 "dossier": {{"role": str, "job_to_be_done": str, "pains": [str], "desired_state": [str], \
 "decides_with": str, "readiness": str, "prices_quoted": [str], "payment_preference": str, \
-"budget_signal": str, "objections": [{{"text": str, "status": str, "handled_by": str}}], \
+"budget_signal": str, \
+"objections": [{{"text": str, "status": str, "handled_by": str, "category": str}}], \
 "products_named": [str], "cases_used": [str], "arguments_used": [str], "refusal": str}}}}
 
 move: the one you picked, from the list above.
@@ -117,6 +118,8 @@ dossier: your updated read. Carry forward what's above and add what this turn re
   role: school|student|working|jobseeking|parent. decides_with: self|parents|family.
   readiness: exploring|considering|ready. refusal: none|soft|vague|blunt.
   objections: everything raised so far; status 'open' or 'handled' with how you handled it.
+  category: price|time|trust|job_outcome|self_study_free|parent_approval, else empty — \
+  pulls in the matching argument bank, so get it right rather than guess.
   prices_quoted / products_named / cases_used / arguments_used: what you have ALREADY used
   with this lead, so you don't serve the same thing twice. Append, never drop.
   Record what the LEAD revealed, in your own clearest phrasing — not what you suggested to

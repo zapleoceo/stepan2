@@ -18,6 +18,7 @@ from app.config import settings
 from app.ports.llm import LLMPort
 
 from .repository import KnowledgeRepo, ProductRepo
+from .sections import split_sections
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ _QUICK_FACTS_RE = re.compile(r"(?im)^\s*QUICK FACTS:\s*(.+)$")
 # terse catalog line isn't enough to ground a real offer, and the model offering them from
 # memory got the critic to false-reject ('Demo Event not in KB') and cascade to a hand-off.
 _ALWAYS_PRODUCT_SLUGS = ("vibe_coding_demo_event",)  # Open House retired 2026-07-21
+
+# NOT in _ALWAYS_DOC_SLUGS on purpose — this doc never loads whole. Its `## price`,
+# `## time`, ... sections are argument banks per objection category (dossier.
+# OBJECTION_CATEGORIES); objection_snippets() below pulls out only the categories this
+# lead actually raised, via the same split_sections the KB editor already uses.
+OBJECTION_PLAYBOOK_SLUG = "objection_playbook"
 
 
 class KnowledgeService:
@@ -144,6 +151,18 @@ class KnowledgeService:
             if doc is not None and doc.content.strip():
                 parts.append(f"[{slug}]\n{doc.content.strip()}")
         return "\n\n".join(parts)
+
+    async def objection_snippets(self, categories: frozenset[str]) -> str:
+        """Argument bank entries for only the objection categories this lead actually raised
+        — never the whole playbook. Empty categories or a missing doc return ''."""
+        if not categories:
+            return ""
+        doc = await self.docs.by_slug(OBJECTION_PLAYBOOK_SLUG)
+        if doc is None or not doc.content.strip():
+            return ""
+        matched = [f"[objection:{heading}]\n{body}"
+                  for heading, body in split_sections(doc.content) if heading in categories]
+        return "\n\n".join(matched)
 
     async def _always_products_block(self, exclude: str | None) -> str:
         """Full cards for the universal low-friction event products, skipping the focus one."""

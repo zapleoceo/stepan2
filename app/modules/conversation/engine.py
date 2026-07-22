@@ -137,15 +137,22 @@ class DecisionEngine:
         stored_needs = parse_needs(lead.needs if lead is not None else None)
         return DecisionContext(thread, dialog, lead, stored_needs, budget)
 
-    async def kb_context(self, ctx: DecisionContext, thread_id: int, *, light: bool) -> str:
+    async def kb_context(
+        self, ctx: DecisionContext, thread_id: int, *, light: bool,
+        objection_categories: frozenset[str] = frozenset(),
+    ) -> str:
         """The branch's assembled knowledge for this turn, memoized per turn.
 
         A DecisionEngine lives for ONE lead-turn, and every regen calls back in with the same
-        dialog, so without this the broker embed + assembly ran identically 2-4× a turn."""
+        dialog, so without this the broker embed + assembly ran identically 2-4× a turn.
+
+        `objection_categories` pulls in ONLY the matching objection-playbook sections (see
+        knowledge.service.objection_snippets) — never the whole playbook, and nothing at all
+        when the lead hasn't raised anything the model could classify."""
         lead_type = ctx.lead.lead_type if ctx.lead is not None else None
         has_open_objection = bool(ctx.stored_needs.objections)
         cache_key = (ctx.thread.product_slug, _retrieval_query(ctx.dialog), light,
-                     lead_type, has_open_objection)
+                     lead_type, has_open_objection, objection_categories)
         context = self._ctx_cache.get(cache_key)
         if context is None:
             context = await self.knowledge.knowledge_context(
@@ -156,6 +163,9 @@ class DecisionEngine:
             # day "8 Agustus 2026" falls on or how far off it is, and anything already past is
             # labelled. See dates.annotate_dates for why this is data and not a rule.
             context = annotate_dates(context, (await self._now_local()).date())
+            snippets = await self.knowledge.objection_snippets(objection_categories)
+            if snippets:
+                context = f"{context}\n\n{snippets}"
             self._ctx_cache[cache_key] = context
         self.last_context = context  # the reply-guard checks the draft against exactly this
         return context

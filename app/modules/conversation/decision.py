@@ -309,7 +309,8 @@ def _objections(value: object) -> list[Objection]:
             text = _text(item.get("text"), lower=False)[:160]
             if text:
                 out.append(Objection(text, _text(item.get("status")) or "open",
-                                     _text(item.get("handled_by"), lower=False)[:160]))
+                                     _text(item.get("handled_by"), lower=False)[:160],
+                                     _text(item.get("category"))))
         elif isinstance(item, str) and item.strip():
             out.append(Objection(item.strip()[:160]))
     return out[:_MAX_OBJECTIONS]

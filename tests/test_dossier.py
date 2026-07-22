@@ -154,3 +154,43 @@ def test_objections_stored_as_plain_strings_still_load() -> None:
     d = parse_dossier(raw)
     assert d.open_objections() == ["mahal"]
     assert d.objections[1].status == "handled"
+
+
+# ── objection categories: pick which playbook section loads ──────────────────
+
+def test_a_recognised_category_survives_the_roundtrip() -> None:
+    d = LeadDossier(objections=[Objection("mahal", category="price")])
+    assert parse_dossier(d.to_json()).objections[0].category == "price"
+
+
+def test_an_unrecognised_category_is_dropped_not_stored() -> None:
+    """A model typo must not silently create a playbook section that will never match."""
+    d = LeadDossier(objections=[Objection("mahal", category="expensive_stuff")])
+    assert parse_dossier(d.to_json()).objections[0].category == ""
+
+
+def test_open_objection_categories_only_counts_open_ones() -> None:
+    d = LeadDossier(objections=[
+        Objection("mahal", "handled", category="price"),
+        Objection("nggak ada waktu", category="time"),
+    ])
+    assert d.open_objection_categories() == frozenset({"time"})
+
+
+def test_open_objection_categories_ignores_uncategorised_objections() -> None:
+    d = LeadDossier(objections=[Objection("saya bingung")])
+    assert d.open_objection_categories() == frozenset()
+
+
+def test_merging_can_add_a_category_to_an_objection_first_seen_without_one() -> None:
+    """The model may recognise a live objection's category a turn late — that update must
+    not be lost just because the objection already existed."""
+    stored = LeadDossier(objections=[Objection("mahal banget")])
+    merged = merge_dossier(stored, LeadDossier(objections=[Objection("mahal", category="price")]))
+    assert merged.objections[0].category == "price"
+
+
+def test_merging_never_erases_a_category_already_known() -> None:
+    stored = LeadDossier(objections=[Objection("mahal", category="price")])
+    merged = merge_dossier(stored, LeadDossier(objections=[Objection("mahal")]))
+    assert merged.objections[0].category == "price"

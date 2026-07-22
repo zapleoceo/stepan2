@@ -30,19 +30,32 @@ DECIDES_WITH = ("self", "parents", "family")
 # never an argument; vague ("makasih infonya") = accept, one delayed touch; blunt ("nggak
 # usah") = stop, zero follow-ups. Treating all three alike is what got leads hammered.
 REFUSALS = ("none", "soft", "vague", "blunt")
+# Picks which section of the objection playbook (knowledge_doc, one `## ` section per
+# category) loads into context — see knowledge.service.objection_snippets. "other" and
+# unrecognised values load nothing extra, same as an objection the model didn't classify.
+OBJECTION_CATEGORIES = (
+    "price", "time", "trust", "job_outcome", "self_study_free", "parent_approval",
+)
 
 
 @dataclass(frozen=True)
 class Objection:
     """One objection and whether it is still live. `handled_by` is how it was answered, so a
-    later turn can reference the answer instead of repeating it."""
+    later turn can reference the answer instead of repeating it.
+
+    `category` picks which section of the objection playbook (a knowledge_doc, sections
+    named after these categories) gets loaded into context — never the whole playbook, only
+    the one that matches what this lead actually raised. Empty when the model doesn't
+    recognise a category; nothing extra loads for those, same as an unhandled fact."""
 
     text: str
     status: str = "open"  # open | handled
     handled_by: str = ""
+    category: str = ""  # price|time|trust|job_outcome|self_study_free|parent_approval|other
 
     def as_dict(self) -> dict[str, str]:
-        return {"text": self.text, "status": self.status, "handled_by": self.handled_by}
+        return {"text": self.text, "status": self.status, "handled_by": self.handled_by,
+                "category": self.category}
 
 
 @dataclass
@@ -72,6 +85,11 @@ class LeadDossier:
 
     def open_objections(self) -> list[str]:
         return [o.text for o in self.objections if o.status == "open"]
+
+    def open_objection_categories(self) -> frozenset[str]:
+        """Which playbook sections to load — see knowledge.service.objection_snippets."""
+        return frozenset(o.category for o in self.objections
+                         if o.status == "open" and o.category)
 
     def has_discovery(self) -> bool:
         """A pain AND a desired state — the emotional layer, not just a surface goal. Same bar
@@ -170,10 +188,15 @@ def _merge_objections(stored: list[Objection], delta: list[Objection]) -> list[O
             continue
         index = _match_objection(out, text)
         if index is None:
-            out.append(Objection(text, _status(incoming.status), incoming.handled_by.strip()))
-        elif incoming.status == "handled":
-            out[index] = Objection(out[index].text, "handled",
-                                   incoming.handled_by.strip() or out[index].handled_by)
+            out.append(Objection(text, _status(incoming.status), incoming.handled_by.strip(),
+                                 _category(incoming.category)))
+        else:
+            existing = out[index]
+            out[index] = Objection(
+                existing.text,
+                "handled" if incoming.status == "handled" else existing.status,
+                incoming.handled_by.strip() or existing.handled_by,
+                _category(incoming.category) or existing.category)
     return out[:_MAX_OBJECTIONS]
 
 
@@ -188,6 +211,11 @@ def _match_objection(items: list[Objection], text: str) -> int | None:
 
 def _status(value: str) -> str:
     return "handled" if (value or "").strip().lower() == "handled" else "open"
+
+
+def _category(value: str) -> str:
+    candidate = (value or "").strip().lower()
+    return candidate if candidate in OBJECTION_CATEGORIES else ""
 
 
 def _from_json(raw: str | None) -> LeadDossier | None:
@@ -229,8 +257,10 @@ def _objections(value: object) -> list[Objection]:
     out: list[Objection] = []
     for item in value:
         if isinstance(item, dict) and str(item.get("text") or "").strip():
-            out.append(Objection(str(item["text"]).strip(), _status(str(item.get("status") or "")),
-                                 str(item.get("handled_by") or "").strip()))
+            out.append(Objection(
+                str(item["text"]).strip(), _status(str(item.get("status") or "")),
+                str(item.get("handled_by") or "").strip(),
+                _category(str(item.get("category") or ""))))
         elif isinstance(item, str) and item.strip():
             out.append(Objection(item.strip()))
     return out[:_MAX_OBJECTIONS]

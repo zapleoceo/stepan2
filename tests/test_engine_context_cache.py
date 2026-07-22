@@ -24,6 +24,9 @@ class _SpyKnowledge:
         self.calls += 1
         return f"CTX[{query}|light={light}]"
 
+    async def objection_snippets(self, categories):  # noqa: ANN001, ANN201
+        return ""
+
 
 class _FakeLLM:
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201

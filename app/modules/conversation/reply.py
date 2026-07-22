@@ -79,7 +79,9 @@ class ReplyService(ReplyDelivery):
 
         is_first_reply = not any(m.direction == "out" for m in ctx.dialog)
         capability = pick_capability(stored, is_first_reply=is_first_reply)
-        context = await engine.kb_context(ctx, thread_id, light=False)
+        context = await engine.kb_context(
+            ctx, thread_id, light=False,
+            objection_categories=stored.open_objection_categories())
         messages = build_messages_v3(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),

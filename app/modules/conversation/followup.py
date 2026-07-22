@@ -222,7 +222,9 @@ class FollowupService:
             return False
 
         lang = await self._lang()
-        context = await engine.kb_context(ctx, thread_id, light=True)
+        context = await engine.kb_context(
+            ctx, thread_id, light=True,
+            objection_categories=stored.open_objection_categories())
         messages = build_messages_v3(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
