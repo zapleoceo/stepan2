@@ -870,8 +870,11 @@ DISCOVER_BEFORE_PRICE_NUDGE = (
     "NOT ask for the price. Do NOT quote the fee, the monthly figure, or the total now — a price "
     "dropped before there's a reason to pay it just becomes a number they balk at. Ask ONE warm, "
     "specific question about what they want to achieve or what's getting in their way, so the "
-    "price later lands against something worth paying for. (If they DO ask the price outright, "
-    "answer it — this only applies while they haven't.)]"
+    "price later lands against something worth paying for. On a BARE first message ('halo', "
+    "'hi', a greeting with zero content) - ONE plain open question, no numbered 1️⃣2️⃣3️⃣ menu; a "
+    "menu is a wall to someone who just said hi and reliably gets rejected as overwhelming. "
+    "Save the numbered list for once they've named a direction worth narrowing. (If they DO "
+    "ask the price outright, answer it — this only applies while they haven't.)]"
 )
 
 # A follow-up that names the lead's OWN earlier words ("dulu Kakak sempat bilang soal <need>")
