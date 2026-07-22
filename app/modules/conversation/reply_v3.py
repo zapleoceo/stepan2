@@ -16,6 +16,7 @@ this replaces how a reply is produced, not how it is delivered."""
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -26,10 +27,12 @@ from app.modules.settings.service import BranchSettings
 from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
+from . import critic_v3
 from .decision import Decision
 from .decision_v3 import DecisionV3, parse_decision_v3
 from .dossier import merge_dossier
 from .engine import DecisionEngine
+from .guard_v3 import MONEY_CORRECTION, money_issues
 from .prompt import lead_name_hint, source_hint
 from .prompt_v3 import build_messages_v3
 from .reply import _script_lang
@@ -37,6 +40,9 @@ from .repository import CoachingNoteRepo, DossierRepo, MessageRepo, ThreadRepo
 from .routing_v3 import FAST, SMART, pick_capability_v3
 
 logger = logging.getLogger(__name__)
+
+_MONEY_ESCALATION = ("Степан дважды назвал сумму или ссылку, которых нет в базе знаний — "
+                     "нужен ручной ответ менеджера с точной цифрой")
 
 
 class ReplyServiceV3:
@@ -84,9 +90,9 @@ class ReplyServiceV3:
 
         is_first_reply = not any(m.direction == "out" for m in ctx.dialog)
         capability = pick_capability_v3(stored, is_first_reply=is_first_reply)
+        context = await engine.kb_context(ctx, thread_id, light=False)
         messages = build_messages_v3(
-            await engine.kb_context(ctx, thread_id, light=False),
-            ctx.dialog, lang, stored,
+            context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
             source_block=source_hint(ctx.thread.lead_source),
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
@@ -98,6 +104,10 @@ class ReplyServiceV3:
                                         workflow=workflow, capability=capability)
         if decision is None:
             return None
+        decision = await self._vet(
+            engine, ctx, messages, thread_id, decision,
+            workflow=workflow, capability=capability, context=context, lang=lang,
+            last_inbound=(last_in.text if last_in is not None else "") or "")
 
         merged = merge_dossier(stored, decision.dossier)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
@@ -105,6 +115,67 @@ class ReplyServiceV3:
         logger.info("v3 branch=%d thread=%d move=%s tier=%s first=%s",
                     self.branch_id, thread_id, decision.move, capability, is_first_reply)
         return decision.to_legacy(merged)
+
+    async def _vet(  # noqa: PLR0913
+        self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
+        decision: DecisionV3, *, workflow: str, capability: str, context: str, lang: str,
+        last_inbound: str,
+    ) -> DecisionV3:
+        """Two gates, deliberately asymmetric.
+
+        The money gate fails CLOSED, because quoting a price the school never set is a promise
+        it has to honour. The critic fails OPEN, because an unreviewed real answer beats a stub
+        — v2 had this the wrong way round and converted broker hiccups into lost leads.
+
+        Together with generation this caps a turn at three calls: the money gate and the critic
+        never both spend a rewrite."""
+        issues = money_issues(decision.reply, context)
+        if issues:
+            logger.warning("v3 money gate branch=%d thread=%d: %s",
+                           self.branch_id, thread_id, "; ".join(issues))
+            fixed = await self._regenerate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                correction=MONEY_CORRECTION.format(issues="; ".join(issues)))
+            if fixed is None or money_issues(fixed.reply, context):
+                # The one place v3 escalates on its own: we cannot let an invented figure
+                # reach the lead, and we will not answer money questions with silence.
+                logger.error("v3 money gate unfixable branch=%d thread=%d — escalating",
+                             self.branch_id, thread_id)
+                return replace(fixed or decision, needs_human=True,
+                               human_reason=_MONEY_ESCALATION)
+            return fixed
+
+        if capability != SMART:
+            return decision  # routine turn — not worth a second call
+        verdict = await critic_v3.review(
+            self.llm, reply=decision.reply, context=context, last_inbound=last_inbound,
+            lang=lang, branch_id=self.branch_id, thread_id=thread_id, budget=ctx.budget)
+        if verdict.sells:
+            return decision
+        logger.info("v3 critic branch=%d thread=%d rejected: %s",
+                    self.branch_id, thread_id, verdict.why)
+        rewritten = await self._regenerate(
+            engine, ctx, messages, thread_id, workflow=workflow,
+            correction=critic_v3.CRITIC_CORRECTION.format(why=verdict.why, fix=verdict.fix))
+        # Whatever comes back ships — it is NOT judged again. A second rejection is what sent
+        # v2 to a stub and switched the lead's bot off.
+        return rewritten or decision
+
+    async def _regenerate(  # noqa: PLR0913
+        self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
+        workflow: str, correction: str,
+    ) -> DecisionV3 | None:
+        """One rewrite on the strong model. None when it comes back unparseable, in which case
+        the caller keeps the original draft rather than losing the turn."""
+        raw, _meta = await engine.run(
+            ctx, [*messages, {"role": "user", "content": correction}], thread_id,
+            workflow=workflow, capability=SMART)
+        try:
+            return parse_decision_v3(raw)
+        except ValueError:
+            logger.warning("v3: unparseable rewrite branch=%d thread=%d — keeping the draft",
+                           self.branch_id, thread_id)
+            return None
 
     async def _generate(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001

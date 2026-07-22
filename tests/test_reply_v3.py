@@ -39,8 +39,11 @@ class _LLM:
 
 
 class _Knowledge:
+    def __init__(self, context: str = "KB FACTS") -> None:
+        self._context = context
+
     async def knowledge_context(self, product_slug, **kw):  # noqa: ANN001, ANN003, ANN201
-        return "KB FACTS"
+        return self._context
 
 
 def _answer(**over) -> str:  # noqa: ANN003
@@ -69,20 +72,30 @@ async def _thread(s, *, texts: tuple[tuple[str, str], ...] = (("in", "halo"),), 
     return b.id, th.id, lead.id
 
 
-def _service(session, branch_id: int, llm: _LLM) -> ReplyServiceV3:  # noqa: ANN001
-    return ReplyServiceV3(session, branch_id, llm, _Knowledge())
+def _service(session, branch_id: int, llm: _LLM, kb: str = "KB FACTS") -> ReplyServiceV3:  # noqa: ANN001
+    return ReplyServiceV3(session, branch_id, llm, _Knowledge(kb))
 
 
 # ── the happy path ────────────────────────────────────────────────────────────
 
-async def test_one_turn_is_one_model_call(db_session) -> None:  # noqa: ANN001
+async def test_a_routine_turn_is_a_single_model_call(db_session) -> None:  # noqa: ANN001
     """v2's worst case was twelve calls on one turn."""
-    bid, tid, _ = await _thread(db_session)
+    bid, tid, _ = await _thread(
+        db_session, texts=(("in", "halo"), ("out", "hai kak"), ("in", "oke")),
+        dossier=LeadDossier(readiness="exploring").to_json())
     llm = _LLM()
     decision = await _service(db_session, bid, llm).decide(tid)
     assert decision is not None
     assert decision.reply == "halo kak"
     assert len(llm.capabilities) == 1
+
+
+async def test_a_decisive_turn_costs_a_review_and_no_more(db_session) -> None:  # noqa: ANN001
+    """Generation plus one critic call — the reviewed path stays at two."""
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(), json.dumps({"sells": True}))
+    await _service(db_session, bid, llm).decide(tid)
+    assert len(llm.capabilities) == 2
 
 
 async def test_what_the_turn_learned_is_persisted(db_session) -> None:  # noqa: ANN001
@@ -139,7 +152,7 @@ async def test_the_opener_runs_on_the_strong_model(db_session) -> None:  # noqa:
     bid, tid, _ = await _thread(db_session)
     llm = _LLM()
     await _service(db_session, bid, llm).decide(tid)
-    assert llm.capabilities == [SMART]
+    assert llm.capabilities[0] == SMART
 
 
 async def test_a_quiet_mid_conversation_turn_runs_cheap(db_session) -> None:  # noqa: ANN001
@@ -197,3 +210,82 @@ async def test_the_chosen_move_is_kept_for_logging(db_session) -> None:  # noqa:
     await service.decide(tid)
     assert service.last_decision is not None
     assert service.last_decision.move == "quote_price"
+
+
+# ── the two gates, deliberately asymmetric ───────────────────────────────────
+
+_KB_PRICES = "Vibe Coding: harga Rp 13.360.000, DP Rp 500.000."
+
+
+async def test_an_invented_price_is_rewritten_before_it_reaches_the_lead(db_session) -> None:  # noqa: ANN001
+    """The money gate fails CLOSED — a price the school never set is a promise it must honour."""
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak"),
+               _answer(reply="Investasinya Rp 13.360.000 kak"),
+               json.dumps({"sells": True}))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert "13.360.000" in decision.reply
+    assert decision.needs_manager is False
+
+
+async def test_a_price_that_stays_invented_escalates_rather_than_shipping(db_session) -> None:  # noqa: ANN001
+    """The one place v3 escalates on its own."""
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert decision.needs_manager is True
+    assert "базе знаний" in (decision.manager_question or "")
+
+
+async def test_the_money_gate_and_the_critic_never_both_spend_a_rewrite(db_session) -> None:  # noqa: ANN001
+    """Three calls is the ceiling for a turn."""
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak"),
+               _answer(reply="Investasinya Rp 13.360.000 kak"))
+    await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+    assert len(llm.capabilities) <= 3
+
+
+async def test_a_reviewer_rejection_produces_a_rewrite_not_a_stub(db_session) -> None:  # noqa: ANN001
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(reply="ada yang bisa dibantu lagi?"),
+               json.dumps({"sells": False, "why": "generic", "fix": "jawab pertanyaannya"}),
+               _answer(reply="Durasinya 6 bulan kak"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert decision.reply == "Durasinya 6 bulan kak"
+    assert decision.needs_manager is False
+
+
+async def test_a_rewrite_is_never_judged_a_second_time(db_session) -> None:  # noqa: ANN001
+    """A second rejection is what sent v2 to a stub and switched the lead's bot off."""
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(reply="generic"),
+               json.dumps({"sells": False, "why": "generic", "fix": "fix it"}),
+               _answer(reply="masih generic"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert decision.reply == "masih generic"
+    assert len(llm.capabilities) == 3
+
+
+async def test_an_unreachable_reviewer_ships_the_draft(db_session) -> None:  # noqa: ANN001
+    """Broker instability must not cost the lead their answer — the v2 inversion."""
+    class _Flaky(_LLM):
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+            if kw.get("workflow") == "critic_v3":
+                raise TimeoutError("chat:smart still pending after budget")
+            return await super().chat(messages, **kw)
+
+    bid, tid, _ = await _thread(db_session)
+    decision = await _service(db_session, bid, _Flaky(_answer(reply="jawaban asli"))).decide(tid)
+
+    assert decision is not None
+    assert decision.reply == "jawaban asli"
+    assert decision.needs_manager is False
