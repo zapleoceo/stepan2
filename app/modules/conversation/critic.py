@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from app.ports.llm import LLMPort
 
 from .needs import NeedsProfile
-from .situations import AD_TEMPLATE_RE
+from .situations import AD_TEMPLATE_RE, ANY_POST_SHARE_RE
 
 logger = logging.getLogger(__name__)
 
@@ -134,15 +134,29 @@ async def critique_reply(
     parse error returns Critique(ok=False, errored=True) so the caller fails CLOSED — the
     opposite of guard.verify_grounding, which fails open. A reply we couldn't verify is a
     reply we don't send."""
-    ad_note = (
-        "\nNOTE: this exact message is this account's common ad-click auto-opener template "
-        "(sent near-verbatim by many different leads right after tapping an ad's message "
-        "button, not something this lead personally composed) - it signals warm interest in "
-        "the ad's product, NOT a specific personal question demanding an immediate fact-dump. "
-        "A natural discovery/qualifying opener is a SOUND 'responsive' move here, not a dodge; "
-        "only fail 'responsive' for ignoring something the lead ACTUALLY typed themselves."
-        if AD_TEMPLATE_RE.search((last_inbound or "").strip()) else ""
-    )
+    inbound_stripped = (last_inbound or "").strip()
+    if AD_TEMPLATE_RE.search(inbound_stripped):
+        ad_note = (
+            "\nNOTE: this exact message is this account's common ad-click auto-opener template "
+            "(sent near-verbatim by many different leads right after tapping an ad's message "
+            "button, not something this lead personally composed) - it signals warm interest in "
+            "the ad's product, NOT a specific personal question demanding an immediate "
+            "fact-dump. A natural discovery/qualifying opener is a SOUND 'responsive' move here, "
+            "not a dodge; only fail 'responsive' for ignoring something the lead ACTUALLY typed "
+            "themselves."
+        )
+    elif ANY_POST_SHARE_RE.match(inbound_stripped):
+        ad_note = (
+            "\nNOTE: this message is a RESHARED Instagram post (icon + account handle + that "
+            "post's own caption) - the caption text belongs to whoever posted it, NOT the lead. "
+            "It is NEVER the lead's own statement, objection, or personal question, however it "
+            "reads (even if the caption literally says something like 'no promotion'). Judge "
+            "'responsive'/'objection' only against what the lead demonstrably typed themselves "
+            "elsewhere in the dialog - failing the draft for 'ignoring' or 'not handling' text "
+            "that is just a reposted caption is a MISJUDGMENT."
+        )
+    else:
+        ad_note = ""
     user = (
         f"KNOWLEDGE BASE:\n{context[:14000]}\n\n"
         f"KNOWN LEAD NEEDS & OPEN OBJECTIONS:\n{_needs_and_objections(needs, open_objections)}\n\n"

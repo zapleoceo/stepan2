@@ -193,7 +193,7 @@ def lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
             continue
         text = (m.text or "").strip()
         if (not text or AD_TEMPLATE_RE.match(text) or is_auto_reply(text)
-                or OWN_POST_SHARE_RE.match(text)):
+                or OWN_POST_SHARE_RE.match(text) or ANY_POST_SHARE_RE.match(text)):
             continue
         if text in (VOICE_PENDING_PH, IMAGE_PENDING_PH):
             continue
@@ -715,6 +715,15 @@ MENU_REPLY_NUDGE = (
 # the shared SMM ad got the full Rp 1.882.955 immediately). Prefix match (no $) catches the
 # caption-with-copy; requiring 'itstep' keeps a genuine third-party share out of scope.
 OWN_POST_SHARE_RE = re.compile(r"^[📷🎬📖🎥🎞]\s*\S*itstep", re.IGNORECASE)
+
+# ANY reshared Instagram post, not just our own — same structural signature (icon, handle,
+# middot, the SAME handle repeated, then the post's own caption). thread 4847: a lead reshared
+# an unrelated meme ("mistery219jakarta · mistery219jakarta DI LARANG PANSOS !!" — "no
+# showing off", a joke caption) and the caption got judged as the LEAD's own objection to being
+# pitched, tripping a false critic rejection — the exact OWN_POST_SHARE_RE bug, just for a
+# third-party account this narrower pattern doesn't cover. The caption of someone else's post
+# is never the lead's own statement regardless of whose account posted it.
+ANY_POST_SHARE_RE = re.compile(r"^[📷🎬📖🎥🎞👤]\s*(\S+)\s*·\s*\1\b", re.IGNORECASE)
 
 OWN_POST_NUDGE = (
     "[System: the lead shared one of OUR OWN Instagram posts — that is interest in that "
