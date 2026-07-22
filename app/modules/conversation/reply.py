@@ -1113,7 +1113,14 @@ class ReplyService:
             )
         else:
             reason_text = decision.stage_reason
-        if reason_text:
+        # A critic/guard-forced hand-off's reason is diagnostic detail for the Telegram alert
+        # (raise_manager_alert, unaffected by this) - showing it in the CHAT chronology too is
+        # just clutter a human keeps having to manually delete (asked 3x same session,
+        # 2026-07-22). A genuine model-named kb_gap/manager_question is real context worth
+        # keeping visible; the technical "critic rejected the draft twice" one is not.
+        is_technical_handoff = reason_text is not None and reason_text.startswith(
+            (critic.CRITIC_HANDOFF_REASON, guard.GUARD_HANDOFF_REASON))
+        if reason_text and not is_technical_handoff:
             self.session.add(ThreadLog(
                 branch_id=self.branch_id, thread_id=thread.id,
                 kind="stage_reason", detail=reason_text, actor="bot",
