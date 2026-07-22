@@ -148,19 +148,7 @@ class DecisionEngine:
 
         capability picks the model tier (see routing.pick_capability) — default stays smart
         so any caller that doesn't route keeps the strong model."""
-        light = workflow == "followup"
-        lead_type = ctx.lead.lead_type if ctx.lead is not None else None
-        has_open_objection = bool(ctx.stored_needs.objections)
-        cache_key = (ctx.thread.product_slug, _retrieval_query(ctx.dialog), light,
-                    lead_type, has_open_objection)
-        context = self._ctx_cache.get(cache_key)
-        if context is None:
-            context = await self.knowledge.knowledge_context(
-                ctx.thread.product_slug, query=_retrieval_query(ctx.dialog),
-                thread_id=thread_id, light=light,
-                lead_type=lead_type, has_open_objection=has_open_objection)
-            self._ctx_cache[cache_key] = context
-        self.last_context = context  # reply-guard checks the draft against exactly this
+        context = await self.kb_context(ctx, thread_id, light=workflow == "followup")
         notes = await self.coaching.active_manager_notes()
         messages = build_messages(
             context, ctx.dialog, lang, coaching_notes=notes,
@@ -173,6 +161,34 @@ class DecisionEngine:
             messages.append({"role": "user", "content": extra_user_msg})
         elif messages[-1]["role"] == "assistant":
             messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
+        return await self.run(ctx, messages, thread_id,
+                              workflow=workflow, capability=capability, bill=bill)
+
+    async def kb_context(self, ctx: DecisionContext, thread_id: int, *, light: bool) -> str:
+        """The branch's assembled knowledge for this turn, memoized per turn.
+
+        A DecisionEngine lives for ONE lead-turn, and every regen calls back in with the same
+        dialog, so without this the broker embed + assembly ran identically 2-4× a turn."""
+        lead_type = ctx.lead.lead_type if ctx.lead is not None else None
+        has_open_objection = bool(ctx.stored_needs.objections)
+        cache_key = (ctx.thread.product_slug, _retrieval_query(ctx.dialog), light,
+                     lead_type, has_open_objection)
+        context = self._ctx_cache.get(cache_key)
+        if context is None:
+            context = await self.knowledge.knowledge_context(
+                ctx.thread.product_slug, query=_retrieval_query(ctx.dialog),
+                thread_id=thread_id, light=light,
+                lead_type=lead_type, has_open_objection=has_open_objection)
+            self._ctx_cache[cache_key] = context
+        self.last_context = context  # the reply-guard checks the draft against exactly this
+        return context
+
+    async def run(
+        self, ctx: DecisionContext, messages: list[dict], thread_id: int, *,
+        workflow: str, capability: str, bill: bool = True,
+    ) -> tuple[str, dict]:
+        """Call the model and charge the branch's daily ledger. Prompt-shape agnostic, so v2
+        and v3 share one call path (billing, timeouts, broker-log tagging)."""
         raw, meta = await self.llm.chat(
             messages, capability=capability, require_json_schema=True,
             workflow=workflow, thread_id=thread_id, branch_id=self.branch_id,
