@@ -18,14 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import replace
 
-from sqlmodel.ext.asyncio.session import AsyncSession
-
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
-from app.adapters.db.models import Branch
-from app.modules.knowledge.service import KnowledgeService
-from app.modules.settings.service import BranchSettings
-from app.ports.llm import LLMPort
-from app.ports.notify import NotifierPort
 
 from . import critic_v3
 from .decision import Decision
@@ -35,8 +28,8 @@ from .engine import DecisionEngine
 from .guard_v3 import MONEY_CORRECTION, money_issues
 from .prompt import lead_name_hint, source_hint
 from .prompt_v3 import build_messages_v3
-from .reply import _script_lang
-from .repository import CoachingNoteRepo, DossierRepo, MessageRepo, ThreadRepo
+from .reply import ReplyService, _script_lang
+from .repository import DossierRepo
 from .routing_v3 import FAST, SMART, pick_capability_v3
 
 logger = logging.getLogger(__name__)
@@ -45,30 +38,17 @@ _MONEY_ESCALATION = ("Степан дважды назвал сумму или �
                      "нужен ручной ответ менеджера с точной цифрой")
 
 
-class ReplyServiceV3:
-    """Produce one reply for one thread, and remember what it learned."""
+class ReplyServiceV3(ReplyService):
+    """Produce one reply for one thread, and remember what it learned.
 
-    def __init__(  # noqa: PLR0913
-        self,
-        session: AsyncSession,
-        branch_id: int,
-        llm: LLMPort,
-        knowledge: KnowledgeService,
-        branch_settings: BranchSettings | None = None,
-        notifier: NotifierPort | None = None,
-        broker_budget_s: float | None = None,
-    ) -> None:
-        self.session = session
-        self.branch_id = branch_id
-        self.llm = llm
-        self.knowledge = knowledge
-        self.settings = branch_settings
-        self._notifier = notifier
-        self._broker_budget_s = broker_budget_s
-        self.threads = ThreadRepo(session, branch_id)
-        self.messages = MessageRepo(session, branch_id)
-        self.coaching = CoachingNoteRepo(session, branch_id)
-        self.dossiers = DossierRepo(session, branch_id)
+    Subclasses v2 on purpose: only the DECISION procedure changes. Enqueueing, bubble
+    splitting, stage events, hand-off alerts and the outbox are identical and already
+    battle-tested, so they are inherited rather than reimplemented — every caller can swap the
+    two services without knowing which one it holds."""
+
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        super().__init__(*args, **kwargs)
+        self.dossiers = DossierRepo(self.session, self.branch_id)
         self.last_decision: DecisionV3 | None = None  # the raw v3 answer, for logging/tests
 
     async def decide(self, thread_id: int, workflow: str = "reply") -> Decision | None:
@@ -83,7 +63,7 @@ class ReplyServiceV3:
         stored = await self.dossiers.load(lead.id if lead is not None else None)
         last_in = next((m for m in reversed(ctx.dialog) if m.direction == "in"), None)
         script_lang = _script_lang(last_in.text if last_in is not None else "")
-        lang = script_lang or await self._lang()
+        lang = script_lang or await self._lang(lead)
         if script_lang and lead is not None and lead.preferred_language != script_lang:
             lead.preferred_language = script_lang
             self.session.add(lead)
@@ -203,11 +183,6 @@ class ReplyServiceV3:
             logger.warning("v3: unparseable on both tiers branch=%d thread=%d — skip",
                            self.branch_id, thread_id)
             return None
-
-    async def _lang(self) -> str:
-        branch = await self.session.get(Branch, self.branch_id)
-        return branch.lang if branch is not None else "id"
-
 
 def _awaiting_media(dialog: list) -> bool:
     """The newest inbound is a voice/image the broker hasn't transcribed yet — hold the turn so
