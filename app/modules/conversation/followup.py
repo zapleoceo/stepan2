@@ -92,8 +92,13 @@ _FOLLOWUP_NUDGE = (
     "FACTS ONLY FROM THE KNOWLEDGE BASE: never invent an alumni story, an ROI/percentage "
     "figure, a discount, a deadline, or a class schedule that is not written there (live "
     "follow-ups fabricated 'ROI 30% in the first month' and 'an app used by thousands' — "
-    "one screenshot of a made-up claim costs more than the lead). No real fact for your "
-    "angle → use a general truthful line or pick another angle."
+    "one screenshot of a made-up claim costs more than the lead). Before falling back to a "
+    "vague hype line ('gimana serunya belajar di sini', 'seru banget lho') - check the KB's "
+    "concrete differentiators first (network since 1999 in 24 countries, 267k+ alumni, "
+    "authorized Microsoft/Cisco/Autodesk center, AI-first curriculum, honest no-fake-job-"
+    "guarantee stance, price vs named competitors) or a real success story - one of THOSE is "
+    "almost always available and beats vague hype every time. Vague filler is the LAST "
+    "resort, only when truly nothing concrete fits this angle."
     " Return the JSON as usual.]"
 )
 
