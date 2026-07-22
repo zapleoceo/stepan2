@@ -165,7 +165,7 @@ SCHEMA: list[SettingSection] = [
         # failing CLOSED to a human). v3 = the rebuilt one (small contract, LeadDossier state,
         # next-best-move, narrow money-only gate, critic failing OPEN). Kept as a per-branch
         # switch so v3 can be turned off on a live branch without reverting code.
-        _f("reply_engine", "text", "v2",
+        _f("reply_engine", "text", "v3",
            _l("Движок ответов", "Reply engine", "Mesin balasan"),
            choices=[("v2", _l("v2 — прежний", "v2 — legacy", "v2 — lama")),
                     ("v3", _l("v3 — новый", "v3 — rebuilt", "v3 — baru"))],

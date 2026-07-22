@@ -96,6 +96,8 @@ async def _branch(s) -> int:
     b = Branch(name="ID", lang="id")
     s.add(b)
     await s.flush()
+    # v2 behaviour — these tests retire with the engine
+    s.add(AppSetting(branch_id=b.id, key="reply_engine", value="v2"))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="urls"))  # deterministic path
     await s.flush()
     invalidate(b.id)

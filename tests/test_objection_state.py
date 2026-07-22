@@ -80,6 +80,8 @@ async def _branch(s) -> int:
     s.add(b)
     await s.flush()
     s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy", content="Vibe Coding 4 bulan."))
+    # v2 behaviour — these tests retire with the engine
+    s.add(AppSetting(branch_id=b.id, key="reply_engine", value="v2"))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="urls"))
     await s.flush()
     invalidate(b.id)

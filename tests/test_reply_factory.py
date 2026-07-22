@@ -27,9 +27,9 @@ def _build(session, engine: str):  # noqa: ANN001, ANN202
     return build_reply_service(session, 1, _LLM(), object(), engine=engine)
 
 
-async def test_v2_is_the_default(db_session) -> None:  # noqa: ANN001
+async def test_v3_is_the_default(db_session) -> None:  # noqa: ANN001
     service = build_reply_service(db_session, 1, _LLM(), object())
-    assert type(service) is ReplyService
+    assert type(service) is ReplyServiceV3
 
 
 async def test_each_engine_maps_to_its_service(db_session) -> None:  # noqa: ANN001
@@ -41,6 +41,7 @@ async def test_an_unexpected_engine_still_replies(db_session) -> None:  # noqa: 
     """Belt and braces: BranchSettings already sanitises this, but the factory must not be
     the thing that leaves a branch with no reply service at all."""
     assert isinstance(_build(db_session, "v4"), ReplyService)
+    assert type(_build(db_session, "v4")) is ReplyServiceV3
 
 
 async def test_the_setting_and_the_factory_agree_on_the_vocabulary(db_session) -> None:  # noqa: ANN001

@@ -39,6 +39,8 @@ async def _branch(s) -> int:
     await s.flush()
     s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
         content="Pembayaran: DP Rp 500.000. SMM Intensive total Rp 1.882.955."))
+    # v2 behaviour — these tests retire with the engine
+    s.add(AppSetting(branch_id=b.id, key="reply_engine", value="v2"))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="urls"))
     await s.flush()
     invalidate(b.id)

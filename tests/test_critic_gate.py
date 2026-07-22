@@ -68,6 +68,8 @@ async def _branch(s, critic_gate: str) -> int:
     await s.flush()
     s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
         content="Vibe Coding 4 bulan. Pembayaran: DP Rp 500.000 via BCA atau QRIS."))
+    # v2 behaviour — these tests retire with the engine
+    s.add(AppSetting(branch_id=b.id, key="reply_engine", value="v2"))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="urls"))  # isolate the critic
     s.add(AppSetting(branch_id=b.id, key="critic_gate", value=critic_gate))
     await s.flush()

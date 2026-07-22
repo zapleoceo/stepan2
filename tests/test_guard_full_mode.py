@@ -61,6 +61,8 @@ async def _full_branch(s) -> int:
     await s.flush()
     s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
         content="Pembayaran: DP Rp 500.000 via transfer BCA atau QRIS."))
+    # v2 behaviour — these tests retire with the engine
+    s.add(AppSetting(branch_id=b.id, key="reply_engine", value="v2"))
     s.add(AppSetting(branch_id=b.id, key="reply_guard", value="full"))  # tier-2 LLM verify ON
     await s.flush()
     invalidate(b.id)

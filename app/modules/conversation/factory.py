@@ -11,11 +11,12 @@ from __future__ import annotations
 from .reply import ReplyService
 from .reply_v3 import ReplyServiceV3
 
-V3 = "v3"
+V2 = "v2"
 
 
-def build_reply_service(*args, engine: str = "v2", **kwargs) -> ReplyService:  # noqa: ANN002, ANN003
+def build_reply_service(*args, engine: str = "v3", **kwargs) -> ReplyService:  # noqa: ANN002, ANN003
     """A reply service for this branch. ReplyServiceV3 subclasses ReplyService, so the caller
-    never has to know which one it got."""
-    service = ReplyServiceV3 if engine == V3 else ReplyService
+    never has to know which one it got. v3 is the default; v2 remains reachable only as a
+    rollback while it is being removed."""
+    service = ReplyService if engine == V2 else ReplyServiceV3
     return service(*args, **kwargs)
