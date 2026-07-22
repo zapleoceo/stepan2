@@ -325,6 +325,11 @@ class Message(SQLModel, table=True):
         description="не пробовать раньше этого времени (экспоненциальный back-off)")
     link_url: str | None = Field(default=None, description="кликабельная цель (шэр поста/ссылки)")
     preview_url: str | None = Field(default=None, description="превью карточки (CDN, протухает)")
+    is_ad_referral: bool = Field(
+        default=False, index=True,
+        description="структурный признак от IG (ad_id/ad_media_id/lead_source='ad_clicktomsg' "
+                     "на ЭТОМ inbound) — текст пришёл с кликом по рекламе, не напечатан лидом; "
+                     "используется ТОЛЬКО для маппинга продукта, никогда для анализа диалога")
 
 
 class PostComment(SQLModel, table=True):

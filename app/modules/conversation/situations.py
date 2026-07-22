@@ -187,9 +187,18 @@ def is_auto_reply(text: str) -> bool:
 
 def lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
     """True once ANY inbound is something the lead actually typed/said — not an ad's
-    prefilled opener, not an unresolved media placeholder, and not their own auto-responder."""
+    prefilled opener, not an unresolved media placeholder, and not their own auto-responder.
+
+    `is_ad_referral` (structural, from IG's own ad_id/ad_media_id/lead_source — see
+    ingest._store) is checked FIRST and is authoritative when present: it catches every ad
+    click regardless of caption phrasing, unlike the text-pattern fallbacks below which only
+    catch phrasings already seen once (thread 4849: an unrecognized ad caption slipped past
+    every regex and got treated as the lead's own words). The regexes remain for messages
+    ingested before this field existed and for the rare case IG omits the referral fields."""
     for m in dialog:
         if m.direction != "in":
+            continue
+        if getattr(m, "is_ad_referral", False):
             continue
         text = (m.text or "").strip()
         if (not text or AD_TEMPLATE_RE.match(text) or is_auto_reply(text)
@@ -204,11 +213,18 @@ def lead_spoke_own_words(dialog) -> bool:  # noqa: ANN001
 def unseen_media_in_turn(dialog) -> bool:  # noqa: ANN001
     """Did the lead's CURRENT turn (everything since our last send) include content we can't
     read? The placeholder is often not the last message — thread 3058 sent the unavailable
-    reel, then 'Like2 ders' — so checking only the last inbound would miss it."""
+    reel, then 'Like2 ders' — so checking only the last inbound would miss it.
+
+    An ad-referral message (is_ad_referral, structural — see ingest._store) is never this: its
+    media is the AD's own creative, already identified via ad_id/ad_media_id product mapping,
+    not something the lead sent that needs a download. Thread 4849: the ad-click media/caption
+    got misread as unreadable lead-sent content and the bot apologized for a broken image
+    instead of opening straight into the (already-known) product."""
     for m in reversed(dialog):
         if m.direction == "out":
             break
-        if m.direction == "in" and UNSEEN_MEDIA_RE.search((m.text or "").strip()):
+        if m.direction == "in" and not getattr(m, "is_ad_referral", False) \
+                and UNSEEN_MEDIA_RE.search((m.text or "").strip()):
             return True
     return False
 

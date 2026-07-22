@@ -103,8 +103,8 @@ def test_buying_signal_catches_gas_family() -> None:
 # ─── unseen media: the lead sent something the bot cannot read ───
 
 class _M:
-    def __init__(self, direction: str, text: str) -> None:
-        self.direction, self.text = direction, text
+    def __init__(self, direction: str, text: str, is_ad_referral: bool = False) -> None:
+        self.direction, self.text, self.is_ad_referral = direction, text, is_ad_referral
 
 
 def test_unseen_media_detects_unreadable_content() -> None:
@@ -576,6 +576,22 @@ def test_ad_caption_first_turn_gets_the_ad_opener_not_a_price() -> None:
     got = pick_nudge(lead_type=None, dialog=[_M("in", _AD_CAPTION)], last_txt=_AD_CAPTION,
                      stored_needs=NeedsProfile(), inbound_count=1)
     assert got == AD_OPENER_NUDGE  # ad opener owns it — never a price
+
+
+def test_is_ad_referral_flag_excludes_unrecognized_ad_captions_too() -> None:
+    # thread 4849: an ad caption this account had never seen before ("Ini bust tools ya")
+    # matched NONE of the text-pattern regexes above and got treated as the lead's own words.
+    # The structural is_ad_referral flag (set by ingest from IG's own ad_id/ad_media_id/
+    # lead_source, not guessed from text) catches it regardless of phrasing.
+    unseen_caption = "Ini bust tools ya"
+    assert not lead_spoke_own_words([_M("in", unseen_caption, is_ad_referral=True)])
+    # without the flag, this exact caption would (wrongly) count as the lead speaking —
+    # proving the flag is doing real work, not just duplicating the regex fallbacks
+    assert lead_spoke_own_words([_M("in", unseen_caption, is_ad_referral=False)])
+    # same structural exclusion for "can we even read this media" — an ad-click's own
+    # creative media is never unresolved lead-sent content needing a download
+    assert not _unseen_media_in_turn(
+        [_M("out", "hai"), _M("in", "🖼 media", is_ad_referral=True)])
 
 
 def test_materials_question_is_answerable() -> None:

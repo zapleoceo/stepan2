@@ -196,6 +196,15 @@ class IngestService:
             thread.id, inbound.text, inbound.occurred_at
         ):
             return None  # IG echoed our own outgoing message back as if the lead sent it
+        # Structural signal from IG itself (ad_id/ad_media_id/lead_source), not a text guess:
+        # this specific inbound item rode in on an ad click, so its text is the ad's own
+        # caption/CTA prefill, never the lead's own words — however it happens to be phrased.
+        # Downstream (situations.lead_spoke_own_words/unseen_media_in_turn, critic.py) must
+        # treat it as product-identification-only, never as dialogue to answer or judge
+        # (thread 4849: an unrecognized ad caption fragment slipped through every text-pattern
+        # guess and got answered as if the lead had said it).
+        is_ad_referral = bool(
+            inbound.ad_id or inbound.ad_media_id or inbound.lead_source == "ad_clicktomsg")
         msg = await self.messages.add(
             Message(
                 branch_id=self.branch_id,
@@ -208,6 +217,7 @@ class IngestService:
                 occurred_at=inbound.occurred_at,
                 link_url=inbound.link_url,
                 preview_url=inbound.preview_url,
+                is_ad_referral=is_ad_referral,
             )
         )
         if inbound.media_url:
