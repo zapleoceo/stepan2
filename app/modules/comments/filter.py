@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from app.modules.conversation.situations import (
+from app.modules.conversation.signals import (
     BUYING_SIGNAL_RE,
     PAYMENT_INTENT_RE,
     PRICE_QUESTION_RE,

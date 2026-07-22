@@ -79,45 +79,6 @@ def false_delivery_claims(reply: str) -> list[str]:
     return [m.group(0) for m in _FALSE_DELIVERY_RE.finditer(reply or "")]
 
 
-# Quoted example scripts in the reply (rare, but the KB itself has «...»-quoted sample
-# lines) can carry a "?" that isn't a real question TO the lead — strip before counting.
-_QUOTE_STRIP_RE = re.compile(r"«[^»]*»")
-
-
-def multiple_questions(reply: str) -> list[str]:
-    """More than one '?' in a single turn (counted across every '|||' bubble, since the
-    lead experiences a multi-bubble reply as ONE turn) — a hard live pattern (thread 1729:
-    "pernah ngerasa gak dapet engagement? Atau bingung bikin konten...?" two distinct
-    questions joined by 'atau' in one message; thread 1793: two separate questions split
-    across two bubbles of the same turn) that leaves one of the two unanswered. The KB's
-    own MESSAGE FORMULA already says "ONE engaging question" — this is the deterministic
-    backstop for that rule, the same pattern as every other guard check here."""
-    text = _QUOTE_STRIP_RE.sub("", reply or "")
-    count = text.count("?")
-    if count >= 2:
-        return [f"{count} question marks in a single turn — ask exactly ONE question"]
-    return []
-
-
-def truncate_to_one_question(reply: str) -> str:
-    """Deterministic last resort for a draft still asking 2+ questions after a regen: keep
-    everything through the FIRST real question mark, drop the rest. A double question is a
-    style slip, not a fabrication risk — trimming it is safe and always available, unlike
-    the SAFE_FALLBACK hand-off, which wastes a manager's attention on a lead who asked a
-    perfectly answerable question (live case: threads 2159/2160, "ceritakan lebih detail
-    tentang kursusnya" got a full hand-off because the regen also happened to double up)."""
-    # Same length as the original so the found index lines up with the un-stripped string —
-    # a quoted KB "?" must not count, but blanking it (not deleting it) keeps positions valid.
-    masked = _QUOTE_STRIP_RE.sub(lambda m: "�" * len(m.group(0)), reply or "")
-    idx = masked.find("?")
-    if idx == -1:
-        return reply
-    return reply[: idx + 1].rstrip()
-
-
-# Stepan is a TEXT-ONLY Instagram DM bot — no voice notes, no calls, no video. Offering one
-# is a capability that doesn't exist, whether phrased as a future offer (thread 1330: "aku
-# bisa jelasin lewat voice note") or (already covered by false_delivery_claims) as done.
 _IMPOSSIBLE_CAPABILITY_RE = re.compile(
     r"\b(voice note|rekaman suara|video call|telpon (?:langsung|kamu|kakak)|"
     r"nelpon (?:langsung|kamu|kakak)|jelasin(?:in)? (?:lewat|via) (?:telepon|telpon|call))\b",
@@ -211,28 +172,6 @@ def booster_wrong_duration(reply: str) -> list[str]:
         if m else []
 
 
-# Vibe Coding is a ~4-MONTH program; the model shrank it to '4 minggu' live (thread 4220,
-# 24h review 2026-07-19) — a lead plans a month and meets a 4-month commitment. Same shape
-# as the booster guard: a week/day duration glued to the program name is always wrong.
-_VIBE_DURATION_RE = re.compile(
-    r"\bvibe\s*coding\b(?:(?!\bbulan\b)[^.!?\n]){0,60}?\b\d+\s*(?:minggu|hari)\b"
-    r"|\b\d+\s*(?:minggu|hari)\b(?:(?!\bbulan\b)[^.!?\n]){0,40}?\bvibe\s*coding\b",
-    re.IGNORECASE)
-
-
-def vibe_wrong_duration(reply: str) -> list[str]:
-    m = _VIBE_DURATION_RE.search(reply or "")
-    return [f"Vibe Coding given a week/day length — it is a ~4-month program: {m.group(0)}"] \
-        if m else []
-
-
-# A concrete monthly-EARNINGS figure ('alumni dapat 5-6 juta per bulan', 'gaji 8jt/bulan') is
-# a fabricated statistic — no branch KB carries an income number, and the LLM verify waves it
-# through as "general archetype language" because the sentence is phrased generally. The number
-# is the lie. Bench b10g 4045: "banyak alumni kami dapat proyek freelance sampai 5-6 juta per
-# bulan" reached the final reply. Deterministic backstop: an earnings word + a money figure
-# tied to 'per bulan' fires — but an INSTALLMENT ('cicilan 3 juta per bulan') is a real KB
-# price, so a payment word in the same bubble spares it.
 _EARN_WORD_RE = re.compile(
     r"\b(dapat|dapet|penghasilan|gaji|gajih|hasilkan|menghasilkan|income|earning|raup|cuan|"
     r"freelance|proyek|fee|omzet|profit|untung)\w*", re.IGNORECASE)
@@ -255,193 +194,6 @@ def fabricated_income_figure(reply: str) -> list[str]:
     return out
 
 
-# A quantitative business claim (N perusahaan/partner/klien/alumni-network size) the KB never
-# states. Thread 2740 (2026-07-19): 'jaringan alumni di lebih dari 1.500 perusahaan' plus
-# invented 'career guidance' - plausible-sounding career fabrications the LLM-verify waved
-# through. Deterministic backstop: a number glued to a company/partner noun must literally
-# exist in the KB context (separator-insensitive), else regen.
-_BIZ_COUNT_RE = re.compile(
-    r"(\d[\d.,]*)\s*\+?\s*(perusahaan|companies|company|partner\w*|klien|clients?|"
-    r"lowongan|vacanc\w+)", re.IGNORECASE)
-
-
-# Career-service claims are ALWAYS false (owner-confirmed 2026-07-19): no career guidance,
-# no bimbingan karier, no job placement / penyaluran / penempatan program exists. Mentors
-# answer questions if asked, but there is no dedicated service. Negated mentions ("belum
-# punya program penempatan") are the honest answer and must pass.
-_CAREER_SERVICE_RE = re.compile(
-    r"career\s*(guidance|support|coaching)|bimbingan\s*karie?r|job\s*placement|"
-    r"penyaluran\s*(kerja|lowongan)|penempatan\s*kerja", re.IGNORECASE)
-_NEGATION_BEFORE_RE = re.compile(
-    r"(belum|tidak|tak|nggak|ngga|gak|ga|no)\b[^.!?\n]{0,30}$", re.IGNORECASE)
-
-
-def career_service_claims(reply: str) -> list[str]:
-    out = []
-    for m in _CAREER_SERVICE_RE.finditer(reply or ""):
-        prefix = (reply or "")[max(0, m.start() - 35):m.start()]
-        if not _NEGATION_BEFORE_RE.search(prefix):
-            out.append(f"career service that does not exist: {m.group(0)}")
-    return out
-
-
-def ungrounded_biz_counts(reply: str, context: str) -> list[str]:
-    ctx_digits = re.sub(r"[.,\s]", "", context or "")
-    out = []
-    for m in _BIZ_COUNT_RE.finditer(reply or ""):
-        if re.sub(r"[.,\s]", "", m.group(1)) not in ctx_digits:
-            out.append(f"business count not stated in the KB: {m.group(0)}")
-    return out
-
-
-# Open House reframe (owner 2026-07-19): OH is a real office VISIT — meet the team, see the
-# classroom, walk through the program — NOT an event or demo lesson. Because Jakarta leads
-# travel far, it must be offered as "time set aside for a visit, whenever suits you" and ASK
-# if coming is convenient, never as a fixed weekly event to show up to. The reframe was a
-# prompt rule and the cheap follow-up model kept shipping the old event pitch ("Open House
-# gratis tiap Kamis, datang minggu ini?", threads 4563/4550, 2026-07-19) — same pattern as
-# the price/booster guards: a rule the weak model drops → deterministic backstop. Fires only
-# when Open House carries a fixed-event marker (a weekday, "acara", a "this week" deadline);
-# the reframed visit-time offer names no weekday/event and passes.
-_OH_EVENT_RE = re.compile(
-    r"open\s*house[^.!?\n]{0,60}\b(?:tiap|setiap|hari)?\s*kamis\b"
-    r"|\bkamis\b[^.!?\n]{0,40}open\s*house"
-    r"|open\s*house[^.!?\n]{0,30}\bacara\b|\bacara\b[^.!?\n]{0,20}open\s*house"
-    r"|open\s*house[^.!?\n]{0,50}\b(?:minggu|pekan)\s+ini\b",
-    re.IGNORECASE)
-
-
-def open_house_as_event(reply: str) -> list[str]:
-    m = _OH_EVENT_RE.search(reply or "")
-    return [
-        "Open House framed as a fixed/weekly event to attend — reframe it: it is time set "
-        "aside for an office VISIT (meet the team, see the classroom, walk through the "
-        "program), offered whenever suits the lead; and because Jakarta is far, ASK whether "
-        f"coming is convenient — never a 'come this Thursday' event: {m.group(0)}"
-    ] if m else []
-
-
-# IT STEP Jakarta has NO game-development course (catalog: cybersecurity, data_analyst,
-# graphic_design, python_backend, smm_intensive, uiux_design, vibe_coding + Skill Boosters).
-# Leads asking to build games keep getting a fabricated game class or "game projects we built"
-# (thread 4573, 2026-07-19: "bikin game multiplayer + contoh project game yang pernah kami
-# buat"). The honest move is to pivot to Python Back-End; inventing a game program is the
-# fabrication. Fires when a game course/program is claimed, or WE are said to teach/have built
-# games — an honest negation ("belum ada kelas game") and a general truth ("Python bisa buat
-# bikin game juga") both pass.
-_GAME_OFFER_RE = re.compile(
-    r"\b(?:kelas|kursus|program|jurusan)\s+(?:khusus\s+)?(?:bikin\s+|buat\s+|dev\w*\s+)?game\b"
-    r"|\b(?:contoh|portofolio|portfolio|proyek|project)\s+game\b[^.!?\n]{0,20}\b(?:kami|kita)\b"
-    r"|\b(?:kami|kita)\b[^.!?\n]{0,20}\b(?:ajarin|ngajarin|ngajar|mengajar|ajarkan)\b"
-    r"[^.!?\n]{0,20}\bgame\b",
-    re.IGNORECASE)
-_GAME_NEGATION_RE = re.compile(
-    r"\b(belum|tidak|tak|nggak|ngga|gak|ga|blm|no)\b[^.!?\n]{0,25}$", re.IGNORECASE)
-
-
-def game_offering_claims(reply: str) -> list[str]:
-    out = []
-    for m in _GAME_OFFER_RE.finditer(reply or ""):
-        prefix = (reply or "")[max(0, m.start() - 30):m.start()]
-        if not _GAME_NEGATION_RE.search(prefix):
-            out.append(
-                "game course/projects claimed — Jakarta has no game program; pivot honestly "
-                f"to Python Back-End, never invent a game class: {m.group(0)}")
-    return out
-
-
-# Open House is IN-PERSON ONLY (Menara Sudirman, Kamis 16:00-20:00); playbook_meetings is
-# explicit — NEVER promise a Zoom link. Classes can run online (Teams), and the model keeps
-# conflating the two, inventing an 'Open House join online via Zoom' (dozens of live cases in
-# the 2026-07-20 export: "hadir langsung di Menara Sudirman atau join online via Zoom"). A
-# lead who plans to attend the OH from home shows up to nothing. An online CLASS mention near
-# OH ('Open House Kamis, atau kelas online') is fine — the kelas/belajar guard spares it.
-# Same-clause filler: any non-sentence-ender, but a period/comma BETWEEN digits (a time
-# '16.00-20.00' or price) is not a boundary — those broke the window on OH-time lines.
-_CL = r"(?:[^.!?\n]|\d[.,]\d)"
-_OH_ONLINE_RE = re.compile(
-    rf"open\s*house{_CL}{{0,90}}?\b(?:join|hadir|ikut|datang)\s+online\b"
-    rf"|open\s*house{_CL}{{0,90}}?\b(?:via|lewat)\s+zoom\b"
-    rf"|open\s*house{_CL}{{0,60}}?\bsecara\s+online\b"
-    # OH itself framed as location-OR-online ("Open House ... di Menara Sudirman atau online")
-    rf"|open\s*house{_CL}{{0,95}}?\batau\s+online\b"
-    rf"|\bopen\s*house\b{_CL}{{0,30}}?\bonline\b",
-    re.IGNORECASE)
-
-
-def open_house_online_claims(reply: str) -> list[str]:
-    out = []
-    for m in _OH_ONLINE_RE.finditer(reply or ""):
-        span = m.group(0).lower()
-        if "kelas" in span or "belajar" in span:
-            continue  # 'Open House Kamis, atau kelas online' — online modifies the class
-        out.append(
-            "Open House offered online/Zoom — it is IN-PERSON only (Menara Sudirman, Kamis "
-            f"16-20); offer online only for the CLASS, never the Open House: {m.group(0)}")
-    return out
-
-
-# The 'pelajar 10%' discount is ONLY for school students UNDER 18 — policy_discounts is
-# explicit: "Umur 18+ TIDAK dapat diskon ini (termasuk mahasiswa)". The model keeps offering
-# it to a mahasiswa (university student, 18+): "karena Kakak masih mahasiswa ada diskon
-# pelajar 10%" (2026-07-20 export). A discount that collapses when they try to claim it costs
-# the sale AND the trust. The real levers for an adult are referral 10% (bring a friend) and
-# the Vibe Coding book-now −1jt, never the pelajar discount.
-_MHS_DISCOUNT_RE = re.compile(
-    r"mahasiswa[^.!?\n]{0,45}diskon[^.!?\n]{0,20}10\s*%"
-    r"|diskon[^.!?\n]{0,20}(?:pelajar|siswa)[^.!?\n]{0,10}10\s*%[^.!?\n]{0,45}mahasiswa",
-    re.IGNORECASE)
-
-
-def student_discount_to_adult(reply: str) -> list[str]:
-    m = _MHS_DISCOUNT_RE.search(reply or "")
-    return [
-        "pelajar 10% discount offered to a mahasiswa — that discount is for UNDER-18 school "
-        "students only; university students (18+) do not qualify. Use referral 10% (bring a "
-        f"friend) or no discount, never the pelajar discount for a mahasiswa: {m.group(0)}"
-    ] if m else []
-
-
-# IT STEP Jakarta teaches SOFTWARE / digital skills only — no hardware, electronics, or
-# device-repair course exists (catalog: cybersecurity, data_analyst, graphic_design,
-# python_backend, smm, uiux, vibe_coding + Skill Boosters). Thread 1761: a lead who wanted a
-# phone-repair job got "beneran worth it, gaji stabil" plus a pitch for electronics/hardware
-# certificates that don't exist — the bot invented a whole program off the catalog. Honest
-# move: say we don't have it, pivot to a real software track only if one genuinely fits, else
-# hand off. An honest negation ("belum ada kelas reparasi") passes.
-_HARDWARE_OFFER_RE = re.compile(
-    r"\b(?:kelas|kursus|program|jurusan|sertifikat|sertifikasi)\b[^.!?\n]{0,35}"
-    r"\b(?:hardware|elektronika?|reparasi|perbaikan\s*(?:hp|komputer|laptop|gadget|elektronik)"
-    r"|servis\s*(?:hp|komputer|laptop|elektronik)|teknisi\s*(?:hp|komputer|laptop|jaringan))\b"
-    r"|\b(?:kami|kita)\b[^.!?\n]{0,25}\b(?:ajarin|ngajarin|ajarkan|mengajar)\b[^.!?\n]{0,20}"
-    r"\b(?:hardware|reparasi|servis\s*(?:hp|komputer)|perbaikan\s*(?:hp|komputer)|elektronika?)\b",
-    re.IGNORECASE)
-
-
-def nonexistent_hardware_claims(reply: str) -> list[str]:
-    out = []
-    for m in _HARDWARE_OFFER_RE.finditer(reply or ""):
-        prefix = (reply or "")[max(0, m.start() - 30):m.start()]
-        if not _GAME_NEGATION_RE.search(prefix):
-            out.append(
-                "hardware/repair/electronics course claimed — IT STEP Jakarta teaches software/"
-                f"digital only; never invent one, pivot to a real track or hand off: {m.group(0)}")
-    return out
-
-
-# A clock time quoted for a class/event that the KB never states. Sim s10 night_worker: a
-# shift worker asking about evenings got 'kelas kita malam hari, sekitar jam 19.00-20.00 WIB'
-# plus an offer of later groups — the KB says only 'malam', no times. The lead plans their
-# shift around an invented hour and no-shows. Same shape as booster_wrong_duration: the one
-# class of fact that reads authoritative but has no card behind it. Times the context DOES
-# state (Open House 16:00-20:00) pass via separator-normalized substring match.
-_CLOCK_RE = re.compile(r"\b([01]?\d|2[0-3])[.:]([0-5]\d)\b")
-
-
-# Price ORDER (Miroslav-adopted rule, prompt alone holds it only ~1/3 of the time on the free
-# model, measured live 2026-07-19): when a reply carries BOTH a full multi-million total AND a
-# small-step figure (DP/instalment), the small step must come FIRST — the big number first is
-# a shock anchor. Only fires when both are present, so a lone Booster price passes untouched.
 _MILLIONS_RE = re.compile(r"rp\s*\.?\s*\d{1,3}[.,]\d{3}[.,]\d{3}", re.IGNORECASE)
 _SMALL_STEP_RE = re.compile(r"\bdp\b|cicil\w*|angsur\w*|per\s*bulan|/\s*bulan|uang\s*muka",
                             re.IGNORECASE)
@@ -468,39 +220,6 @@ def price_order_wrong(reply: str) -> list[str]:
     return []
 
 
-def ungrounded_times(reply: str, context: str) -> list[str]:
-    ctx_norm = _CLOCK_RE.sub(lambda m: f"{int(m.group(1))}:{m.group(2)}", context or "")
-    out = []
-    for m in _CLOCK_RE.finditer(reply or ""):
-        if f"{int(m.group(1))}:{m.group(2)}" not in ctx_norm:
-            out.append(f"clock time not stated anywhere in the KB: {m.group(0)}")
-    return out
-
-
-def price_before_lead_spoke(reply: str, lead_spoke: bool) -> list[str]:
-    """A number quoted to a lead who has still only ever tapped an ad button.
-
-    This was a prompt rule (AD_OPENER_NUDGE / FOLLOWUP_SILENT_CLICKER_EXTRA) and the prompt
-    lost. Threads 4064/4065 (2026-07-16): the opener obeyed it perfectly — three short
-    bubbles, no price — and the follow-up an hour later opened with the full Rp 13.000.000.
-    The nudge WAS delivered (one broker call, no regen); the cheap follow-up model simply
-    disregarded it. Anything the model can silently drop belongs here instead: quoting the
-    price to someone who never said a word is the most expensive move Stepan makes, so it
-    can't rest on the model's goodwill."""
-    if lead_spoke:
-        return []
-    hit = _PRICE_RE.search(reply or "")
-    return [f"price quoted to a lead who has never spoken their own words: {hit.group(0)}"] \
-        if hit else []
-
-
-# Threads 2045/1996: the lead showed clear irritation at being re-contacted ("Sok asik
-# banget" / "Sukanya chat gw mulu") in a LIVE reply, but the next scheduled follow-up fired
-# ~67 minutes later and re-pitched the same price anyway, ignoring the signal entirely —
-# the lead then escalated to "Shuttt" / "Diemm" / "Gak usah ganggu aku lagi" before the bot
-# finally stopped. A follow-up is proactive (the lead didn't ask for it), so it must never
-# fire on top of an unaddressed annoyance signal — this is a deterministic backstop checked
-# against the lead's OWN last message before a nudge is even generated.
 _LEAD_ANNOYANCE_RE = re.compile(
     r"\b(jangan ganggu|gak usah ganggu|nggak usah ganggu|tolong jangan ganggu|"
     r"berhenti (?:chat|kirim|hubungi|nge-?chat)|stop (?:chat|hubungi|mengirim|nge-?chat)|"
@@ -534,52 +253,6 @@ def wrong_channel_claims(reply: str) -> list[str]:
     return [m.group(0) for m in _WRONG_CHANNEL_RE.finditer(reply or "")]
 
 
-# A price/availability question ("ini gratis ga kak?", "berapa?") escalated to
-# needs_manager when the retrieved KB context ALREADY has a price figure for the product
-# being discussed is not a real KB gap — the contract's own rule says either answer it or
-# defer with a discovery question, never hand off (thread 2285: lead asked "ini gratis ga
-# kak?" right after the bot itself named "Skill Booster"; the Cybersecurity Skill Booster
-# price - Rp 700.000/600.000 - was right there in context, and the bot silently muted
-# itself instead of using it).
-_PRICE_QUESTION_RE = re.compile(
-    # 'brp/brpa/brapa/berpa' are the everyday chat misspellings of 'berapa' (how much) — leads
-    # type them constantly (thread 4710: 'Brpa aja kak' never registered as a price question, so
-    # the hand-off guard let a KB-answerable price question escalate to a human).
-    r"\b(gratis|free|be?rapa|brp|brpa|harga|biaya|tarif|cicilan|angsuran|murah|mahal)\b",
-    re.IGNORECASE)
-
-# Thread 2664 (2026-07-11): a HOT lead ("saya bayar sekarang atau nunggu?") — ready to pay —
-# was escalated instead of given the payment details, even though the BCA account + methods
-# (QR/transfer/card, the 500k DP) are in the FAQ that's in context. Losing a lead at the
-# payment moment is the most expensive false escalation. Same shape as the price case: an
-# answerable how-to-pay / how-to-enrol question with the answer already in context.
-# No trailing \b — Indonesian suffixes (daftar→daftarnya, bayar→bayarnya) would break it.
-_ENROLL_PAY_RE = re.compile(
-    r"\b(bayar|pembayaran|transfer|rekening|no\.?\s*rek|norek|qris|dp\b|booking|daftar|"
-    r"register|enroll|mau (?:ikut|gabung))",
-    re.IGNORECASE)
-# Payment facts present in the KB context — a bank account number, transfer/QR/DP methods.
-_PAY_FACT_RE = re.compile(
-    r"\b(rekening|bca|no\.?\s*rek|transfer|qris?|\bdp\b|cicilan|paylater|"
-    r"kartu (?:kredit|debit))\b", re.IGNORECASE)
-
-
-def premature_payment_details(reply: str, lead_words: str) -> list[str]:
-    """Bank account details in the reply while the lead never asked to pay/enrol. Thread
-    4114: 'saya mau kerja' from a schoolkid got the BCA account and a DP instruction for a
-    course they never chose — that's not a close, it's a screenshot waiting to happen."""
-    txt = reply or ""
-    if not re.search(r"\b(bca|rekening|norek|no\.?\s*rek)\b", txt, re.IGNORECASE):
-        return []
-    digits = re.sub(r"(?<=\d)[ .\-](?=\d)", "", txt)
-    if not re.search(r"\d{8,}", digits):
-        return []  # payment methods in prose are fine — only the account number is gated
-    if _ENROLL_PAY_RE.search(lead_words or ""):
-        return []
-    return ["bank account details offered before the lead ever asked to pay or enrol - "
-            "remove them; close on the value and the next step instead"]
-
-
 def invented_price_no_card(reply: str, context: str) -> list[str]:
     """A money figure in the reply while the retrieved context contains no prices AT ALL —
     there is nothing the number could have come from, so it is invented (sim 2026-07-17:
@@ -593,55 +266,6 @@ def invented_price_no_card(reply: str, context: str) -> list[str]:
             "price at all - never state a number you cannot see; say you'll confirm it"]
 
 
-def premature_manager_handoff(last_inbound: str, context: str) -> bool:
-    """True when the lead's last message asks something ANSWERABLE from context but the model
-    escalated anyway: a price/availability question with a price figure in context, OR a
-    how-to-pay / how-to-enrol question with payment facts (bank account / methods / DP) in
-    context. Either way the model already had the answer — escalating loses the lead."""
-    q = last_inbound or ""
-    if _PRICE_QUESTION_RE.search(q) and _PRICE_RE.search(context or ""):
-        return True
-    return bool(_ENROLL_PAY_RE.search(q) and _PAY_FACT_RE.search(context or ""))
-
-
-MANAGER_HANDOFF_CORRECTION = (
-    "[System: you set needs_manager=true for a price OR payment/enrolment question, but the "
-    "answer is ALREADY in the knowledge base context above (the price figure, and/or the "
-    "payment methods + bank account + DP to reserve a seat) - this is NOT a real KB gap, do "
-    "NOT hand it off to a human. A lead asking HOW to pay or whether to pay now is a HOT "
-    "buying signal: give the concrete payment facts from context and the next step "
-    "immediately (take name + WhatsApp, give the DP/account) - never stall a ready-to-pay "
-    "lead behind a hand-off. If it's a price question and discovery genuinely isn't done, "
-    "answer the price then weave in ONE discovery question. Set needs_manager=false. Return "
-    "the JSON as usual.]"
-)
-
-
-# Thread 2398: needs_manager=true fired on "mau kak" + "masih belajar dari nol kak" (the
-# lead agreeing + answering a discovery question - nothing unanswerable) with
-# manager_question, kb_gap AND stage_reason ALL left null - the model escalated without
-# being able to say what it was escalating. A real KB gap can always be named; if the model
-# can't name one, that's a strong signal there isn't one.
-def unexplained_manager_handoff(
-    needs_manager: bool, manager_question: str | None, kb_gap: str | None,
-) -> bool:
-    """needs_manager=true with no manager_question AND no kb_gap - the model set the flag
-    but can't say why, which is itself evidence the escalation isn't grounded in a real gap."""
-    return needs_manager and not (manager_question or "").strip() \
-        and not (kb_gap or "").strip()
-
-
-UNEXPLAINED_HANDOFF_CORRECTION = (
-    "[System: you set needs_manager=true but left both manager_question and kb_gap empty - "
-    "a genuine KB gap can always be named. If there really is a fact you can't answer, say "
-    "EXACTLY what the lead asked (manager_question) and what's missing from the KB (kb_gap). "
-    "If there ISN'T a real gap - e.g. the lead just agreed to something or answered your own "
-    "question - set needs_manager=false and continue the conversation naturally instead. "
-    "Return the JSON as usual.]"
-)
-
-
-# Bahasa hand-off when a clean reply can't be produced — never invents, defers to a human.
 SAFE_FALLBACK = (
     "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
     "Nanti aku kabari secepatnya. Sementara itu, ada hal lain yang bisa aku bantu?")
@@ -663,55 +287,6 @@ def normalize_address(text: str) -> str:
     return _KAMU_RE.sub("Kakak", text or "")
 
 
-# The bot telling the lead a HUMAN is taking over is a promise that must be kept. Thread 1230:
-# "Data sudah aku teruskan ke tim, mereka akan hubungi Kakak via WhatsApp dalam 1×24 jam" — but
-# needs_manager stayed false, so no human was ever notified, the bot stayed on, and it kept
-# nudging the lead it had just handed off ("Eh iya Kak, jadi kepikiran lagi nih..."). If the
-# reply says a human is coming, the escalation must actually fire (which also mutes the bot and
-# stops the follow-up cycle). Deliberately narrow: only a stated hand-off, not "let me check"
-# (SAFE_FALLBACK already sets needs_manager itself).
-_HANDOFF_PROMISE_RE = re.compile(
-    r"\b(?:data|nomor|kontak)\b[^.!?\n]{0,30}\b(?:sudah|udah|telah)\b[^.!?\n]{0,20}"
-    r"\b(?:teruskan|diteruskan|catat)\b"
-    r"|\btim\s+(?:kami\s+)?(?:akan|bakal)\s+(?:hubungi|kontak|menghubungi)\b"
-    r"|\bakan\s+dihubungi\b[^.!?\n]{0,25}\btim\b",
-    re.IGNORECASE)
-
-
-def promised_handoff(reply: str) -> bool:
-    """The reply tells the lead a human/team will contact them — so a human must really be
-    notified and the bot must stop nudging."""
-    return bool(_HANDOFF_PROMISE_RE.search(reply or ""))
-
-
-ANSWER_DONT_ESCALATE_CORRECTION = (
-    "[System: the lead just asked a concrete, answerable question (a price, schedule, or how to "
-    "sign up). Answer it DIRECTLY from the product catalog / knowledge base in this reply. Do "
-    "NOT set needs_manager and do NOT ask for a phone number instead of answering — that reads "
-    "as stonewalling (thread 2733: 'how much?' / 'when?' / 'I want to register' each got an "
-    "identical 'give me your WhatsApp' and never an answer). Only if the fact is genuinely "
-    "absent from the knowledge base may you escalate, and then name exactly what is missing.]"
-)
-
-ASK_PHONE_BEFORE_HANDOFF = (
-    "Biar aku bisa amankan slot Kakak & tim kami bantu proses daftarnya, boleh minta "
-    "nomor WhatsApp-nya ya, Kak? 😊")
-
-# Used when a live reply keeps converging onto a near-duplicate after a guard regen. That's
-# a style dead-end (the model can't rephrase), NOT a knowledge gap — summoning a manager here
-# wastes a human on an answerable thread (threads 2541/2566, false SMM escalations). The old
-# open-ended "sebutkan lebih spesifik" read as a brush-off and fired on the most engaged
-# leads (2026-07 audit of 300 threads: ~24 hit it — on emotions, on agreements, even right
-# after a phone was given). A numbered menu turns the dead-end into a one-tap next step.
-CLARIFY_FALLBACK = (
-    "Biar nggak muter-muter, Kakak mau tahu yang mana dulu? 🙏\n"
-    "1️⃣ Biaya & cicilan\n2️⃣ Jadwal & durasi\n3️⃣ Materi yang dipelajari\n"
-    "4️⃣ Cara daftar\nKirim nomornya aja ya 😊")
-
-# Reason stamped onto a GUARD-forced hand-off (not the model's own needs_manager). Without
-# it the alert falsely reads "лид запросил менеджера" and the chat log falls back to the
-# model's stage_reason for a DIFFERENT stage (thread 2541: a presenting-reason logged next
-# to a manager escalation). Flows into both the alert body and the ThreadLog reason.
 GUARD_HANDOFF_REASON = (
     "Степан не смог составить корректный ответ (сработала защита от выдумок) — "
     "нужен ручной ответ менеджера")

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from app.modules.conversation.critic_v3 import CRITIC_CORRECTION, Verdict, review
+from app.modules.conversation.critic import CRITIC_CORRECTION, Verdict, review
 
 
 class _LLM:
@@ -75,14 +75,14 @@ async def test_the_draft_and_the_lead_message_both_reach_the_reviewer() -> None:
 
 
 def test_the_rubric_puts_answering_the_question_first() -> None:
-    from app.modules.conversation.critic_v3 import _SYSTEM
+    from app.modules.conversation.critic import _SYSTEM
     assert "FIRST line actually answer it" in _SYSTEM
     assert "more than the other two combined" in _SYSTEM
 
 
 def test_the_rubric_biases_towards_passing() -> None:
     """A plain honest reply reaching the lead beats a perfect one that never arrives."""
-    from app.modules.conversation.critic_v3 import _SYSTEM
+    from app.modules.conversation.critic import _SYSTEM
     assert "Be reluctant to fail" in _SYSTEM
 
 

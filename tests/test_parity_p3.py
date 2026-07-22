@@ -53,26 +53,6 @@ def test_parse_decision_ready_subtype() -> None:
     assert parse_decision(json.dumps(base)).ready_subtype is None
 
 
-def test_build_messages_merges_consecutive_same_role() -> None:
-    from types import SimpleNamespace
-
-    from app.modules.conversation.prompt import build_messages
-    dialog = [
-        SimpleNamespace(direction="in", text="hi"),
-        SimpleNamespace(direction="in", text="are you there?"),    # consecutive user
-        SimpleNamespace(direction="out", text="yes"),
-        SimpleNamespace(direction="out", text="how can I help?"),  # consecutive assistant
-        SimpleNamespace(direction="in", text="  "),                # empty → dropped
-        SimpleNamespace(direction="in", text="price?"),
-    ]
-    msgs = build_messages("persona", dialog, "en")
-    # strict user/assistant alternation after the system message (Anthropic requirement)
-    assert [m["role"] for m in msgs] == ["system", "user", "assistant", "user"]
-    assert "hi\nare you there?" in msgs[1]["content"]
-    assert "yes\nhow can I help?" in msgs[2]["content"]
-    assert msgs[3]["content"] == "price?"  # blank turn dropped
-
-
 def test_source_hint_only_for_known_entry_points() -> None:
     from app.modules.conversation.prompt import source_hint
     assert "paid ad" in (source_hint("ad_clicktomsg") or "")
@@ -94,17 +74,6 @@ def test_lead_name_hint_rejects_handles_keeps_real_names() -> None:
     assert lead_name_hint("A") is None                    # too short to be a name
 
 
-def test_build_messages_injects_entry_hint() -> None:
-    from types import SimpleNamespace
-
-    from app.modules.conversation.prompt import build_messages
-    dialog = [SimpleNamespace(direction="in", text="halo")]
-    msgs = build_messages("persona", dialog, "en", source_block="ENTRY: paid ad, be warm.")
-    assert "ENTRY: paid ad" in msgs[0]["content"]
-    plain = build_messages("persona", dialog, "en")
-    assert "ENTRY:" not in plain[0]["content"]  # no block → nothing injected
-
-
 def test_manager_note_block_wraps_with_header_or_none() -> None:
     from app.modules.conversation.prompt import manager_note_block
     block = manager_note_block("checked, not ready yet — needs budget confirmed")
@@ -115,23 +84,8 @@ def test_manager_note_block_wraps_with_header_or_none() -> None:
     assert manager_note_block("   ") is None  # blank note → nothing injected
 
 
-def test_build_messages_injects_manager_note() -> None:
-    """Per-lead override (2026-07-08): a manager who demotes a wrongly-ready lead can leave
-    Stepan a reason so it doesn't just mark ready=true again next turn — distinct from
-    CoachingNote, which is branch-wide, not per-lead."""
-    from types import SimpleNamespace
-
-    from app.modules.conversation.prompt import build_messages
-    dialog = [SimpleNamespace(direction="in", text="halo")]
-    msgs = build_messages("persona", dialog, "en", manager_note="not actually ready yet")
-    assert "MANAGER NOTE" in msgs[0]["content"]
-    assert "not actually ready yet" in msgs[0]["content"]
-    plain = build_messages("persona", dialog, "en")
-    assert "MANAGER NOTE" not in plain[0]["content"]  # no note → nothing injected
-
-
 def test_fmt_llm_meta_free_time_and_id() -> None:
-    from app.modules.conversation.reply import _fmt_llm_meta
+    from app.modules.conversation.delivery import _fmt_llm_meta
     free = _fmt_llm_meta({"model": "x/mistral-large-latest", "tokens_in": 537,
                           "tokens_out": 131, "cost_usd": 0.0, "elapsed_ms": 8231,
                           "request_id": "abc123def456"})
@@ -344,7 +298,7 @@ class _FakeLLM:
 # ─── ||| multi-bubble split ───────────────────────────────────────────────────
 
 def test_split_bubbles() -> None:
-    from app.modules.conversation.reply import _split_bubbles
+    from app.modules.conversation.delivery import _split_bubbles
     assert _split_bubbles("hello") == ["hello"]
     assert _split_bubbles("a ||| b ||| c") == ["a", "b", "c"]
     assert _split_bubbles("a|||b|||c|||d") == ["a", "b", "c d"]  # overflow merged into last

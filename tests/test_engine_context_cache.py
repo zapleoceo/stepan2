@@ -1,5 +1,9 @@
-"""DecisionEngine memoizes knowledge_context within a turn — a regen (guard correction,
-dedup, fast→smart) must not re-embed + re-scan the identical retrieval query."""
+"""DecisionEngine memoizes the branch's knowledge within a turn.
+
+A DecisionEngine lives for ONE lead-turn, and a turn can call back in more than once (the
+money-gate rewrite, the critic rewrite). Without memoization each of those re-ran assembly —
+identically — so the same context was rebuilt two or three times per turn.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -18,18 +22,18 @@ class _SpyKnowledge:
     async def knowledge_context(self, product_slug, *, query, thread_id, light=False,  # noqa: ANN001, ANN003
                                 lead_type=None, has_open_objection=False):
         self.calls += 1
-        return f"CTX[{query}]"
+        return f"CTX[{query}|light={light}]"
 
 
 class _FakeLLM:
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
-        return '{"reply": "ok", "stage": "qualifying"}', {"model": "f", "cost_usd": 0.0}
+        return '{"reply": "ok", "move": "give_value", "stage": "qualifying"}', {"cost_usd": 0.0}
 
     async def embed(self, texts, **kw):  # noqa: ANN001, ANN003, ANN201
         return [[0.0] for _ in texts]
 
 
-async def _thread(s) -> tuple[int, int]:
+async def _thread(s) -> tuple[int, int]:  # noqa: ANN001
     b = Branch(name="T", lang="id")
     s.add(b)
     await s.flush()
@@ -41,32 +45,47 @@ async def _thread(s) -> tuple[int, int]:
     s.add(th)
     await s.flush()
     s.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="m1",
-                  direction="in", sent_by="lead", text="berapa harga kursusnya", occurred_at=_NOW))
+                  direction="in", sent_by="lead", text="berapa harga kursusnya",
+                  occurred_at=_NOW))
     await s.flush()
     return b.id, th.id
 
 
-async def test_complete_reuses_context_across_regens(db_session) -> None:
+async def test_context_is_built_once_per_turn(db_session) -> None:  # noqa: ANN001
+    """A rewrite pass must not pay for assembly again — same dialog, same context."""
     bid, tid = await _thread(db_session)
     spy = _SpyKnowledge()
     engine = DecisionEngine(db_session, bid, _FakeLLM(), spy)
     ctx = await engine.prepare(tid, workflow="reply")
     assert ctx is not None
-    # first decision + two regens of the SAME turn (same dialog → same retrieval query)
-    await engine.complete(ctx, tid, lang="id", workflow="reply", capability="chat:fast")
-    await engine.complete(ctx, tid, lang="id", workflow="reply", capability="chat:smart",
-                          extra_user_msg="[System: fix this]")
-    await engine.complete(ctx, tid, lang="id", workflow="reply", capability="chat:smart",
-                          extra_user_msg="[System: fix again]")
-    assert spy.calls == 1  # built once, reused on both regens — no re-embed / re-scan
+
+    first = await engine.kb_context(ctx, tid, light=False)
+    again = await engine.kb_context(ctx, tid, light=False)
+    once_more = await engine.kb_context(ctx, tid, light=False)
+
+    assert spy.calls == 1
+    assert first == again == once_more
 
 
-async def test_followup_light_context_is_cached_separately(db_session) -> None:
-    """A live reply and a followup nudge use different (light) contexts — distinct cache keys."""
+async def test_a_lighter_context_is_cached_separately(db_session) -> None:  # noqa: ANN001
+    """A follow-up asks for a different shape, so it must not be served the reply's cache."""
     bid, tid = await _thread(db_session)
     spy = _SpyKnowledge()
     engine = DecisionEngine(db_session, bid, _FakeLLM(), spy)
     ctx = await engine.prepare(tid, workflow="reply")
-    await engine.complete(ctx, tid, lang="id", workflow="reply")
-    await engine.complete(ctx, tid, lang="id", workflow="followup")  # light=True → new key
+    assert ctx is not None
+
+    await engine.kb_context(ctx, tid, light=False)
+    await engine.kb_context(ctx, tid, light=True)
     assert spy.calls == 2
+
+
+async def test_the_last_built_context_is_exposed_for_the_money_gate(db_session) -> None:  # noqa: ANN001
+    """The gate checks a draft's figures against exactly the knowledge the model was given."""
+    bid, tid = await _thread(db_session)
+    engine = DecisionEngine(db_session, bid, _FakeLLM(), _SpyKnowledge())
+    ctx = await engine.prepare(tid, workflow="reply")
+    assert ctx is not None
+
+    built = await engine.kb_context(ctx, tid, light=False)
+    assert engine.last_context == built

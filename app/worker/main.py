@@ -24,10 +24,10 @@ from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
 from app.domain.enums import ChannelKind, SessionStatus
-from app.modules.conversation.factory import build_reply_service
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reactivation import ReactivationService
+from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import ThreadRepo
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.knowledge.source import effective_kb_branch
@@ -316,11 +316,10 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                 return False  # another job owns this thread right now
             cfg = await get_settings(session, branch_id)
             kb = await effective_kb_branch(session, branch_id)  # shared-KB link, if any
-            reply = build_reply_service(
+            reply = ReplyService(
                 session, branch_id, llm, KnowledgeService(session, kb, llm),
                 branch_settings=cfg, notifier=_build_notifier(cfg),
                 broker_budget_s=settings().reply_broker_budget_s,
-                engine=cfg.reply_engine,
             )
             started = time.time()
             decision = await reply.decide(thread_id)

@@ -171,9 +171,7 @@ async def test_generate_one_reply_uses_the_generous_broker_budget(monkeypatch) -
     monkeypatch.setattr(worker_main, "effective_kb_branch", _kb)
     monkeypatch.setattr(worker_main, "_build_notifier", lambda _c: None)
     monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **k: object())
-    monkeypatch.setattr(worker_main, "build_reply_service",
-                        lambda *a, **kw: _CaptureReply(*a, **{k: v for k, v in kw.items()
-                                                              if k != "engine"}))
+    monkeypatch.setattr(worker_main, "ReplyService", _CaptureReply)
 
     await worker_main.generate_one_reply({"redis": _FakeRedis()}, 1, 42)
     assert captured["budget"] == settings().reply_broker_budget_s

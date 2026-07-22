@@ -9,13 +9,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.adapters.db.models import Message
-from app.modules.conversation.dossier import LeadDossier, Objection
-from app.modules.conversation.prompt_v3 import (
+from app.modules.conversation.contract import (
     MOVES,
     build_messages_v3,
     contract,
     dossier_block,
 )
+from app.modules.conversation.dossier import LeadDossier, Objection
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 _CONTRACT_CEILING = 6_000
@@ -29,11 +29,10 @@ def _msg(text: str, direction: str = "in") -> Message:
 
 # ── the contract ──────────────────────────────────────────────────────────────
 
-def test_contract_stays_far_below_the_v2_size() -> None:
-    from app.modules.conversation.prompt import _DECISION_CONTRACT, _JSON_SCHEMA_BLOCK
-    v3, v2 = len(contract("id")), len(_DECISION_CONTRACT) + len(_JSON_SCHEMA_BLOCK)
-    assert v3 < _CONTRACT_CEILING
-    assert v3 < v2 / 4
+def test_the_contract_stays_small() -> None:
+    """The retired contract reached 30 146 chars by absorbing one incident fix at a time,
+    until instructions were 55% of the prompt and the lead's own words 5%."""
+    assert len(contract("id")) < _CONTRACT_CEILING
 
 
 def test_every_move_is_offered_to_the_model() -> None:

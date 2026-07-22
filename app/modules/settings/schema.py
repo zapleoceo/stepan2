@@ -161,21 +161,6 @@ SCHEMA: list[SettingSection] = [
         # smart_stages toggles were removed 2026-07-19 — no operator tuning needed.
         # hidden until the RAG / tech-context / web-search features are ported — the
         # keys are still parsed + seeded, but showing dead toggles misleads the operator.
-        # v2 = the accumulated 2026 pipeline (25k contract, 21 deterministic regexes, critic
-        # failing CLOSED to a human). v3 = the rebuilt one (small contract, LeadDossier state,
-        # next-best-move, narrow money-only gate, critic failing OPEN). Kept as a per-branch
-        # switch so v3 can be turned off on a live branch without reverting code.
-        _f("reply_engine", "text", "v3",
-           _l("Движок ответов", "Reply engine", "Mesin balasan"),
-           choices=[("v2", _l("v2 — прежний", "v2 — legacy", "v2 — lama")),
-                    ("v3", _l("v3 — новый", "v3 — rebuilt", "v3 — baru"))],
-           help=_l("v3: компактный промт, досье лида, выбор следующего хода, проверки только "
-                   "там, где на кону деньги",
-                   "v3: compact prompt, lead dossier, next-best-move, checks only where money "
-                   "is at stake",
-                   "v3: prompt ringkas, dosir lead, pilih langkah berikutnya, cek hanya di "
-                   "bagian yang menyangkut uang"),
-           width="130px"),
         _f("tech_usecase_enabled", "bool", "true",
            _l("Кейсы под лида", "Tailor use-cases", "Kasus sesuai lead"),
            width="130px", hidden=True),

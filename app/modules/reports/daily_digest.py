@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api._changelog import RELEASES
-from app.modules.conversation.situations import AD_TEMPLATE_RE, is_auto_reply
+from app.modules.conversation.signals import AD_TEMPLATE_RE, is_auto_reply
 
 _PRICE_RE = re.compile(r"\brp\.?\s?\d[\d.,]*|\d[\d.,]*\s?(?:ribu|juta|rb\b)", re.IGNORECASE)
 _CLOSE_RE = re.compile(

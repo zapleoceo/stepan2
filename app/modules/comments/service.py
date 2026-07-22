@@ -15,7 +15,7 @@ import logging
 from app.adapters.db.models import Branch, Channel, PostComment
 from app.domain.clock import utc_now
 from app.modules.conversation import guard
-from app.modules.conversation.reply import guard_prompt
+from app.modules.conversation.delivery import guard_prompt
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import BranchSettings
 from app.ports.channel import ChannelPort

@@ -13,9 +13,9 @@ from app.adapters.channels.ig_parse import VOICE_PENDING_PH
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation.dossier import LeadDossier, Objection
-from app.modules.conversation.reply_v3 import ReplyServiceV3
+from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import DossierRepo
-from app.modules.conversation.routing_v3 import FAST, SMART
+from app.modules.conversation.routing import FAST, SMART
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
@@ -72,8 +72,8 @@ async def _thread(s, *, texts: tuple[tuple[str, str], ...] = (("in", "halo"),), 
     return b.id, th.id, lead.id
 
 
-def _service(session, branch_id: int, llm: _LLM, kb: str = "KB FACTS") -> ReplyServiceV3:  # noqa: ANN001
-    return ReplyServiceV3(session, branch_id, llm, _Knowledge(kb))
+def _service(session, branch_id: int, llm: _LLM, kb: str = "KB FACTS") -> ReplyService:  # noqa: ANN001
+    return ReplyService(session, branch_id, llm, _Knowledge(kb))
 
 
 # ── the happy path ────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ async def test_an_unreachable_reviewer_ships_the_draft(db_session) -> None:  # n
     """Broker instability must not cost the lead their answer — the v2 inversion."""
     class _Flaky(_LLM):
         async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
-            if kw.get("workflow") == "critic_v3":
+            if kw.get("workflow") == "critic":
                 raise TimeoutError("chat:smart still pending after budget")
             return await super().chat(messages, **kw)
 

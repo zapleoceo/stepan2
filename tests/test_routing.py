@@ -1,84 +1,56 @@
-"""Capability routing (hybrid cost policy): keep chat:smart for money moments, send the
-cheap majority to chat:fast, and honour the off switch."""
+"""v3 tier routing — decided from state, never from text patterns.
+
+v2 partly routed on regexes over the lead's last message, so a phrasing nobody had seen yet
+got the cheap model at the exact moment a sale was on the line. Everything here keys off the
+dossier or the turn index, both structural.
+"""
 from __future__ import annotations
 
-from app.domain.enums import Stage
-from app.modules.conversation.routing import (
-    FAST,
-    SMART,
-    pick_capability,
-)
+from app.modules.conversation.dossier import LeadDossier, Objection
+from app.modules.conversation.routing import FAST, SMART, pick_capability
 
 
-def _pick(**over) -> str:
-    # default mid-conversation (inbound_count=3) so tests aren't all the first-reply case
-    base = dict(workflow="reply", stage=Stage.QUALIFYING, lead_type=None,
-                last_inbound="halo kak", inbound_count=3)
-    base.update(over)
-    return pick_capability(**base)
+def _pick(dossier: LeadDossier, first: bool = False) -> str:
+    return pick_capability(dossier, is_first_reply=first)
 
 
-def test_first_reply_to_new_lead_is_smart() -> None:
-    # the opener decides ~76% of ghosts — never gamble it on the free pool
-    assert _pick(inbound_count=1, stage=Stage.NEW) == SMART
-    assert _pick(inbound_count=0) == SMART
+def test_the_opener_always_gets_the_strong_model() -> None:
+    """65% of this branch's leads never write a third message — the opener is most of the loss."""
+    assert _pick(LeadDossier(), first=True) == SMART
 
 
-def test_followups_use_fast() -> None:
-    # 2026-07-22 cost trial: back to FAST now that the critic-gate (built same day) catches
-    # exactly the fabrication (wrong durations, Zoom, fake scarcity, thread 4141) that justified
-    # forcing SMART on 2026-07-21 - a bad draft now regens escalated to SMART instead of
-    # reaching the lead.
-    assert _pick(workflow="followup", followup_attempt=0) == FAST
-    assert _pick(workflow="followup", followup_attempt=2) == FAST
+def test_an_ordinary_mid_conversation_turn_runs_cheap() -> None:
+    assert _pick(LeadDossier(role="student", readiness="exploring")) == FAST
 
 
-def test_money_stages_stay_smart() -> None:
-    for st in (Stage.PRESENTING, Stage.OBJECTION, Stage.READY):
-        assert _pick(stage=st) == SMART
+def test_an_unresolved_objection_forces_the_strong_model() -> None:
+    assert _pick(LeadDossier(objections=[Objection("mahal")])) == SMART
 
 
-def test_hot_lead_stays_smart() -> None:
-    assert _pick(lead_type="hot") == SMART
+def test_an_objection_already_handled_does_not_keep_paying_for_smart() -> None:
+    assert _pick(LeadDossier(objections=[Objection("mahal", "handled", "cicilan")])) == FAST
 
 
-def test_active_sales_stages_are_smart() -> None:
-    # owner 2026-07-20: every active sales stage runs on the strong model, even neutral chatter
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", last_inbound="oh gitu ya") == SMART
-    assert _pick(stage=Stage.NURTURING, lead_type="unclear", last_inbound="oke makasih") == SMART
-    # the cheap lane remains for the 'new' stage past the first reply (pre-discovery neutral)
-    assert _pick(stage=Stage.NEW, lead_type="cold", last_inbound="oh gitu ya") == FAST
+def test_a_live_money_conversation_forces_the_strong_model() -> None:
+    assert _pick(LeadDossier(prices_quoted=["DP 500rb"])) == SMART
+    assert _pick(LeadDossier(payment_preference="cicilan")) == SMART
+    assert _pick(LeadDossier(budget_signal="lagi tipis")) == SMART
 
 
-def test_buying_signal_forces_smart_even_early() -> None:
-    # A hot signal at an early stage must not be gambled on the cheap model.
-    assert _pick(stage=Stage.QUALIFYING, last_inbound="kak gimana cara daftar?") == SMART
-    assert _pick(stage=Stage.NEW, last_inbound="mau bayar sekarang dong") == SMART
-    assert _pick(stage=Stage.QUALIFYING, last_inbound="Gasss") == SMART
-    assert _pick(stage=Stage.QUALIFYING, last_inbound="ini nomor wa 0812 3456 7890") == SMART
-    # a soft-no is the save-the-sale (objection-handling) turn — it needs the strong model
-    # too (sales-logic audit 2026-07-19); a neutral message still rides the cheap lane
-    assert _pick(stage=Stage.QUALIFYING, last_inbound="masih mikir dulu ya") == SMART
-    # a neutral acknowledgement in the 'new' stage still rides the cheap lane
-    assert _pick(stage=Stage.NEW, last_inbound="oke kak makasih infonya") == FAST
+def test_a_lead_weighing_it_up_or_ready_forces_the_strong_model() -> None:
+    assert _pick(LeadDossier(readiness="considering")) == SMART
+    assert _pick(LeadDossier(readiness="ready")) == SMART
 
 
-def test_deep_conversation_forces_smart_regardless_of_stage() -> None:
-    # A lead 10+ turns deep represents real invested effort. Active sales stages are smart
-    # anyway now; the deep-thread rule still lifts a lingering 'new'-stage lead onto smart.
-    assert _pick(stage=Stage.NEW, lead_type="cold", inbound_count=6) == FAST
-    assert _pick(stage=Stage.NEW, lead_type="cold", inbound_count=9) == FAST
-    assert _pick(stage=Stage.NEW, lead_type="cold", inbound_count=10) == SMART
-    assert _pick(stage=Stage.NEW, inbound_count=12) == SMART
+def test_any_degree_of_refusal_forces_the_strong_model() -> None:
+    """Soft, vague and blunt each need a different reaction — the cheap model conflates them."""
+    for degree in ("soft", "vague", "blunt"):
+        assert _pick(LeadDossier(refusal=degree)) == SMART
 
 
-def test_guard_regen_history_stays_on_smart_for_this_lead() -> None:
-    # Once guard has REPEATEDLY had to regenerate replies for this lead, keep it on smart —
-    # a per-LEAD signal. A single regen over the whole history is noise (it made every lead
-    # who ever tripped one smart forever); two+ is a pattern.
-    assert _pick(stage=Stage.NEW, guard_regen_count=0) == FAST
-    assert _pick(stage=Stage.NEW, guard_regen_count=1) == FAST
-    assert _pick(stage=Stage.NEW, guard_regen_count=2) == SMART
-    assert _pick(stage=Stage.QUALIFYING, lead_type="cold", guard_regen_count=3) == SMART
-
-
+def test_routing_never_reads_the_lead_message_text() -> None:
+    """The signature takes no text at all — an unseen phrasing structurally cannot downgrade
+    a decisive turn, which is the v2 failure this replaces."""
+    import inspect
+    params = set(inspect.signature(pick_capability).parameters)
+    assert params == {"dossier", "is_first_reply"}

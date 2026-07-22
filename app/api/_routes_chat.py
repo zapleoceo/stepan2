@@ -20,9 +20,9 @@ from app.admin._branch import (
     writable_branch_ids,
 )
 from app.config import settings
-from app.modules.conversation.factory import build_reply_service
 from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.needs_translate import cached_needs, translated_needs
+from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.translate import (
     target_for_lang,
     translate_message,
@@ -691,9 +691,8 @@ async def chat_suggest(thread_id: int, request: Request) -> HTMLResponse:
         cfg = await get_settings(session, suggest_bid)
         kb = await effective_kb_branch(session, suggest_bid)  # shared-KB link, if any
         llm = BrokerLLM()
-        reply_service = build_reply_service(
-            session, suggest_bid, llm, KnowledgeService(session, kb, llm), branch_settings=cfg,
-            engine=cfg.reply_engine)
+        reply_service = ReplyService(
+            session, suggest_bid, llm, KnowledgeService(session, kb, llm), branch_settings=cfg)
         draft = ""
         try:
             decision = await reply_service.decide(thread_id, workflow="suggest")

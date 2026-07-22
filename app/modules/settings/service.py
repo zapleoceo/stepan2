@@ -86,10 +86,6 @@ class BranchSettings:
     # logs disagreement only, never changes the reply (see conversation.classifier). Off by
     # default; a branch opts in to gather shadow data before any cutover.
     nudge_classifier_shadow: bool = False
-    # Which reply pipeline a branch runs: "v2" (the accumulated pipeline) or "v3" (the rebuild —
-    # LeadDossier state, compact contract, next-best-move, money-only gate, critic fail-OPEN).
-    # Anything unrecognised resolves to v2, so a typo can never silently disable replies.
-    reply_engine: str = "v2"
     # Trunk country code for phones mined from a lead's free-text message (see
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
@@ -248,7 +244,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         reply_guard=raw.get("reply_guard", "full"),
         critic_gate=raw.get("critic_gate", "off"),
         nudge_classifier_shadow=_b(raw, "nudge_classifier_shadow"),
-        reply_engine=_choice(raw, "reply_engine"),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),

@@ -15,8 +15,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Branch, Lead
 from app.modules.budget import BudgetService
 
-from .needs import NeedsProfile, needs_summary, parse_needs
-from .prompt import build_messages, lead_name_hint, now_hint, source_hint
+from .needs import NeedsProfile, parse_needs
+from .prompt import now_hint
 from .repository import CoachingNoteRepo, MessageRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -132,37 +132,6 @@ class DecisionEngine:
         lead = await self.session.get(Lead, thread.lead_id)
         stored_needs = parse_needs(lead.needs if lead is not None else None)
         return DecisionContext(thread, dialog, lead, stored_needs, budget)
-
-    async def complete(
-        self,
-        ctx: DecisionContext,
-        thread_id: int,
-        *,
-        lang: str,
-        workflow: str,
-        extra_user_msg: str | None = None,
-        capability: str = "chat:smart",
-        bill: bool = True,
-    ) -> tuple[str, dict]:
-        """Build the prompt, call the model, record the spend; returns (raw, meta).
-
-        capability picks the model tier (see routing.pick_capability) — default stays smart
-        so any caller that doesn't route keeps the strong model."""
-        context = await self.kb_context(ctx, thread_id, light=workflow == "followup")
-        notes = await self.coaching.active_manager_notes()
-        messages = build_messages(
-            context, ctx.dialog, lang, coaching_notes=notes,
-            needs_block=needs_summary(ctx.stored_needs),
-            source_block=source_hint(ctx.thread.lead_source),
-            name_block=lead_name_hint(ctx.lead.display_name if ctx.lead else None),
-            manager_note=ctx.lead.manager_note if ctx.lead else None,
-            workflow=workflow, now_block=await self._now_block())
-        if extra_user_msg is not None:
-            messages.append({"role": "user", "content": extra_user_msg})
-        elif messages[-1]["role"] == "assistant":
-            messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
-        return await self.run(ctx, messages, thread_id,
-                              workflow=workflow, capability=capability, bill=bill)
 
     async def kb_context(self, ctx: DecisionContext, thread_id: int, *, light: bool) -> str:
         """The branch's assembled knowledge for this turn, memoized per turn.

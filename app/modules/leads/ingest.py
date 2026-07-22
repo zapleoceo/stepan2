@@ -14,7 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Lead, MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.ads import AdMappingService
-from app.modules.conversation.situations import is_auto_reply
+from app.modules.conversation.signals import is_auto_reply
 from app.modules.notifications.alerts import AlertService
 from app.ports.channel import InboundMessage
 from app.ports.notify import NotifierPort

@@ -114,9 +114,7 @@ async def test_worker_reply_thread_returns_false_when_llm_raises(monkeypatch) ->
     monkeypatch.setattr(worker_main, "effective_kb_branch", _kb)
     monkeypatch.setattr(worker_main, "_build_notifier", lambda _cfg: None)
     monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **kw: object())
-    monkeypatch.setattr(worker_main, "build_reply_service",
-                        lambda *a, **kw: _RaisingReply(*a, **{k: v for k, v in kw.items()
-                                                              if k != "engine"}))
+    monkeypatch.setattr(worker_main, "ReplyService", _RaisingReply)
 
     class _FakeRedis:
         async def zremrangebyscore(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
@@ -167,4 +165,7 @@ async def test_decide_returns_none_when_both_fast_and_smart_unparseable(db_sessi
                        branch_settings=_parse({}))
     decision = await svc.decide(tid)
     assert decision is None
-    assert llm.calls >= 2  # fast attempt + smart escalation both tried
+    # The opener always runs on the strong model, and a broken STRONG answer is not retried:
+    # two attempts is the ceiling, and burning the second on the tier that just failed buys
+    # nothing. The fast->smart escalation is covered in test_reply.py.
+    assert llm.calls == 1

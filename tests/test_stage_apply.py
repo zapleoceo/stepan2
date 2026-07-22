@@ -106,21 +106,6 @@ def _decision(**over: Any) -> Decision:
     return Decision(**base)
 
 
-async def test_fast_broken_json_escalates_to_smart(db_session) -> None:
-    # 'new'-stage mid-conversation, neutral last message, cold lead → routes to fast (active
-    # sales stages now run on smart, so 'new' is the remaining cheap lane), exercising the
-    # broken-JSON → smart escalation path
-    bid, tid, lead = await _world(
-        db_session, stage=Stage.NEW, inbounds=["halo", "oh gitu", "oke deh"])
-    lead.lead_type = "cold"
-    db_session.add(lead)
-    await db_session.flush()
-    llm = CapRecordingLLM()
-    decision = await _svc(db_session, bid, llm=llm).decide(tid)
-    assert llm.caps == ["chat:fast", "chat:smart"]  # tried cheap, escalated on broken JSON
-    assert decision is not None and decision.reply == "ok"
-
-
 def _svc(s, bid: int, notifier=None, llm=None) -> ReplyService:  # noqa: ANN001
     return ReplyService(s, bid, llm or FakeLLM(), KnowledgeService(s, bid),
                         branch_settings=_parse({}), notifier=notifier)
@@ -287,7 +272,7 @@ async def test_ready_without_phone_keeps_selling(db_session) -> None:
 async def test_ready_handoff_appends_a_closing_line_for_the_lead(db_session) -> None:
     """The won/READY exit muted the bot but never guaranteed the lead a 'what happens next'
     line (unlike the manager exit). The fresh READY flip now appends _READY_HANDOFF_CLOSING."""
-    from app.modules.conversation.reply import _READY_HANDOFF_CLOSING
+    from app.modules.conversation.delivery import _READY_HANDOFF_CLOSING
 
     bid, tid, _lead = await _world(db_session, phone="+6281234567890")
     await _svc(db_session, bid).enqueue_reply(tid, _decision(ready=True, stage=Stage.PRESENTING))
@@ -393,7 +378,7 @@ async def test_needs_manager_appends_a_closing_line_for_the_lead(db_session) -> 
     """Live case (thread 1023): needs_manager mutes the bot, but nothing told the LEAD a
     human was taking over — a follow-up they sent days later got pure silence. The bot's own
     turn must include a closing bubble saying a human will follow up."""
-    from app.modules.conversation.reply import _MANAGER_HANDOFF_CLOSING
+    from app.modules.conversation.delivery import _MANAGER_HANDOFF_CLOSING
 
     bid, tid, _lead = await _world(db_session, phone="+6281234567890")
     out = await _svc(db_session, bid).enqueue_reply(
@@ -408,7 +393,7 @@ async def test_needs_manager_appends_a_closing_line_for_the_lead(db_session) -> 
 async def test_no_closing_line_when_already_in_manager_stage(db_session) -> None:
     """Don't re-append the closing line on every subsequent needs_manager turn once the
     lead is already muted — only the turn that FLIPS the stage gets it."""
-    from app.modules.conversation.reply import _MANAGER_HANDOFF_CLOSING
+    from app.modules.conversation.delivery import _MANAGER_HANDOFF_CLOSING
 
     bid, tid, _lead = await _world(db_session, phone="+6281234567890", stage=Stage.MANAGER)
     await _svc(db_session, bid).enqueue_reply(

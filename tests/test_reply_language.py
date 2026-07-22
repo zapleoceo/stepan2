@@ -43,7 +43,8 @@ class _SpyLLM:
         self.seen_lang: str | None = None
 
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
-        self.seen_lang = messages[0]["content"]  # system prompt carries the {lang} token
+        if self.seen_lang is None:  # the GENERATION prompt, not the critic's review of it
+            self.seen_lang = messages[0]["content"]
         return json.dumps({"reply": "ok", "stage": "qualifying"}), \
             {"model": "fake", "cost_usd": 0.0}
 
@@ -111,7 +112,7 @@ async def test_cyrillic_in_lead_text_overrides_stale_default_immediately(db_sess
     decision = await svc.decide(tid)
 
     assert decision is not None and decision.reply_language is None  # model said nothing
-    assert "'ru'" in llm.seen_lang  # THIS turn's prompt already asked for Russian
+    assert "Reply in ru" in llm.seen_lang  # THIS turn's prompt already asked for Russian
     lead_after = (await db_session.exec(select(Lead))).first()
     assert lead_after.id == lead_before.id
     assert lead_after.preferred_language == "ru"  # persisted without waiting on self-report

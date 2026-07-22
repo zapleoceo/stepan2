@@ -18,6 +18,12 @@ from .guard import canonical_prices, fabricated_income_figure, ungrounded_urls
 # The correction handed to the model when the gate trips. It names the offence and demands a
 # replacement — never a retreat to "I'll check with the team", which is what v2 did and what
 # taught the bot to go quiet on answerable questions.
+# Stamped on the one hand-off v3 raises by itself, so the chat log can tell a machine-forced
+# escalation from a reason the model actually named.
+MONEY_ESCALATION_REASON = (
+    "Степан дважды назвал сумму или ссылку, которых нет в базе знаний — "
+    "нужен ручной ответ менеджера с точной цифрой")
+
 MONEY_CORRECTION = (
     "[System: your draft states something about money or a link that is NOT in the knowledge "
     "base: {issues}. Rewrite the SAME message keeping its intent and warmth, but state only "

@@ -178,9 +178,13 @@ async def _queue_call_failed_message(
     if thread_id is None:
         return False
     # local imports break an import cycle (conversation ← leads) — same pattern as coach
-    from app.modules.conversation.decision import parse_decision  # noqa: PLC0415
+    from app.modules.conversation.contract import build_messages_v3  # noqa: PLC0415
+    from app.modules.conversation.decision import generate  # noqa: PLC0415
+    from app.modules.conversation.delivery import _BUBBLE_GAP_S, _split_bubbles  # noqa: PLC0415
+    from app.modules.conversation.dossier import merge_dossier  # noqa: PLC0415
     from app.modules.conversation.engine import DecisionEngine, _fmt_llm_meta  # noqa: PLC0415
-    from app.modules.conversation.reply import _BUBBLE_GAP_S, _split_bubbles  # noqa: PLC0415
+    from app.modules.conversation.repository import DossierRepo  # noqa: PLC0415
+    from app.modules.conversation.routing import SMART  # noqa: PLC0415
     from app.modules.knowledge.service import KnowledgeService  # noqa: PLC0415
     from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
 
@@ -191,17 +195,24 @@ async def _queue_call_failed_message(
     ctx = await engine.prepare(thread_id, workflow="call_failed")
     if ctx is None:
         return False
+    dossiers = DossierRepo(session, lead.branch_id)
+    stored = await dossiers.load(lead.id)
     try:
-        raw, meta = await engine.complete(
-            ctx, thread_id, lang=lang, workflow="call_failed",
-            extra_user_msg=_CALL_FAILED_NUDGE.format(lang=lang),
-        )
-        decision = parse_decision(raw)
+        messages = build_messages_v3(
+            await engine.kb_context(ctx, thread_id, light=False),
+            ctx.dialog, lang, stored,
+            now_block=await engine._now_block())  # noqa: SLF001
+        messages.append({"role": "user", "content": _CALL_FAILED_NUDGE.format(lang=lang)})
+        # A lead we already tried to phone is well past small talk — worth the strong model.
+        decision, meta = await generate(
+            engine, ctx, messages, thread_id, workflow="call_failed",
+            capability=SMART, branch_id=lead.branch_id)
     except Exception:  # noqa: BLE001 — a generation failure must not undo the funnel move
         logger.exception("call_failed message gen failed lead=%d", lead.id)
         return False
-    if not decision.reply:
+    if decision is None or not decision.reply.strip():
         return False
+    await dossiers.save(lead.id, merge_dossier(stored, decision.dossier))
     now = _now()
     meta_line = _fmt_llm_meta(meta)
     for i, bubble in enumerate(_split_bubbles(decision.reply)):

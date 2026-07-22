@@ -51,10 +51,10 @@ def test_operational_knobs_are_present_with_sane_defaults() -> None:
 
 
 def test_modules_read_from_settings_not_literals() -> None:
-    from app.modules.conversation import reply
+    from app.modules.conversation import delivery
     from app.modules.conversation.repository import _MAX_CONTEXT_MSGS
-    assert reply._BUBBLE_GAP_S == settings().bubble_gap_s
-    assert reply._MAX_BUBBLES == settings().max_bubbles
+    assert delivery._BUBBLE_GAP_S == settings().bubble_gap_s
+    assert delivery._MAX_BUBBLES == settings().max_bubbles
     assert _MAX_CONTEXT_MSGS == settings().max_context_msgs
 
 

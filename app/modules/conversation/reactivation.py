@@ -27,12 +27,12 @@ from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.domain.enums import Stage
 from app.modules.settings.service import BranchSettings
 
-from .decision_v3 import generate
+from .contract import build_messages_v3
+from .decision import generate
+from .delivery import _BUBBLE_GAP_S, _split_bubbles
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
-from .guard_v3 import money_issues
-from .prompt_v3 import build_messages_v3
-from .reply import _BUBBLE_GAP_S, _split_bubbles
+from .money_gate import money_issues
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import FAST
 

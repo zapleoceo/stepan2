@@ -7,7 +7,7 @@ exist, an invented income claim.
 """
 from __future__ import annotations
 
-from app.modules.conversation.guard_v3 import MONEY_CORRECTION, money_issues
+from app.modules.conversation.money_gate import MONEY_CORRECTION, money_issues
 
 _KB = ("Vibe Coding: durasi 6 bulan · harga Rp 13.360.000, DP Rp 500.000, "
        "cicilan Rp 2.226.000 per bulan. Info: https://itstep.id")

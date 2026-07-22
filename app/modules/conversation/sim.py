@@ -21,8 +21,8 @@ from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import get_settings
 from app.ports.llm import LLMPort
 
-from .factory import build_reply_service
-from .reply import _split_bubbles
+from .delivery import _split_bubbles
+from .reply import ReplyService
 
 _SIM_HANDLE = "__sim__"
 
@@ -78,9 +78,8 @@ class SimService:
         cfg = await get_settings(self.session, branch_id)
         from app.modules.knowledge.source import effective_kb_branch  # noqa: PLC0415
         kb = await effective_kb_branch(self.session, branch_id)
-        reply = build_reply_service(self.session, branch_id, self.llm,
-                                    KnowledgeService(self.session, kb, self.llm), cfg,
-                                    engine=cfg.reply_engine)
+        reply = ReplyService(self.session, branch_id, self.llm,
+                             KnowledgeService(self.session, kb, self.llm), cfg)
         decision = await reply.decide(th.id, workflow="sim")  # sim-tagged log, billed
         if decision is None:
             return {"ok": False, "detail": "no decision (over budget / empty / voice-hold)"}
