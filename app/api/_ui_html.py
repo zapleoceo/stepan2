@@ -642,8 +642,14 @@ _STC: dict[str, str] = {
     "manager": "sm",
 }
 
-_PIPELINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready", "handed_off")
-_SIDE_STAGES = ("dormant", "manager")
+# The correct funnel order (verified against 7 days of live bot-driven transitions,
+# 2026-07-23): a fresh lead goes straight to discovery 657 times against 8 that land in
+# nurturing first — nurturing is not a step a lead passes through, it's a state entered
+# (and left) from ANY active stage when they go quiet mid-conversation (84% of entries into
+# it came from qualifying/presenting/objection, not from new), exactly like dormant already
+# is. It moved out of the linear pipeline into the side-track for that reason.
+_PIPELINE = ("new", "qualifying", "presenting", "objection", "ready", "handed_off")
+_SIDE_STAGES = ("nurturing", "dormant", "manager")
 _STAGE_COLOR: dict[str, str] = {
     "new": "#4da6ff", "nurturing": "#d6a96f", "qualifying": "#9b7aff",
     "presenting": "#4adb7a", "objection": "#ffa94d", "ready": "#51cf66",
@@ -1246,8 +1252,8 @@ def messages_html(
 
 
 _STAGES = (
-    "new", "nurturing", "qualifying", "presenting", "objection",
-    "ready", "handed_off", "dormant", "manager",
+    "new", "qualifying", "presenting", "objection", "ready", "handed_off",
+    "nurturing", "dormant", "manager",
 )
 
 

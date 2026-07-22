@@ -17,13 +17,20 @@ class Role(StrEnum):
 
 
 class Stage(StrEnum):
+    """Declared in funnel order, then side states. Nothing in the code compares members by
+    this order (only equality/membership), so this carries no functional weight — it exists
+    for whoever reads this next. NURTURING sits with the side states on purpose: measured
+    live (2026-07-23), 84% of leads that enter it come from an already-active stage going
+    quiet, not from NEW — it's a state entered from (and returned to) any active stage, not
+    a step in the sequence, exactly like DORMANT."""
+
     NEW = "new"
-    NURTURING = "nurturing"
     QUALIFYING = "qualifying"
     PRESENTING = "presenting"
     OBJECTION = "objection"
     READY = "ready"
     HANDED_OFF = "handed_off"
+    NURTURING = "nurturing"
     DORMANT = "dormant"
     MANAGER = "manager"
 

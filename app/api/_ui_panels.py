@@ -1552,13 +1552,17 @@ def _ad_tree_html(
     return f'{hdr}{note}<div class="adt">{body}</div>{_AD_TREE_CSS}{_AD_FUNNEL_JS}'
 
 
-# Pipeline order for the one-line funnel (side stages shown separately below).
-_FUNNEL_PIPELINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready")
-_FUNNEL_SIDE = ("handed_off", "dormant", "manager")
+# Pipeline order for the one-line funnel (side stages shown separately below). Verified
+# against 7 days of live bot-driven transitions (2026-07-23): a fresh lead reaches discovery
+# directly 657 times against 8 that land in nurturing first, and 84% of entries into
+# nurturing come from an already-active stage going quiet, not from "new" — it's a side
+# state entered from (and returned to) any active stage, not a step in the sequence.
+_FUNNEL_PIPELINE = ("new", "qualifying", "presenting", "objection", "ready")
+_FUNNEL_SIDE = ("nurturing", "handed_off", "dormant", "manager")
 
-# Flow diagram: pipeline spine on the top lane, terminal exits on the bottom lane.
-_FLOW_SPINE = ("new", "nurturing", "qualifying", "presenting", "objection", "ready", "handed_off")
-_FLOW_EXITS = ("dormant", "manager")
+# Flow diagram: pipeline spine on the top lane, side branches on the bottom lane.
+_FLOW_SPINE = ("new", "qualifying", "presenting", "objection", "ready", "handed_off")
+_FLOW_EXITS = ("nurturing", "dormant", "manager")
 
 
 def _funnel_flow_html(
@@ -1594,8 +1598,12 @@ def _funnel_flow_html(
     pos: dict[str, tuple[float, float]] = {
         s: (left + i * step, top_y) for i, s in enumerate(_FLOW_SPINE)
     }
-    pos["dormant"] = (left + 2 * step, bot_y)
-    pos["manager"] = (left + 4 * step, bot_y)
+    # Bottom lane, spread across the width: nurturing sits early (its traffic is heaviest
+    # around qualifying/presenting), dormant and manager later, mirroring where in a real
+    # conversation a lead is most likely to fall into each.
+    pos["nurturing"] = (left + 1.5 * step, bot_y)
+    pos["dormant"] = (left + 3 * step, bot_y)
+    pos["manager"] = (left + 4.5 * step, bot_y)
 
     def bar_h(s: str) -> float:
         return max(10.0, min(96.0, tp.get(s, 0) / max_tp * 96))
