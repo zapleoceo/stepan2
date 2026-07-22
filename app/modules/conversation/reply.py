@@ -517,6 +517,8 @@ async def apply_critic(
     except ValueError:
         fixed = None
     from dataclasses import replace  # noqa: PLC0415
+    recrit = None
+    det: list[str] = []
     if fixed is not None and fixed.reply:
         recrit = await _judge(fixed.reply)
         det = _deterministic_issues(
@@ -530,7 +532,7 @@ async def apply_critic(
     # Two drafts couldn't clear the bar — hand the lead to a human rather than send a sub-par
     # reply. This is the guarantee's teeth: only proven-good replies reach the lead.
     base = fixed if fixed is not None and fixed.reply else decision
-    last_crit = recrit if fixed is not None and fixed.reply else crit
+    last_crit = recrit if recrit is not None else crit
     last_draft = (base.reply or decision.reply or "").strip()
     # The Telegram alert reads kb_gap verbatim (raise_manager_alert) - a model-set kb_gap is
     # kept as-is (it named a real fact gap), but the GENERIC handoff reason told a human nothing
@@ -538,8 +540,12 @@ async def apply_critic(
     # tried to say, so every incident needed live container logs (lost on the next deploy/
     # restart) to diagnose. Carry the critic's own verdict + the rejected draft into the alert
     # itself - real AI-generated diagnostic data, not a guess reconstructed after the fact.
+    # thread 4799: the critic said 'ok' on both attempts and the enrichment showed nothing
+    # actionable ("Критик: ok") because it was really the DETERMINISTIC guard (det) that kept
+    # failing, silently dropped from the message here - include it explicitly.
+    det_note = f"\nДетерминированный guard: {'; '.join(det[:5])}" if det else ""
     enriched_gap = (
-        f"{critic.CRITIC_HANDOFF_REASON}\nКритик: {last_crit.summary()[:300]}\n"
+        f"{critic.CRITIC_HANDOFF_REASON}\nКритик: {last_crit.summary()[:300]}{det_note}\n"
         f"Черновик: «{last_draft[:250]}»"
     )
     return replace(base, reply=guard.SAFE_FALLBACK, needs_manager=True,
