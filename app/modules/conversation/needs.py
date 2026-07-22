@@ -184,6 +184,11 @@ def lead_grounded(items: list[str], lead_text: str) -> list[str]:
     return [s for s in items if _content_tokens(s) & lead_toks]
 
 
+# Public alias — the v3 dossier collapses its own phrase lists with exactly these semantics,
+# so it imports this rather than growing a second near-duplicate implementation.
+dedup_phrases = _dedup_near
+
+
 def _clean(value: object) -> list[str]:
     if not isinstance(value, list):
         return []

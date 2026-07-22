@@ -77,6 +77,11 @@ class Lead(SQLModel, table=True):
         default=None, description="если лид попросил другой язык — отвечаем на нём")
     needs: str | None = Field(
         default=None, description="JSON-профиль потребности: jobs/pains/gains + discovery_complete")
+    dossier: str | None = Field(
+        default=None,
+        description="v3 LeadDossier (JSON): кто/зачем/боли/решение/деньги/возражения со "
+                    "статусом/что уже потрачено. Заменяет needs; needs остаётся нетронутым, "
+                    "чтобы v2 и v3 работали параллельно и мердж ничего не ломал")
     needs_tr: str | None = Field(
         default=None,
         description="кэш перевода needs: {lang: {ориг.фраза: перевод}} — не биллить повторно")
