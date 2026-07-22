@@ -67,12 +67,13 @@ def pick_capability(
     followup_attempt = nudges already sent (0 = first). inbound_count = lead messages so far.
     guard_regen_count = times guard regenerated for this LEAD across their whole history."""
     if workflow == "followup":
-        # ALL follow-ups use the strong model (owner-set 2026-07-21). A proactive touch is
-        # unprompted and content-sensitive, and the free pool (gpt-oss) fabricated on them —
-        # wrong course durations, Zoom, 'max 14 orang' / 'tiap Kamis' scarcity (thread 4141);
-        # varying the angle without repeating an earlier opener needs strong instruction-
-        # following anyway (chat 1830). Reliability wins over the cheap lane here.
-        return SMART
+        # 2026-07-22 cost trial: back to FAST for follow-ups (was forced to SMART 2026-07-21
+        # after the free pool fabricated wrong durations/Zoom/fake scarcity - thread 4141). The
+        # critic-gate built earlier today (conversation.critic) runs on EVERY reply including
+        # follow-ups and is exactly the safety net that incident needed - a fabricated duration/
+        # Zoom/scarcity claim now fails 'grounded' and forces a regen (escalating to SMART
+        # automatically) instead of reaching the lead. Revert to SMART if live quality suffers.
+        return FAST
     # The FIRST reply to a brand-new lead is the single highest-leverage message — the opener
     # is where ~76% of leads ghost (funnel audit 2026-07-19). Never gamble it on the free pool.
     if inbound_count <= 1:

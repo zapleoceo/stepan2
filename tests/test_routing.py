@@ -24,11 +24,13 @@ def test_first_reply_to_new_lead_is_smart() -> None:
     assert _pick(inbound_count=0) == SMART
 
 
-def test_followups_use_smart() -> None:
-    # owner-set 2026-07-21: all follow-ups use the strong model — the free pool fabricated on
-    # proactive touches (wrong durations, Zoom, fake scarcity, thread 4141)
-    assert _pick(workflow="followup", followup_attempt=0) == SMART
-    assert _pick(workflow="followup", followup_attempt=2) == SMART
+def test_followups_use_fast() -> None:
+    # 2026-07-22 cost trial: back to FAST now that the critic-gate (built same day) catches
+    # exactly the fabrication (wrong durations, Zoom, fake scarcity, thread 4141) that justified
+    # forcing SMART on 2026-07-21 - a bad draft now regens escalated to SMART instead of
+    # reaching the lead.
+    assert _pick(workflow="followup", followup_attempt=0) == FAST
+    assert _pick(workflow="followup", followup_attempt=2) == FAST
 
 
 def test_money_stages_stay_smart() -> None:
