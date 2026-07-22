@@ -26,6 +26,7 @@ from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
 from . import critic, guard
+from .classifier import classify_turn, regex_category_for
 from .decision import Decision, parse_decision
 from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
 from .needs import _content_tokens, is_question, lead_grounded, merge_needs, parse_needs
@@ -56,6 +57,9 @@ from .situations import (
 )
 from .situations import (
     pick_nudge as _pick_situational_nudge,
+)
+from .situations import (
+    pick_situation as _pick_situation,
 )
 from .situations import (
     postpone_days as _postpone_days,
@@ -617,12 +621,27 @@ class ReplyService:
         # Situational steering — detectors, nudges, priorities and their conflict combos all
         # live in situations.pick_nudge (one chain, one owner; see that module's docstring).
         last_txt = (last_in.text if last_in is not None else "") or ""
+        raw_situation = _pick_situation(
+            lead_type=lead.lead_type if lead is not None else None,
+            dialog=ctx.dialog, last_txt=last_txt,
+            stored_needs=ctx.stored_needs, inbound_count=inbound_count)
         extra_user_msg = _pick_situational_nudge(
             lead_type=lead.lead_type if lead is not None else None,
             dialog=ctx.dialog,
             last_txt=last_txt,
             stored_needs=ctx.stored_needs,
             inbound_count=inbound_count)
+        if self.settings is not None and self.settings.nudge_classifier_shadow:
+            # Shadow-only measurement (2026-07-22 architecture review): never alters
+            # extra_user_msg, just logs where the six meaning-regexes and an AI classifier
+            # disagree, to build the evidence needed before any cutover.
+            ai_type = await classify_turn(
+                self.llm, last_txt=last_txt, branch_id=self.branch_id, thread_id=thread_id)
+            regex_type = regex_category_for(raw_situation)
+            if ai_type is not None and ai_type != regex_type:
+                logger.info(
+                    "nudge_classifier_shadow branch=%d thread=%d disagree: regex=%s ai=%s "
+                    "last_txt=%r", self.branch_id, thread_id, regex_type, ai_type, last_txt[:200])
         raw, meta = await engine.complete(
             ctx, thread_id, lang=lang, workflow=workflow, capability=cap, bill=bill,
             extra_user_msg=extra_user_msg)

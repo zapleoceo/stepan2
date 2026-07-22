@@ -990,7 +990,7 @@ def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> s
     """The steering block for this turn: ONE situational nudge (priority chain below) plus the
     length-mirror suffix when the lead is chatting in one-liners, plus the answer-every-part
     suffix when their message packs several questions. Returns None only when none apply."""
-    nudge = _pick_situation(
+    nudge = pick_situation(
         lead_type=lead_type, dialog=dialog, last_txt=last_txt,
         stored_needs=stored_needs, inbound_count=inbound_count)
     suffix = format_suffix(last_txt, nudge)
@@ -1003,7 +1003,7 @@ def pick_nudge(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> s
     return (nudge + suffix) if nudge else suffix.lstrip("\n")
 
 
-def _pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
+def pick_situation(*, lead_type, dialog, last_txt, stored_needs, inbound_count) -> str | None:  # noqa: ANN001
     """The ONE situational nudge for this turn, or None — the whole priority chain in one
     place so rule conflicts are resolved here, deliberately, instead of by accident of
     ordering scattered through reply.py.

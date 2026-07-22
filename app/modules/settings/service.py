@@ -80,6 +80,11 @@ class BranchSettings:
     # 'off' disables it. Default OFF so sims/tests see the raw model draft (their purpose);
     # the live sales branch opts in via an AppSetting. See conversation.critic.
     critic_gate: str = "off"
+    # Shadow AI classifier for the lead's turn (soft_no/postpone/paid_shock/trust_doubt/
+    # low_budget/no_time/buying_signal/none) vs the six equivalent regexes in situations.py —
+    # logs disagreement only, never changes the reply (see conversation.classifier). Off by
+    # default; a branch opts in to gather shadow data before any cutover.
+    nudge_classifier_shadow: bool = False
     # Trunk country code for phones mined from a lead's free-text message (see
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
@@ -226,6 +231,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         meta_capi_token=raw.get("meta_capi_token", ""),
         reply_guard=raw.get("reply_guard", "full"),
         critic_gate=raw.get("critic_gate", "off"),
+        nudge_classifier_shadow=_b(raw, "nudge_classifier_shadow"),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),
