@@ -375,8 +375,14 @@ async def schedule_followups(ctx: dict[str, Any]) -> int:
 async def schedule_followups_branch(ctx: dict[str, Any], branch_id: int) -> int:
     """One branch's follow-up harvest. followup_enabled and the schedule are per-connector
     now (resolved inside FollowupService.due_threads), so the branch-level enabled check is
-    gone — a branch runs if ANY of its channels wants follow-ups."""
-    queued = 0
+    gone — a branch runs if ANY of its channels wants follow-ups.
+
+    Dispatches each due thread as its OWN arq job (generate_one_followup), deduped by
+    _job_id=followup:{thread_id} — the same idempotency guard reply_pending_branch uses for
+    replies. Before this, the per-thread loop ran synchronously in-process with no such guard:
+    thread 4842 (2026-07-22) got two follow-ups 46s apart during a worker rolling-restart
+    deploy — the outgoing and incoming worker both queried due_threads() and each picked up
+    the same thread before either had committed its outbox row."""
     llm = BrokerLLM()
     try:
         async with session_scope() as session:
@@ -390,10 +396,25 @@ async def schedule_followups_branch(ctx: dict[str, Any], branch_id: int) -> int:
         logger.exception(
             "schedule_followups: branch=%s bookkeeping failed, skipping", branch_id)
         return 0
+    redis = ctx["redis"]
+    enqueued = 0
     for thread_id, product_slug, sent_so_far in due:
-        if await _queue_one_followup(branch_id, thread_id, product_slug, sent_so_far, llm):
-            queued += 1  # timers are armed by OutboxSender after bot sends
-    return queued
+        job = await redis.enqueue_job(
+            "generate_one_followup", branch_id, thread_id, product_slug, sent_so_far,
+            _job_id=f"followup:{thread_id}")  # None → this thread's follow-up is already queued
+        if job is not None:
+            enqueued += 1
+    return enqueued
+
+
+async def generate_one_followup(
+    ctx: dict[str, Any], branch_id: int, thread_id: int, product_slug: str | None,
+    sent_so_far: int,
+) -> bool:
+    """One thread's follow-up generate+queue, as its own arq job — see schedule_followups_branch
+    for why this needed the same per-thread dedup as generate_one_reply."""
+    llm = BrokerLLM()
+    return await _queue_one_followup(branch_id, thread_id, product_slug, sent_so_far, llm)
 
 
 async def _queue_one_followup(
@@ -1037,6 +1058,9 @@ class WorkerSettings:
         # and double-billing). keep_result=0 is the worker default — a killed/failed reply job
         # frees its reply:{thread_id} id next tick instead of blocking it (prod 2026-07-10).
         func(generate_one_reply, timeout=settings().reply_job_timeout_s, max_tries=1),
+        # Same reasoning as generate_one_reply above — its own long timeout, no ARQ retry,
+        # keep_result=0 frees followup:{thread_id} next tick if killed/failed.
+        func(generate_one_followup, timeout=settings().reply_job_timeout_s, max_tries=1),
     ]
     cron_jobs = [
         # Ingest every 2 min: an IG poll costs several private-API calls each with a
