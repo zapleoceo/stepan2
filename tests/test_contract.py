@@ -151,3 +151,35 @@ def test_the_lead_is_not_drowned_out_by_instructions() -> None:
     kb = "x" * 12_000
     system = build_messages_v3(kb, [_msg("halo")], "id", LeadDossier())[0]["content"]
     assert len(contract("id")) / len(system) < 0.35
+
+
+# ── the opener: introduce yourself, never the building ───────────────────────
+
+def test_the_first_message_introduces_who_is_writing() -> None:
+    """Measured over 2 619 live openers, an introduction cost nothing (43.5% vs 43.8% reply
+    rate); it was the campus line riding along with it that looked expensive."""
+    text = contract("id")
+    assert "FIRST MESSAGE" in text
+    assert "who you are" in text
+
+
+def test_the_introduction_is_capped_at_once() -> None:
+    text = contract("id")
+    assert "Once per conversation, never again" in text
+
+
+def test_the_campus_description_is_banned_from_the_opener() -> None:
+    """Any opener mentioning the campus measured 33-38% reply rate against 43.8% without it —
+    the single most expensive habit the old engine had."""
+    text = contract("id")
+    assert "Never describe the campus" in text
+    assert "address" in text
+
+
+def test_the_opener_still_has_to_end_on_a_question() -> None:
+    """Without a question an opener drops from 43.8% to 39.4%."""
+    assert "Always end on a question" in contract("id")
+
+
+def test_the_contract_did_not_grow_past_its_ceiling() -> None:
+    assert len(contract("id")) < _CONTRACT_CEILING

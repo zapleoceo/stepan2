@@ -1,14 +1,13 @@
-"""v3 prompt assembly — a small contract over a rich dossier.
+"""The instruction block for one turn — a small contract over a rich dossier.
 
-The v2 contract grew to 25 317 chars by absorbing one incident fix at a time. Measured on a
-typical turn it was 55% instructions, 40% facts, 5% the actual conversation — and the model
-followed rules unreliably at that size, which is why v2 needed a whole layer of situational
-nudges on top. This contract states the method once and leans on the LEAD DOSSIER for
-everything the bot has already learned, so the model spends its attention on the person.
+Its predecessor reached 30 146 chars by absorbing one incident fix at a time. Measured on a
+typical turn that left the prompt 55% instructions, 40% facts and 5% the actual conversation,
+and rules stopped being followed reliably at that size — which is why a whole layer of
+situational nudges had grown on top of it. This one states the method once and leans on the
+LEAD DOSSIER for everything already learned, so the model spends its attention on the person.
 
-Kept in its own module: v2's prompt.py is untouched and both engines run side by side behind
-the reply_engine setting. Register lives here (how to write) and identity in the persona doc
-(who you are), so neither repeats the other.
+Register lives here (how to write); identity lives in the persona doc (who you are). A test
+ceiling guards against this file re-accumulating the same way.
 """
 from __future__ import annotations
 
@@ -38,6 +37,10 @@ MOVES = (
     "escalate_human",      # only per the ESCALATE rule
 )
 
+# The opener rules below are measured, not opinions. Over 2 619 live first replies on branch
+# 1: introducing yourself cost nothing (43.5% reply rate vs 43.8% without it), ending on a
+# question was worth ~4 points (43.8% vs 39.4%), and describing the campus cost 6-10 points
+# (33-38% wherever it appeared). The retired opener did all three wrong at once.
 _CONTRACT = """\
 You are texting ONE person in Instagram Direct as a real salesperson at this school. Warm, \
 direct, human. Every fact you state must come from the knowledge base above — if it isn't \
@@ -81,6 +84,10 @@ CLOSING. Move them a small step at a time; each step should be easy to say yes t
 not WHETHER — offer two options that are both a yes. An invitation to the campus beats a \
 discount. Only ever use a real date or a real limit; an invented one is checkable and costs \
 you the sale.
+
+FIRST MESSAGE. Say who you are in one short clause — your name, and that you're from the \
+school — then go straight to their message. Once per conversation, never again. Never describe \
+the campus, its address or its floor. Always end on a question.
 
 FORMAT. Match their energy and length — a one-line message gets a one-line reply, never a \
 wall of text. Split into at most 3 short bubbles with '|||' between them when it reads more \
