@@ -15,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Branch, Lead
 from app.modules.budget import BudgetService
 
+from .dates import annotate_dates
 from .needs import NeedsProfile, parse_needs
 from .prompt import now_hint
 from .repository import CoachingNoteRepo, MessageRepo, ThreadRepo
@@ -107,14 +108,17 @@ class DecisionEngine:
         self._ctx_cache: dict[tuple[str | None, str, bool], str] = {}
         self._tz_offset_h: int | None = None  # branch tz, lazily loaded for the now-hint
 
-    async def _now_block(self) -> str:
-        """Branch-local 'today is …' line for the prompt, so the model never offers a past
-        session date. tz is loaded once per engine (one lead-turn)."""
+    async def _now_local(self) -> datetime:
+        """Branch-local now; tz is loaded once per engine (one lead-turn)."""
         if self._tz_offset_h is None:
             branch = await self.session.get(Branch, self.branch_id)
             self._tz_offset_h = int(branch.tz_offset_h or 0) if branch is not None else 0
-        now_local = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=self._tz_offset_h)
-        return now_hint(now_local)
+        return datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=self._tz_offset_h)
+
+    async def _now_block(self) -> str:
+        """Branch-local 'today is …' line for the prompt, so the model never offers a past
+        session date."""
+        return now_hint(await self._now_local())
 
     async def prepare(self, thread_id: int, workflow: str) -> DecisionContext | None:
         """None if the thread is foreign, has no dialog, or the branch is over budget."""
@@ -148,6 +152,10 @@ class DecisionEngine:
                 ctx.thread.product_slug, query=_retrieval_query(ctx.dialog),
                 thread_id=thread_id, light=light,
                 lead_type=lead_type, has_open_objection=has_open_objection)
+            # Dates are resolved before the model sees them: it never has to work out which
+            # day "8 Agustus 2026" falls on or how far off it is, and anything already past is
+            # labelled. See dates.annotate_dates for why this is data and not a rule.
+            context = annotate_dates(context, (await self._now_local()).date())
             self._ctx_cache[cache_key] = context
         self.last_context = context  # the reply-guard checks the draft against exactly this
         return context
