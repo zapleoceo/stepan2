@@ -55,10 +55,14 @@ def test_reply_language_is_bound_to_the_branch_language() -> None:
     assert "Reply in Russian" in contract("ru")
 
 
-def test_register_rules_the_research_found_load_bearing_are_present() -> None:
+def test_the_contract_leaves_voice_to_the_persona() -> None:
+    """Register was described in both documents, in different words — the same clash that made
+    the entry hints fight the answer-first rule. The persona owns how Stepan sounds; the
+    contract owns the shape of the message."""
     text = contract("id")
-    assert '"Kak"' in text and "Mas" in text and "Anda" in text
-    assert "particles" in text
+    assert "persona above" in text
+    for voice_rule in ("particles", "Mas", "Anda"):
+        assert voice_rule not in text
 
 
 # ── the dossier block ─────────────────────────────────────────────────────────
@@ -213,3 +217,12 @@ def test_the_lead_language_wins_and_sticks() -> None:
     text = contract("id")
     assert "wrote to you in another language" in text
     assert "keep answering in it" in text
+
+
+def test_the_model_is_told_not_to_invent_details_about_the_lead() -> None:
+    """Lost when the contract was rebuilt, and it showed: thread 452 was offered an event as
+    though discovery were done, on a lead whose pains were still empty. The competitor's
+    playbook states it outright, and so does this one again."""
+    text = contract("id")
+    assert "NEVER ASSUME" in text
+    assert "for them or for" in text
