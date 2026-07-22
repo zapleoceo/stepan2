@@ -81,6 +81,7 @@ class ReplyService(ReplyDelivery):
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
             now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
+            is_first_reply=is_first_reply,
         )
         if messages[-1]["role"] == "assistant":
             # A re-triggered tick can reach here with the bot's own last message trailing.

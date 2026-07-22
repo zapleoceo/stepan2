@@ -85,17 +85,13 @@ not WHETHER — offer two options that are both a yes. An invitation to the camp
 discount. Only ever use a real date or a real limit; an invented one is checkable and costs \
 you the sale.
 
-FIRST MESSAGE. Say who you are in one short clause — your name, and that you're from the \
-school — then go straight to their message. Once per conversation, never again. Never describe \
-the campus, its address or its floor. Always end on a question.
-
 FORMAT. Match their energy and length — a one-line message gets a one-line reply, never a \
 wall of text. Split into at most 3 short bubbles with '|||' between them when it reads more \
 naturally that way. Address them as "Kak" (use "Pak"/"Bu" once you know you're talking to a \
 parent); never "Mas"/"Mbak", never "Anda". Write how people actually text: 1-2 particles \
 (ya, sih, kok, nih, lho, kan) per message, not zero — zero is what makes a bot sound like a \
-bot — and not four. At most one emoji. Reply in {lang} unless they wrote in another language, \
-then use theirs.
+bot — and not four. At most one emoji. Reply in {lang} unless the lead wrote to you in another \
+language — then answer in theirs, and keep answering in it.
 
 ESCALATE to a human ONLY if they ask for one, complain, raise a legal issue, or have a problem \
 with a payment they already made. Not knowing something is not a reason — say what you do know, \
@@ -127,6 +123,16 @@ dossier: your updated read. Carry forward what's above and add what this turn re
 """
 
 
+# Injected only on the turn it applies to. As a section inside the always-on contract the model
+# had to decide for itself whether "first message" described this turn, and on thread 4956 it
+# didn't — a bare "Iya ka" was answered with no introduction at all. is_first_reply is already
+# known in code (the router uses it), so it goes in as a fact rather than as a condition.
+FIRST_TURN_NOTE = (
+    "[This is your FIRST message to this person. Open by saying who you are in one short "
+    "clause — your name, and that you're from the school — then go straight to what they "
+    "wrote. Never describe the campus, its address or its floor. End on a question.]"
+)
+
 FOLLOWUP_FRAMING = """\
 [System: the lead has gone quiet — there is no new message to answer, so the answer-first rule \
 doesn't apply this turn. This is nudge {n} of {total}. Write ONE short message that earns a \
@@ -150,10 +156,21 @@ def followup_framing(attempt: int, total: int, refusal: str) -> str:
         n=attempt, total=total, refusal_note=_REFUSAL_NOTES.get(refusal, ""))
 
 
+# The branch language as a person would name it. "Reply in id" is an instruction about a
+# string; "Reply in Bahasa Indonesia" is an instruction about a language. Same length.
+_LANG_NAMES = {"id": "Bahasa Indonesia", "ms": "Bahasa Melayu", "en": "English",
+               "ru": "Russian", "uk": "Ukrainian", "vi": "Vietnamese"}
+
+
+def language_name(lang: str) -> str:
+    return _LANG_NAMES.get((lang or "").lower(), lang)
+
+
 def contract(lang: str) -> str:
     """The full instruction block for one live turn."""
-    return (_CONTRACT.format(lang=lang, moves=", ".join(MOVES))
-            + "\n" + _SCHEMA.format(lang=lang))
+    named = language_name(lang)
+    return (_CONTRACT.format(lang=named, moves=", ".join(MOVES))
+            + "\n" + _SCHEMA.format(lang=named))
 
 
 def dossier_block(d: LeadDossier) -> str:
@@ -199,6 +216,7 @@ def build_messages_v3(  # noqa: PLR0913
     name_block: str | None = None,
     manager_note: str | None = None,
     now_block: str | None = None,
+    is_first_reply: bool = False,
 ) -> list[dict[str, Any]]:
     """System (facts → what we know → rules) then the dialog.
 
@@ -214,6 +232,7 @@ def build_messages_v3(  # noqa: PLR0913
         (name_block or "").strip(),
         dossier_block(dossier),
         contract(lang),
+        FIRST_TURN_NOTE if is_first_reply else "",
     ) if block]
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": "\n\n".join(parts)}]

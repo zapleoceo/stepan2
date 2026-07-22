@@ -112,7 +112,7 @@ async def test_cyrillic_in_lead_text_overrides_stale_default_immediately(db_sess
     decision = await svc.decide(tid)
 
     assert decision is not None and decision.reply_language is None  # model said nothing
-    assert "Reply in ru" in llm.seen_lang  # THIS turn's prompt already asked for Russian
+    assert "Reply in Russian" in llm.seen_lang  # THIS turn already asked for Russian
     lead_after = (await db_session.exec(select(Lead))).first()
     assert lead_after.id == lead_before.id
     assert lead_after.preferred_language == "ru"  # persisted without waiting on self-report

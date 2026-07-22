@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from app.adapters.db.models import Message
 from app.modules.conversation.contract import (
+    FIRST_TURN_NOTE,
     MOVES,
     build_messages_v3,
     contract,
@@ -50,8 +51,8 @@ def test_the_answer_first_rule_is_stated_as_the_top_priority() -> None:
 
 
 def test_reply_language_is_bound_to_the_branch_language() -> None:
-    assert "Reply in id" in contract("id")
-    assert "Reply in ru" in contract("ru")
+    assert "Reply in Bahasa Indonesia" in contract("id")
+    assert "Reply in Russian" in contract("ru")
 
 
 def test_register_rules_the_research_found_load_bearing_are_present() -> None:
@@ -155,31 +156,60 @@ def test_the_lead_is_not_drowned_out_by_instructions() -> None:
 
 # ── the opener: introduce yourself, never the building ───────────────────────
 
-def test_the_first_message_introduces_who_is_writing() -> None:
+def test_the_first_turn_note_introduces_who_is_writing() -> None:
     """Measured over 2 619 live openers, an introduction cost nothing (43.5% vs 43.8% reply
     rate); it was the campus line riding along with it that looked expensive."""
-    text = contract("id")
-    assert "FIRST MESSAGE" in text
-    assert "who you are" in text
-
-
-def test_the_introduction_is_capped_at_once() -> None:
-    text = contract("id")
-    assert "Once per conversation, never again" in text
+    assert "who you are" in FIRST_TURN_NOTE
+    assert "FIRST message" in FIRST_TURN_NOTE
 
 
 def test_the_campus_description_is_banned_from_the_opener() -> None:
     """Any opener mentioning the campus measured 33-38% reply rate against 43.8% without it —
     the single most expensive habit the old engine had."""
-    text = contract("id")
-    assert "Never describe the campus" in text
-    assert "address" in text
+    assert "Never describe the campus" in FIRST_TURN_NOTE
+    assert "address" in FIRST_TURN_NOTE
 
 
-def test_the_opener_still_has_to_end_on_a_question() -> None:
+def test_the_opener_ends_on_a_question() -> None:
     """Without a question an opener drops from 43.8% to 39.4%."""
-    assert "Always end on a question" in contract("id")
+    assert "End on a question" in FIRST_TURN_NOTE
+
+
+def test_the_opener_rule_is_not_carried_on_every_turn() -> None:
+    """As a section of the always-on contract the model had to decide whether it applied, and
+    on thread 4956 it decided wrong. It is a fact about THIS turn now, not a condition."""
+    assert "FIRST message" not in contract("id")
 
 
 def test_the_contract_did_not_grow_past_its_ceiling() -> None:
     assert len(contract("id")) < _CONTRACT_CEILING
+
+
+# ── the first turn, and the language it is written in ────────────────────────
+
+def test_the_opener_note_rides_only_on_the_first_turn() -> None:
+    from app.modules.conversation.contract import build_messages_v3
+
+    first = build_messages_v3("KB", [_msg("halo")], "id", LeadDossier(),
+                              is_first_reply=True)[0]["content"]
+    later = build_messages_v3("KB", [_msg("halo")], "id", LeadDossier())[0]["content"]
+    assert FIRST_TURN_NOTE in first
+    assert FIRST_TURN_NOTE not in later
+
+
+def test_the_branch_language_is_named_not_coded() -> None:
+    """"Reply in id" is an instruction about a string; "Reply in Bahasa Indonesia" is an
+    instruction about a language."""
+    assert "Reply in Bahasa Indonesia" in contract("id")
+    assert "Reply in Russian" in contract("ru")
+
+
+def test_an_unknown_language_code_passes_through_unharmed() -> None:
+    assert "Reply in th" in contract("th")
+
+
+def test_the_lead_language_wins_and_sticks() -> None:
+    """A lead who writes in their own language keeps getting answered in it."""
+    text = contract("id")
+    assert "wrote to you in another language" in text
+    assert "keep answering in it" in text
