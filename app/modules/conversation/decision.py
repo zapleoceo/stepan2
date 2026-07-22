@@ -133,6 +133,12 @@ def parse_decision(raw_json: str) -> Decision:
     )
 
 
+# Public aliases — the v3 parser needs exactly these semantics (fence tolerance, list
+# cleaning, never-abort stage coercion); it imports them rather than reimplementing them.
+strip_fences = _strip_fences
+coerce_stage = _coerce_stage
+
+
 def _str_list(value: object, max_items: int = 6, max_len: int = 160) -> list[str]:
     """Clean a model-returned list into ≤max_items short non-empty strings."""
     if not isinstance(value, list):
@@ -145,3 +151,6 @@ def _str_list(value: object, max_items: int = 6, max_len: int = 160) -> list[str
         if len(out) >= max_items:
             break
     return out
+
+
+str_list = _str_list

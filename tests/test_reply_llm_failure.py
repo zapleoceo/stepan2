@@ -114,7 +114,9 @@ async def test_worker_reply_thread_returns_false_when_llm_raises(monkeypatch) ->
     monkeypatch.setattr(worker_main, "effective_kb_branch", _kb)
     monkeypatch.setattr(worker_main, "_build_notifier", lambda _cfg: None)
     monkeypatch.setattr(worker_main, "KnowledgeService", lambda *a, **kw: object())
-    monkeypatch.setattr(worker_main, "ReplyService", _RaisingReply)
+    monkeypatch.setattr(worker_main, "build_reply_service",
+                        lambda *a, **kw: _RaisingReply(*a, **{k: v for k, v in kw.items()
+                                                              if k != "engine"}))
 
     class _FakeRedis:
         async def zremrangebyscore(self, *a, **k):  # noqa: ANN002, ANN003, ANN201

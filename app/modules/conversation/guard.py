@@ -882,6 +882,12 @@ def price_claims_grounded(reply: str, context: str) -> bool:
     return prices <= _canonical_prices(context, liberal=True)
 
 
+# Public alias — the v3 money gate matches figures with exactly these canonicalisation rules
+# (Rp prefixes, 'juta'/'ribu' magnitudes, liberal on the KB side); it imports rather than
+# growing a second money parser that could disagree with this one.
+canonical_prices = _canonical_prices
+
+
 async def verify_grounding(
     llm: LLMPort, reply: str, context: str, *, branch_id: int,
     thread_id: int, bill: bool = True, budget: object = None, system: str | None = None,

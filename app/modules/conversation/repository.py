@@ -10,11 +10,13 @@ from datetime import datetime
 from sqlalchemy import case, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import ChannelThread, CoachingNote, Message, Outbox
+from app.adapters.db.models import ChannelThread, CoachingNote, Lead, Message, Outbox
 from app.adapters.db.repository import BranchScoped
 from app.config import settings
 from app.modules.leads.repository import MessageRepo as _LeadMessageRepo
 from app.modules.leads.repository import ThreadRepo as _LeadThreadRepo
+
+from .dossier import LeadDossier, parse_dossier
 
 _MAX_CONTEXT_MSGS = settings().max_context_msgs  # dialog fed to the LLM (token-cost bound)
 _DIALOG_CHAR_BUDGET = settings().dialog_char_budget  # char bound on the same dialog
@@ -76,6 +78,40 @@ class MessageRepo(_LeadMessageRepo):
             select(func.count()).select_from(Message).where(
                 Message.thread_id == thread_id, Message.direction == "in")
         )).scalar_one())
+
+
+class DossierRepo:
+    """Branch-scoped read/write of a lead's v3 working memory.
+
+    Reads fall back to the legacy `needs` JSON when no dossier exists yet, so a conversation
+    that started under v2 keeps every fact it had the moment the branch switches to v3. Writes
+    only ever touch `dossier` — `needs` stays as v2 left it, so switching back is lossless too.
+    """
+
+    def __init__(self, session: AsyncSession, branch_id: int) -> None:
+        self.session = session
+        self.branch_id = branch_id
+
+    async def load(self, lead_id: int | None) -> LeadDossier:
+        lead = await self._lead(lead_id)
+        if lead is None:
+            return LeadDossier()
+        return parse_dossier(lead.dossier, legacy_needs=lead.needs)
+
+    async def save(self, lead_id: int | None, dossier: LeadDossier) -> None:
+        lead = await self._lead(lead_id)
+        if lead is None:
+            return
+        lead.dossier = dossier.to_json()
+        self.session.add(lead)
+        await self.session.commit()
+
+    async def _lead(self, lead_id: int | None) -> Lead | None:
+        """None for a foreign or missing lead — the branch guard for this repo."""
+        if lead_id is None:
+            return None
+        lead = await self.session.get(Lead, lead_id)
+        return lead if lead is not None and lead.branch_id == self.branch_id else None
 
 
 class CoachingNoteRepo:
