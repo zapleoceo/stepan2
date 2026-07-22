@@ -92,24 +92,39 @@ class KnowledgeService:
     async def knowledge_context(
         self, product_slug: str | None, lang: str | None = None, query: str | None = None,
         thread_id: int | None = None, light: bool = False,
+        lead_type: str | None = None, has_open_objection: bool = False,
     ) -> str:
         """Persona + policy/market facts + the FULL focus card + a compact facts catalog of the
         other products. Deterministic and complete every turn — no retrieval. `query`/`thread_id`
         are accepted for call-site compatibility and ignored; `light` is unused (kept so the
-        follow-up caller's signature is unchanged)."""
+        follow-up caller's signature is unchanged).
+
+        `lead_type`/`has_open_objection` gate the low-friction EVENT card (architecture review
+        2026-07-22): its full ~1.5-2.5k-char body used to ride in EVERY turn regardless of
+        relevance. The event is the answer to price-sensitivity/objections/postponing and is
+        already named (without its full card) in the base contract, so a lead deep in an
+        unrelated product's enrolment discussion doesn't need its full body every turn — only
+        when it's plausibly the next move: price-sensitive/no-budget/cold, an open objection,
+        or the focus product itself is the event's own course (vibe_coding)."""
         resolved_lang = await self._lang(lang)
         blocks = [_persona_block(await self._persona_text(), resolved_lang)]
         focused = await self._focused(product_slug)
         if focused is not None:
             blocks.append(_focus_block(focused, resolved_lang))
-        events = await self._always_products_block(exclude=product_slug)
+        event_relevant = (
+            has_open_objection or lead_type in ("cold", "no_budget")
+            or product_slug in ("vibe_coding", *_ALWAYS_PRODUCT_SLUGS))
+        events = await self._always_products_block(exclude=product_slug) \
+            if event_relevant else ""
         if events:
             blocks.append(events)
         always = await self._always_docs_block()
         if always:
             blocks.append(always)
-        # the event cards are already full above, so drop them from the compact catalog too
-        catalog_exclude = {product_slug, *_ALWAYS_PRODUCT_SLUGS}
+        # A full event card above already covers it in the catalog too — exclude it there.
+        # When NOT relevant this turn, it must still get its cheap compact anchor (NOT full
+        # exclusion) so the model still knows the event exists, just without the full body.
+        catalog_exclude = {product_slug, *(_ALWAYS_PRODUCT_SLUGS if event_relevant else ())}
         catalog = _catalog_block(
             await self.products.active(), resolved_lang, exclude=catalog_exclude)
         if catalog:

@@ -15,7 +15,8 @@ class _SpyKnowledge:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def knowledge_context(self, product_slug, *, query, thread_id, light=False):  # noqa: ANN001, ANN003
+    async def knowledge_context(self, product_slug, *, query, thread_id, light=False,  # noqa: ANN001, ANN003
+                                lead_type=None, has_open_objection=False):
         self.calls += 1
         return f"CTX[{query}]"
 

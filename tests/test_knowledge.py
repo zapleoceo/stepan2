@@ -173,20 +173,52 @@ async def test_catalog_falls_back_to_title_without_quick_facts(db_session):
     assert "- data: Data Analyst —" not in ctx  # no ' — <facts>' suffix when line absent
 
 
-async def test_event_cards_are_always_in_full_not_just_catalog(db_session):
-    """The Demo Event is the universal low-friction step, so its FULL card rides in every
-    context (grounding the offer), not just a terse catalog line. (Open House retired
-    2026-07-21 — no longer an always-included event.)"""
+async def test_event_card_is_full_when_relevant_to_this_turn(db_session):
+    """Architecture review 2026-07-22: the Demo Event's full card no longer rides in EVERY
+    context unconditionally — only when it's plausibly the next move (focus IS vibe_coding,
+    an open objection, or a cold/no_budget lead). Focus=vibe_coding is one such case: its
+    FULL card grounds the offer, not just a terse catalog line."""
     s = db_session
     a = await _branch(s, "Jakarta", "id")
     await _seed(s, a, "persona-A", [
-        ("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
+        ("vibe_coding", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
         ("vibe_coding_demo_event", "Demo Event",
-         "QUICK FACTS: 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live")])
+         "QUICK FACTS: durasi 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live")])
     svc = KnowledgeService(s, a)
-    ctx = await svc.knowledge_context("vibe")
+    ctx = await svc.knowledge_context("vibe_coding")
     assert "[event vibe_coding_demo_event]" in ctx and "lihat AI bikin app live" in ctx
     assert "- vibe_coding_demo_event:" not in ctx  # not duplicated in the compact catalog
+
+
+async def test_event_card_is_just_a_catalog_anchor_when_not_relevant(db_session):
+    """A lead deep in an UNRELATED product's enrolment, no open objection, not cold/no_budget
+    — the Demo Event's full ~1.5-2.5k-char body is dead weight most turns. It should shrink to
+    its cheap catalog anchor (still knowable, not fully invisible), never disappear outright."""
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona-A", [
+        ("cybersecurity", "Cybersecurity", "QUICK FACTS: durasi 8 bulan | harga Rp 13.360.000"),
+        ("vibe_coding_demo_event", "Demo Event",
+         "QUICK FACTS: durasi 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live")])
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("cybersecurity")
+    assert "[event vibe_coding_demo_event]" not in ctx  # no full card this turn
+    assert "lihat AI bikin app live" not in ctx          # detail body genuinely dropped
+    assert "- vibe_coding_demo_event: Demo Event — durasi 3 jam · harga Rp 100.000" in ctx
+
+
+async def test_event_card_returns_to_full_on_an_open_objection(db_session):
+    """An open objection makes the low-friction event plausibly the next move again, even on
+    an unrelated product's focus card."""
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona-A", [
+        ("cybersecurity", "Cybersecurity", "QUICK FACTS: durasi 8 bulan | harga Rp 13.360.000"),
+        ("vibe_coding_demo_event", "Demo Event",
+         "QUICK FACTS: durasi 3 jam | harga Rp 100.000\n## Detail\nlihat AI bikin app live")])
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("cybersecurity", has_open_objection=True)
+    assert "[event vibe_coding_demo_event]" in ctx and "lihat AI bikin app live" in ctx
 
 
 async def test_context_stays_within_the_char_budget(db_session):
