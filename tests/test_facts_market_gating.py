@@ -13,11 +13,11 @@ from app.adapters.db.models import Branch, KnowledgeDoc
 from app.modules.knowledge.service import KnowledgeService
 
 _MARKET = (
-    "## Tentang ITSTEP\nSejak 1999, 24 negara.\n\n"
-    "## Format & platform\nMicrosoft Teams, sesi direkam.\n\n"
-    "## Perbandingan kompetitor (jujur, pakai RANGE)\nPurwadhika Rp 18-47M.\n\n"
-    "## Penghasilan (kira-kira, bukan jaminan)\nJunior developer Rp 5-9 juta/bulan.\n\n"
-    "## Success cases / bukti\nMinStep dibuat alumnus Vibe Coding."
+    "## О IT STEP\nSejak 1999, 24 negara.\n\n"
+    "## Формат и платформа\nMicrosoft Teams, sesi direkam.\n\n"
+    "## Сравнение с конкурентами (jujur, pakai RANGE)\nPurwadhika Rp 18-47M.\n\n"
+    "## Доход (kira-kira, bukan jaminan)\nJunior developer Rp 5-9 juta/bulan.\n\n"
+    "## Успешные кейсы / bukti\nMinStep dibuat alumnus Vibe Coding."
 )
 
 
