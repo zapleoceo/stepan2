@@ -24,7 +24,7 @@ from .decision import generate
 from .delivery import _BUBBLE_GAP_S, _reply_bubble_cap, _split_bubbles
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
-from .money_gate import money_issues
+from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
 from .repository import (
     CoachingNoteRepo,
     DossierRepo,
@@ -239,6 +239,22 @@ class FollowupService:
             capability=capability, branch_id=self.branch_id)
         if decision is None:
             return False
+        if uninvited_price(decision.reply, stored):
+            # A nudge is never a reply to a fresh question — a price in one is always
+            # volunteered (thread 4849). One rewrite, same as reply.py's money gate; if it
+            # still quotes a figure, drop the nudge rather than send it.
+            logger.info("followup pitch gate branch=%d thread=%d: uninvited price",
+                        self.branch_id, thread_id)
+            regen_messages = [*messages, {"role": "user", "content": PITCH_CORRECTION}]
+            fixed, meta = await generate(
+                engine, ctx, regen_messages, thread_id, workflow="followup",
+                capability=SMART, branch_id=self.branch_id)
+            if fixed is None or uninvited_price(fixed.reply, stored):
+                logger.warning("followup pitch gate unfixable branch=%d thread=%d — dropped",
+                                self.branch_id, thread_id)
+                await self._burn_dry_step(thread_id, now)
+                return False
+            decision = fixed
         if not decision.reply.strip():
             # The model was told to say nothing rather than repeat itself. Burn the step: a
             # thread with nothing left to say used to regenerate a dropped nudge every tick,

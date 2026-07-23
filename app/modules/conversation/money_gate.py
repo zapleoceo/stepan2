@@ -59,10 +59,30 @@ def premature_pitch(
     Checks the DECLARED move first, but that alone isn't airtight: thread 4972 shipped a full
     price quote on a first turn with an empty dossier, self-labelled `answer_question` — a
     move outside `_PITCH_MOVES`, so the move check alone let it through. A price figure in the
-    reply is pitch content regardless of what the model called the move, so it's checked too."""
-    if lead_asked_directly or dossier.has_discovery():
+    reply is pitch content regardless of what the model called the move, so it's checked too.
+
+    A price is different from the rest of `_PITCH_MOVES`: "discovery done once" doesn't make it
+    safe to volunteer forever after — thread 4905 quoted the full price and instalments mid
+    small-talk, discovery long since landed, nobody asked. PRICE in the contract says "when they
+    ask, answer that turn" — so a price needs asking (or the lead already being `ready`) on
+    EVERY turn, not just the first one."""
+    if lead_asked_directly:
         return False
-    return move in _PITCH_MOVES or quotes_price(reply)
+    if uninvited_price(reply, dossier):
+        return True
+    if dossier.has_discovery():
+        return False
+    return move in _PITCH_MOVES
+
+
+def uninvited_price(reply: str, dossier: object) -> bool:
+    """A price figure with nobody asking for it this turn and the lead not already `ready`.
+
+    Split out of `premature_pitch` for `followup.py`: a nudge's whole job is giving value the
+    lead hasn't heard — `give_value`/`invite_campus` before discovery is exactly what a
+    follow-up is FOR, so the full pitch gate is too aggressive there. A volunteered price never
+    is, on a live reply or a nudge alike."""
+    return quotes_price(reply) and dossier.readiness != "ready"
 
 
 def money_issues(reply: str, context: str) -> list[str]:

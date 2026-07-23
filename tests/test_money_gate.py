@@ -130,11 +130,27 @@ def test_a_mislabelled_move_without_a_price_is_not_gated() -> None:
         "answer_question", LeadDossier(), lead_asked_directly=False, reply=reply)
 
 
-def test_a_mislabelled_move_with_a_price_but_discovery_done_is_not_gated() -> None:
+def test_a_price_is_still_gated_after_discovery_if_nobody_asked() -> None:
+    """Thread 4905: discovery had long since landed, nobody asked, and Stepan volunteered the
+    full price and instalments mid small-talk. "Discovery done" made every OTHER pitch move
+    safe, but a price is different — PRICE in the contract says "when they ask, answer that
+    turn", not "once, ever". Only an actual ask (or the lead already being ready) earns it."""
     from app.modules.conversation.dossier import LeadDossier
     from app.modules.conversation.money_gate import premature_pitch
 
     discovered = LeadDossier(pains=["ga pede desain"], desired_state=["portofolio kuat"])
     reply = "Investasinya Rp 1.882.955 kak."
-    assert not premature_pitch(
+    assert premature_pitch(
         "answer_question", discovered, lead_asked_directly=False, reply=reply)
+
+
+def test_a_price_is_fine_once_the_lead_is_ready() -> None:
+    """Restating the total while closing an already-ready lead is not a volunteered pitch."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    ready = LeadDossier(pains=["ga pede desain"], desired_state=["portofolio kuat"],
+                         readiness="ready")
+    reply = "Investasinya Rp 1.882.955 kak."
+    assert not premature_pitch(
+        "close", ready, lead_asked_directly=False, reply=reply)

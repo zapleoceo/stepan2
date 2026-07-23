@@ -552,8 +552,24 @@ async def test_a_nudge_quoting_a_price_that_is_not_in_the_kb_is_dropped(db_sessi
     assert await _pending(db_session, tid) is None
 
 
-async def test_a_grounded_price_still_goes_out(db_session) -> None:  # noqa: ANN001
+async def test_a_grounded_price_is_still_uninvited_and_gets_dropped(db_session) -> None:  # noqa: ANN001
+    """Thread 4849: a nudge volunteered the full price and instalments — nobody had asked, and
+    the figure being real (in the KB) didn't make it any less unprompted. Being grounded only
+    used to save it from the ungrounded-money check; it still needed an invitation."""
     bid, tid, _lead, _ = await _world(db_session, timer_due=True)
+    llm = _CapturingLLM(_v3(reply="DP-nya Rp 500.000 aja kak, bisa dicicil"))
+
+    assert await _svc(db_session, bid, llm).run() == 0
+    assert await _pending(db_session, tid) is None
+
+
+async def test_a_price_nudge_is_fine_once_the_lead_is_ready(db_session) -> None:  # noqa: ANN001
+    """A ready lead who's gone quiet can still be nudged with the number they already agreed
+    to move on — that's a close, not a volunteered pitch."""
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, tid, lead, _ = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(readiness="ready"))
     llm = _CapturingLLM(_v3(reply="DP-nya Rp 500.000 aja kak, bisa dicicil"))
 
     assert await _svc(db_session, bid, llm).run() == 1
