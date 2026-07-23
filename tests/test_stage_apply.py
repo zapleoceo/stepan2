@@ -390,6 +390,21 @@ async def test_needs_manager_appends_a_closing_line_for_the_lead(db_session) -> 
     assert [r.text for r in rows] == ["ok", _MANAGER_HANDOFF_CLOSING]  # model's reply, then it
 
 
+async def test_needs_manager_without_phone_asks_for_it(db_session) -> None:
+    """thread 452, 5005: needs_manager has no phone gate the way ready/READY does — a lead
+    genuinely ready to commit got muted and handed off with no contact for a manager to call.
+    The closing line is the only remaining chance to ask, since the bot goes silent right
+    after (ingest's own phone miner still runs on a muted thread's later reply, though)."""
+    from app.modules.conversation.delivery import _MANAGER_HANDOFF_CLOSING_NO_PHONE
+
+    bid, tid, _lead = await _world(db_session, phone=None)
+    out = await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(needs_manager=True, manager_question="Ready to book Skill Booster"),
+    )
+    assert out is not None and out.text == _MANAGER_HANDOFF_CLOSING_NO_PHONE
+    assert "nomor telepon" in out.text.lower()
+
+
 async def test_no_closing_line_when_already_in_manager_stage(db_session) -> None:
     """Don't re-append the closing line on every subsequent needs_manager turn once the
     lead is already muted — only the turn that FLIPS the stage gets it."""

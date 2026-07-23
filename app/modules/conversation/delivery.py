@@ -53,6 +53,17 @@ _MANAGER_HANDOFF_CLOSING = (
     "Terima kasih ya Kak! Untuk ini tim kami yang akan bantu langsung - nanti dihubungi via "
     "telepon atau WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) ya 🙏"
 )
+# Same closing, but the lead has NO phone on file yet (thread 452, 5005: needs_manager has no
+# phone gate the way the ready/READY path does — a real "ready to commit, no contact" lead got
+# muted and handed off with nothing for a manager to call). Asking here is the only remaining
+# chance: the bot is muted (agent_enabled=False) the instant this ships, but ingest's own
+# phone miner (identity._backfill) runs on EVERY inbound regardless of mute state, so a lead
+# who replies to THIS explicit ask still gets captured automatically.
+_MANAGER_HANDOFF_CLOSING_NO_PHONE = (
+    "Terima kasih ya Kak! Untuk ini tim kami yang akan bantu langsung. Boleh minta nomor "
+    "telepon/WhatsApp Kakak? Biar tim bisa hubungi di jam kerja (Senin-Jumat, 09.00-18.00 "
+    "WIB) ya 🙏"
+)
 # The sale/READY exit muted the bot like MANAGER but never guaranteed the lead a closing —
 # it relied on the model's own reply confirming next steps, which isn't guaranteed. Append
 # this on the fresh READY flip so a won lead always knows what happens next (same shape as
@@ -227,8 +238,11 @@ class ReplyDelivery:
             # happens next instead of going silent (thread 1023: a lead who sent a follow-up
             # phone number 2 days after a needs_manager mute got zero acknowledgment). READY
             # relied on the model's reply confirming next steps; now it's guaranteed too.
-            closing = (_MANAGER_HANDOFF_CLOSING if exit_kind == "manager"
-                       else _READY_HANDOFF_CLOSING)
+            if exit_kind == "manager":
+                closing = (_MANAGER_HANDOFF_CLOSING if lead.phone_e164
+                          else _MANAGER_HANDOFF_CLOSING_NO_PHONE)
+            else:
+                closing = _READY_HANDOFF_CLOSING
             outbox = await self.outbox.add(
                 Outbox(
                     branch_id=self.branch_id,
