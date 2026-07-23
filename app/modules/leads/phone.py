@@ -21,6 +21,15 @@ _SHAPE_BY_CC: dict[str, re.Pattern[str]] = {
 }
 _DEFAULT_CC = "62"
 
+# An explicit international number the lead typed themselves ('+380 99 481 1889') —
+# unambiguous regardless of the branch's own country, so it doesn't need to fit any
+# _SHAPE_BY_CC entry. Without this, a foreign lead's phone (thread 452: a Ukrainian '+380…'
+# number on the Indonesia branch) silently never matched any shape and was dropped at
+# ingest — the ONLY writer of phone_e164 for a muted/handed-off thread, since no later LLM
+# turn runs to catch it via decision.phone either. Grouped digits (spaces/dashes) are the
+# same _RUN shape normalize_phone already handles — just anchored on a leading '+' here.
+_INTL_RE = re.compile(r"\+[\d ()\-.]{7,17}")
+
 
 def normalize_phone(raw: str) -> str | None:
     """Extract a phone and return international digits-only; None if no >=9-digit run.
@@ -79,6 +88,9 @@ def extract_phone(text: str | None, country_code: str = "62") -> str | None:
     keeping the cross-branch merge safe."""
     if not text:
         return None
+    intl = _INTL_RE.search(text)
+    if intl:
+        return to_e164(intl.group(0))  # explicit '+<digits>' — trust it as typed, any country
     cc = (country_code or _DEFAULT_CC).strip() or _DEFAULT_CC
     shape = _SHAPE_BY_CC.get(cc)
     if shape is None:

@@ -580,6 +580,38 @@ class ReplyDelivery:
                 event_id=f"handoff-{self.branch_id}-{lead.id}",
                 phone=lead.phone_e164,
             )
+        await self._push_crm_ready(lead, thread)
+
+    async def _push_crm_ready(self, lead: Lead, thread) -> None:
+        """Push the ready-to-enrol lead into the CRM funnel with the chat's own summary as
+        context — push_mcp.drain_writeback (the background warm-lead push) deliberately
+        EXCLUDES ready/manager/handed_off leads, so a hand-off used to reach the Telegram
+        alert only, with nothing landing in the CRM a manager actually works from (thread
+        452). Reuses crm_writeback_enabled/crm_mcp_url — same feature flag and transport as
+        the warm-lead drain, just a different trigger."""
+        if not lead.phone_e164:
+            return
+        cfg = self.settings
+        if cfg is None or not cfg.crm_writeback_enabled or not cfg.crm_mcp_url:
+            return
+        from app.modules.crm.push_mcp import EVENT_WAIT_CALL, CrmMcpPusher  # noqa: PLC0415
+        from app.modules.notifications.summarize import build_alert_body  # noqa: PLC0415
+        branch = await self.session.get(Branch, self.branch_id)
+        lang = branch.lang if branch is not None else "id"
+        reason = f"Lead ready to enrol ({lead.ready_subtype or 'deal'})"
+        body = await build_alert_body(
+            self.session, self.llm, thread.id, branch_lang=lang,
+            reason_en=reason, reason_ru=reason, branch_id=self.branch_id)
+        comment = body.summary_branch or reason
+        pusher = CrmMcpPusher(cfg.crm_mcp_url, cfg.crm_mcp_city_alias)
+        try:
+            ok, detail = await pusher.add_lead_event(
+                lead.phone_e164, EVENT_WAIT_CALL, comment=comment,
+                name=lead.display_name or "Stepan")
+            if not ok:
+                logger.warning("crm ready-push failed lead=%d: %s", lead.id, detail)
+        except Exception:
+            logger.warning("crm ready-push errored lead=%d", lead.id, exc_info=True)
 
     async def _handoff_openhouse(self, lead: Lead, thread) -> None:
         """Lead RSVP'd to an event (open house / demo day): notify the team with a

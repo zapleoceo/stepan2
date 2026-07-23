@@ -18,6 +18,15 @@ def test_extract_phone_variants_yield_one_key() -> None:
     assert extract_phone("62812 3456 7890 ya kak") == "+6281234567890"
 
 
+def test_extract_phone_matches_foreign_number_by_plus_prefix() -> None:
+    """thread 452: a Ukrainian lead's '+380…' number on the Indonesia branch (country_code
+    default '62') used to match no _SHAPE_BY_CC entry and get silently dropped — an explicit
+    '+' is unambiguous regardless of branch country, so it must not need a shape match."""
+    assert extract_phone("+380994811889") == "+380994811889"
+    assert extract_phone("📱 Phone number · +380 99 481 1889") == "+380994811889"
+    assert extract_phone("call me at +1 415 555 0132") == "+14155550132"
+
+
 def test_extract_phone_ignores_prices_and_prose() -> None:
     assert extract_phone("harga 1.200.000 rupiah") is None
     assert extract_phone("Rp 628.000 saja") is None
