@@ -26,6 +26,7 @@ from .decision import str_list, strip_fences
 from .dossier import LeadDossier, Objection
 from .prompt import _role_of
 from .routing import FAST
+from .signals import AD_TEMPLATE_RE
 
 logger = logging.getLogger(__name__)
 
@@ -33,19 +34,21 @@ _DIALOG_BUDGET = 20  # last N turns — discovery lives in recent talk, not the 
 
 _SYSTEM = """\
 You read one Instagram DM conversation between a lead and a sales rep at an IT school. Your \
-ONLY job: extract what the LEAD has revealed about their pains and desired outcomes — in \
+ONLY job: extract what the LEAD has revealed about their goal, pains and desired outcome — in \
 their own words/meaning, not what the rep suggested or offered to them. A bare "iya"/"ok" to \
-the rep's question reveals nothing; do not invent a pain or a goal that was never actually \
-said. Extract only what is genuinely new — do not repeat anything already listed as known \
-below. If nothing new was revealed, return empty lists.
+the rep's question reveals nothing; do not invent a goal, a pain or an outcome that was never \
+actually said. Extract only what is genuinely new — do not repeat anything already listed as \
+known below. If nothing new was revealed, return empty lists/string.
 
+job_to_be_done: WHY they're here now — what pushed them to ask today, the task they're trying \
+to get done. Empty string if not revealed yet.
 pains: what worries them, what's holding them back, what's not working now.
 desired_state: what a good outcome looks like to them — the goal, not the product.
 objections: any reason they gave for hesitating (price, time, trust, parents, ...), in their \
 own words. Leave empty if none.
 
 Return ONLY this JSON, no prose, no markdown fences:
-{"pains": [str], "desired_state": [str], "objections": [str]}
+{"job_to_be_done": str, "pains": [str], "desired_state": [str], "objections": [str]}
 """
 
 
@@ -56,12 +59,19 @@ def _transcript(dialog: list[Message]) -> str:
         if not text:
             continue
         speaker = "LEAD" if _role_of(m) == "user" else "REP"
+        if speaker == "LEAD" and AD_TEMPLATE_RE.match(text):
+            # The ad's own prefilled button text, not the lead's words (thread 5025: the
+            # backfill lifted "Boleh info jadwal, durasi, dan biaya?" verbatim into
+            # job_to_be_done as if the lead had said it). Drop it entirely rather than let
+            # the model treat a tap as a revealed goal.
+            continue
         lines.append(f"{speaker}: {text}")
     return "\n".join(lines)
 
 
 def _known_block(dossier: LeadDossier) -> str:
-    lines = [f"- pains: {'; '.join(dossier.pains)}" if dossier.pains else "",
+    lines = [f"- job_to_be_done: {dossier.job_to_be_done}" if dossier.job_to_be_done else "",
+             f"- pains: {'; '.join(dossier.pains)}" if dossier.pains else "",
              f"- desired_state: {'; '.join(dossier.desired_state)}"
              if dossier.desired_state else ""]
     body = "\n".join(line for line in lines if line)
@@ -105,6 +115,7 @@ def _parse(raw: str) -> LeadDossier:
         return LeadDossier()
     objections = [Objection(text) for text in str_list(data.get("objections"))]
     return LeadDossier(
+        job_to_be_done=str(data.get("job_to_be_done") or "").strip(),
         pains=str_list(data.get("pains")),
         desired_state=str_list(data.get("desired_state")),
         objections=objections,
