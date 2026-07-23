@@ -295,6 +295,25 @@ async def test_a_reviewer_rejection_produces_a_rewrite_not_a_stub(db_session) ->
     assert decision.needs_manager is False
 
 
+async def test_a_critic_rewrite_that_adds_an_uninvited_price_escalates(db_session) -> None:  # noqa: ANN001
+    """thread 5010 (2026-07-23): the ORIGINAL draft passed the pitch gate clean — an ad-tap
+    first turn, empty dossier, no price yet — so it fell through to the critic. The critic
+    rejected it as under-selling, and its OWN rewrite volunteered a (real, grounded) price with
+    still nobody asking and no discovery landed — a path that pre-dates the money/pitch gates
+    above it and shipped completely unchecked. The critic rewrite must be re-checked against
+    the same deterministic gates, without asking the critic itself again."""
+    bid, tid, _ = await _thread(
+        db_session, texts=(("in", "🐍 Ceritakan lebih detail tentang program kursus Python"),))
+    llm = _LLM(_answer(reply="8 bulan, belajar Python dan Django", move="give_value"),
+               json.dumps({"sells": False, "why": "no price", "fix": "add the price"}),
+               _answer(reply="Biayanya Rp 13.360.000 kak, bisa dicicil", move="quote_price"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert decision.needs_manager is True
+    assert "менеджера" in (decision.manager_question or "")
+
+
 async def test_a_rewrite_is_never_judged_a_second_time(db_session) -> None:  # noqa: ANN001
     """A second rejection is what sent v2 to a stub and switched the lead's bot off."""
     bid, tid, _ = await _thread(db_session, dossier=_DISCOVERED)

@@ -212,9 +212,27 @@ class ReplyService(ReplyDelivery):
         rewritten = await self._regenerate(
             engine, ctx, messages, thread_id, workflow=workflow,
             correction=critic.CRITIC_CORRECTION.format(why=verdict.why, fix=verdict.fix))
-        # Whatever comes back ships — it is NOT judged again. A second rejection is what sent
-        # v2 to a stub and switched the lead's bot off.
-        return rewritten or decision
+        # The critic itself is NOT asked again — a second rejection is what sent v2 to a stub
+        # and switched the lead's bot off. But "chase a better sell" is exactly the kind of
+        # instruction that can talk the model into volunteering a price (thread 5010: the
+        # ORIGINAL draft passed the pitch gate clean — no price yet, empty dossier — the
+        # critic rejected it as under-selling, and its OWN rewrite added the price, shipped
+        # with no check at all since this path pre-dates the money/pitch gates above it). Those
+        # two checks are deterministic, not another LLM call, so re-running them here doesn't
+        # risk the stub-loop the comment above is about.
+        final = rewritten or decision
+        rewrite_issues = money_issues(final.reply, context)
+        if rewrite_issues:
+            logger.error("v3 critic rewrite added an ungrounded claim branch=%d thread=%d: %s",
+                         self.branch_id, thread_id, "; ".join(rewrite_issues))
+            return replace(final, needs_human=True, human_reason=MONEY_ESCALATION_REASON)
+        if stored is not None and premature_pitch(
+            final.move, stored, lead_typed_a_question, final.reply,
+        ):
+            logger.error("v3 critic rewrite pitched uninvited branch=%d thread=%d",
+                         self.branch_id, thread_id)
+            return replace(final, needs_human=True, human_reason=PITCH_ESCALATION_REASON)
+        return final
 
     async def _regenerate(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
