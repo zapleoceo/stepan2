@@ -166,6 +166,9 @@ class DecisionEngine:
             snippets = await self.knowledge.objection_snippets(objection_categories)
             if snippets:
                 context = f"{context}\n\n{snippets}"
+            market = await self.knowledge.market_snippets(objection_categories)
+            if market:
+                context = f"{context}\n\n{market}"
             self._ctx_cache[cache_key] = context
         self.last_context = context  # the reply-guard checks the draft against exactly this
         return context
