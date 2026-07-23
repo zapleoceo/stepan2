@@ -50,6 +50,25 @@ ANSWER_FIRST_CORRECTION = (
     "question back.]"
 )
 
+# Sent instead of the offending draft whenever a gate escalates — thread 5019: the pitch gate
+# caught an unearned price+DP dump twice, correctly flagged needs_human=True and alerted a
+# manager, but still SHIPPED that exact draft to the lead because `needs_human` only ever added
+# a flag, never replaced `.reply`. The flag protected the CRM record, not the lead. This is the
+# one message every escalation path ships instead: content-free, safe regardless of which gate
+# tripped (invented price, uninvited pitch, ungrounded rewrite), and consistent with the tone of
+# _MANAGER_HANDOFF_CLOSING so the lead doesn't get two conflicting "our team will help" lines.
+ESCALATION_HOLD_REPLY = (
+    "Kakak, bentar ya - aku cek dulu ke tim supaya infonya pas dan akurat. "
+    "Nanti dibantu langsung di jam kerja (Senin-Jumat, 09.00-18.00 WIB) 🙏"
+)
+
+
+def _escalate(decision: TurnDecision, reason: str) -> TurnDecision:
+    """Never ship the draft that triggered the escalation — only the reason and the dossier it
+    already learned survive; the reply the lead actually sees is always the safe hold-line."""
+    return replace(decision, reply=ESCALATION_HOLD_REPLY, needs_human=True, human_reason=reason)
+
+
 class ReplyService(ReplyDelivery):
     """Produce one reply for one thread, and remember what it learned.
 
@@ -156,8 +175,7 @@ class ReplyService(ReplyDelivery):
                 # reach the lead, and we will not answer money questions with silence.
                 logger.error("v3 money gate unfixable branch=%d thread=%d — escalating",
                              self.branch_id, thread_id)
-                return replace(fixed or decision, needs_human=True,
-                               human_reason=MONEY_ESCALATION_REASON)
+                return _escalate(fixed or decision, MONEY_ESCALATION_REASON)
             return fixed
 
         if lead_typed_a_question and decision.move != "answer_question":
@@ -188,16 +206,14 @@ class ReplyService(ReplyDelivery):
             if discovered is None or premature_pitch(
                 discovered.move, stored, lead_typed_a_question, discovered.reply,
             ):
-                # thread 5005: the rewrite ignored PITCH_CORRECTION and re-quoted the same
-                # price on an empty-dossier first turn — shipping it unverified sent an
-                # un-earned price straight to the lead. Mirror the money gate: never ship an
-                # unverified re-offense, escalate to a human rather than go silent on a live
-                # inbound message (unlike followup's uninvited_price gate, which can just drop
-                # a nudge — there is no reply to fall back to here).
+                # thread 5005, thread 5019: the rewrite ignored PITCH_CORRECTION and re-quoted
+                # the same price on an empty-dossier turn twice in a row, even on SMART — and
+                # `_escalate` below replaces `.reply` with the safe hold-line rather than
+                # shipping that second offending draft (it used to ship it with only a flag
+                # attached, which protected the CRM record but not the lead).
                 logger.error("pitch gate unfixable branch=%d thread=%d — escalating",
                              self.branch_id, thread_id)
-                return replace(discovered or decision, needs_human=True,
-                               human_reason=PITCH_ESCALATION_REASON)
+                return _escalate(discovered or decision, PITCH_ESCALATION_REASON)
             return discovered
 
         if capability != SMART:
@@ -225,13 +241,13 @@ class ReplyService(ReplyDelivery):
         if rewrite_issues:
             logger.error("v3 critic rewrite added an ungrounded claim branch=%d thread=%d: %s",
                          self.branch_id, thread_id, "; ".join(rewrite_issues))
-            return replace(final, needs_human=True, human_reason=MONEY_ESCALATION_REASON)
+            return _escalate(final, MONEY_ESCALATION_REASON)
         if stored is not None and premature_pitch(
             final.move, stored, lead_typed_a_question, final.reply,
         ):
             logger.error("v3 critic rewrite pitched uninvited branch=%d thread=%d",
                          self.branch_id, thread_id)
-            return replace(final, needs_human=True, human_reason=PITCH_ESCALATION_REASON)
+            return _escalate(final, PITCH_ESCALATION_REASON)
         return final
 
     async def _regenerate(  # noqa: PLR0913

@@ -42,8 +42,9 @@ _TR: dict[str, dict[str, str]] = {
     "nav.inbox":    {"ru": "Входящие",    "en": "Inbox",       "id": "Kotak Masuk"},
     "nav.comments": {"ru": "Комментарии", "en": "Comments",    "id": "Komentar"},
     "nav.coach":    {"ru": "Коуч KB",     "en": "Coach KB",    "id": "Coach KB"},
-    "nav.know":     {"ru": "База знаний", "en": "Knowledge",   "id": "Basis Pengetahuan"},
-    "nav.products": {"ru": "Продукты",    "en": "Products",    "id": "Produk"},
+    "nav.know":     {"ru": "Персона", "en": "Persona", "id": "Persona"},
+    "nav.products": {"ru": "Каталог и цены",  "en": "Catalog & pricing",
+                     "id": "Katalog & harga"},
     "nav.settings": {"ru": "Настройки",   "en": "Settings",    "id": "Pengaturan"},
     "nav.members":  {"ru": "Участники",   "en": "Members",     "id": "Anggota"},
     "nav.tables":   {"ru": "Таблицы",     "en": "Tables",      "id": "Tabel"},
@@ -133,7 +134,6 @@ _TR: dict[str, dict[str, str]] = {
     "cloud.jobs":   {"ru": "Цели",   "en": "Goals", "id": "Tujuan"},
     "cloud.gains":  {"ru": "Выгоды", "en": "Gains", "id": "Manfaat"},
     # knowledge-base tree / editor / history
-    "kb.tab_persona": {"ru": "Персона",   "en": "Persona",     "id": "Persona"},
     "kb.preamble":  {"ru": "Вступление",  "en": "Intro",       "id": "Intro"},
     "kb.history":   {"ru": "История",      "en": "History",     "id": "Riwayat"},
     "kb.edited_by": {"ru": "правил:",      "en": "edited by",   "id": "diedit oleh"},
@@ -189,15 +189,20 @@ _TR: dict[str, dict[str, str]] = {
     },
     "help.know":    {
         "ru": (
-            "База знаний бота: persona, FAQ, описания курсов"
-            " — всё что Степан знает и цитирует."
+            "Как бот говорит: персона, стиль, факты, возражения."
+            " Цены и карточки продуктов — в разделе «Каталог и цены»."
             " Кликните на документ чтобы открыть редактор."
         ),
         "en": (
-            "Bot knowledge base: persona, FAQ, course info"
-            " — everything Stepan knows. Click a doc to edit."
+            "How the bot talks: persona, style, facts, objections."
+            " Prices and product cards live under Catalog & pricing."
+            " Click a doc to edit."
         ),
-        "id": "Basis pengetahuan bot: persona, FAQ, info kursus. Klik dokumen untuk mengedit.",
+        "id": (
+            "Cara bot bicara: persona, gaya, fakta, keberatan."
+            " Harga & kartu produk ada di Katalog & harga."
+            " Klik dokumen untuk mengedit."
+        ),
     },
     "help.products": {
         "ru": (

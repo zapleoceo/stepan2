@@ -250,14 +250,28 @@ class ReplyDelivery:
         """Copy this turn's observations onto the lead/thread — product, language, segment,
         and a freshly-typed phone. Pure field sync, no funnel-stage logic (see _apply_decision
         for that) — split out so each responsibility can be read and tested on its own."""
-        # The model may re-qualify the product it inherited from the ad (product_source
-        # 'ad') or from an earlier turn ('model'), but never overrides a manager's manual
-        # pick ('manager').
+        # The model may re-qualify a product it inferred on an earlier turn ('model') or one
+        # that was never anchored ('None'), but never overrides an ad-matched product ('ad')
+        # or a manager's manual pick ('manager') — thread 4943: an ad-mapped SMM lead had its
+        # product silently swapped to Vibe Coding by the model's own re-qualification, and the
+        # wrong product's (real, grounded) price got quoted when the lead asked directly. An
+        # ad click is stronger evidence of intent than the model's read of the conversation, so
+        # it must not be overwritten without a human correction.
         if (
             decision.product_slug
             and decision.product_slug != thread.product_slug
-            and thread.product_source in (None, "ad", "model")
+            and thread.product_source in (None, "model")
         ):
+            # Logged with actor="agent" (renders as "Степан" — see who.agent in _i18n.py) so
+            # the chat timeline can never again read as a manager having clicked the product
+            # dropdown when it was really the model re-qualifying — the manual endpoint
+            # (_routes_chat.chat_product) is the only other writer of this log kind, and it
+            # always attributes to the signed-in session's name.
+            self.session.add(ThreadLog(
+                branch_id=self.branch_id, thread_id=thread.id, kind="product_changed",
+                detail=f"{thread.product_slug or '∅'} → {decision.product_slug or '∅'}",
+                actor="agent",
+            ))
             thread.product_slug = decision.product_slug
             thread.product_source = "model"
             self.session.add(thread)

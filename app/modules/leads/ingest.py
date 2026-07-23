@@ -264,6 +264,21 @@ class IngestService:
             if mapped:
                 thread.product_slug = mapped
                 thread.product_source = "ad"
+            else:
+                # No AdProductMap entry for this ad_id yet (matcher walk pending/incomplete,
+                # or a newly launched campaign nobody mapped) — the lead enters the funnel with
+                # no product anchor, and the model picks one on its own from conversation
+                # content alone (thread 4943, thread 5018: an ad lead got pitched the wrong
+                # product / pitched twice with no discovery and escalated to a manager).
+                # Waiting for that escalation means Stepan has already fumbled the opener by
+                # the time anyone notices — ping ops on the FIRST inbound instead, same turn
+                # the gap appears, so the ad can be mapped before Stepan replies at all.
+                logger.warning(
+                    "ingest: branch=%d thread=%d ad_id=%s has no AdProductMap entry — "
+                    "product will be inferred by the model with no ad anchor",
+                    self.branch_id, thread.id, thread.ad_id)
+                if is_ad_referral:  # once per thread — not on every later inbound while unmapped
+                    await self._notify_unmapped_ad(lead, thread)
         return msg
 
     async def _reset_followup_cycle(self, thread) -> None:
@@ -296,6 +311,25 @@ class IngestService:
         if not lead.agent_enabled:
             lead.agent_enabled = True
         self.session.add(lead)
+
+    async def _notify_unmapped_ad(self, lead, thread) -> None:
+        """This lead clicked an ad Stepan has no AdProductMap entry for — ping ops on the ad's
+        FIRST inbound so it can be mapped in the admin Ads panel before the model has to guess
+        a product on its own. Best-effort: never blocks/fails ingestion."""
+        if self._notifier is None:
+            return
+        try:
+            await AlertService(self.session, self.branch_id, self._notifier).raise_alert(
+                lead_id=lead.id, kind="unmapped_ad", thread_id=thread.id,
+                lead_phone=lead.phone_e164,
+                summary_en=f"New lead from ad_id={thread.ad_id} with no product mapping — "
+                           "map it in Ads before Stepan has to guess the product",
+                summary_ru=f"Новый лид с ad_id={thread.ad_id} без привязки продукта — "
+                           "смапь в разделе Ads, пока Степан не начал угадывать продукт",
+            )
+        except Exception:
+            logger.warning("unmapped-ad alert failed lead=%d thread=%d",
+                            lead.id, thread.id, exc_info=True)
 
     async def _notify_bot_off(self, lead, thread, text: str) -> None:
         """The bot was silent (manually toggled off, or a human-led stage) when this

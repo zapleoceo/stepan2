@@ -23,7 +23,7 @@ from app.modules.knowledge.sections import reassemble
 
 from ._i18n import apply_lang
 from ._query import _branch_where
-from ._ui_kb import kb_editor_html, kb_history_html, kb_products_html, kb_tree_html
+from ._ui_kb import kb_editor_html, kb_history_html, kb_tree_html
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
@@ -43,18 +43,6 @@ async def knowledge_tree(request: Request) -> HTMLResponse:
     async with session_scope() as session:
         docs = await _docs(session, branch_ids_from_request(request))
     return HTMLResponse(kb_tree_html(docs))
-
-
-@router.get("/knowledge/products", response_class=HTMLResponse)
-async def knowledge_products_tab(request: Request) -> HTMLResponse:
-    apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
-    async with session_scope() as session:
-        rows = (await session.execute(
-            text("SELECT id, slug, title, is_active, sort_order"  # noqa: S608
-                 f" FROM product {where} ORDER BY sort_order, id"), params)).all()
-    return HTMLResponse(kb_products_html(list(rows)))
 
 
 @router.get("/knowledge/{doc_id}/edit", response_class=HTMLResponse)

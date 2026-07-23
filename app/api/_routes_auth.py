@@ -63,6 +63,18 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
             log.debug("self-provisioned platform owner tg=%d", tg_id)
         if user is None:
             return HTMLResponse(_msg_html("Not authorized."), status_code=403)
+        if not user.name:
+            # A user invited via the admin panel (not self-provisioned) has no name — every
+            # ThreadLog/StageEvent entry they write then falls back to the generic literal
+            # "manager" (_actor_name), so the chat timeline can't say WHICH manager acted.
+            # Telegram's own login payload already carries their name; backfill it here so it
+            # sticks from their very first login instead of staying blank forever.
+            tg_name = " ".join(
+                p for p in (params.get("first_name"), params.get("last_name")) if p
+            ).strip() or params.get("username") or ""
+            if tg_name:
+                user.name = tg_name
+                s.add(user)
         memberships = await MembershipRepo(s).memberships_for_user(user.id)
         is_super = any(m.role == Role.SUPER_ADMIN for m in memberships)
         branch_ids = [m.branch_id for m in memberships if m.branch_id is not None]

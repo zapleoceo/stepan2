@@ -1,6 +1,7 @@
-"""Knowledge-base UI: tabbed tree sidebar (Persona | Products), a section editor with
-localized placeholder hints, and the edit-history diff view. Navigation is sidebar-only —
-clicking a doc/product loads it into #main."""
+"""Knowledge-base UI: persona/facts tree sidebar, a section editor with localized placeholder
+hints, and the edit-history diff view. Navigation is sidebar-only — clicking a doc loads it
+into #main. Products live only under /ui/products/panel now — this page used to also carry a
+Products tab, which just duplicated that entry point without adding anything (2026-07-23)."""
 from __future__ import annotations
 
 import html as _h
@@ -21,19 +22,6 @@ def _cat_label(cat: str, lang: str) -> str:
     return {"ru": "Прочее", "en": "Other", "id": "Lainnya"}.get(lang, "Other")
 
 
-def _tabs(active: str) -> str:
-    def tab(key: str, url: str, label: str) -> str:
-        cls = "kb-tab on" if key == active else "kb-tab"
-        return (f'<button class="{cls}" hx-get="{url}" hx-target="#kb-side"'
-                f' hx-swap="innerHTML">{_h.escape(label)}</button>')
-    return (
-        '<div class="kb-tabs">'
-        f'{tab("persona", "/ui/knowledge/tree", t("kb.tab_persona"))}'
-        f'{tab("products", "/ui/knowledge/products", t("nav.products"))}'
-        '</div>'
-    )
-
-
 def kb_tree_html(docs: list, active_id: int | None = None) -> str:
     """Persona-tab sidebar: docs grouped by category. When the view spans >1 branch, each
     branch's category groups are wrapped in an outer collapsible branch group
@@ -46,7 +34,7 @@ def kb_tree_html(docs: list, active_id: int | None = None) -> str:
         cat = d[4] if d[4] in CATEGORIES else _OTHER
         br = d[7] if len(d) > 7 else ""
         by_branch.setdefault(br, {}).setdefault(cat, []).append(d)
-    out = [_tabs("persona")]
+    out: list[str] = []
     for br in (branches or [""]):
         cats = by_branch.get(br, {})
         cat_groups = []
@@ -67,7 +55,7 @@ def kb_tree_html(docs: list, active_id: int | None = None) -> str:
                 f'{"".join(cat_groups)}</details>')
         else:
             out.extend(cat_groups)
-    if len(out) == 1:
+    if not out:
         out.append('<div class="emp">—</div>')
     return f'<div id="kb-side">{"".join(out)}</div>'
 
@@ -83,23 +71,6 @@ def _tree_item(d: object, active_id: int | None) -> str:
     )
 
 
-def kb_products_html(products: list, active_id: int | None = None) -> str:
-    """Products-tab sidebar: flat product list."""
-    create = (
-        f'<a class="btn-sm btn-p" hx-get="/ui/products/new" hx-target="#main"'
-        f' hx-push-url="/ui/products/new" style="text-decoration:none;margin:.3rem">'
-        f'+ {_h.escape(t("prod.create"))}</a>')
-    items = "".join(
-        f'<a class="ti{" on" if p[0] == active_id else ""}"'
-        f' hx-get="/ui/products/{p[0]}/edit" hx-target="#main"'
-        f' hx-push-url="/ui/products/{p[0]}/edit" onclick="setOn(this)">'
-        f'<div class="ti-t"><span class="ti-n">{_h.escape(str(p[2]))}</span>'
-        f'{"" if p[3] else " <span class=ti-off>✗</span>"}</div>'
-        f'<div class="ti-p">{_h.escape(str(p[1]))}</div></a>'
-        for p in products  # (id, slug, title, is_active, sort_order)
-    )
-    body = items or '<div class="emp">—</div>'
-    return f'<div id="kb-side">{_tabs("products")}{create}{body}</div>'
 
 
 def _section_editor(slug: str, content: str, lang: str) -> str:
