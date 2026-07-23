@@ -7,6 +7,7 @@ settings (crm_mcp_url, crm_mcp_city_alias). The transport is behind CrmPusherPor
 logic is unit-testable without a live CRM."""
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -60,30 +61,72 @@ class CrmMcpPusher:
         from mcp import ClientSession  # noqa: PLC0415
         from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
 
+        try:
+            async with streamablehttp_client(self.url) as (r, w, _):
+                async with ClientSession(r, w) as s:
+                    await s.initialize()
+                    # crm_lead_add_event assumes the phone is ALREADY a CRM contact — for an
+                    # IG-ad lead that never existed in CRM, its internal add-contact call
+                    # 404s (confirmed with itstep CRM devs, 2026-07-23). crm_client_search
+                    # first tells us which of the two tools this phone actually needs.
+                    known = await self._is_known_client(s, phone)
+                    if known:
+                        return await self._add_event(s, phone, event_type, comment, name)
+                    return await self._create_internet_request(s, phone, comment, name)
+        except Exception as exc:  # noqa: BLE001 — external MCP transport; log + report, never raise
+            logger.exception("crm push transport error phone=%s", phone)
+            return False, str(exc)
+
+    async def _is_known_client(self, s: Any, phone: str) -> bool:
+        res = await s.call_tool(
+            "crm_client_search", {"cityAlias": self.city_alias, "search": phone})
+        full = _content_text(res, limit=None)  # count_all can sit past a truncated 300 chars
+        if getattr(res, "isError", False):
+            # Search itself failing shouldn't block the push — fall through to the create
+            # path, which is the safer default for a lead we can't confirm exists yet.
+            logger.warning("crm client search failed phone=%s: %s", phone, full[:300])
+            return False
+        try:
+            return int(json.loads(full).get("count_all", 0)) > 0
+        except (json.JSONDecodeError, TypeError, ValueError):
+            logger.warning("crm client search unparseable phone=%s: %s", phone, full[:300])
+            return False  # unparseable → treat as unknown, safer to create than to 404
+
+    async def _add_event(
+        self, s: Any, phone: str, event_type: str, comment: str, name: str | None,
+    ) -> tuple[bool, str]:
         args: dict[str, Any] = {
             "cityAlias": self.city_alias, "phone": phone, "eventType": event_type,
             "managerComment": comment,
         }
         if name:
             args["name"] = name
-        try:
-            async with streamablehttp_client(self.url) as (r, w, _):
-                async with ClientSession(r, w) as s:
-                    await s.initialize()
-                    res = await s.call_tool("crm_lead_add_event", args)
-                    detail = _content_text(res)
-                    if getattr(res, "isError", False):
-                        logger.warning("crm push failed phone=%s: %s", phone, detail)
-                        return False, detail
-                    return True, detail
-        except Exception as exc:  # noqa: BLE001 — external MCP transport; log + report, never raise
-            logger.exception("crm push transport error phone=%s", phone)
-            return False, str(exc)
+        res = await s.call_tool("crm_lead_add_event", args)
+        detail = _content_text(res)
+        if getattr(res, "isError", False):
+            logger.warning("crm push failed phone=%s: %s", phone, detail)
+            return False, detail
+        return True, detail
+
+    async def _create_internet_request(
+        self, s: Any, phone: str, comment: str, name: str | None,
+    ) -> tuple[bool, str]:
+        args: dict[str, Any] = {
+            "cityAlias": self.city_alias, "phone": phone, "name": name or "Kak",
+            "type": "ai_bot", "comment": comment,
+        }
+        res = await s.call_tool("crm_internet_request_create", args)
+        detail = _content_text(res)
+        if getattr(res, "isError", False):
+            logger.warning("crm lead create failed phone=%s: %s", phone, detail)
+            return False, detail
+        return True, detail
 
 
-def _content_text(res: Any) -> str:
+def _content_text(res: Any, limit: int | None = 300) -> str:
     parts = [getattr(c, "text", "") for c in (getattr(res, "content", None) or [])]
-    return " ".join(p for p in parts if p)[:300]
+    full = " ".join(p for p in parts if p)
+    return full if limit is None else full[:limit]
 
 
 def _coerce_dt(v: Any) -> datetime | None:
