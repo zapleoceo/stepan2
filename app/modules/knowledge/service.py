@@ -65,9 +65,9 @@ OBJECTION_PLAYBOOK_SLUG = "objection_playbook"
 # so a copy-edit to the parenthetical doesn't silently stop the gate from matching.
 _FACTS_MARKET_SLUG = "facts_market"
 _GATED_MARKET_SECTIONS: tuple[tuple[str, str], ...] = (
-    ("Perbandingan kompetitor", "trust"),
-    ("Penghasilan", "job_outcome"),
-    ("Success cases", "job_outcome"),
+    ("Сравнение с конкурентами", "trust"),
+    ("Доход", "job_outcome"),
+    ("Успешные кейсы", "job_outcome"),
 )
 
 

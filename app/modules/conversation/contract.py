@@ -94,9 +94,10 @@ between them when it reads more naturally that way. At most one emoji. Reply in 
 unless the lead wrote to you in another language — then answer in theirs, and keep \
 answering in it. How you sound is described in the persona above; this is only about shape.
 
-ESCALATE to a human ONLY if they ask for one, complain, raise a legal issue, or have a problem \
-with a payment they already made. Not knowing something is not a reason — say what you do know, \
-say you'll confirm the rest, and keep the conversation going. Never go silent on them.
+ESCALATE to a human ONLY if they ask for one, complain, raise a legal issue, have a problem \
+with a payment they already made, or are genuinely ready to commit / pay. Not knowing \
+something is not a reason — say what you do know, say you'll confirm the rest, and keep the \
+conversation going. Never go silent on them.
 """
 
 _SCHEMA = """\
