@@ -91,6 +91,14 @@ def impossible_capability_offers(reply: str) -> list[str]:
     return [m.group(0) for m in _IMPOSSIBLE_CAPABILITY_RE.finditer(reply or "")]
 
 
+def quotes_price(reply: str) -> bool:
+    """A concrete money figure appears in the reply — same shape the money gate already
+    verifies against the KB. Used by the pitch gate as a content-based backstop: the model
+    can mislabel its own `move` (thread 4972 shipped a full price quote tagged
+    `answer_question`, which isn't in `_PITCH_MOVES`), but it can't hide the figure itself."""
+    return bool(_PRICE_RE.search(reply or ""))
+
+
 # Thread 1721: the bot promised "aku kirim file dataset ... via WhatsApp ya", asked for the
 # lead's number, then repeatedly claimed to have already sent it (false_delivery_claims
 # above blocks THAT half) — but the ORIGINAL future-tense promise to reach the lead over

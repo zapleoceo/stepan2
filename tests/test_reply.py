@@ -48,6 +48,9 @@ class _Knowledge:
     async def objection_snippets(self, categories):  # noqa: ANN001, ANN201
         return ""
 
+    async def market_snippets(self, categories):  # noqa: ANN001, ANN201
+        return ""
+
 
 def _answer(**over) -> str:  # noqa: ANN003
     payload = {"reply": "halo kak", "move": "answer_question", "stage": "qualifying"}
@@ -375,6 +378,48 @@ def test_the_gate_reads_the_declared_move_not_the_prose() -> None:
     assert not _typed_a_question(_M(_AD_PREFILL))
     assert not _typed_a_question(_M("   "))
     assert not _typed_a_question(None)
+
+
+def test_a_real_typed_question_is_not_dismissed_for_carrying_the_ad_flag() -> None:
+    """Thread 4972: is_ad_referral=True fires because the message landed on an ad
+    click-through, but the composer text is editable — the lead can clear the prefill and
+    type their own question. `is_ad_referral` alone must never be the reason a genuine,
+    non-template question gets treated as an unanswered tap."""
+    from app.modules.conversation.reply import _typed_a_question
+
+    class _M:
+        def __init__(self, text: str, ad: bool = False) -> None:
+            self.text, self.is_ad_referral = text, ad
+
+    real_question = "Halo, boleh tanya apa yang beda dari kursus SMM di sini dan biayanya berapa?"
+    assert _typed_a_question(_M(real_question, ad=True))
+
+
+async def test_an_ad_referral_first_reply_never_quotes_price_before_discovery(
+    db_session,  # noqa: ANN001
+) -> None:
+    """Thread 4972 end-to-end: an ad-referral message, empty dossier, first reply — even if
+    the model self-labels its price-carrying draft `answer_question` (a move outside
+    `_PITCH_MOVES`), the pitch gate must still force a rewrite before any price ships."""
+    bid, tid, _ = await _thread(db_session, texts=())
+    from app.adapters.db.models import Message
+    db_session.add(Message(
+        branch_id=bid, thread_id=tid, channel_id=1, external_id="q1",
+        direction="in", sent_by="lead", is_ad_referral=True,
+        text="Halo, saya ingin tahu detail program SMM dan biaya kursusnya 😊",
+        occurred_at=_NOW))
+    await db_session.flush()
+    kb = "Digital Marketing (SMM): durasi 6 bulan · harga Rp 1.882.955."
+    llm = _LLM(
+        _answer(reply="Program SMM durasinya 6 bulan, biayanya Rp 1.882.955 kak.",
+                move="answer_question"),
+        _answer(reply="Kakak lagi kerja atau sekolah?", move="discover_situation"),
+    )
+    decision = await _service(db_session, bid, llm, kb).decide(tid)
+
+    assert decision is not None
+    assert "1.882.955" not in decision.reply
+    assert "Rp" not in decision.reply
 
 
 # ── the pitch gate: no product pitch before discovery has actually landed ─────

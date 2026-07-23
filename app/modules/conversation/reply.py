@@ -164,7 +164,9 @@ class ReplyService(ReplyDelivery):
             if answered is not None:
                 return answered  # shipped as-is; a second rewrite is what v2 did
 
-        if stored is not None and premature_pitch(decision.move, stored, lead_typed_a_question):
+        if stored is not None and premature_pitch(
+            decision.move, stored, lead_typed_a_question, decision.reply,
+        ):
             # v2 enforced "no pitch before pain+gain" in code (_stage_for). The v3 rebuild only
             # asked for it in prose, and thread 452 showed that wasn't enough: two turns after a
             # context clear, dossier empty, Stepan pitched Vibe Coding anyway.
@@ -210,13 +212,17 @@ def _typed_a_question(last_in: object) -> bool:
 
     An ad's prefilled button text reads like a question ("Boleh info jadwal, durasi, dan
     biaya?") but the lead never typed it — they tapped an ad. Answering a tap with a price list
-    is what the old opener did; the right move there is a warm question. IG's own referral
-    metadata (`is_ad_referral`) settles it structurally, with the text template as the fallback
-    for messages ingested before that flag existed."""
+    is what the old opener did; the right move there is a warm question.
+
+    IG's `is_ad_referral` metadata marks the message the ad's click-through landed on, but that
+    composer text is EDITABLE — a lead can clear the prefill and type a real, specific question
+    before sending (thread 4972: "saya ingin tahu detail program SMM dan biaya kursusnya" —
+    is_ad_referral=True, but a genuine ask). So the flag alone can't settle it; only the TEXT
+    can. AD_TEMPLATE_RE is the actual determinant for both ad-tap and pre-flag messages."""
     if last_in is None:
         return False
     text = (getattr(last_in, "text", "") or "").strip()
-    if not text or getattr(last_in, "is_ad_referral", False) or AD_TEMPLATE_RE.match(text):
+    if not text or AD_TEMPLATE_RE.match(text):
         return False
     return is_answerable_question(text)
 

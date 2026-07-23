@@ -105,3 +105,36 @@ def test_discovery_moves_are_never_gated() -> None:
     for move in ("discover_situation", "discover_motive", "probe_suppose",
                 "need_payoff", "handle_objection", "accept_refusal", "escalate_human"):
         assert not premature_pitch(move, LeadDossier(), lead_asked_directly=False)
+
+
+def test_a_price_quoted_under_a_mislabelled_move_is_still_gated() -> None:
+    """Thread 4972: a first-turn reply to an ad-referral message quoted Rp 1.882.955 tagged
+    `answer_question` — a move outside `_PITCH_MOVES` — with an empty dossier. The declared
+    move alone let it through; the price figure in the reply must not."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    reply = "Program SMM durasinya 6 bulan, biayanya Rp 1.882.955 kak."
+    assert premature_pitch(
+        "answer_question", LeadDossier(), lead_asked_directly=False, reply=reply)
+
+
+def test_a_mislabelled_move_without_a_price_is_not_gated() -> None:
+    """The content-based backstop only fires on an actual figure — a plain answer_question
+    reply with no price still passes, same as before."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    reply = "Program SMM durasinya 6 bulan kak, mau fokus ke apa dulu?"
+    assert not premature_pitch(
+        "answer_question", LeadDossier(), lead_asked_directly=False, reply=reply)
+
+
+def test_a_mislabelled_move_with_a_price_but_discovery_done_is_not_gated() -> None:
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import premature_pitch
+
+    discovered = LeadDossier(pains=["ga pede desain"], desired_state=["portofolio kuat"])
+    reply = "Investasinya Rp 1.882.955 kak."
+    assert not premature_pitch(
+        "answer_question", discovered, lead_asked_directly=False, reply=reply)

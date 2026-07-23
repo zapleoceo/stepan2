@@ -13,7 +13,7 @@ sales quality — is judged by the critic, which fails OPEN.
 """
 from __future__ import annotations
 
-from .guard import canonical_prices, fabricated_income_figure, ungrounded_urls
+from .guard import canonical_prices, fabricated_income_figure, quotes_price, ungrounded_urls
 
 # The correction handed to the model when the gate trips. It names the offence and demands a
 # replacement — never a retreat to "I'll check with the team", which is what v2 did and what
@@ -48,14 +48,21 @@ MONEY_CORRECTION = (
 _PITCH_MOVES = frozenset({"give_value", "quote_price", "invite_campus", "close"})
 
 
-def premature_pitch(move: str, dossier: object, lead_asked_directly: bool) -> bool:
+def premature_pitch(
+    move: str, dossier: object, lead_asked_directly: bool, reply: str = "",
+) -> bool:
     """True when the model pitched before earning the right to.
 
     Never fires when the lead asked outright (answer-first already covers that turn) or once
-    discovery has actually landed a pain and a desired outcome."""
-    if lead_asked_directly or move not in _PITCH_MOVES:
+    discovery has actually landed a pain and a desired outcome.
+
+    Checks the DECLARED move first, but that alone isn't airtight: thread 4972 shipped a full
+    price quote on a first turn with an empty dossier, self-labelled `answer_question` — a
+    move outside `_PITCH_MOVES`, so the move check alone let it through. A price figure in the
+    reply is pitch content regardless of what the model called the move, so it's checked too."""
+    if lead_asked_directly or dossier.has_discovery():
         return False
-    return not dossier.has_discovery()
+    return move in _PITCH_MOVES or quotes_price(reply)
 
 
 def money_issues(reply: str, context: str) -> list[str]:
