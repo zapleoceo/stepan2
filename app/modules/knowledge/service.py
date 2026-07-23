@@ -261,15 +261,24 @@ def _catalog_anchor(product: Product) -> str:
     exists so the model KNOWS a product exists and roughly what it costs/how long — for cross-
     reference and product-switching, never for presenting (that needs the FULL card, which
     loads separately once the lead actually focuses on it). Every other detail is duplicated
-    work most turns never use. Falls back to the full quick_facts line if a card doesn't follow
-    the 'durasi ... | ... | harga ...' convention, so no product silently loses its anchor."""
+    work most turns never use.
+
+    Every QUICK FACTS line's FIRST segment is duration (no consistent label word survives
+    translation — Bahasa said 'durasi 37 sesi', Russian just says '37 сессий'), and exactly one
+    segment starts with a price label ('цена' in the live Russian KB, 'harga' in Bahasa —
+    kept for older/test content) — matched by keyword since its position varies. Falls back to
+    the full quick_facts line if a card has no price segment, so no product silently loses its
+    anchor."""
     m = _QUICK_FACTS_RE.search(product.content or "")
     if not m:
         return product.title
     segments = [s.strip() for s in m.group(1).split("|")]
-    anchor = [s for s in segments if s[:6].lower() in ("durasi", "harga ")]
-    if not anchor:
+    if not segments:
         return _quick_facts(product)
+    price = next((s for s in segments if s.lower().startswith(("цена", "harga"))), None)
+    if price is None:
+        return _quick_facts(product)
+    anchor = [segments[0], price] if segments[0] != price else [price]
     return f"{product.title} — {' · '.join(anchor)}"
 
 
