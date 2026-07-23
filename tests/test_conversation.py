@@ -31,6 +31,11 @@ class FakeLLM:
     def __init__(self, decision: dict[str, Any]) -> None:
         self._payload = json.dumps(decision)
         self.seen: list[dict[str, Any]] | None = None
+        # `.seen` is overwritten by every chat() call — a first-reply turn is always SMART
+        # (routing.pick_capability), which also runs the critic's own separate review call
+        # on the same LLM, so `.seen` alone can't tell "the main decide() call" apart from
+        # "the critic's own prompt". Keep every call so assertions can target the first one.
+        self.calls_seen: list[list[dict[str, Any]]] = []
         self.json_required = False
 
     async def chat(
@@ -44,6 +49,7 @@ class FakeLLM:
         **_kw: Any,
     ) -> tuple[str, dict[str, Any]]:
         self.seen = messages
+        self.calls_seen.append(messages)
         self.json_required = require_json_schema
         return self._payload, {"cost_usd": 0.0, "model": "fake"}
 
@@ -74,7 +80,10 @@ class FakeChannel:
 
 
 _DECISION = {
-    "reply": "Halo! Vibe Coding mulai 1.2jt.",
+    # No price, no product pitch — this fixture is about decide()'s plumbing (routing,
+    # dialog assembly, JSON parsing), not the money/pitch gates, so it must not trip them
+    # (an uninvited price fires the pitch gate regardless of discovery — see money_gate.py).
+    "reply": "Oh siap Kak, boleh tau dulu mau belajar buat apa?",
     "stage": "qualifying",
     "product_slug": "vibe",
     "ready": False,
@@ -138,10 +147,11 @@ async def test_decide_returns_decision_from_fake_llm(db_session):
     assert decision.stage is Stage.QUALIFYING
     assert decision.product_slug == "vibe"
     assert llm.json_required is True  # require_json_schema flowed through
-    assert llm.seen[0]["role"] == "system"
+    first_call = llm.calls_seen[0]  # the main decide() call — a critic review may follow it
+    assert first_call[0]["role"] == "system"
     # dialog turn included — not necessarily last: a situational/format nudge is appended
     # after it on purpose, so the model reads the instruction closest to its own turn
-    assert any(m["content"] == "halo" for m in llm.seen)
+    assert any(m["content"] == "halo" for m in first_call)
 
 
 async def test_decide_none_without_dialog(db_session):

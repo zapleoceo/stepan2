@@ -382,7 +382,7 @@ def test_kb_tree_html_empty() -> None:
     from app.api._ui_kb import kb_tree_html
     _set_lang("en")
     html = kb_tree_html([])
-    assert "Persona" in html and "Products" in html  # tabs always present
+    assert 'id="kb-side"' in html and "emp" in html  # empty placeholder, no products tab
 
 
 def test_kb_tree_html_groups_by_category() -> None:
@@ -729,11 +729,6 @@ def test_products_new_form_exists(client: TestClient) -> None:
     assert "slug" in resp.text
 
 
-def test_knowledge_products_tab_exists(client: TestClient) -> None:
-    resp = client.get("/ui/knowledge/products")
-    assert resp.status_code in (200, 500)
-
-
 def test_inbox_has_leads_nav(client: TestClient) -> None:
     resp = client.get("/ui/inbox")
     assert resp.status_code == 200
@@ -992,13 +987,6 @@ def test_products_panel_html_has_create_button() -> None:
     from app.api._ui_panels import products_panel_html
     _set_lang("en")
     html = products_panel_html([])
-    assert "/ui/products/new" in html
-
-
-def test_kb_products_tab_has_create_button() -> None:
-    from app.api._ui_kb import kb_products_html
-    _set_lang("en")
-    html = kb_products_html([])
     assert "/ui/products/new" in html
 
 
@@ -1392,7 +1380,6 @@ def test_all_sub_routers_reachable(client: TestClient) -> None:
         "/ui/members/panel",
         "/ui/settings/panel",
         "/ui/knowledge/tree",
-        "/ui/knowledge/products",
         "/ui/products/panel",
         "/ui/products/new",
         "/ui/branches/panel",
@@ -1658,7 +1645,7 @@ def test_nav_order_matches_requested_grouping() -> None:
     from app.api._ui_html import app_shell
     _set_lang("en")  # labels come from the i18n contextvar, not app_shell's lang arg
     html = app_shell("en", "<div>x</div>", active_nav="inbox")
-    labels = ["Inbox", "Outbox", "Coach KB", "Knowledge", "Products",
+    labels = ["Inbox", "Outbox", "Coach KB", "Persona", "Catalog &amp; pricing",
               "Reports", "Leads", "Members", "Settings", "Branches", "Broker log"]
     positions = [html.index(f">{lbl}<") for lbl in labels]
     assert positions == sorted(positions)  # exact requested order, left to right

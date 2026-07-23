@@ -30,8 +30,11 @@ class _FakeLLM:
 
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
         self.calls += 1
-        raw = ('{"reply":"Halo! Vibe Coding 13 juta, cicilan bisa.","stage":"qualifying",'
-               '"jobs":[],"pains":[],"gains":[]}')
+        # No price quoted — this fixture has no Product row, so any figure the reply named
+        # would be ungrounded and the money gate would (correctly) swap it for the safe
+        # hold-line. The point of this test is sandbox isolation, not the gate itself.
+        raw = ('{"reply":"Halo! Vibe Coding cocok banget buat kamu, boleh tau dulu mau belajar '
+               'buat apa?","stage":"qualifying","jobs":[],"pains":[],"gains":[]}')
         return raw, {"model": "cerebras/gpt-oss-120b", "cost_usd": 0.0}
 
     async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201
@@ -50,7 +53,7 @@ async def _branch(s) -> int:
 async def test_sim_say_uses_real_path_and_stays_sandboxed(db_session) -> None:
     bid = await _branch(db_session)
     out = await SimService(db_session, _FakeLLM()).say(bid, "s1", "berapa harga vibe coding?")
-    assert out["ok"] and "13 juta" in out["reply"] and out["stage"] == "qualifying"
+    assert out["ok"] and "Vibe Coding" in out["reply"] and out["stage"] == "qualifying"
 
     # sandbox isolation — worker never touches it, nothing can be sent
     ch = (await db_session.execute(

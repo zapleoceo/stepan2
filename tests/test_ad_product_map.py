@@ -170,12 +170,14 @@ def _svc(s, bid: int):  # noqa: ANN001, ANN201
                         branch_settings=_parse({}), notifier=None)
 
 
-async def test_model_overrides_ad_sourced_product(db_session) -> None:
+async def test_model_does_not_override_ad_sourced_product(db_session) -> None:
+    # thread 4943/5019: an ad click is stronger evidence of intent than the model's own
+    # re-qualification — silently overriding it sent a wrong-product price to a live lead.
     bid, tid = await _thread_with_source(db_session, "ad", "smm_intensive")
     await _svc(db_session, bid).enqueue_reply(tid, _decision(product_slug="vibe_coding"))
     thread = (await db_session.exec(select(ChannelThread))).first()
-    assert thread.product_slug == "vibe_coding"
-    assert thread.product_source == "model"
+    assert thread.product_slug == "smm_intensive"  # ad match locked
+    assert thread.product_source == "ad"
 
 
 async def test_model_does_not_override_manager_product(db_session) -> None:
