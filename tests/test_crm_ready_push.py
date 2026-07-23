@@ -6,8 +6,6 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlmodel import select
-
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
