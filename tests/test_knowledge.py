@@ -121,10 +121,10 @@ async def test_focus_card_is_sent_in_full_no_rag(db_session):
 
 
 async def test_catalog_shows_quick_facts_for_other_products(db_session):
-    """A non-focus product is summarised by duration+price ONLY in the catalog (architecture
-    review 2026-07-22: format/DP/outcome dropped — the catalog is a cross-reference anchor,
-    the FULL card loads separately once the lead actually focuses on that product), so a
-    cross-product question is answerable without dumping all 15 full cards."""
+    """With NO focus yet (lead still browsing), a product is summarised by duration+price ONLY
+    in the catalog (architecture review 2026-07-22: format/DP/outcome dropped — the catalog is
+    a cross-reference anchor, the FULL card loads separately once the lead actually focuses on
+    that product), so a cross-product question is answerable without dumping all 15 full cards."""
     s = db_session
     a = await _branch(s, "Jakarta", "id")
     data_card = ("# Data Analyst\nQUICK FACTS: durasi 9 bulan | harga Rp 15.030.000\n"
@@ -133,9 +133,9 @@ async def test_catalog_shows_quick_facts_for_other_products(db_session):
                 [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
                  ("data", "Data Analyst", data_card)])
     svc = KnowledgeService(s, a)
-    ctx = await svc.knowledge_context("vibe")
-    assert "focus product=vibe" in ctx                 # vibe is the full focus card
+    ctx = await svc.knowledge_context(None)
     assert "- data: Data Analyst — durasi 9 bulan · harga Rp 15.030.000" in ctx  # data summarised
+    assert "- vibe: Vibe Coding" in ctx
     assert "SQL, Python, Power BI" not in ctx           # the OTHER card's bulk is NOT dumped
 
 
@@ -152,7 +152,7 @@ async def test_catalog_drops_format_dp_outcome_keeps_duration_and_price(db_sessi
                 [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
                  ("smm", "SMM Intensive", smm_card)])
     svc = KnowledgeService(s, a)
-    ctx = await svc.knowledge_context("vibe")
+    ctx = await svc.knowledge_context(None)
     assert "- smm: SMM Intensive — durasi 2 minggu · harga Rp 1.882.955" in ctx
     assert "format hybrid" not in ctx
     assert "DP Rp 500.000" not in ctx
@@ -168,8 +168,25 @@ async def test_catalog_falls_back_to_title_without_quick_facts(db_session):
                 [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
                  ("data", "Data Analyst", "# Data Analyst\nNo quick-facts headline here.")])
     svc = KnowledgeService(s, a)
-    ctx = await svc.knowledge_context("vibe")
+    ctx = await svc.knowledge_context(None)
     assert "- data: Data Analyst" in ctx        # title fallback present
+
+
+async def test_catalog_is_skipped_once_a_product_is_focused(db_session):
+    """2026-07-23: once the lead has settled on ONE product, the other-products catalog
+    (~6-7k chars, the single largest untouched chunk of the prompt) is dead weight every turn
+    from here on — cross-referencing every other course costs more than it's worth. Only the
+    full focus card + the always-relevant event's cheap anchor survive."""
+    s = db_session
+    a = await _branch(s, "Jakarta", "id")
+    await _seed(s, a, "persona-A",
+                [("vibe", "Vibe Coding", "QUICK FACTS: durasi 4 bulan | harga Rp 13.000.000"),
+                 ("data", "Data Analyst",
+                  "QUICK FACTS: durasi 9 bulan | harga Rp 15.030.000\n## Kurikulum\nX")])
+    svc = KnowledgeService(s, a)
+    ctx = await svc.knowledge_context("vibe")
+    assert "focus product=vibe" in ctx
+    assert "- data:" not in ctx
     assert "- data: Data Analyst —" not in ctx  # no ' — <facts>' suffix when line absent
 
 

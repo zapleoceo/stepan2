@@ -143,12 +143,18 @@ class KnowledgeService:
         always = await self._always_docs_block()
         if always:
             blocks.append(always)
-        # A full event card above already covers it in the catalog too — exclude it there.
-        # When NOT relevant this turn, it must still get its cheap compact anchor (NOT full
-        # exclusion) so the model still knows the event exists, just without the full body.
+        # The other-products catalog (~6-7k chars: one anchor line per course) exists so the
+        # model knows OTHER products exist while the lead is still deciding — cross-reference,
+        # never for presenting (the FULL card loads separately once a product becomes focus).
+        # Once a focus IS set, most of that need is gone: the lead settled on ONE product, and
+        # every turn from here on was paying for anchors it never used. 2026-07-23 measurement:
+        # this was the single largest untouched chunk of the prompt, bigger than facts_policy.
+        # The event stays reachable at its cheap anchor even while focused — its "never
+        # disappear outright" rule (below) predates this change and still applies.
         catalog_exclude = {product_slug, *(_ALWAYS_PRODUCT_SLUGS if event_relevant else ())}
-        catalog = _catalog_block(
-            await self.products.active(), resolved_lang, exclude=catalog_exclude)
+        catalog_pool = await self.products.active() if product_slug is None else \
+            [p for p in await self.products.active() if p.slug in _ALWAYS_PRODUCT_SLUGS]
+        catalog = _catalog_block(catalog_pool, resolved_lang, exclude=catalog_exclude)
         if catalog:
             blocks.append(catalog)
         text = "\n\n".join(b for b in blocks if b)
