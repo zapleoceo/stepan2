@@ -149,19 +149,20 @@ async def test_own_reply_recorded_as_manager_and_moves_last_out(db_session) -> N
     assert thread.followups_sent == 2
 
 
-async def test_manager_manual_reply_pauses_bot_and_survives_next_inbound(db_session) -> None:
-    # thread 1761: a manager corrected the bot in the IG app; the bot woke on the lead's next
-    # message and re-pitched over the human. A manual manager reply hands the thread to the
-    # human (MANAGER stage) and stays muted even after the lead writes again.
+async def test_manager_manual_reply_no_longer_auto_pauses_the_bot(db_session) -> None:
+    # thread 4151: a phone number the BOT itself texted got auto-turned into an IG "share
+    # contact" card, which came back through the poll as an unattributed outbound and silently
+    # muted the bot — sent_by="manager" means "we didn't send this ourselves", not "a human is
+    # now driving this thread". A real manager can still step in (the message is recorded and
+    # visible), but only the UI's Bot OFF switch is a deliberate pause now.
     bid, cid, lead, thread = await _world(db_session)  # QUALIFYING
     lead.agent_enabled = True
     await db_session.flush()
     await IngestService(db_session, bid).ingest(
         cid, [_in("Halo, ini dari tim IT STEP ya", ext="mgr1", minutes_ago=2, direction="out")])
-    assert lead.stage == Stage.MANAGER and lead.agent_enabled is False
-    # the lead replies — the bot must NOT revive (a human leads the thread now)
+    assert lead.stage == Stage.QUALIFYING and lead.agent_enabled is True
     await IngestService(db_session, bid).ingest(cid, [_in("oh oke kak", ext="l2", minutes_ago=1)])
-    assert lead.stage == Stage.MANAGER and lead.agent_enabled is False
+    assert lead.stage == Stage.QUALIFYING and lead.agent_enabled is True
 
 
 async def test_own_send_polled_back_under_new_id_is_deduped(db_session) -> None:
