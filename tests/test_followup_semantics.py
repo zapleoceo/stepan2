@@ -519,14 +519,20 @@ async def test_an_open_objection_buys_the_strong_model(db_session) -> None:  # n
     from app.modules.conversation.dossier import LeadDossier, Objection
 
     bid, _tid, lead, _ = await _world(db_session, timer_due=True)
-    await _set_dossier(db_session, lead, LeadDossier(objections=[Objection("mahal")]))
+    await _set_dossier(db_session, lead, LeadDossier(
+        objections=[Objection("mahal")], pains=["takut telat"],
+        desired_state=["kerja remote"]))
     llm = _CapturingLLM(_v3())
     await _svc(db_session, bid, llm).run()
     assert llm.capabilities == ["chat:smart"]
 
 
 async def test_an_ordinary_nudge_runs_cheap(db_session) -> None:  # noqa: ANN001
-    bid, _tid, _lead, _ = await _world(db_session, timer_due=True)
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
+    await _set_dossier(db_session, lead, LeadDossier(
+        pains=["takut telat"], desired_state=["kerja remote"]))
     llm = _CapturingLLM(_v3())
     await _svc(db_session, bid, llm).run()
     assert llm.capabilities == ["chat:fast"]

@@ -91,11 +91,13 @@ async def _branch(s, name: str = "Jakarta", lang: str = "id") -> int:
     return b.id
 
 
-async def _thread_with_inbound(s, branch_id: int, *, text: str = "halo") -> int:
+async def _thread_with_inbound(
+    s, branch_id: int, *, text: str = "halo", dossier: str | None = None,
+) -> int:
     channel = Channel(branch_id=branch_id, kind=ChannelKind.INSTAGRAM)
     s.add(channel)
     await s.flush()
-    lead = Lead(branch_id=branch_id)
+    lead = Lead(branch_id=branch_id, dossier=dossier)
     s.add(lead)
     await s.flush()
     thread = ChannelThread(
@@ -117,9 +119,16 @@ def _reply_service(s, branch_id: int, llm: FakeLLM) -> ReplyService:
 
 
 async def test_decide_returns_decision_from_fake_llm(db_session):
+    from app.modules.conversation.dossier import LeadDossier
+
     s = db_session
     branch_id = await _branch(s)
-    thread_id = await _thread_with_inbound(s, branch_id)
+    # Discovery already complete so the discovery-extraction backstop pass (a separate
+    # chat:fast call, see discovery.py) doesn't fire and overwrite llm.seen with its own
+    # smaller prompt — this test is about the main decide() call, not that backstop.
+    thread_id = await _thread_with_inbound(
+        s, branch_id,
+        dossier=LeadDossier(pains=["takut telat"], desired_state=["kerja remote"]).to_json())
     llm = FakeLLM(_DECISION)
 
     decision = await _reply_service(s, branch_id, llm).decide(thread_id)

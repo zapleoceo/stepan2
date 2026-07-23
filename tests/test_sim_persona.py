@@ -23,11 +23,17 @@ class _DualLLM:
 
     async def chat(self, messages, *, require_json_schema=False, **kw):  # noqa: ANN001, ANN003, ANN201
         if require_json_schema:  # Stepan's decision
-            payload = {"reply": "Halo Kak! Vibe Coding 13 juta ya.", "stage": "qualifying",
-                       "jobs": [], "pains": [], "gains": []}
+            # move=answer_question because the lead TYPED a price question ("berapa harga") —
+            # the pitch gate (premature_pitch) never applies to a directly-asked price, only
+            # to a volunteered one, so quoting it here is correct on turn one with an empty
+            # dossier.
+            payload = {"reply": "Halo Kak! Vibe Coding 13 juta ya.", "move": "answer_question",
+                       "stage": "qualifying"}
             return json.dumps(payload), {"model": "x", "cost_usd": 0.0}
         self.actor_calls += 1  # lead actor
-        return ("halo kak mau tanya vibe coding" if self.actor_calls == 1 else "[END]",
+        # A real, typed price question — so answer-first (not the pitch gate) governs this
+        # turn, and quoting a price on an empty dossier is legitimately the right move.
+        return ("halo kak, berapa ya harga vibe coding?" if self.actor_calls == 1 else "[END]",
                 {"model": "x", "cost_usd": 0.0})
 
     async def embed(self, texts, **_k):  # noqa: ANN001, ANN003, ANN201

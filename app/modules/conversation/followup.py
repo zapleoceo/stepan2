@@ -22,6 +22,7 @@ from app.modules.settings.service import BranchSettings, get_channel_settings
 from .contract import build_messages_v3, followup_framing
 from .decision import generate
 from .delivery import _BUBBLE_GAP_S, _reply_bubble_cap, _split_bubbles
+from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
@@ -273,7 +274,14 @@ class FollowupService:
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: the lead answered while we were generating
 
-        await dossiers.save(lead_id, merge_dossier(stored, decision.dossier))
+        merged = merge_dossier(stored, decision.dossier)
+        if not merged.has_discovery():
+            # Same backstop as reply.py's decide() — skip once discovery is already complete.
+            extra = await extract_discovery(
+                self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id,
+                budget=ctx.budget)
+            merged = merge_dossier(merged, extra)
+        await dossiers.save(lead_id, merged)
         meta_line = _fmt_llm_meta(meta)
         for i, bubble in enumerate(
             _split_bubbles(decision.reply, max_parts=_reply_bubble_cap(decision.reply))):

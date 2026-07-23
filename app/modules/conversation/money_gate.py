@@ -24,6 +24,10 @@ MONEY_ESCALATION_REASON = (
     "Степан дважды назвал сумму или ссылку, которых нет в базе знаний — "
     "нужен ручной ответ менеджера с точной цифрой")
 
+PITCH_ESCALATION_REASON = (
+    "Степан дважды спитчил продукт до выявления боли/цели лида — "
+    "нужен ручной ответ менеджера")
+
 PITCH_CORRECTION = (
     "[System: you don't know this lead's pain or goal yet, and your draft pitched a product "
     "or asked for a commitment anyway. Rewrite the SAME message as one honest discovery move "

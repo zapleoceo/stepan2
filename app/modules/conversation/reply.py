@@ -24,12 +24,14 @@ from . import critic
 from .contract import build_messages_v3
 from .decision import Decision, TurnDecision, generate
 from .delivery import ReplyDelivery, _script_lang
+from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import _ASSISTANT_LAST_NUDGE, DecisionEngine
 from .money_gate import (
     MONEY_CORRECTION,
     MONEY_ESCALATION_REASON,
     PITCH_CORRECTION,
+    PITCH_ESCALATION_REASON,
     money_issues,
     premature_pitch,
 )
@@ -110,6 +112,14 @@ class ReplyService(ReplyDelivery):
             lead_typed_a_question=_typed_a_question(last_in), stored=stored)
 
         merged = merge_dossier(stored, decision.dossier)
+        if not merged.has_discovery():
+            # Backstop only: skip the extra chat:fast call once discovery is already complete
+            # for this lead — the common case after a few turns, and this pass exists only to
+            # catch what the main call misses under generation pressure, not to re-confirm it.
+            extra = await extract_discovery(
+                self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id,
+                budget=ctx.budget)
+            merged = merge_dossier(merged, extra)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
         self.last_decision = decision
         logger.info("v3 branch=%d thread=%d move=%s tier=%s first=%s",
@@ -175,8 +185,20 @@ class ReplyService(ReplyDelivery):
             discovered = await self._regenerate(
                 engine, ctx, messages, thread_id, workflow=workflow,
                 correction=PITCH_CORRECTION)
-            if discovered is not None:
-                return discovered
+            if discovered is None or premature_pitch(
+                discovered.move, stored, lead_typed_a_question, discovered.reply,
+            ):
+                # thread 5005: the rewrite ignored PITCH_CORRECTION and re-quoted the same
+                # price on an empty-dossier first turn — shipping it unverified sent an
+                # un-earned price straight to the lead. Mirror the money gate: never ship an
+                # unverified re-offense, escalate to a human rather than go silent on a live
+                # inbound message (unlike followup's uninvited_price gate, which can just drop
+                # a nudge — there is no reply to fall back to here).
+                logger.error("pitch gate unfixable branch=%d thread=%d — escalating",
+                             self.branch_id, thread_id)
+                return replace(discovered or decision, needs_human=True,
+                               human_reason=PITCH_ESCALATION_REASON)
+            return discovered
 
         if capability != SMART:
             return decision  # routine turn — not worth a second call

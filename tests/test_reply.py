@@ -52,6 +52,12 @@ class _Knowledge:
         return ""
 
 
+# A dossier that already has_discovery() == True — used by tests whose intent is routing/
+# call-count behaviour, not the discovery-extraction backstop, so the extra chat:fast pass
+# (added in discovery.py) never fires and the original call-count assertions still hold.
+_DISCOVERED = LeadDossier(pains=["takut telat"], desired_state=["kerja remote"]).to_json()
+
+
 def _answer(**over) -> str:  # noqa: ANN003
     payload = {"reply": "halo kak", "move": "answer_question", "stage": "qualifying"}
     payload.update(over)
@@ -88,7 +94,8 @@ async def test_a_routine_turn_is_a_single_model_call(db_session) -> None:  # noq
     """v2's worst case was twelve calls on one turn."""
     bid, tid, _ = await _thread(
         db_session, texts=(("in", "halo"), ("out", "hai kak"), ("in", "oke")),
-        dossier=LeadDossier(readiness="exploring").to_json())
+        dossier=LeadDossier(readiness="exploring", pains=["takut telat"],
+                            desired_state=["kerja remote"]).to_json())
     llm = _LLM()
     decision = await _service(db_session, bid, llm).decide(tid)
     assert decision is not None
@@ -98,7 +105,7 @@ async def test_a_routine_turn_is_a_single_model_call(db_session) -> None:  # noq
 
 async def test_a_decisive_turn_costs_a_review_and_no_more(db_session) -> None:  # noqa: ANN001
     """Generation plus one critic call — the reviewed path stays at two."""
-    bid, tid, _ = await _thread(db_session)
+    bid, tid, _ = await _thread(db_session, dossier=_DISCOVERED)
     llm = _LLM(_answer(), json.dumps({"sells": True}))
     await _service(db_session, bid, llm).decide(tid)
     assert len(llm.capabilities) == 2
@@ -164,7 +171,8 @@ async def test_the_opener_runs_on_the_strong_model(db_session) -> None:  # noqa:
 async def test_a_quiet_mid_conversation_turn_runs_cheap(db_session) -> None:  # noqa: ANN001
     bid, tid, _ = await _thread(
         db_session, texts=(("in", "halo"), ("out", "hai kak"), ("in", "oke")),
-        dossier=LeadDossier(readiness="exploring").to_json())
+        dossier=LeadDossier(readiness="exploring", pains=["takut telat"],
+                            desired_state=["kerja remote"]).to_json())
     llm = _LLM()
     await _service(db_session, bid, llm).decide(tid)
     assert llm.capabilities == [FAST]
@@ -175,7 +183,8 @@ async def test_a_quiet_mid_conversation_turn_runs_cheap(db_session) -> None:  # 
 async def test_a_broken_cheap_answer_escalates_once_to_the_strong_model(db_session) -> None:  # noqa: ANN001
     bid, tid, _ = await _thread(
         db_session, texts=(("in", "halo"), ("out", "hai"), ("in", "oke")),
-        dossier=LeadDossier(readiness="exploring").to_json())
+        dossier=LeadDossier(readiness="exploring", pains=["takut telat"],
+                            desired_state=["kerja remote"]).to_json())
     llm = _LLM("not json at all", _answer(reply="kembali normal"))
     decision = await _service(db_session, bid, llm).decide(tid)
 
@@ -256,6 +265,24 @@ async def test_the_money_gate_and_the_critic_never_both_spend_a_rewrite(db_sessi
     assert len(llm.capabilities) <= 3
 
 
+async def test_a_pitch_that_stays_premature_escalates_rather_than_shipping(db_session) -> None:  # noqa: ANN001
+    """thread 5005 (2026-07-23): an empty-dossier first turn quoted a price nobody asked for;
+    the PITCH_CORRECTION rewrite ignored the correction and quoted the SAME price again, and
+    the old code shipped it unverified — an un-earned price reached the lead. The pitch gate
+    must re-check its own rewrite, same as the money gate three lines above it, and escalate
+    to a human rather than ship a second premature pitch."""
+    bid, tid, _ = await _thread(
+        db_session, texts=(("in", "halo, boleh info vibe coding dong"),))
+    llm = _LLM(_answer(reply="Vibe Coding-nya Rp 13.360.000 kak", move="quote_price"))
+    decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
+
+    assert decision is not None
+    assert decision.needs_manager is True
+    assert "менеджера" in (decision.manager_question or "")
+    # the rewrite (same broken draft) still must not be what the lead sees unflagged
+    assert llm.capabilities.count(SMART) >= 1
+
+
 async def test_a_reviewer_rejection_produces_a_rewrite_not_a_stub(db_session) -> None:  # noqa: ANN001
     bid, tid, _ = await _thread(db_session)
     llm = _LLM(_answer(reply="ada yang bisa dibantu lagi?"),
@@ -270,7 +297,7 @@ async def test_a_reviewer_rejection_produces_a_rewrite_not_a_stub(db_session) ->
 
 async def test_a_rewrite_is_never_judged_a_second_time(db_session) -> None:  # noqa: ANN001
     """A second rejection is what sent v2 to a stub and switched the lead's bot off."""
-    bid, tid, _ = await _thread(db_session)
+    bid, tid, _ = await _thread(db_session, dossier=_DISCOVERED)
     llm = _LLM(_answer(reply="generic"),
                json.dumps({"sells": False, "why": "generic", "fix": "fix it"}),
                _answer(reply="masih generic"))
@@ -462,7 +489,8 @@ async def test_a_pitch_after_real_discovery_is_not_gated(db_session) -> None:  #
 
 async def test_the_pitch_gate_never_fights_the_answer_gate(db_session) -> None:  # noqa: ANN001
     """A lead who asked directly is answer-first's turn, not the pitch gate's."""
-    bid, tid, _ = await _thread(db_session, texts=(("in", "halo"), ("out", "hai kak")))
+    bid, tid, _ = await _thread(db_session, texts=(("in", "halo"), ("out", "hai kak")),
+                                dossier=_DISCOVERED)
     from app.adapters.db.models import Message
     db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=1, external_id="q1",
                            direction="in", sent_by="lead", text="berapa harga vibe coding?",
