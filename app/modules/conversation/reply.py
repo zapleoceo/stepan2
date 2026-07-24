@@ -418,29 +418,26 @@ class ReplyService(ReplyDelivery):
             capability=capability, branch_id=self.branch_id)
         if decision is None:
             return None
-        # The gates must see what the lead revealed THIS turn, not just prior turns: the model
-        # populates decision.dossier on the same turn it acts on it. Sim p4-close: discovery
-        # landed (pain+goal) exactly on the closing turn, but the pitch gate read `stored`
-        # (turns 1-3 only), saw no discovery, and escalated the close to a hold-line. Fold
-        # this turn's extraction in before vetting so has_discovery() is current.
-        gate_dossier = merge_dossier(stored, decision.dossier)
-        decision = await self._vet(
-            engine, ctx, messages, thread_id, decision,
-            workflow=workflow, capability=capability, context=context, lang=lang,
-            last_inbound=(last_in.text if last_in is not None else "") or "",
-            lead_typed_a_question=_typed_a_question(last_in), stored=gate_dossier,
-            inbound_count=sum(1 for m in ctx.dialog if m.direction == "in"),
-            lead_ready_signal=_is_buying_signal(ctx.dialog))
-
+        # The gates must see what the lead revealed THIS turn, not just prior turns. The main
+        # call runs on chat:fast for a routine turn and fills decision.dossier unreliably, and
+        # the discovery backstop used to run AFTER the gates (for next turn's save) — so on the
+        # very turn a lead finished revealing a pain+goal, has_discovery() still read False and
+        # the pitch gate escalated a legitimate close to a hold-line (sim p4-close/final). Run
+        # the backstop BEFORE vetting when discovery hasn't landed yet, so the close/present
+        # move is judged against a current dossier. The same merged dossier is then saved.
         merged = merge_dossier(stored, decision.dossier)
         if not merged.has_discovery():
-            # Backstop only: skip the extra chat:fast call once discovery is already complete
-            # for this lead — the common case after a few turns, and this pass exists only to
-            # catch what the main call misses under generation pressure, not to re-confirm it.
             extra = await extract_discovery(
                 self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id,
                 budget=ctx.budget)
             merged = merge_dossier(merged, extra)
+        decision = await self._vet(
+            engine, ctx, messages, thread_id, decision,
+            workflow=workflow, capability=capability, context=context, lang=lang,
+            last_inbound=(last_in.text if last_in is not None else "") or "",
+            lead_typed_a_question=_typed_a_question(last_in), stored=merged,
+            inbound_count=sum(1 for m in ctx.dialog if m.direction == "in"),
+            lead_ready_signal=_is_buying_signal(ctx.dialog))
         await self.dossiers.save(lead.id if lead is not None else None, merged)
         self.last_decision = decision
         logger.info("v3 branch=%d thread=%d move=%s tier=%s first=%s",

@@ -29,6 +29,12 @@ class _LLM:
         self.messages: list[list[dict]] = []
 
     async def chat(self, messages, **kw):  # noqa: ANN001, ANN003, ANN201
+        # The discovery backstop (workflow="discovery") is a SEPARATE extraction call, not part
+        # of the scripted reply sequence — return an empty extraction so it doesn't consume a
+        # scripted answer and shift the gate/rewrite responses these tests assert on.
+        if kw.get("workflow") == "discovery":
+            return '{"job_to_be_done":"","pains":[],"desired_state":[],"objections":[]}', \
+                {"model": "fake", "cost_usd": 0.0}
         self.capabilities.append(kw.get("capability", ""))
         self.messages.append(messages)
         answer = self._answers.pop(0) if len(self._answers) > 1 else self._answers[0]
