@@ -37,7 +37,7 @@ from .money_gate import (
     money_issues,
     premature_pitch,
 )
-from .prompt import lead_name_hint, source_hint
+from .prompt import ORGANIC_ENTRY_HINT, lead_name_hint, source_hint
 from .repository import DossierRepo
 from .routing import SMART, pick_capability
 from .signals import (
@@ -244,6 +244,11 @@ class ReplyService(ReplyDelivery):
             first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
         src = ctx.thread.lead_source
         entry_hint = source_hint(src) if src != "ad_clicktomsg" or pure_prefill_entry else None
+        if entry_hint is None and not src and not ctx.thread.ad_id:
+            # A walk-in with no ad/story signal at all — the deep-discovery entry. Injected
+            # every turn like the other entry hints; harmless once the dossier fills (its own
+            # text defers to answer-first and to what the lead has already said).
+            entry_hint = ORGANIC_ENTRY_HINT
         messages = build_messages_v3(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),

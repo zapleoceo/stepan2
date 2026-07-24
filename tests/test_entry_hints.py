@@ -48,6 +48,27 @@ def test_the_contract_scopes_answer_first_to_words_the_lead_typed() -> None:
 
 
 def test_an_unknown_entry_point_adds_nothing() -> None:
-    """Organic leads get no assumptions at all."""
+    """source_hint itself stays assumption-free for unknown sources — the organic
+    deep-discovery hint is a separate constant reply.decide injects deliberately."""
     assert source_hint(None) is None
     assert source_hint("organic") is None
+
+
+def test_the_organic_hint_demands_deep_discovery_without_orders_against_answering() -> None:
+    """A walk-in DM lead gets the full-discovery entry: nothing is known, no product may be
+    assumed — but the hint must not fight the answer-first rule (same bar as the ad hint)."""
+    from app.modules.conversation.prompt import ORGANIC_ENTRY_HINT
+
+    hint = ORGANIC_ENTRY_HINT.lower()
+    assert "know nothing" in hint
+    assert "no product direction may be assumed" in hint
+    assert "answer-first" in hint  # defers to the contract's top rule, never competes with it
+    for order in _ORDERS:
+        assert order not in hint
+
+
+def test_the_ad_hint_anchors_discovery_to_the_tapped_product() -> None:
+    """An ad lead already showed a direction — discovery must build on it, not restart from
+    'what are you looking for' (the tap is the one thing the entry DOES reveal)."""
+    hint = (source_hint("ad_clicktomsg") or "").lower()
+    assert "anchor" in hint and "product they tapped" in hint

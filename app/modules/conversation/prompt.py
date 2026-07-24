@@ -19,12 +19,29 @@ _SOURCE_HINTS = {
         "is the ad's own prefilled text — they did not type it and did not ask you anything, "
         "so there is nothing to answer yet. It tells you the topic they tapped on and NOTHING "
         "else: no goal, no age, no background, no budget. Open warmly with ONE question about "
-        "them. The answer-first rule applies from the moment they type something themselves."
+        "them. Anchor your discovery to the product they tapped — what they want THAT skill "
+        "for, what made it interesting now — rather than a generic 'what are you looking "
+        "for'; they already showed you the direction. The answer-first rule applies from the "
+        "moment they type something themselves."
     ),
     "story": (
         "ENTRY: the lead replied to one of our Instagram stories — a light, casual opening."
     ),
 }
+
+# Injected for a lead who walked into the DM themselves — no ad, no story, no product signal.
+# Without this the organic entry got NO hint at all, and the model treated it like an ad lead
+# minus the product: one shallow question, then drift toward the flagship course. An organic
+# lead is the one segment where deep discovery IS the opener: nothing about them is known, and
+# whatever brought them here is fresh enough that they typed first.
+ORGANIC_ENTRY_HINT = (
+    "ENTRY: the lead reached out to the DM on their own — no ad, no story reply, no product "
+    "signal. You know NOTHING about them or what they came for, and no product direction may "
+    "be assumed. Run the full discovery arc, one question per message: who they are and where "
+    "they're starting from, what pushed them to write today, what a good outcome would look "
+    "like — and only then map a product to it. Their own words are the only source; the "
+    "answer-first rule still wins whenever they ask something directly."
+)
 
 
 def source_hint(lead_source: str | None) -> str | None:
