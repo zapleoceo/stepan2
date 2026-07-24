@@ -296,14 +296,17 @@ async def test_a_reviewer_rejection_produces_a_rewrite_not_a_stub(db_session) ->
 
 
 async def test_a_critic_rewrite_that_adds_an_uninvited_price_escalates(db_session) -> None:  # noqa: ANN001
-    """thread 5010 (2026-07-23): the ORIGINAL draft passed the pitch gate clean — an ad-tap
-    first turn, empty dossier, no price yet — so it fell through to the critic. The critic
-    rejected it as under-selling, and its OWN rewrite volunteered a (real, grounded) price with
-    still nobody asking and no discovery landed — a path that pre-dates the money/pitch gates
-    above it and shipped completely unchecked. The critic rewrite must be re-checked against
-    the same deterministic gates, without asking the critic itself again."""
+    """thread 5010 (2026-07-23): the ORIGINAL draft passed the pitch gate clean — a genuine
+    typed first message, empty dossier, no price yet — so it fell through to the critic. The
+    critic rejected it as under-selling, and its OWN rewrite volunteered a (real, grounded)
+    price with still nobody asking and no discovery landed — a path that pre-dates the
+    money/pitch gates above it and shipped completely unchecked. The critic rewrite must be
+    re-checked against the same deterministic gates, without asking the critic itself again.
+    (An actual ad-tap opener no longer reaches this pipeline at all — see
+    test_conversation.test_first_reply_to_ad_tap_is_templated_not_generated — so this uses a
+    lead's own typed words instead, the case that still runs through the LLM.)"""
     bid, tid, _ = await _thread(
-        db_session, texts=(("in", "🐍 Ceritakan lebih detail tentang program kursus Python"),))
+        db_session, texts=(("in", "Halo, boleh cerita soal kursus Python"),))
     llm = _LLM(_answer(reply="8 bulan, belajar Python dan Django", move="give_value"),
                json.dumps({"sells": False, "why": "no price", "fix": "add the price"}),
                _answer(reply="Biayanya Rp 13.360.000 kak, bisa dicicil", move="quote_price"))

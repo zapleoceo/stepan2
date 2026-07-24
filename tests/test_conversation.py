@@ -9,6 +9,8 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlmodel import select
+
 from app.adapters.db.models import (
     Branch,
     Channel,
@@ -125,6 +127,45 @@ async def _thread_with_inbound(
 
 def _reply_service(s, branch_id: int, llm: FakeLLM) -> ReplyService:
     return ReplyService(s, branch_id, llm, KnowledgeService(s, branch_id))
+
+
+async def test_first_reply_to_ad_tap_is_templated_not_generated(db_session):
+    """24h measurement (2026-07-23): the same fixed ad-button text got a correct opener 80%
+    of the time and a full unprompted pitch the other 20% (11/56 threads) — the model had to
+    re-derive "this is a tap, not a question" from prose every time. Code already knows this
+    string with certainty (AD_TEMPLATE_RE), so no broker call happens at all for it."""
+    from app.modules.conversation.reply import AD_TAP_OPENER
+
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(
+        s, branch_id, text="Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?")
+    llm = FakeLLM(_DECISION)
+
+    decision = await _reply_service(s, branch_id, llm).decide(thread_id)
+
+    assert isinstance(decision, Decision)
+    assert decision.reply == AD_TAP_OPENER
+    assert decision.stage is Stage.QUALIFYING
+    assert llm.calls_seen == []  # zero broker calls — fully deterministic
+
+
+async def test_second_reply_to_ad_tap_text_is_not_templated(db_session):
+    """The prefill only marks the FIRST message after a tap (signals.py) — if this exact
+    text somehow reappears once the bot has already replied once, it's no longer special."""
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(
+        s, branch_id, text="Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?")
+    thread = (await s.exec(select(ChannelThread).where(ChannelThread.id == thread_id))).first()
+    s.add(Message(branch_id=branch_id, thread_id=thread_id, channel_id=thread.channel_id,
+                  external_id="out-1", direction="out", sent_by="agent", text="Halo Kak!"))
+    await s.flush()
+    llm = FakeLLM(_DECISION)
+
+    await _reply_service(s, branch_id, llm).decide(thread_id)
+
+    assert llm.calls_seen != []  # a real turn — the broker WAS called
 
 
 async def test_decide_returns_decision_from_fake_llm(db_session):

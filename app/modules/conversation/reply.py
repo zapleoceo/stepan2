@@ -19,6 +19,7 @@ import logging
 from dataclasses import replace
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
+from app.domain.enums import Stage
 
 from . import critic
 from .contract import build_messages_v3
@@ -69,6 +70,21 @@ def _escalate(decision: TurnDecision, reason: str) -> TurnDecision:
     return replace(decision, reply=ESCALATION_HOLD_REPLY, needs_human=True, human_reason=reason)
 
 
+# The FIRST reply to a known ad-button prefill (AD_TEMPLATE_RE — a fixed, code-certain string,
+# not a guess) is templated instead of generated. 24h measurement (2026-07-23): the same input
+# text got a correct discovery-first opener 80% of the time and a full unprompted pitch the
+# other 20% (11/56 threads), because "is this a tap or a typed question" was left for the model
+# to infer turn by turn from prose (source_hint + THE ONE RULE's carve-out + FIRST_TURN_NOTE)
+# — three scattered signals the model has to synthesize itself, competing against the tapped
+# text's own very concrete "jadwal, durasi, biaya" wording. Code already knows the answer with
+# certainty; asking a probabilistic model to re-derive it every time wastes a broker call AND
+# costs ~1 in 5 leads a pitch gate escalation. No LLM call needed for a fixed input.
+AD_TAP_OPENER = (
+    "Halo, aku MinStep dari IT STEP Academy 😊 Seneng banget Kakak tertarik! Biar aku bisa "
+    "kasih info yang paling pas, boleh cerita dulu — Kakak lagi cari kursus buat apa nih?"
+)
+
+
 class ReplyService(ReplyDelivery):
     """Produce one reply for one thread, and remember what it learned.
 
@@ -99,6 +115,16 @@ class ReplyService(ReplyDelivery):
             self.session.add(lead)
 
         is_first_reply = not any(m.direction == "out" for m in ctx.dialog)
+        if (
+            is_first_reply and last_in is not None
+            and AD_TEMPLATE_RE.match((last_in.text or "").strip())
+        ):
+            decision = TurnDecision(
+                reply=AD_TAP_OPENER, move="discover_motive", stage=Stage.QUALIFYING)
+            self.last_decision = decision
+            logger.info("v3 branch=%d thread=%d move=%s tier=templated first=True",
+                        self.branch_id, thread_id, decision.move)
+            return decision.to_legacy(stored)
         capability = pick_capability(stored, is_first_reply=is_first_reply)
         context = await engine.kb_context(
             ctx, thread_id, light=False,
