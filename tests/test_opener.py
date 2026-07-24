@@ -111,3 +111,12 @@ def test_compose_includes_the_lead_name_when_clean() -> None:
 def test_compose_caps_slot_length() -> None:
     msg = compose_typed_opener(Entry.AD_TYPED, "x" * 2000, None)
     assert len(msg) < 600
+
+
+def test_compose_strips_a_second_greeting_from_the_slot() -> None:
+    """Live sim (branch 8): the slot opened with its own 'Halo Kak, senang banget…' despite
+    SLOT_SYSTEM's no-greeting rule — the frame already greets, so the clause is stripped."""
+    msg = compose_typed_opener(
+        Entry.ORGANIC, "Halo Kak, senang banget bisa bantu! Vibe Coding cocok banget.", None)
+    assert msg.count("Halo") == 1  # only the frame's own greeting survives
+    assert "Vibe Coding cocok" in msg  # the content after the greeting is kept

@@ -140,14 +140,22 @@ ORGANIC_FRAME = (
 )
 
 _SLOT_MAX_CHARS = 320
+# The model greets from inside the slot despite SLOT_SYSTEM's "no greeting" (live sim,
+# branch 8: "Halo, aku MinStep… 😊 Halo Kak, senang banget…") — the frame already said
+# hello, so a leading greeting clause is stripped deterministically instead of re-asked.
+_LEADING_GREETING_RE = re.compile(
+    r"^(?:halo+|hai+|hi|selamat\s+\w+)\b[^.!?]{0,30}[,.!]\s*", re.IGNORECASE)
 
 
 def compose_typed_opener(entry: Entry, slot: str, lead_name: str | None) -> str:
     """The finished first message: fixed frame + the model's bounded slot.
 
-    A slot that overflows, carries markdown, or smuggles a question in is trimmed — the
-    frame's own question must stay the only one (one-question-per-message rule)."""
+    A slot that overflows, carries markdown, greets a second time, or smuggles a question in
+    is trimmed — the frame's own greeting and question must stay the only ones."""
     cleaned = " ".join((slot or "").split())[:_SLOT_MAX_CHARS].strip()
+    cleaned = _LEADING_GREETING_RE.sub("", cleaned).strip()
+    if cleaned:
+        cleaned = cleaned[0].upper() + cleaned[1:]
     if cleaned and cleaned[-1] == "?":
         cleaned = cleaned.rstrip("?").rstrip() + "."
     if cleaned and cleaned[-1] not in ".!…":
