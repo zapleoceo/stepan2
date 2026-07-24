@@ -250,6 +250,7 @@ def parse_turn_decision(raw_json: str, *, free_moves: bool = False) -> TurnDecis
         raise ValueError(f"decision is not valid JSON: {exc}") from exc
     if not isinstance(data, dict):
         raise ValueError("decision JSON must be an object")
+    data = _unwrap_tool_envelope(data)
     reply = data.get("reply")
     if not isinstance(reply, str):
         raise ValueError("decision missing a string 'reply'")
@@ -279,6 +280,24 @@ def _move(value: object) -> str:
         return move
     logger.info("decision: unknown move %r → give_value", value)
     return "give_value"
+
+
+# Anthropic served via the broker's forced-tool JSON mode intermittently wraps the whole
+# decision in the tool-call envelope ({"parameters": {...}} — measured live on chat:sales,
+# ~half of turns). The content inside is exactly our schema, so unwrap rather than fail the
+# turn. One level only, and only when the envelope itself carries no 'reply'.
+_TOOL_ENVELOPE_KEYS = ("parameters", "arguments", "input")
+
+
+def _unwrap_tool_envelope(data: dict) -> dict:
+    if "reply" in data:
+        return data
+    for key in _TOOL_ENVELOPE_KEYS:
+        inner = data.get(key)
+        if isinstance(inner, dict) and isinstance(inner.get("reply"), str):
+            logger.info("decision: unwrapped %r tool envelope", key)
+            return inner
+    return data
 
 
 _FREE_MOVE_RE = re.compile(r"[^a-z0-9_]+")
