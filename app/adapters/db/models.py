@@ -101,10 +101,6 @@ class Lead(SQLModel, table=True):
                                   "филиал), это per-lead override")
     manager_note_by: str | None = Field(default=None, description="кто оставил manager_note")
     manager_note_at: datetime | None = Field(default=None)
-    guard_regen_count: int = Field(
-        default=0, description="сколько раз guard заставлял модель перегенерировать ответ "
-                               "этому лиду — сигнал 'дешёвая модель тут спотыкается', "
-                               "используется роутингом chat:fast/chat:smart per-lead")
     created_at: datetime = Field(default_factory=_utcnow)
 
 
