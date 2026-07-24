@@ -345,7 +345,7 @@ def _branch_where(
 _MSG_COLS = (
     "m.id, m.direction, m.sent_by, m.text, m.occurred_at, m.llm_info,"
     " m.link_url, m.preview_url, mm.media_id, mm.media_kind, mm.media_ready,"
-    " m.media_pending"
+    " m.media_pending, m.sent_by_name"
 )
 
 # One media_asset row per message, joined once for the whole thread instead of two

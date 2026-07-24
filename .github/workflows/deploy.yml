@@ -22,14 +22,12 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Same self-hosted runner as ci.yml — free minutes, prod untouched (containered job).
+    runs-on: [self-hosted, hetzner]
+    container: python:3.12-slim
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
       - name: Install
         run: |
           pip install --upgrade pip
@@ -41,28 +39,16 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: ubuntu-latest
+    # The runner LIVES on the deploy target — no SSH hop, no secrets: checkout → local rsync
+    # → docker compose. Same steps as the old remote flow, minus the transport.
+    runs-on: [self-hosted, hetzner]
     timeout-minutes: 15
-    env:
-      HOST: ${{ secrets.HETZNER_HOST }}
-      PORT: ${{ secrets.HETZNER_PORT || '9617' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.HETZNER_SSH_KEY }}
-
-      - name: Trust host key
+      - name: Rsync repo into the deploy dir
         run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts
-
-      - name: Rsync repo to server
-        run: |
-          rsync -az --delete \
-            -e "ssh -p $PORT -o BatchMode=yes -o ConnectTimeout=15" \
+          rsync -a --delete \
             --exclude '.git' \
             --exclude '.venv' \
             --exclude '__pycache__' \
@@ -73,45 +59,43 @@ jobs:
             --exclude '.pytest_cache' \
             --exclude '.ruff_cache' \
             --exclude '.coverage' \
-            ./ "root@${HOST}:${REMOTE_DIR}/"
+            ./ "${REMOTE_DIR}/"
 
       - name: Build image and bring up datastores
         run: |
-          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
-            "set -e; cd ${REMOTE_DIR}/infra \
-             && docker compose build api \
-             && docker compose up -d postgres redis"
+          set -e; cd ${REMOTE_DIR}/infra
+          docker compose build api
+          docker compose up -d postgres redis
 
       - name: Apply migrations (before the new API serves)
         run: |
           # Migrate with the NEW image via a one-off container while the OLD api container is
-          # still serving. This avoids the window where a freshly-recreated new-code api runs
-          # against the not-yet-migrated old schema (500s during the migration). Rollback on a
-          # bad release: revert the commit and re-deploy (images aren't registry-tagged here).
-          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
-            "set -e; cd ${REMOTE_DIR}/infra \
-             && docker compose run --rm api alembic upgrade head"
+          # still serving — avoids the new-code-vs-old-schema window. Rollback on a bad
+          # release: revert the commit and re-deploy (images aren't registry-tagged here).
+          set -e; cd ${REMOTE_DIR}/infra
+          docker compose run --rm api alembic upgrade head
 
       - name: Recreate API on the new code (schema already migrated)
         run: |
-          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
-            "set -e; cd ${REMOTE_DIR}/infra \
-             && docker compose up -d api"
+          set -e; cd ${REMOTE_DIR}/infra
+          docker compose up -d api
 
       - name: Refresh worker (only if already running)
         run: |
-          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
-            "set -e; cd ${REMOTE_DIR}/infra \
-             && if [ -n \"\$(docker ps -q -f name=stepan2-worker -f status=running)\" ]; then \
-                  echo 'worker running → rebuild + restart on new code'; \
-                  docker compose --profile worker build worker \
-                  && docker compose --profile worker up -d --force-recreate worker; \
-                else echo 'worker off (profile-gated) → left untouched'; fi"
+          set -e; cd ${REMOTE_DIR}/infra
+          if [ -n "$(docker ps -q -f name=stepan2-worker -f status=running)" ]; then
+            echo 'worker running → rebuild + restart on new code'
+            docker compose --profile worker build worker
+            docker compose --profile worker up -d --force-recreate worker
+          else
+            echo 'worker off (profile-gated) → left untouched'
+          fi
 
       - name: Healthcheck
         run: |
-          ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
-            "set -e; for i in \$(seq 1 10); do \
-               curl -fsS http://localhost:8020/healthz && exit 0; \
-               echo 'waiting for api…'; sleep 3; \
-             done; echo 'healthcheck failed'; exit 1"
+          set -e
+          for i in $(seq 1 10); do
+            curl -fsS http://localhost:8020/healthz && exit 0
+            echo 'waiting for api…'; sleep 3
+          done
+          echo 'healthcheck failed'; exit 1

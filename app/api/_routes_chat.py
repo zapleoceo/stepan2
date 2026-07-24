@@ -333,6 +333,10 @@ async def chat_send(
         session.add(Outbox(
             branch_id=branch_id, thread_id=thread_id, text=text_body, source=src,
             llm_info=(llm_info if src == "agent" else None),
+            # Which MANAGER wrote this — shown on the bubble so a multi-manager branch can
+            # tell who said what. Only dashboard sends know the identity; IG-app replies
+            # arrive via ingest with none and keep the generic label.
+            sent_by_name=(_actor_name(request) if src == "manager" else None),
         ))
         await session.flush()
         return await _rerender_feed(session, thread_id)

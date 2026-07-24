@@ -131,12 +131,25 @@ def test_threads_partial_honors_open_thread_cookie(client: TestClient) -> None:
 
 # ─── bubble translate button: only when there is text to translate ────────────
 
-def _msg_row(mid: int, text: str, media_id=None) -> tuple:
+def _msg_row(mid: int, text: str, media_id=None, *, sent_by: str = "lead",
+             direction: str = "in", sent_by_name: str | None = None) -> tuple:
     # (id, direction, sent_by, text, ts, llm_info, link_url, preview_url, media_id,
-    #  media_kind, media_ready, media_pending)
-    return (mid, "in", "lead", text, datetime.now(UTC).replace(tzinfo=None),
+    #  media_kind, media_ready, media_pending, sent_by_name)
+    return (mid, direction, sent_by, text, datetime.now(UTC).replace(tzinfo=None),
             None, None, None, media_id, "image" if media_id else None,
-            bool(media_id), False)
+            bool(media_id), False, sent_by_name)
+
+
+def test_manager_bubble_shows_the_managers_name() -> None:
+    """A multi-manager branch must show WHO wrote a manual reply — the dashboard stamps the
+    session user's name; an IG-app reply has no identity and keeps the generic label."""
+    from app.api._ui_html import _bubble
+    _set_lang("en")
+    named = _bubble(_msg_row(3, "halo", direction="out", sent_by="manager",
+                             sent_by_name="Citra"), 10)
+    assert ">Citra ·" in named or "Citra ·" in named
+    generic = _bubble(_msg_row(4, "halo", direction="out", sent_by="manager"), 10)
+    assert "Citra" not in generic  # falls back to the localized who.manager label
 
 
 def test_bubble_shows_translate_button_for_text() -> None:

@@ -1026,11 +1026,15 @@ def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str
 
 def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     (mid, direction, sent_by, text, ts, llm_info, link_url, preview_url,
-     media_id, media_kind, media_ready, media_pending) = row[:12]  # type: ignore[misc]
-    excluded = bool(row[12]) if len(row) > 12 else False  # greyed, out of Stepan's context
+     media_id, media_kind, media_ready, media_pending, sent_by_name) = row[:13]  # type: ignore[misc]
+    excluded = bool(row[13]) if len(row) > 13 else False  # greyed, out of Stepan's context
     ex = " bb-ex" if excluded else ""
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
+    if sent_by == "manager" and (sent_by_name or "").strip():
+        # WHICH manager wrote this — the dashboard stamps the session user's name at send
+        # time; IG-app replies carry no identity and keep the generic label.
+        who = _h.escape(str(sent_by_name).strip())
     time_str = _fmt_time(ts)
     ready = bool(media_id and media_ready)
     raw = str(text or "").strip()

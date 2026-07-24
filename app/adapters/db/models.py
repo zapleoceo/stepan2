@@ -318,6 +318,8 @@ class Message(SQLModel, table=True):
     external_id: str
     direction: str = Field(description="in|out")
     sent_by: str = Field(default="lead", description="lead|agent|manager")
+    sent_by_name: str | None = Field(
+        default=None, description="имя менеджера из сессии дашборда (None для IG-app отправок)")
     text: str = Field(default="")
     occurred_at: datetime = Field(default_factory=_utcnow)
     llm_info: str | None = Field(default=None)
@@ -389,6 +391,8 @@ class Outbox(SQLModel, table=True):
     thread_id: int = Field(foreign_key="channel_thread.id", index=True)
     text: str
     source: str = Field(default="agent", description="agent|manager|followup")
+    sent_by_name: str | None = Field(
+        default=None, description="имя менеджера из сессии дашборда для source=manager")
     status: str = Field(default="pending", index=True, description="pending|sent|failed")
     scheduled_at: datetime = Field(default_factory=_utcnow)
     sent_at: datetime | None = Field(default=None)

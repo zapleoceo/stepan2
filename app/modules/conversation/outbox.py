@@ -322,6 +322,7 @@ class OutboxSender:
             external_id=external_id or f"out-{row.id}",
             direction="out",
             sent_by=sent_by,
+            sent_by_name=row.sent_by_name,  # which manager (dashboard sends only)
             text=row.text,
             llm_info=row.llm_info,
         )
