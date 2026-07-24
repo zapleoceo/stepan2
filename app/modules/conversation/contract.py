@@ -143,6 +143,10 @@ FOLLOWUP_FRAMING = """\
 doesn't apply this turn. This is nudge {n} of {total}. Write ONE short message that earns a \
 reply: something concrete they have NOT heard yet, tied to what the dossier says they care \
 about. Never "masih minat?" or "ada yang bisa dibantu?" — that is begging, not selling. \
+FACTS ONLY FROM THE KNOWLEDGE BASE above: never invent an alumni story, an ROI/percentage \
+figure, a case study tailored to their industry, a discount, or a deadline that is not \
+written there — live nudges fabricated "ROI 30%" and a "manufacturing-plant Meta Ads case" \
+and earned zero replies; the KB's real differentiators always beat invented ones. \
 {refusal_note}If you have nothing genuinely new to say, return an empty reply rather than \
 padding — a nudge that repeats you costs more than silence.]"""
 

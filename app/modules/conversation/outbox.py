@@ -271,9 +271,14 @@ class OutboxSender:
             thread.followups_sent += 1  # this nudge counts now that it actually went out
         schedule = cfg.followup_schedule_h
         if cfg.followup_enabled and schedule and thread.followups_sent < len(schedule):
-            thread.next_followup_at = now + timedelta(
-                hours=schedule[thread.followups_sent]
-            )
+            proposed = now + timedelta(hours=schedule[thread.followups_sent])
+            # Never pull an already-armed LATER date closer: a soft-no with a named time
+            # ("abis gajian", "bulan depan") arms next_followup_at at the lead's own date
+            # (delivery._snooze_on_soft_no) — and the bot's reply to that same soft-no lands
+            # here moments later, which used to re-arm to the schedule step (~120h) and nudge
+            # the lead days before the date they themselves asked for.
+            if thread.next_followup_at is None or thread.next_followup_at <= proposed:
+                thread.next_followup_at = proposed
             return
         thread.next_followup_at = None
         if row.source == "followup" and schedule and thread.followups_sent >= len(schedule):

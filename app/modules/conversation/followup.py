@@ -64,35 +64,6 @@ _FOLLOWUP_Q = (  # noqa: S608
     "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
 )
 
-_FOLLOWUP_NUDGE = (
-    "[System: the lead has not replied since your last message. This is follow-up"
-    " attempt {n} of {total}. Write a short friendly follow-up in {lang} to"
-    " re-engage them.\n"
-    "SIGNAL THIS IS A CHECK-IN, don't just continue like the lead just spoke — a real "
-    "person re-opening a quiet chat gives some small, casual sign time passed ('eh iya '"
-    " / 'btw ' / 'oh iya jadi keinget' / a fresh greeting), not a bare reaction word like"
-    " 'Baik' or 'Wah sip!' that implies they just said something. Never state the wait"
-    " length or attempt number, never sound like an automated nag — one natural, human"
-    " beat is enough, then move straight to value.\n"
-    "DO NOT REPEAT A QUESTION YOU ALREADY ASKED, in ANY wording — read your own prior"
-    " messages first. If your last message asked something and got no answer, do NOT ask"
-    " it again reworded ('apa tujuan Kakak' vs 'Kakak pengen fokus ke mana' are the SAME"
-    " question) - either give them a concrete value/answer instead, or ask about a"
-    " completely different angle. CHANGE THE ANGLE each attempt for real: a concrete case"
-    " tied to their stated need, a cheaper entry point (Skill Booster / bootcamp) if price"
-    " was the sticking point, or a low-friction yes/no question instead of an open one.\n"
-    "FACTS ONLY FROM THE KNOWLEDGE BASE: never invent an alumni story, an ROI/percentage "
-    "figure, a discount, a deadline, or a class schedule that is not written there (live "
-    "follow-ups fabricated 'ROI 30% in the first month' and 'an app used by thousands' — "
-    "one screenshot of a made-up claim costs more than the lead). Before falling back to a "
-    "vague hype line ('gimana serunya belajar di sini', 'seru banget lho') - check the KB's "
-    "concrete differentiators first (network since 1999 in 24 countries, 267k+ alumni, "
-    "authorized Microsoft/Cisco/Autodesk center, AI-first curriculum, honest no-fake-job-"
-    "guarantee stance, price vs named competitors) or a real success story - one of THOSE is "
-    "almost always available and beats vague hype every time. Vague filler is the LAST "
-    "resort, only when truly nothing concrete fits this angle."
-    " Return the JSON as usual.]"
-)
 
 
 class FollowupService:
@@ -273,6 +244,19 @@ class FollowupService:
             return False
         if await self._lead_replied_meanwhile(thread_id):
             return False  # race: the lead answered while we were generating
+        if decision.needs_human:
+            # A nudge turn in which the model itself decided a human is needed used to set the
+            # flag into the void — nothing read it here, no alert fired, the nudge shipped
+            # anyway (the exact pre-2026-07-07 gap raise_manager_alert's docstring warns both
+            # paths must cover). Alert the manager and drop the nudge: needs_human means the
+            # bot should not keep talking.
+            from .delivery import raise_manager_alert  # noqa: PLC0415
+            await raise_manager_alert(
+                self.session, self.branch_id, self.notifier, self.llm,
+                thread_id, lead_id, decision.to_legacy(stored),
+                ctx.lead.phone_e164 if ctx.lead is not None else None)
+            await self._burn_dry_step(thread_id, now)
+            return False
 
         merged = merge_dossier(stored, decision.dossier)
         if not merged.has_discovery():

@@ -16,7 +16,6 @@ from app.domain.clock import branch_now
 
 from .repository import SettingRepo
 from .schema import defaults as _schema_defaults
-from .schema import field_for as _schema_field
 
 # Single source of truth lives in schema.py; defaults derive from it (DRY).
 _DEFAULTS: dict[str, str] = _schema_defaults()
@@ -188,17 +187,6 @@ def _f(raw: dict[str, str], key: str) -> float:
             return float(default)
         except ValueError:
             return 0.0
-
-
-def _choice(raw: dict[str, str], key: str) -> str:
-    """A text setting constrained to its schema `choices` — anything else falls back to the
-    schema default. Keeps an operator typo (or a stale DB row from a removed option) from
-    selecting a code path that doesn't exist."""
-    default = _DEFAULTS.get(key, "")
-    value = (raw.get(key) or default).strip()
-    field = _schema_field(key)
-    allowed = {c for c, _ in (field.choices or [])} if field is not None else set()
-    return value if (not allowed or value in allowed) else default
 
 
 def _parse_schedule(raw: dict[str, str]) -> list[int]:

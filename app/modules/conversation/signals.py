@@ -199,24 +199,6 @@ SOFT_NO_RE = re.compile(
 # is ~3 monthly salaries; the cheap 1-day entries exist exactly for this).
 
 
-# A BARE decision-postpone — 'nanti aja / mikir dulu / kalau jadi nanti konfirmasi' — with NO
-# money/time/trust reason named (those route earlier in the chain). The generic soft-no move is
-# 'isolate the doubt' (ask what's wrong), which is the WRONG move here: there's nothing to
-# isolate, they're just deferring. The high-conversion move is a GENTLE opportunity-cost seed +
-# a low-friction step. Distinct enough from SOFT_NO_RE that placing it first only steals the
-# bare-postpone cases, not 'belum tertarik' / 'makasih' etc.
-POSTPONE_RE = re.compile(
-    r"\bnanti\s+(aja|dulu|lah|ya|saja)\b"
-    r"|\bnanti\s+(saya|aku|ku|gua|gue)?\s*(kabar\w*|konfirmasi|chat|hubungi|info\w*)"
-    r"|\bkalau\s+(nanti|udah\s+siap|dah\s+siap|jadi)\b"
-    r"|\b(mikir|pikir)[\s-]*(mikir|pikir)?\s*(dulu|lagi)\b"
-    r"|\bpikir[\s-]*pikir\b"
-    r"|\bbelum\s+(sekarang|kepikiran)\b"
-    r"|\blain\s+(kali|waktu)\b"
-    r"|\bntar\s+(aja|dulu)\b",
-    re.IGNORECASE)
-
-
 # The lead NAMED a timeframe in their postpone ("bulan depan", "abis gajian", "2 minggu
 # lagi") — that's a dated 'later', gold for follow-up timing. Parsed deterministically in
 # reply._snooze_on_soft_no so the re-contact lands when THEY said, not on a fixed +7d guess.

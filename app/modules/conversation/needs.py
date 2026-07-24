@@ -151,39 +151,6 @@ def _dedup_near(items: list[str]) -> list[str]:
     return kept[:_MAX_PER_LIST]
 
 
-# A "pain" that is really just the lead's own QUESTION — the model files "ini ai ya?" (are you
-# a bot?), "smm itu apa?" or "berbayar?" as a captured pain, which then satisfies the
-# presentation gate and pollutes the needs cloud (3-day audit, 2026-07-15).
-_QUESTION_START_RE = re.compile(
-    r"^\s*(apa|apakah|gimana|bagaimana|berapa|kapan|kenapa|mengapa|bisa|boleh|ada)\b",
-    re.IGNORECASE)
-# Indonesian just as often puts the question word LAST — "smm itu apa", "harganya berapa",
-# "mulainya kapan" — so an end-anchored check is needed too, not only a leading one.
-_QUESTION_END_RE = re.compile(
-    r"\b(apa|apakah|gimana|bagaimana|berapa|kapan|kenapa|mengapa)\s*\??\s*$", re.IGNORECASE)
-
-
-def is_question(s: str) -> bool:
-    t = (s or "").strip()
-    return (t.endswith("?") or bool(_QUESTION_START_RE.match(t))
-            or bool(_QUESTION_END_RE.search(t)))
-
-
-def lead_grounded(items: list[str], lead_text: str) -> list[str]:
-    """Keep only entries that share a content word with what the LEAD ACTUALLY WROTE.
-
-    The model invents needs out of thin air — the ad creative's own copy ("upgrade skill",
-    "ubah online time jadi peluang karier") filed as the lead's jobs though they never typed a
-    word, or "serangan siber" read into a joke about a girlfriend. `lead_text` must exclude the
-    ad prefill: a button click is not the lead speaking. Deliberately loose (ONE shared content
-    word is enough) so honest rewording survives — "tidak paham coding" for "ga ngerti coding"
-    still shares 'coding'."""
-    lead_toks = _content_tokens(lead_text)
-    if not lead_toks:
-        return []  # lead said nothing of their own — nothing can be grounded in it
-    return [s for s in items if _content_tokens(s) & lead_toks]
-
-
 # Public alias — the v3 dossier collapses its own phrase lists with exactly these semantics,
 # so it imports this rather than growing a second near-duplicate implementation.
 dedup_phrases = _dedup_near

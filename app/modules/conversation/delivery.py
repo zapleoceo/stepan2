@@ -25,7 +25,7 @@ from app.ports.notify import NotifierPort
 
 from . import guard
 from .decision import Decision
-from .engine import DecisionEngine, _fmt_llm_meta, _retrieval_query  # noqa: F401 — re-exported
+from .engine import _fmt_llm_meta  # noqa: F401 — re-exported for tests/legacy imports
 from .money_gate import MONEY_ESCALATION_REASON
 from .needs import parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
@@ -41,8 +41,6 @@ TECHNICAL_HANDOFF_REASONS = (MONEY_ESCALATION_REASON, guard.GUARD_HANDOFF_REASON
 _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
-# Indonesian mobile number as typed in chat: 08…, 628…, +628…, with optional spaces/dashes.
-_ID_PHONE_RE = re.compile(r"(?:\+?62[\s\-]?|0)8\d(?:[\s\-]?\d){6,10}")
 # A needs_manager turn always mutes the bot (agent_enabled=False) — but the model's own
 # reply that same turn is about answering the lead's question, not about announcing a
 # hand-off; nothing told the LEAD a human is now taking over. A lead who then sends a

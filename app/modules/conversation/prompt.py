@@ -10,8 +10,6 @@ from datetime import datetime
 
 from app.adapters.db.models import Message
 
-_COACHING_HEADER = "MANDATORY RULES (from manager — follow strictly):"
-
 # How the lead first reached us — shapes the opener. An ad-click lead is warm and already
 # picked an offer, so re-asking "what brings you here" wastes the intent; a story-reply is
 # a lighter, more casual entry. Organic/unknown gets no hint (no assumptions).

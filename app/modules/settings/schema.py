@@ -273,11 +273,6 @@ def field_for(key: str) -> SettingField | None:
     return next((f for f in all_fields() if f.key == key), None)
 
 
-def channel_keys() -> frozenset[str]:
-    """Keys that resolve per connector (scope='channel') — everything else is branch-scoped."""
-    return frozenset(f.key for f in all_fields() if f.scope == "channel")
-
-
 def sections_for_scope(scope: str) -> list[SettingSection]:
     """Sections keeping only the fields of the given scope, dropping now-empty sections —
     lets the branch panel and the per-connector editor render from the same SCHEMA."""

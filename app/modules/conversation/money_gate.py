@@ -14,6 +14,7 @@ sales quality — is judged by the critic, which fails OPEN.
 from __future__ import annotations
 
 from .guard import canonical_prices, fabricated_income_figure, quotes_price, ungrounded_urls
+from .signals import DISCOVERY_TURN_CAP
 
 # The correction handed to the model when the gate trips. It names the offence and demands a
 # replacement — never a retreat to "I'll check with the team", which is what v2 did and what
@@ -54,6 +55,7 @@ _PITCH_MOVES = frozenset({"give_value", "quote_price", "invite_campus", "close"}
 
 def premature_pitch(
     move: str, dossier: object, lead_asked_directly: bool, reply: str = "",
+    inbound_count: int = 0,
 ) -> bool:
     """True when the model pitched before earning the right to.
 
@@ -69,12 +71,21 @@ def premature_pitch(
     safe to volunteer forever after — thread 4905 quoted the full price and instalments mid
     small-talk, discovery long since landed, nobody asked. PRICE in the contract says "when they
     ask, answer that turn" — so a price needs asking (or the lead already being `ready`) on
-    EVERY turn, not just the first one."""
+    EVERY turn, not just the first one.
+
+    `inbound_count` mirrors the stage gate's DISCOVERY_TURN_CAP escape hatch: past the cap the
+    contract ORDERS the model to stop interrogating and give value, and the stage gate lets it
+    present — this gate refusing the very same move trapped every non-forthcoming lead in an
+    escalation for doing what it was told (has_discovery() holds a pain AND a desired state,
+    which only a minority of leads ever voice). The uninvited-price rule above is NOT relaxed
+    by the cap — a value pitch is released, a volunteered figure never is."""
     if lead_asked_directly:
         return False
     if uninvited_price(reply, dossier):
         return True
     if dossier.has_discovery():
+        return False
+    if inbound_count >= DISCOVERY_TURN_CAP:
         return False
     return move in _PITCH_MOVES
 

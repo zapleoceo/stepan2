@@ -233,10 +233,15 @@ _KB_PRICES = "Vibe Coding: harga Rp 13.360.000, DP Rp 500.000."
 
 
 async def test_an_invented_price_is_rewritten_before_it_reaches_the_lead(db_session) -> None:  # noqa: ANN001
-    """The money gate fails CLOSED — a price the school never set is a promise it must honour."""
-    bid, tid, _ = await _thread(db_session)
-    llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak"),
-               _answer(reply="Investasinya Rp 13.360.000 kak"),
+    """The money gate fails CLOSED — a price the school never set is a promise it must honour.
+
+    The lead ASKS the price here: that is the turn this gate exists for (answer with the real
+    figure). A money rewrite on a turn where nobody asked is additionally re-checked by the
+    pitch gate now — a corrected figure that is still uninvited escalates instead of shipping
+    (the asymmetry with the critic path, closed 2026-07-24)."""
+    bid, tid, _ = await _thread(db_session, texts=(("in", "berapa biayanya kak?"),))
+    llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak", move="answer_question"),
+               _answer(reply="Investasinya Rp 13.360.000 kak", move="answer_question"),
                json.dumps({"sells": True}))
     decision = await _service(db_session, bid, llm, _KB_PRICES).decide(tid)
 

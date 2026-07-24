@@ -16,7 +16,6 @@ Anti-ban / anti-spam invariants:
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -42,12 +41,6 @@ if TYPE_CHECKING:
     from app.ports.notify import NotifierPort
 
 logger = logging.getLogger(__name__)
-
-# A hard refusal (not a postponement): declined interest or backed out. Postponers
-# ('nanti dulu', 'nabung dulu') stay eligible — see the suppress comment below.
-_HARD_REFUSAL_RE = re.compile(
-    r"(belum|blm|ga|gak|nggak|ngga|ndak|tidak|tdk)\s*(tertarik|minat|berminat)"
-    r"|(tidak|tdk|gak|ga|nggak|ngga|ndak|gk)\s*jadi\b|sudah\s*tidak", re.IGNORECASE)
 
 MIN_DORMANT_DAYS = 3
 # 2026-07-22: widened from 21 to cover the account's full IG history (oldest thread predates
@@ -76,6 +69,18 @@ _DUE_Q = (  # noqa: S608
     "   AND l.is_blocked = false"
     "   AND ct.last_in_at IS NOT NULL"
     "   AND ct.last_in_at < :min_cutoff AND ct.last_in_at > :max_cutoff"
+    # An explicitly hard-stopped lead ('jangan ganggu') must never be woken: the refusal-grade
+    # check downstream only sees the dossier, which the model fills unreliably, while the
+    # hard_stop StageEvent is a deterministic record of the demand. Waking one is the exact
+    # spam-report vector _hard_stop's docstring warns about.
+    "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"
+    "        AND se.reason = 'hard_stop')"
+    # Wrong-audience leads soft-closed as non_target are not a re-engagement segment.
+    "   AND coalesce(l.lead_type, '') <> 'non_target'"
+    # A thread with a LIVE follow-up timer is already being touched by the follow-up cadence —
+    # reactivating it too made two proactive pings land days apart (MIN_DORMANT_DAYS=3 sits
+    # inside the 120h final follow-up step).
+    "   AND ct.next_followup_at IS NULL"
     "   AND (SELECT count(*) FROM stage_event se WHERE se.lead_id = l.id"
     "        AND se.reason = :reason) < :cap"
     "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"
@@ -171,6 +176,18 @@ class ReactivationService:
         if not decision.reply.strip() or money_issues(decision.reply, context):
             # No fresh hook, or a figure we cannot stand behind. Suppress so this lead is not
             # re-picked and re-generated every run, blocking a slot another dormant lead could use.
+            await self._suppress(thread_id, lead_id, now)
+            return False
+        if decision.needs_human:
+            # Same contract as followup.py: a needs_human turn must ALERT, not vanish — and the
+            # touch itself must not ship (the bot deciding "a human should handle this" and
+            # then nudging anyway is self-contradictory).
+            from .delivery import raise_manager_alert  # noqa: PLC0415
+            lead_row = await self.session.get(Lead, lead_id)
+            await raise_manager_alert(
+                self.session, self.branch_id, self.notifier, self.llm,
+                thread_id, lead_id, decision.to_legacy(stored),
+                lead_row.phone_e164 if lead_row is not None else None)
             await self._suppress(thread_id, lead_id, now)
             return False
 

@@ -261,22 +261,7 @@ def wrong_channel_claims(reply: str) -> list[str]:
     return [m.group(0) for m in _WRONG_CHANNEL_RE.finditer(reply or "")]
 
 
-def invented_price_no_card(reply: str, context: str) -> list[str]:
-    """A money figure in the reply while the retrieved context contains no prices AT ALL —
-    there is nothing the number could have come from, so it is invented (sim 2026-07-17:
-    'Rp 7.000.000' for SMM Intensive, real price 1.882.955, on a turn whose context missed
-    the card; live thread 4188 quoted 26 juta for a 13.36 juta course the same way)."""
-    if not _canonical_prices(reply or ""):
-        return []
-    if _canonical_prices(context or "", liberal=True):
-        return []  # context has figures — grounding/verify owns the matching
-    return ["a money figure appears in the reply but the knowledge context contains no "
-            "price at all - never state a number you cannot see; say you'll confirm it"]
 
-
-SAFE_FALLBACK = (
-    "Untuk yang satu ini aku mau pastikan dulu ke tim biar infonya akurat ya Kak 🙏 "
-    "Nanti aku kabari secepatnya. Sementara itu, ada hal lain yang bisa aku bantu?")
 
 # Used when the model wants a manager hand-off but we have no phone/WhatsApp for the lead:
 # ask for the contact first (a manager can't follow up on a contact-less lead), keeping the
@@ -501,19 +486,3 @@ async def verify_grounding(
     except Exception as exc:  # noqa: BLE001 — a failed verify must not block the reply
         logger.warning("guard verify failed branch=%d thread=%d: %s", branch_id, thread_id, exc)
         return []
-
-
-CORRECTION = (
-    "[System: your previous draft had these problems: {issues}. "
-    "Rewrite the reply fixing ALL of them. Never invent links, lab/resource access, free "
-    "trials, discounts, rates, certifications, dates, or statistics. Never claim you have "
-    "ALREADY sent a file/screenshot/dataset or delivered anything via WhatsApp, and never "
-    "PROMISE to send anything via WhatsApp either — you cannot attach files and have no "
-    "WhatsApp channel at all, only this Instagram DM thread. Never tell a specific "
-    "alumni/success story that isn't one of the exact cases in the product's Success Cases "
-    "section - use one of those verbatim, a generalized true statement, or skip the story. "
-    "Ask EXACTLY ONE "
-    "question per turn — never two questions, never 'X atau Y' phrased as a double question. "
-    "Never offer a voice note, call, or video — you are a text-only Instagram DM bot. Never "
-    "tell the lead to go DM you on Instagram — this conversation already IS Instagram. If "
-    "you don't have a fact, say you'll confirm it with the team. Return the JSON as usual.]")

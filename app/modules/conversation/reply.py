@@ -40,7 +40,13 @@ from .money_gate import (
 from .prompt import lead_name_hint, source_hint
 from .repository import DossierRepo
 from .routing import SMART, pick_capability
-from .signals import AD_TEMPLATE_RE, ANY_POST_SHARE_RE, is_answerable_question
+from .signals import (
+    AD_TEMPLATE_RE,
+    ANY_POST_SHARE_RE,
+    BUYING_SIGNAL_RE,
+    PAYMENT_INTENT_RE,
+    is_answerable_question,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +90,71 @@ AD_TAP_OPENER = (
     "Halo, aku MinStep dari IT STEP Academy 😊 Seneng banget Kakak tertarik! Biar aku bisa "
     "kasih info yang paling pas, boleh cerita dulu — Kakak lagi cari kursus buat apa nih?"
 )
+
+# The enriched variant when the ad→product mapping already names what they tapped on. The
+# 24h sales audit (2026-07-24, 72 threads) measured 61% of leads going silent after a first
+# reply that gave ZERO information — a warm question alone is an exchange with nothing in it.
+# The prefill asked jadwal/durasi/biaya; naming the product back + the DP/instalment frame
+# answers the spirit of the tap with two GROUNDED facts (facts_policy: DP Rp 500.000 books a
+# seat, zero-interest instalments — deterministic text, so no invented-figure risk) before
+# the one discovery question. Full price still waits for the lead to actually ask.
+AD_TAP_OPENER_PRODUCT = (
+    "Halo, aku MinStep dari IT STEP Academy 😊 Kakak tertarik {title} ya — pilihan seru! "
+    "Booking tempatnya cukup DP Rp 500.000, sisanya bisa dicicil tanpa bunga. Biar infonya "
+    "pas buat Kakak: rencananya skill ini mau dipakai buat apa nih?"
+)
+
+# Deterministic per-turn coaching notes — injected as the LAST user message (same mechanism
+# as followup_framing / _ASSISTANT_LAST_NUDGE) only on the turn their trigger fires, so they
+# cost nothing on normal turns and never bloat the standing contract (which is at its size
+# ceiling). Both address the two highest-frequency losses in the 24h sales audit.
+BUYING_SIGNAL_NOTE = (
+    "[System: the lead's last message is a YES / buying signal. Do NOT open a new discovery "
+    "question — deliver exactly what you just offered, or move ONE concrete step toward "
+    "enrolment (schedule choice, visit slot, registration step). Re-asking about their goals "
+    "after they said yes is how this sale gets lost.]"
+)
+BARE_ACK_NOTE = (
+    "[System: the lead has now answered twice in a row with bare acknowledgements — your open "
+    "questions are not landing. Do not rephrase the previous question. Switch to ONE simple "
+    "either-or choice or one concrete low-friction next step, in one short sentence.]"
+)
+
+_BARE_ACK_RE = re.compile(
+    r"^(?:iya?|ya|yaa+|ok(?:e|ee)?|okok|sip|baik|siap|oh|hmm?)\b[\s\W]*(?:kak(?:ak)?)?[\s\W]*$",
+    re.IGNORECASE)
+# Explicit yes-words that accept a proposal. Deliberately EXCLUDES bare 'iya'/'ya': to an
+# open question ('proyek apa?') those are filler, not acceptance (thread 5042 answered 'iya
+# kak' eight times to open questions) — only unambiguous accept-words route to the
+# advance-don't-rediscover note.
+_YES_RE = re.compile(
+    r"^(?:boleh+|mau+|ok(?:e|ee)?|okok|siap|sip|gas(?:s|keun)?|yu+k|ayo+|yaudah|gpp)"
+    r"\b[\s\W]*(?:kak(?:ak)?|dong|aja)?[\s\W]*$", re.IGNORECASE)
+
+
+def _turn_note(dialog: list) -> str | None:
+    """The one deterministic coaching note this turn needs, or None.
+
+    Buying signal wins over bare-ack: 'boleh'/'mau' after the bot's own offer IS a
+    bare-looking message, but it's an acceptance — advance-don't-rediscover is the right
+    instruction (thread 5039: bot offered a campus visit, lead said 'Boleh', bot restarted
+    discovery and the lead went quiet)."""
+    ins = [m for m in dialog if m.direction == "in"]
+    if not ins:
+        return None
+    last = (ins[-1].text or "").strip()
+    if BUYING_SIGNAL_RE.search(last) or PAYMENT_INTENT_RE.search(last) \
+            or (_YES_RE.match(last) and _bot_just_offered(dialog)):
+        return BUYING_SIGNAL_NOTE
+    if len(ins) >= 2 and _BARE_ACK_RE.match(last) \
+            and _BARE_ACK_RE.match((ins[-2].text or "").strip()):
+        return BARE_ACK_NOTE
+    return None
+
+
+def _bot_just_offered(dialog: list) -> bool:
+    last_out = next((m for m in reversed(dialog) if m.direction == "out"), None)
+    return last_out is not None and "?" in (last_out.text or "")
 
 _HAS_LETTERS = re.compile(r"[a-zA-Z]")
 
@@ -138,8 +209,12 @@ class ReplyService(ReplyDelivery):
         outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
         is_first_reply = not outs
         if is_first_reply and _ad_tap_first_turn(ctx.dialog):
+            opener = AD_TAP_OPENER
+            title = await self._product_title(ctx.thread.product_slug)
+            if title:
+                opener = AD_TAP_OPENER_PRODUCT.format(title=title)
             decision = TurnDecision(
-                reply=AD_TAP_OPENER, move="discover_motive", stage=Stage.QUALIFYING)
+                reply=opener, move="discover_motive", stage=Stage.QUALIFYING)
             self.last_decision = decision
             logger.info("v3 branch=%d thread=%d move=%s tier=templated first=True",
                         self.branch_id, thread_id, decision.move)
@@ -159,10 +234,20 @@ class ReplyService(ReplyDelivery):
         context = await engine.kb_context(
             ctx, thread_id, light=False,
             objection_categories=stored.open_objection_categories())
+        # The ad-entry hint asserts "they did not type it and did not ask you anything" —
+        # true ONLY when the opening message really was the untouched button prefill. IG's
+        # composer is editable: a lead can clear it and type a real question (thread 4972),
+        # and the metadata still says ad_clicktomsg — injecting the hint then contradicts the
+        # answer-first rule on the very message it matters most for.
+        first_in = next((m for m in ctx.dialog if m.direction == "in"), None)
+        pure_prefill_entry = bool(
+            first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
+        src = ctx.thread.lead_source
+        entry_hint = source_hint(src) if src != "ad_clicktomsg" or pure_prefill_entry else None
         messages = build_messages_v3(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
-            source_block=source_hint(ctx.thread.lead_source),
+            source_block=entry_hint,
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
             now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
@@ -174,6 +259,9 @@ class ReplyService(ReplyDelivery):
             # errors in 24h when this was missing), and other providers silently treat it as a
             # continuation, which isn't the intent either. Nudge a fresh turn instead.
             messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
+        note = _turn_note(ctx.dialog)
+        if note:
+            messages.append({"role": "user", "content": note})
 
         decision, _meta = await generate(
             engine, ctx, messages, thread_id, workflow=workflow,
@@ -184,7 +272,8 @@ class ReplyService(ReplyDelivery):
             engine, ctx, messages, thread_id, decision,
             workflow=workflow, capability=capability, context=context, lang=lang,
             last_inbound=(last_in.text if last_in is not None else "") or "",
-            lead_typed_a_question=_typed_a_question(last_in), stored=stored)
+            lead_typed_a_question=_typed_a_question(last_in), stored=stored,
+            inbound_count=sum(1 for m in ctx.dialog if m.direction == "in"))
 
         merged = merge_dossier(stored, decision.dossier)
         if not merged.has_discovery():
@@ -205,6 +294,7 @@ class ReplyService(ReplyDelivery):
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
         decision: TurnDecision, *, workflow: str, capability: str, context: str, lang: str,
         last_inbound: str, lead_typed_a_question: bool = False, stored: object = None,
+        inbound_count: int = 0,
     ) -> TurnDecision:
         """Four gates, deliberately asymmetric.
 
@@ -232,6 +322,15 @@ class ReplyService(ReplyDelivery):
                 logger.error("v3 money gate unfixable branch=%d thread=%d — escalating",
                              self.branch_id, thread_id)
                 return _escalate(fixed or decision, MONEY_ESCALATION_REASON)
+            if stored is not None and premature_pitch(
+                fixed.move, stored, lead_typed_a_question, fixed.reply,
+                inbound_count=inbound_count,
+            ):
+                # Asymmetry with the critic path closed: a money rewrite that dropped the bad
+                # figure could still be an uninvited pitch, and used to ship unchecked.
+                logger.error("v3 money rewrite pitched uninvited branch=%d thread=%d",
+                             self.branch_id, thread_id)
+                return _escalate(fixed, PITCH_ESCALATION_REASON)
             return fixed
 
         if lead_typed_a_question and decision.move != "answer_question":
@@ -262,6 +361,7 @@ class ReplyService(ReplyDelivery):
 
         if stored is not None and premature_pitch(
             decision.move, stored, lead_typed_a_question, decision.reply,
+            inbound_count=inbound_count,
         ):
             # v2 enforced "no pitch before pain+gain" in code (_stage_for). The v3 rebuild only
             # asked for it in prose, and thread 452 showed that wasn't enough: two turns after a
@@ -273,6 +373,7 @@ class ReplyService(ReplyDelivery):
                 correction=PITCH_CORRECTION)
             if discovered is None or premature_pitch(
                 discovered.move, stored, lead_typed_a_question, discovered.reply,
+                inbound_count=inbound_count,
             ):
                 # thread 5005, thread 5019: the rewrite ignored PITCH_CORRECTION and re-quoted
                 # the same price on an empty-dossier turn twice in a row, even on SMART — and
@@ -312,11 +413,25 @@ class ReplyService(ReplyDelivery):
             return _escalate(final, MONEY_ESCALATION_REASON)
         if stored is not None and premature_pitch(
             final.move, stored, lead_typed_a_question, final.reply,
+            inbound_count=inbound_count,
         ):
             logger.error("v3 critic rewrite pitched uninvited branch=%d thread=%d",
                          self.branch_id, thread_id)
             return _escalate(final, PITCH_ESCALATION_REASON)
         return final
+
+    async def _product_title(self, slug: str | None) -> str | None:
+        """Display title of the ad-mapped product for the enriched templated opener."""
+        if not slug:
+            return None
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.adapters.db.models import Product  # noqa: PLC0415
+        row = (await self.session.execute(
+            select(Product.title).where(
+                Product.branch_id == self.branch_id, Product.slug == slug,
+                Product.is_active == True))).first()  # noqa: E712 — SQLAlchemy needs the comparison
+        return (row[0] or "").strip() or None if row else None
 
     async def _regenerate(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001

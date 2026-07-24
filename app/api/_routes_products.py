@@ -176,6 +176,10 @@ async def products_history(prod_id: int, request: Request) -> HTMLResponse:
             text("SELECT branch_id, slug FROM product WHERE id=:id"), {"id": prod_id})).first()
         if not row:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        # Same IDOR shape as knowledge_history: the row's branch must be in the caller's
+        # scope, or id enumeration reads another branch's product history.
+        if is_branch_forbidden(row[0], branch_ids):
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
         bid = row[0] if branch_ids else None
         revs = await list_revisions(session, bid, "product", str(row[1]))
     return HTMLResponse(kb_history_html(

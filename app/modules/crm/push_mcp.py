@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 # Warm-but-stalled lead the manager should call back. From crm_lead_event_types (jakarta):
 # wait_call | thinking | contract | reject | event | material | waiting_registration | ...
 EVENT_WAIT_CALL = "wait_call"
-EVENT_THINKING = "thinking"
 
 # StageEvent marker so a lead pushed once is never re-pushed — idempotency across cron runs.
 # A FAILED push is NOT marked, so it retries next run (and auto-drains once the CRM endpoint

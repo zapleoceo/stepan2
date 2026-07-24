@@ -144,6 +144,11 @@ async def knowledge_history(doc_id: int, request: Request) -> HTMLResponse:
             {"id": doc_id})).first()
         if not row:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        # The doc's own branch_id must be within the caller's scope — taking it from the row
+        # alone let a branch-scoped user read another branch's doc history by id enumeration
+        # (the sibling /edit route checks; this one didn't).
+        if is_branch_forbidden(row[0], branch_ids):
+            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
         bid = row[0] if branch_ids else None
         revs = await list_revisions(session, bid, "doc", str(row[1]))
     return HTMLResponse(kb_history_html(f"/ui/knowledge/{doc_id}/edit", str(row[1]), revs))
