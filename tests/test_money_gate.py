@@ -120,6 +120,27 @@ def test_ordinary_discovery_is_not_a_service_offer() -> None:
     assert money_issues("Boleh cerita usaha Kakak di bidang apa?", _KB) == []
 
 
+def test_denying_a_free_service_is_not_offering_one() -> None:
+    """"Is there a free trial?" is the question every price-sensitive lead asks, and the honest
+    answer names the very service it denies. Live check on branch 8: the gate matched "gratis
+    atau konsultasi" inside a refusal and escalated the correct answer to the hold-line."""
+    from app.modules.conversation.guard import invented_service_offers
+    for denial in (
+        "Kita nggak ada trial gratis atau konsultasi gratis ya Kak",
+        "Maaf Kak, tidak ada sesi gratis - yang gratis cuma kunjungan ke kampus",
+        "Belum ada konsultasi gratis, tapi Kakak bisa mampir ke kampus",
+    ):
+        assert invented_service_offers(denial) == [], denial
+
+
+def test_offering_a_free_consultation_is_still_caught() -> None:
+    """The negation escape must not open the door: without a denial it is still invented."""
+    from app.modules.conversation.guard import invented_service_offers
+    assert invented_service_offers("Aku kasih konsultasi gratis dulu ya Kak") != []
+    assert invented_service_offers(
+        "Kita nggak ada kelas malam. Aku kasih konsultasi gratis ya") != []
+
+
 # ── the uninvited-price check (follow-up nudges only) ─────────────────────────
 
 def test_a_price_in_a_nudge_is_uninvited() -> None:
