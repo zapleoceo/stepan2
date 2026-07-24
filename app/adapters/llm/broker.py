@@ -67,7 +67,8 @@ _SYNC_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_s, write=10.0, pool=5.0)
 # vision runs in the background media backfill (not a live reply), and free vision providers
 # are spiky — give it the slow budget so a slow caption isn't cut off at the fast ceiling.
-_SLOW_CAPS = frozenset({"chat:smart", "vision"})
+# chat:sales is the Sonnet-first free-mode chain — same long-JSON profile as chat:smart.
+_SLOW_CAPS = frozenset({"chat:smart", "chat:sales", "vision"})
 # A transient poll failure (502/timeout) must not discard a job that's still running —
 # tolerate this many consecutive poll errors before giving up.
 _POLL_MAX_ERRORS = 5

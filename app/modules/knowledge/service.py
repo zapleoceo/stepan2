@@ -38,6 +38,9 @@ _ALWAYS_DOC_SLUGS = ("facts_policy", "facts_market", "payment_policy", "policy_p
 # the cap is only a defensive backstop (past ~30k chars the cheap JSON-mode providers stop
 # returning valid JSON at all).
 _CTX_CHAR_BUDGET = settings().knowledge_context_char_budget
+# Free reply mode sends the ENTIRE fact surface as a byte-stable cached prefix — a much
+# higher ceiling, absorbed by the broker's prompt cache rather than paid per turn.
+_FREE_CTX_CHAR_BUDGET = settings().free_context_char_budget
 
 # The one-line headline every restructured card carries, shown for non-focus products so a
 # cross-product question is answerable without dumping all 15 full cards.
@@ -163,6 +166,35 @@ class KnowledgeService:
                            "has grown past the fits-in-context assumption; consider trimming",
                            self.branch_id, len(text), _CTX_CHAR_BUDGET)
             text = text[:_CTX_CHAR_BUDGET]
+        return text
+
+    async def full_knowledge_context(self, lang: str | None = None) -> str:
+        """The WHOLE fact surface, deterministically ordered — free mode's stable prompt
+        prefix: persona + every facts doc IN FULL (no section gating) + the whole objection
+        playbook + every active product card in full, sorted by slug.
+
+        No per-lead or per-turn inputs on purpose: the result must be byte-identical across
+        turns and leads so the broker's prompt cache stays warm. Gating/focus logic would
+        save chars but break the cache — the opposite trade to knowledge_context()."""
+        resolved_lang = await self._lang(lang)
+        blocks = [_persona_block(await self._persona_text(), resolved_lang)]
+        for slug in _ALWAYS_DOC_SLUGS:
+            doc = await self.docs.by_slug(slug)
+            if doc is not None and doc.content.strip():
+                blocks.append(f"[{slug}]\n{doc.content.strip()}")
+        playbook = await self.docs.by_slug(OBJECTION_PLAYBOOK_SLUG)
+        if playbook is not None and playbook.content.strip():
+            blocks.append(f"[{OBJECTION_PLAYBOOK_SLUG}]\n{playbook.content.strip()}")
+        for p in sorted(await self.products.active(), key=lambda p: p.slug):
+            if (p.content or "").strip():
+                blocks.append(
+                    f"[product {p.slug} lang={resolved_lang}]\n{p.title}\n{p.content.strip()}")
+        text = "\n\n".join(b for b in blocks if b)
+        if len(text) > _FREE_CTX_CHAR_BUDGET:
+            logger.warning(
+                "full_knowledge_context branch=%d assembled %d chars > %d budget — trimming",
+                self.branch_id, len(text), _FREE_CTX_CHAR_BUDGET)
+            text = text[:_FREE_CTX_CHAR_BUDGET]
         return text
 
     async def _always_docs_block(self) -> str:

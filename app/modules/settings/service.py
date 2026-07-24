@@ -85,6 +85,10 @@ class BranchSettings:
     # logs disagreement only, never changes the reply (see conversation.classifier). Off by
     # default; a branch opts in to gather shadow data before any cutover.
     nudge_classifier_shadow: bool = False
+    # 'scripted' = the classic contract (moves, turn-notes, pitch/answer gates, critic);
+    # 'free' = short goal + full fact surface, the model sells its own way, money gate only,
+    # decisive turns on the broker's chat:sales (Sonnet-first) chain. See conversation.free_mode.
+    reply_mode: str = "scripted"
     # Trunk country code for phones mined from a lead's free-text message (see
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
@@ -232,6 +236,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         reply_guard=raw.get("reply_guard", "full"),
         critic_gate=raw.get("critic_gate", "off"),
         nudge_classifier_shadow=_b(raw, "nudge_classifier_shadow"),
+        reply_mode=raw.get("reply_mode", _DEFAULTS.get("reply_mode", "scripted")),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),

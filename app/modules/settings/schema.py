@@ -155,6 +155,23 @@ SCHEMA: list[SettingSection] = [
     ]),
     SettingSection("fa-solid fa-brain",
                    _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
+        # Free mode replaces the scripted sales contract (moves/turn-notes/pitch-gate) with a
+        # short goal + the FULL fact surface and lets the model decide how to sell, routed to
+        # the broker's Sonnet-first chat:sales chain. The money gate stays hard in both modes.
+        _f("reply_mode", "text", "scripted",
+           _l("Режим ответов", "Reply mode", "Mode balasan"),
+           choices=[
+               ("scripted", _l("Скрипт (классический)", "Scripted (classic)", "Skrip (klasik)")),
+               ("free", _l("Свободный (сильная модель)", "Free (strong model)",
+                           "Bebas (model kuat)")),
+           ],
+           help=_l("free: модель сама решает, как продавать; жёстким остаётся только "
+                   "контроль цен/ссылок. Продающие ходы идут на chat:sales (Sonnet)",
+                   "free: the model decides how to sell; only the price/link guard stays "
+                   "hard. Decisive turns go to chat:sales (Sonnet)",
+                   "free: model memutuskan cara menjual; hanya penjaga harga/tautan yang "
+                   "tetap ketat. Giliran penting memakai chat:sales (Sonnet)"),
+           width="170px"),
         # Model routing is baked into code (routing.pick_capability): the strong model handles
         # every sales-decisive moment (opener, price, menu, objection, money stages, buying
         # signals), the free pool handles low-stakes chatter. The old reply_routing /

@@ -14,6 +14,7 @@ Stepan-1.
 | [knowledge-base.md](knowledge-base.md) | База знаний (факты-только): каноническая структура, факты целиком в промпт каждый ход, язык, UI-дерево, история правок |
 | [sales-methodology.md](sales-methodology.md) | Продажи: выявление потребности (VPC + SPIN), захват профиля, гейт презентации |
 | [reply-pipeline.md](reply-pipeline.md) | Ведение лида по ходам: слои пайплайна, ситуативные нуджи (`situations.py`) с приоритетами и комбо, гейты, фолоапы |
+| [free-mode.md](free-mode.md) | Свободный режим продаж (`reply_mode=free`): цель вместо скрипта, кэшируемый префикс, chat:sales (Sonnet-first) с фолбэком, money-gate остаётся |
 | [dialogue-qa-checklist.md](dialogue-qa-checklist.md) | **Регрессия диалогов**: чеклист найденных-и-починенных ошибок + как прогонять sim (только на ClodeCouch, branch 8). Обновляется при каждой новой ошибке |
 | [ad-attribution-and-reports.md](ad-attribution-and-reports.md) | Атрибуция рекламы, авто-привязка продукта (`ad_product_map`), провенанс `product_source` |
 | [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |
