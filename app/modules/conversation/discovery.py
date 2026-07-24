@@ -34,18 +34,28 @@ _DIALOG_BUDGET = 20  # last N turns — discovery lives in recent talk, not the 
 
 _SYSTEM = """\
 You read one Instagram DM conversation between a lead and a sales rep at an IT school. Your \
-ONLY job: extract what the LEAD has revealed about their goal, pains and desired outcome — in \
-their own words/meaning, not what the rep suggested or offered to them. A bare "iya"/"ok" to \
-the rep's question reveals nothing; do not invent a goal, a pain or an outcome that was never \
-actually said. Extract only what is genuinely new — do not repeat anything already listed as \
-known below. If nothing new was revealed, return empty lists/string.
+ONLY job: extract what the LEAD revealed about their goal, pains and desired outcome — their \
+own meaning, not what the rep suggested. Capture it whenever the lead DESCRIBES a situation, \
+a problem, a wish, a fear, or a reason — you do NOT need the exact word "pain" or "goal", and \
+you do NOT need a full sentence; a short phrase in the lead's own words is enough. Paraphrase \
+tightly into Indonesian. Only a bare "iya"/"ok"/"boleh" with no content of its own reveals \
+nothing. Never invent something the lead never said. Extract only what is NEW — don't repeat \
+what's already listed as known below. If nothing new was revealed, return empty lists/string.
 
-job_to_be_done: WHY they're here now — what pushed them to ask today, the task they're trying \
-to get done. Empty string if not revealed yet.
-pains: what worries them, what's holding them back, what's not working now.
-desired_state: what a good outcome looks like to them — the goal, not the product.
-objections: any reason they gave for hesitating (price, time, trust, parents, ...), in their \
-own words. Leave empty if none.
+job_to_be_done: WHY they're here now — the task they want done.
+pains: what's not working now, what worries them, what holds them back (incl. fears like \
+"takut nggak bisa coding").
+desired_state: the outcome they want — the goal, not the product.
+objections: a reason to hesitate (price/time/trust/parents/…), in their words. Empty if none.
+
+Examples (lead line -> what to capture):
+- "biar bisa terima order online, sekarang masih manual ribet" -> pains:["proses order \
+masih manual dan ribet"], desired_state:["bisa terima order online"]
+- "takutnya aku nggak bisa coding" -> pains:["takut nggak bisa coding"]
+- "pengen banget bisa bikin aplikasi sendiri buat usaha" -> desired_state:["bisa bikin \
+aplikasi sendiri untuk usahanya"]
+- "mahal banget ya" -> objections:["harga terlalu mahal"]
+- "iya kak" -> nothing
 
 Return ONLY this JSON, no prose, no markdown fences:
 {"job_to_be_done": str, "pains": [str], "desired_state": [str], "objections": [str]}
