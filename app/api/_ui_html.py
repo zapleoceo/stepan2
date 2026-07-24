@@ -1700,7 +1700,9 @@ def app_shell(
         + _hna("nav.outbox", "/ui/outbox/panel", "fa-solid fa-paper-plane", "outbox", outbox_badge)
         + _na("nav.coach", "#", "fa-solid fa-pencil", "coach", coach_extra)
         + _na("nav.know", "/ui/knowledge", "fa-solid fa-book", "know")
-        + _hna("nav.personas", "/ui/personas", "fa-solid fa-masks-theater", "personas")
+        # nav.personas is hidden: the persona library never wired into the reply path — the
+        # prompt reads the persona_core KB doc. Routes stay for direct URLs until the
+        # library either lands for real or is removed.
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
         + _hna("nav.comments", "/ui/comments/panel", "fa-solid fa-comments", "comments")

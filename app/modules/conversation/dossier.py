@@ -30,9 +30,8 @@ DECIDES_WITH = ("self", "parents", "family")
 # never an argument; vague ("makasih infonya") = accept, one delayed touch; blunt ("nggak
 # usah") = stop, zero follow-ups. Treating all three alike is what got leads hammered.
 REFUSALS = ("none", "soft", "vague", "blunt")
-# Picks which section of the objection playbook (knowledge_doc, one `## ` section per
-# category) loads into context — see knowledge.service.objection_snippets. "other" and
-# unrecognised values load nothing extra, same as an objection the model didn't classify.
+# The objection categories the model classifies into — kept for CRM/analytics and the
+# dossier schema; the whole playbook loads in full as part of the stable prompt prefix.
 OBJECTION_CATEGORIES = (
     "price", "time", "trust", "job_outcome", "self_study_free", "parent_approval",
 )
@@ -87,7 +86,7 @@ class LeadDossier:
         return [o.text for o in self.objections if o.status == "open"]
 
     def open_objection_categories(self) -> frozenset[str]:
-        """Which playbook sections to load — see knowledge.service.objection_snippets."""
+        """The categories of still-open objections — analytics/CRM surface."""
         return frozenset(o.category for o in self.objections
                          if o.status == "open" and o.category)
 

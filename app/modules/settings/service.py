@@ -40,8 +40,6 @@ class BranchSettings:
     tg_group_id: str
     followup_enabled: bool
     followup_schedule_h: list[int]
-    tech_search_enabled: bool
-    tech_usecase_enabled: bool
     daily_budget_usd: float
     crm_enabled: bool
     crm_webhook_url: str
@@ -71,24 +69,6 @@ class BranchSettings:
     comment_replies_enabled: bool = False
     comment_hourly_cap: int = 20
     comment_per_post_cap: int = 5
-    # Reply-guard against fabrication: 'full' (deterministic URL check + LLM grounding
-    # verify on risky replies), 'urls' (deterministic only), 'off'. See conversation.guard.
-    reply_guard: str = "full"
-    # Critic-gate: a positive sales-quality check (grounded/responsive/sales-move/objection/
-    # register) on EVERY reply via chat:smart, failing CLOSED to a human. 'on' blocks+regens+
-    # hands off; 'shadow' runs and logs the verdict but never alters the reply (measurement);
-    # 'off' disables it. Default OFF so sims/tests see the raw model draft (their purpose);
-    # the live sales branch opts in via an AppSetting. See conversation.critic.
-    critic_gate: str = "off"
-    # Shadow AI classifier for the lead's turn (soft_no/postpone/paid_shock/trust_doubt/
-    # low_budget/no_time/buying_signal/none) vs the six equivalent regexes in situations.py —
-    # logs disagreement only, never changes the reply (see conversation.classifier). Off by
-    # default; a branch opts in to gather shadow data before any cutover.
-    nudge_classifier_shadow: bool = False
-    # 'scripted' = the classic contract (moves, turn-notes, pitch/answer gates, critic);
-    # 'free' = short goal + full fact surface, the model sells its own way, money gate only,
-    # decisive turns on the broker's chat:sales (Sonnet-first) chain. See conversation.free_mode.
-    reply_mode: str = "scripted"
     # Trunk country code for phones mined from a lead's free-text message (see
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
@@ -219,8 +199,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         comment_replies_enabled=_b(raw, "comment_replies_enabled"),
         comment_hourly_cap=_i(raw, "comment_hourly_cap"),
         comment_per_post_cap=_i(raw, "comment_per_post_cap"),
-        tech_search_enabled=_b(raw, "tech_search_enabled"),
-        tech_usecase_enabled=_b(raw, "tech_usecase_enabled"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),
         crm_enabled=_b(raw, "crm_enabled"),
         crm_webhook_url=raw.get("crm_webhook_url", ""),
@@ -233,10 +211,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_writeback_enabled=_b(raw, "crm_writeback_enabled"),
         meta_pixel_id=raw.get("meta_pixel_id", ""),
         meta_capi_token=raw.get("meta_capi_token", ""),
-        reply_guard=raw.get("reply_guard", "full"),
-        critic_gate=raw.get("critic_gate", "off"),
-        nudge_classifier_shadow=_b(raw, "nudge_classifier_shadow"),
-        reply_mode=raw.get("reply_mode", _DEFAULTS.get("reply_mode", "scripted")),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),

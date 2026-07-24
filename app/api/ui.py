@@ -29,16 +29,12 @@ from ._query import (
     IN_QUEUE_EXTRA,
     _branch_where,
     awaiting_cutoff,
-    fetch_audience_segment_stage_dist,
     fetch_blocked_count,
     fetch_bot_enabled_count,
     fetch_coach_data,
-    fetch_report_data,
-    fetch_segment_dist,
     fetch_stage_counts,
 )
 from ._routes_admin import (
-    _ad_editor_data,
     _agent_toggles_html,  # noqa: F401 (re-exported for tests)
 )
 from ._routes_admin import router as _admin_router
@@ -60,7 +56,7 @@ from ._ui_html import (
     viewer_tz_offset,
 )
 from ._ui_kb import kb_tree_html
-from ._ui_panels import coach_chat_html, reports_panel_html
+from ._ui_panels import coach_chat_html
 
 
 async def _apply_viewer_tz(request: Request) -> None:
@@ -288,25 +284,11 @@ async def threads_partial(
 
 
 @router.get("/reports", response_class=HTMLResponse)
-async def reports_page(request: Request) -> HTMLResponse:
-    lang = apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    async with session_scope() as session:
-        stage_counts, hour_in, hour_out, ad_funnel, discovery = (
-            await fetch_report_data(session, branch_ids)
-        )
-        products, ad_mappings, ad_suggestions = await _ad_editor_data(session, branch_ids)
-        segments = await fetch_segment_dist(session, branch_ids)
-        seg_stage = await fetch_audience_segment_stage_dist(session, branch_ids)
-    segment_stages: dict[str, dict[str, dict[str, int]]] = {}
-    for a, seg, st, n in seg_stage:
-        segment_stages.setdefault(str(a), {}).setdefault(str(seg), {})[str(st)] = int(n)
-    panel = reports_panel_html(stage_counts, hour_in, hour_out, ad_funnel, discovery,
-                               ad_mappings=ad_mappings, ad_suggestions=ad_suggestions,
-                               products=products, segments=segments,
-                               segment_stages=segment_stages)
-    return HTMLResponse(app_shell(lang, panel, active_nav="reports",
-                                  is_super=is_super_admin(request)))
+async def reports_page(request: Request) -> RedirectResponse:
+    """The full report lives at /ui/reports/panel (wrapped by the partial-shell middleware
+    on direct load); this full-page twin rendered a degraded subset and is kept only as a
+    redirect for old bookmarks."""
+    return RedirectResponse("/ui/reports/panel", status_code=307)
 
 
 # ─── language switcher ────────────────────────────────────────────────────────

@@ -29,7 +29,6 @@ _BRANCH_KEYS = (
     "agent_enabled_global", "hourly_cap", "daily_cap", "quiet_start", "quiet_end",
     "reply_delay_min_s", "reply_delay_max_s", "tg_group_id",
     "followup_enabled", "followup_schedule_h",
-    "tech_search_enabled", "tech_usecase_enabled",
 )
 
 
@@ -158,11 +157,13 @@ def test_no_llm_provider_token_keys() -> None:
     assert not (keys & {"llm_backend", "openai_key", "gemini_key", "provider_key"})
 
 
-def test_unconsumed_tech_toggles_hidden_but_still_seeded() -> None:
-    """tech_* do nothing yet → not rendered, but kept in defaults so nothing regresses."""
+def test_dead_toggles_are_gone_from_the_schema() -> None:
+    """The RAG/web-search era toggles were removed with the free-only cutover — neither
+    rendered nor seeded."""
     html = settings_form_html({}, "en")
     assert "Tailor use-cases" not in html and "Web search" not in html
-    assert "tech_usecase_enabled" in S.defaults() and "tech_search_enabled" in S.defaults()
+    assert not (set(S.defaults()) & {"tech_usecase_enabled", "tech_search_enabled",
+                                     "reply_mode", "meta_ads_token"})
 
 
 def test_current_value_overrides_default() -> None:

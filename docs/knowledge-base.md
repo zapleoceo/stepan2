@@ -38,7 +38,7 @@ market_facts, stories, playbook_×7) по категориям (`persona` / `pla
 ## Факты целиком в промпт (без RAG)
 
 Ретрива нет. KB реструктурирована в **факты-только** (тактические playbook'и переехали
-в промпт ответа — см. [reply-pipeline.md](reply-pipeline.md)), поэтому вся фактовая
+в промпт ответа — см. [free-mode.md](free-mode.md)), поэтому вся фактовая
 поверхность помещается в одно окно контекста и уходит модели **каждый ход**.
 `KnowledgeService.knowledge_context`
 ([service.py](../app/modules/knowledge/service.py)) детерминированно собирает:
