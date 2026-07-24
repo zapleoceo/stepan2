@@ -52,7 +52,7 @@ instagrapi при сбое `user_info` уходил на публичный Grap
 
 ## 5. Продажи: выявление потребности
 
-Внедрено (см. [sales-methodology.md](sales-methodology.md)): двухфазность
+Внедрено (см. [free-mode.md](free-mode.md)): двухфазность
 discover→present, SPIN + Value Proposition Canvas, захват профиля на `lead.needs`, гейт
 презентации, метрика «% выявлено до презентации» + средняя глубина (в отчётах), профиль
 лида в шапке чата. Проверено вживую: на прямой вопрос о цене бот сперва задаёт discovery.

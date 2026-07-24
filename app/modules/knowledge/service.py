@@ -18,7 +18,6 @@ from app.config import settings
 from app.ports.llm import LLMPort
 
 from .repository import KnowledgeRepo, ProductRepo
-from .sections import split_sections
 
 logger = logging.getLogger(__name__)
 
@@ -52,26 +51,9 @@ _QUICK_FACTS_RE = re.compile(r"(?im)^\s*QUICK FACTS:\s*(.+)$")
 # memory got the critic to false-reject ('Demo Event not in KB') and cascade to a hand-off.
 _ALWAYS_PRODUCT_SLUGS = ("vibe_coding_demo_event",)  # Open House retired 2026-07-21
 
-# NOT in _ALWAYS_DOC_SLUGS on purpose — this doc never loads whole. Its `## price`,
-# `## time`, ... sections are argument banks per objection category (dossier.
-# OBJECTION_CATEGORIES); objection_snippets() below pulls out only the categories this
-# lead actually raised, via the same split_sections the KB editor already uses.
+# Loaded IN FULL as part of the reply prefix (full_knowledge_context) — the per-category
+# section gating retired with the scripted path: a stable prefix caches, a gated one doesn't.
 OBJECTION_PLAYBOOK_SLUG = "objection_playbook"
-
-# facts_market IS in _ALWAYS_DOC_SLUGS (via facts_policy/facts_market pair) but two of its
-# sections are evidentiary support, not facts a reply needs by default: the competitor
-# comparison table only earns its ~1.3k chars when the lead has raised a TRUST objection
-# ("kenapa pilih IT STEP"), and the income ranges + success-case proof only earn theirs when
-# a JOB_OUTCOME objection is open ("emang bisa dapet kerja/cuan"). Both used to ride in
-# EVERY turn regardless of relevance — 2026-07-23 measurement showed this pair alone was
-# ~2.5k of the ~10.2k always-loaded facts pair. Matched by heading PREFIX (not full text)
-# so a copy-edit to the parenthetical doesn't silently stop the gate from matching.
-_FACTS_MARKET_SLUG = "facts_market"
-_GATED_MARKET_SECTIONS: tuple[tuple[str, str], ...] = (
-    ("Сравнение с конкурентами", "trust"),
-    ("Доход", "job_outcome"),
-    ("Успешные кейсы", "job_outcome"),
-)
 
 
 class KnowledgeService:
@@ -203,40 +185,8 @@ class KnowledgeService:
             doc = await self.docs.by_slug(slug)
             if doc is None or not doc.content.strip():
                 continue
-            content = doc.content.strip()
-            if slug == _FACTS_MARKET_SLUG:
-                content = _strip_gated_sections(content)
-            parts.append(f"[{slug}]\n{content}")
+            parts.append(f"[{slug}]\n{doc.content.strip()}")
         return "\n\n".join(parts)
-
-    async def objection_snippets(self, categories: frozenset[str]) -> str:
-        """Argument bank entries for only the objection categories this lead actually raised
-        — never the whole playbook. Empty categories or a missing doc return ''."""
-        if not categories:
-            return ""
-        doc = await self.docs.by_slug(OBJECTION_PLAYBOOK_SLUG)
-        if doc is None or not doc.content.strip():
-            return ""
-        matched = [f"[objection:{heading}]\n{body}"
-                  for heading, body in split_sections(doc.content) if heading in categories]
-        return "\n\n".join(matched)
-
-    async def market_snippets(self, categories: frozenset[str]) -> str:
-        """The facts_market sections deferred out of _always_docs_block (see
-        _GATED_MARKET_SECTIONS) — only the ones matching a category this lead actually raised.
-        Same structural-gate pattern as objection_snippets: no model self-selection."""
-        if not categories:
-            return ""
-        doc = await self.docs.by_slug(_FACTS_MARKET_SLUG)
-        if doc is None or not doc.content.strip():
-            return ""
-        wanted = {cat for _, cat in _GATED_MARKET_SECTIONS if cat in categories}
-        if not wanted:
-            return ""
-        matched = [f"[facts_market:{heading}]\n{body}"
-                  for heading, body in split_sections(doc.content)
-                  if _gated_category(heading) in wanted]
-        return "\n\n".join(matched)
 
     async def _always_products_block(self, exclude: str | None) -> str:
         """Full cards for the universal low-friction event products, skipping the focus one."""
@@ -253,25 +203,6 @@ class KnowledgeService:
         if product_slug is None:
             return None
         return await self.products.by_slug(product_slug)
-
-
-def _gated_category(heading: str) -> str:
-    """The objection category a facts_market heading is deferred behind, or '' if it's core
-    (always loaded) — prefix match so a wording tweak to the parenthetical doesn't break it."""
-    for prefix, category in _GATED_MARKET_SECTIONS:
-        if heading.startswith(prefix):
-            return category
-    return ""
-
-
-def _strip_gated_sections(content: str) -> str:
-    """facts_market with the gated sections (competitor comparison, income/success-case proof)
-    removed — those load separately via market_snippets() only when the matching objection
-    category is open. Preamble and every other section (institution facts, format/platform)
-    stay, since they're needed on effectively every turn."""
-    core = [(h, b) for h, b in split_sections(content) if not _gated_category(h)]
-    parts = [f"## {h}\n{b}" if h else b for h, b in core]
-    return "\n\n".join(parts)
 
 
 def _persona_block(content: str, lang: str) -> str:

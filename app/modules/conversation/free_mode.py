@@ -16,9 +16,83 @@ from typing import Any
 
 from app.adapters.db.models import Message
 
-from .contract import FIRST_TURN_NOTE, _notes_block, append_dialog, dossier_block, language_name
 from .dossier import LeadDossier
-from .prompt import manager_note_block
+from .prompt import _role_of, manager_note_block
+
+# Injected only on the turn it applies to. As a standing contract section the model had to
+# decide for itself whether "first message" described this turn, and on thread 4956 it didn't —
+# a bare "Iya ka" was answered with no introduction at all. is_first_reply is already known in
+# code, so it goes in as a fact rather than as a condition. The opener rules are measured over
+# 2 619 live first replies: introducing yourself cost nothing, ending on a question was worth
+# ~4 points of reply rate, describing the campus cost 6-10.
+FIRST_TURN_NOTE = (
+    "[This is your FIRST message to this person. Open by saying who you are in one short "
+    "clause — your name, and that you're from the school — then go straight to what they "
+    "wrote. Never describe the campus, its address or its floor. End on a question.]"
+)
+
+# The branch language as a person would name it. "Reply in id" is an instruction about a
+# string; "Reply in Bahasa Indonesia" is an instruction about a language. Same length.
+_LANG_NAMES = {"id": "Bahasa Indonesia", "ms": "Bahasa Melayu", "en": "English",
+               "ru": "Russian", "uk": "Ukrainian", "vi": "Vietnamese"}
+
+
+def language_name(lang: str) -> str:
+    return _LANG_NAMES.get((lang or "").lower(), lang)
+
+
+def dossier_block(d: LeadDossier) -> str:
+    """What is already known about this lead — the block that replaces re-deriving it from raw
+    history every turn. Empty when nothing is known yet, so a first turn stays clean."""
+    lines = [f"- {label}: {value}" for label, value in (
+        ("who they are", d.role),
+        ("what they want", d.job_to_be_done),
+        ("what worries them", "; ".join(d.pains)),
+        ("what a good outcome looks like", "; ".join(d.desired_state)),
+        ("who decides", d.decides_with),
+        ("how ready they are", d.readiness),
+        ("payment preference", d.payment_preference),
+        ("budget signal", d.budget_signal),
+    ) if value]
+    open_objections = d.open_objections()
+    if open_objections:
+        lines.append("- STILL UNRESOLVED (handle before anything else): "
+                     + "; ".join(open_objections))
+    handled = [f"{o.text} → {o.handled_by}" for o in d.objections
+               if o.status == "handled" and o.handled_by]
+    if handled:
+        lines.append("- already answered (don't re-argue): " + "; ".join(handled))
+    spent = [f"{label}: {', '.join(items)}" for label, items in (
+        ("prices given", d.prices_quoted), ("products named", d.products_named),
+        ("stories told", d.cases_used), ("arguments made", d.arguments_used),
+    ) if items]
+    if spent:
+        lines.append("- ALREADY USED, don't repeat: " + " | ".join(spent))
+    if d.refusal != "none":
+        lines.append(f"- they have said no, degree: {d.refusal}")
+    return "LEAD DOSSIER (what you already know — never re-ask it):\n" + "\n".join(lines) \
+        if lines else ""
+
+
+def append_dialog(messages: list[dict[str, Any]], dialog: list[Message]) -> None:
+    """Append the dialog turns, merging consecutive same-role messages (some providers
+    hard-reject same-role runs)."""
+    for m in dialog:
+        content = (m.text or "").strip()
+        if not content:
+            continue
+        role = _role_of(m)
+        if messages and messages[-1]["role"] == role and role != "system":
+            messages[-1]["content"] += "\n" + content
+        else:
+            messages.append({"role": role, "content": content})
+
+
+def _notes_block(notes: list[str] | None) -> str:
+    if not notes:
+        return ""
+    body = "\n".join(f"- {n}" for n in notes)
+    return f"MANAGER RULES for every lead (follow strictly):\n{body}"
 
 # The goal is stated as the funnel Dima runs: explicit agreement → phone → manager (CRM).
 # Manager process facts (call 09-18 WIB, WhatsApp fallback) are owner-confirmed 2026-07-24.

@@ -39,13 +39,6 @@ _ASSISTANT_LAST_NUDGE = (
 )
 
 
-def _retrieval_query(dialog: list, limit: int = 6) -> str:
-    """Recent dialog text used as the RAG retrieval query — the index is searched by what
-    the conversation is about right now, not the whole (capped) history."""
-    return "\n".join(
-        (m.text or "").strip() for m in dialog[-limit:] if (m.text or "").strip())
-
-
 def _fmt_llm_meta(meta: dict) -> str | None:
     model = (meta.get("model") or "").split("/")[-1]
     t_in = meta.get("tokens_in", 0)
@@ -103,14 +96,8 @@ class DecisionEngine:
         self.threads = ThreadRepo(session, branch_id)
         self.messages = MessageRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
-        self.last_context = ""  # KB context of the most recent complete() — for the guard
-        # A DecisionEngine lives for ONE lead-turn (built fresh per decide()/queue_one). Every
-        # regen (fast→smart escalation, dedup, guard corrections) calls complete() again with
-        # the SAME dialog, so knowledge_context — a broker embed + a full-table vector scan +
-        # assembly — was recomputed identically 2-4× per turn. Memoize it per turn so only the
-        # first complete() of a turn pays for retrieval; the regens reuse it.
-        self._ctx_cache: dict[tuple[str | None, str, bool], str] = {}
-        self._free_ctx: str | None = None  # free-mode full surface, memoized per turn
+        self.last_context = ""  # KB context of the most recent turn — the money gate's ground
+        self._free_ctx: str | None = None  # full KB surface, memoized per turn
         self._tz_offset_h: int | None = None  # branch tz, lazily loaded for the now-hint
 
     async def _now_local(self) -> datetime:
@@ -149,45 +136,9 @@ class DecisionEngine:
         stored_needs = parse_needs(lead.needs if lead is not None else None)
         return DecisionContext(thread, dialog, lead, stored_needs, budget, over_budget=over)
 
-    async def kb_context(
-        self, ctx: DecisionContext, thread_id: int, *, light: bool,
-        objection_categories: frozenset[str] = frozenset(),
-    ) -> str:
-        """The branch's assembled knowledge for this turn, memoized per turn.
-
-        A DecisionEngine lives for ONE lead-turn, and every regen calls back in with the same
-        dialog, so without this the broker embed + assembly ran identically 2-4× a turn.
-
-        `objection_categories` pulls in ONLY the matching objection-playbook sections (see
-        knowledge.service.objection_snippets) — never the whole playbook, and nothing at all
-        when the lead hasn't raised anything the model could classify."""
-        lead_type = ctx.lead.lead_type if ctx.lead is not None else None
-        has_open_objection = bool(ctx.stored_needs.objections)
-        cache_key = (ctx.thread.product_slug, _retrieval_query(ctx.dialog), light,
-                     lead_type, has_open_objection, objection_categories)
-        context = self._ctx_cache.get(cache_key)
-        if context is None:
-            context = await self.knowledge.knowledge_context(
-                ctx.thread.product_slug, query=_retrieval_query(ctx.dialog),
-                thread_id=thread_id, light=light,
-                lead_type=lead_type, has_open_objection=has_open_objection)
-            # Dates are resolved before the model sees them: it never has to work out which
-            # day "8 Agustus 2026" falls on or how far off it is, and anything already past is
-            # labelled. See dates.annotate_dates for why this is data and not a rule.
-            context = annotate_dates(context, (await self._now_local()).date())
-            snippets = await self.knowledge.objection_snippets(objection_categories)
-            if snippets:
-                context = f"{context}\n\n{snippets}"
-            market = await self.knowledge.market_snippets(objection_categories)
-            if market:
-                context = f"{context}\n\n{market}"
-            self._ctx_cache[cache_key] = context
-        self.last_context = context  # the reply-guard checks the draft against exactly this
-        return context
-
     async def free_kb_context(self) -> str:
-        """Free mode's stable prefix: the whole fact surface, date-annotated, memoized per
-        turn. Stable within a branch-local day (annotate_dates is the only date-dependent
+        """The reply prompt's stable prefix: the whole fact surface, date-annotated, memoized
+        per turn. Stable within a branch-local day (annotate_dates is the only date-dependent
         input), which is what keeps the broker's prompt cache warm across leads."""
         if self._free_ctx is None:
             context = await self.knowledge.full_knowledge_context()

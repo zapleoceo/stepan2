@@ -1,24 +1,15 @@
-"""The first contact — classified by CODE, never free-generated.
+"""The first contact — SILENT entries answered by template, typed ones by the model.
 
-Every first-message incident of 2026-07 (threads 4943, 5005, 5019, 5024, 5029, 5031, 5095,
-5097) shared one root cause: the opener was produced by free LLM generation steered by
-scattered prose hints, with deterministic gates catching mistakes AFTER the fact at the cost
-of escalating a live lead. Each new entry shape got its own regex patch — an unwinnable race.
-
-This module ends it: the entry is classified deterministically into one of five shapes, and
-each shape has a known-good response. Personalization comes from SLOTS (the lead's name, the
-ad-mapped product, the lead's own words) — not from letting the model improvise the frame.
+The entry is classified deterministically into one of five shapes. Silent/junk shapes ship
+a known-good Bahasa template with zero LLM (anti-ban, zero cost, measured wording); a TYPED
+entry (AD_TYPED / ORGANIC) goes to the full free reply pipeline — with the strong chat:sales
+chain writing the opener, the old fixed-frame-plus-slot skeleton became scaffolding for a
+weaker model and was retired with the scripted path (2026-07-25).
 
   AD_SILENT   ad thread, nothing typed (prefill/shares/acks) → product template, zero LLM
-  AD_TYPED    ad thread, lead typed real words → skeleton: intro is fixed, the LLM fills
-              ONLY the answer slot (answer-first fully applies)
-  ORGANIC     walk-in DM with typed text → skeleton: intro fixed, LLM fills a short
-              reflection of their words; the deep-discovery question is fixed
-  STORY       reply to our story → light template
+  STORY       reply to our story, nothing typed → light template
   JUNK        emoji/garble only, no ad context → clarify template, zero LLM
-
-Only AD_TYPED and ORGANIC call the broker at all, and only for a bounded slot — the model
-cannot pitch, quote, or restart discovery from inside a slot."""
+  AD_TYPED / ORGANIC → full pipeline"""
 from __future__ import annotations
 
 import logging
@@ -115,57 +106,3 @@ JUNK_OPENER = (
     "info tentang apa ya? Biar aku bisa bantu yang paling pas."
 )
 
-# ── skeletons: fixed frame, ONE bounded LLM slot ─────────────────────────────
-
-# The slot generator's whole world: answer the lead's message from the KB facts, in 1-2
-# short sentences, nothing else. It cannot introduce itself (the frame does), cannot ask a
-# question (the frame does), and a price appears ONLY if the lead's own words asked for one.
-SLOT_SYSTEM = (
-    "You write ONE short fragment (1-2 sentences, Bahasa Indonesia, warm chat register, no "
-    "greeting, no self-introduction, no question at the end) for a sales chat at an IT "
-    "school. Use ONLY facts from the knowledge base below; if the needed fact is missing, "
-    "say you'll confirm it with the team. If the lead's message asks about money, give the "
-    "starting figure with its instalment frame from the knowledge base; otherwise never "
-    "mention money.\n\nKNOWLEDGE BASE:\n{kb}\n\nLEAD'S MESSAGE:\n{typed}\n\n"
-    "Return ONLY the fragment, no quotes, no JSON."
-)
-
-AD_TYPED_FRAME = (
-    "Halo{name}, aku MinStep dari IT STEP Academy 😊 {slot} "
-    "Biar aku bisa bantu lebih pas — boleh cerita, Kakak mau pakai skill-nya buat apa nanti?"
-)
-ORGANIC_FRAME = (
-    "Halo{name}, aku MinStep dari IT STEP Academy 😊 {slot} "
-    "Boleh cerita dikit, apa yang bikin Kakak kepikiran soal ini sekarang?"
-)
-
-_SLOT_MAX_CHARS = 320
-# The model greets from inside the slot despite SLOT_SYSTEM's "no greeting" (live sim,
-# branch 8: "Halo, aku MinStep… 😊 Halo Kak, senang banget…") — the frame already said
-# hello, so a leading greeting clause is stripped deterministically instead of re-asked.
-_LEADING_GREETING_RE = re.compile(
-    r"^(?:halo+|hai+|hi|selamat\s+\w+)\b[^.!?]{0,30}[,.!]\s*", re.IGNORECASE)
-
-
-def compose_typed_opener(entry: Entry, slot: str, lead_name: str | None) -> str:
-    """The finished first message: fixed frame + the model's bounded slot.
-
-    A slot that overflows, carries markdown, greets a second time, or smuggles a question in
-    is trimmed — the frame's own greeting and question must stay the only ones."""
-    cleaned = " ".join((slot or "").split()).strip()
-    if len(cleaned) > _SLOT_MAX_CHARS:
-        # Trim to the last full sentence within budget, not mid-word ("…mau tahu d." — a live
-        # sim artifact). Fall back to the hard cut only if there's no sentence break to use.
-        head = cleaned[:_SLOT_MAX_CHARS]
-        cut = max(head.rfind("."), head.rfind("!"), head.rfind("…"))
-        cleaned = head[:cut + 1] if cut > 40 else head
-    cleaned = _LEADING_GREETING_RE.sub("", cleaned).strip()
-    if cleaned:
-        cleaned = cleaned[0].upper() + cleaned[1:]
-    if cleaned and cleaned[-1] == "?":
-        cleaned = cleaned.rstrip("?").rstrip() + "."
-    if cleaned and cleaned[-1] not in ".!…":
-        cleaned += "."
-    name = f" Kak {lead_name}" if lead_name else ""
-    frame = AD_TYPED_FRAME if entry is Entry.AD_TYPED else ORGANIC_FRAME
-    return " ".join(frame.format(name=name, slot=cleaned).split())

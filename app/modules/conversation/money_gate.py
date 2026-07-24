@@ -21,7 +21,6 @@ from .guard import (
     quotes_price,
     ungrounded_urls,
 )
-from .signals import DISCOVERY_TURN_CAP
 
 # The correction handed to the model when the gate trips. It names the offence and demands a
 # replacement — never a retreat to "I'll check with the team", which is what v2 did and what
@@ -32,15 +31,13 @@ MONEY_ESCALATION_REASON = (
     "Степан дважды назвал сумму или ссылку, которых нет в базе знаний — "
     "нужен ручной ответ менеджера с точной цифрой")
 
-PITCH_ESCALATION_REASON = (
-    "Степан дважды спитчил продукт до выявления боли/цели лида — "
-    "нужен ручной ответ менеджера")
-
+# Used only by followup.py: a nudge that volunteers a price gets one rewrite before being
+# dropped — a follow-up is never an answer to a fresh question, so a figure in one is
+# always uninvited.
 PITCH_CORRECTION = (
-    "[System: you don't know this lead's pain or goal yet, and your draft pitched a product "
-    "or asked for a commitment anyway. Rewrite the SAME message as one honest discovery move "
-    "instead — a question about their situation or motive. Save the pitch for once you "
-    "actually know why they're here.]"
+    "[System: nobody asked about money this turn, and your draft volunteers a figure anyway. "
+    "Rewrite the SAME message keeping its hook and warmth, but without any price — give the "
+    "value first; the numbers come when they ask.]"
 )
 
 MONEY_CORRECTION = (
@@ -54,66 +51,10 @@ MONEY_CORRECTION = (
 )
 
 
-# Moves that pitch — name a product, quote a price, or ask for a commitment — before
-# discovery is done. v2 enforced "no presenting without a pain and a gain" in CODE
-# (_stage_for rolled the stage back); the v3 rebuild only asked for it in prose (CLOSING:
-# "save it until you know why they came"), and thread 452 showed prose alone isn't enough —
-# two turns after a context clear, with the dossier empty, Stepan pitched Vibe Coding anyway.
-_PITCH_MOVES = frozenset({"give_value", "quote_price", "invite_campus", "close"})
-
-
-def premature_pitch(
-    move: str, dossier: object, lead_asked_directly: bool, reply: str = "",
-    inbound_count: int = 0, lead_ready_signal: bool = False,
-) -> bool:
-    """True when the model pitched before earning the right to.
-
-    Never fires when the lead asked outright (answer-first already covers that turn) or once
-    discovery has actually landed a pain and a desired outcome.
-
-    Checks the DECLARED move first, but that alone isn't airtight: thread 4972 shipped a full
-    price quote on a first turn with an empty dossier, self-labelled `answer_question` — a
-    move outside `_PITCH_MOVES`, so the move check alone let it through. A price figure in the
-    reply is pitch content regardless of what the model called the move, so it's checked too.
-
-    A price is different from the rest of `_PITCH_MOVES`: "discovery done once" doesn't make it
-    safe to volunteer forever after — thread 4905 quoted the full price and instalments mid
-    small-talk, discovery long since landed, nobody asked. PRICE in the contract says "when they
-    ask, answer that turn" — so a price needs asking (or the lead already being `ready`) on
-    EVERY turn, not just the first one.
-
-    `inbound_count` mirrors the stage gate's DISCOVERY_TURN_CAP escape hatch: past the cap the
-    contract ORDERS the model to stop interrogating and give value, and the stage gate lets it
-    present — this gate refusing the very same move trapped every non-forthcoming lead in an
-    escalation for doing what it was told (has_discovery() holds a pain AND a desired state,
-    which only a minority of leads ever voice). The uninvited-price rule above is NOT relaxed
-    by the cap — a value pitch is released, a volunteered figure never is."""
-    if lead_asked_directly:
-        return False
-    if uninvited_price(reply, dossier):
-        return True
-    if dossier.has_discovery():
-        return False
-    # An explicit buying signal ("mau daftar", "pengen banget", "gas") means the lead is
-    # asking to move forward — closing/presenting is exactly right even when the dossier's
-    # pain+goal fields never got populated (sim p3-close2: the model comforted a fear, the
-    # lead said "pengen banget bisa mandiri", the model closed, and this gate escalated it
-    # for "no discovery"). The uninvited-price rule above still applies — a ready signal
-    # invites the close, not a volunteered number.
-    if lead_ready_signal:
-        return False
-    if inbound_count >= DISCOVERY_TURN_CAP:
-        return False
-    return move in _PITCH_MOVES
-
-
 def uninvited_price(reply: str, dossier: object) -> bool:
-    """A price figure with nobody asking for it this turn and the lead not already `ready`.
-
-    Split out of `premature_pitch` for `followup.py`: a nudge's whole job is giving value the
-    lead hasn't heard — `give_value`/`invite_campus` before discovery is exactly what a
-    follow-up is FOR, so the full pitch gate is too aggressive there. A volunteered price never
-    is, on a live reply or a nudge alike."""
+    """A price figure in a NUDGE with the lead not already `ready` — always volunteered,
+    since a follow-up is never an answer to a fresh question (thread 4849). Used only by
+    followup.py; live replies leave price timing to the model."""
     return quotes_price(reply) and dossier.readiness != "ready"
 
 

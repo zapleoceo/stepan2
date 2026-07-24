@@ -1,6 +1,6 @@
 """A second, decoupled pass whose only job is filling `pains`/`desired_state`/`objections`.
 
-The main v3 turn (decision.generate + contract._SCHEMA) already asks one model call to write
+The main turn (decision.generate + the free_mode schema) already asks one model call to write
 a warm, on-brand reply AND correctly populate a 21-field dossier at the same time. Measured
 live on branch_id=1 (2026-07-23): of 1215 leads active in the last 7 days, only ~5% had ANY
 dossier saved, and only ~2% had pains+desired_state both filled — the reply wins that
@@ -11,8 +11,8 @@ This module is the backstop, not a replacement: a SEPARATE chat:fast call, given
 dialog and what pains/desired_state are already known, with the ONE job of reading what the
 lead revealed. No reply to write, no stage to pick, no 21-field contract to juggle — a tiny
 schema is the entire hypothesis being tested. It never blocks or gates the reply: any failure
-(broker error, timeout, unparseable JSON) is swallowed and logged, same discipline as
-critic.review — an unreachable extractor must never cost the lead their answer.
+(broker error, timeout, unparseable JSON) is swallowed and logged — an unreachable extractor
+must never cost the lead their answer.
 """
 from __future__ import annotations
 
