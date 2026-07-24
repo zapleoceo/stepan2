@@ -68,6 +68,44 @@ def test_the_correction_demands_a_rewrite_never_a_retreat() -> None:
     assert "do not go silent" in text and "do not hand the lead off" in text
 
 
+# ── invented services / materials (threads 5018, 5063) ───────────────────────
+
+def test_a_free_consultation_offer_is_blocked() -> None:
+    """thread 5018: 'free 30-minute business-strategy consultation' — a service that does
+    not exist (facts_policy: no career-guidance/advisory service)."""
+    assert money_issues(
+        "Untuk sesi konsultasi gratis 30 menit tentang strategi pemasaran usaha", _KB) != []
+
+
+def test_a_business_strategy_consultation_is_blocked() -> None:
+    assert money_issues("nanti kita atur konsultasi strategi bisnis ya Kak", _KB) != []
+
+
+def test_a_fabricated_analysis_document_is_blocked() -> None:
+    """thread 5063: a promised bespoke 'cost-analysis / break-even PDF' for a franchise lead."""
+    assert money_issues(
+        "aku siapin analisa biaya dan estimasi break-even dalam bentuk PDF ya", _KB) != []
+
+
+def test_a_campus_visit_is_allowed() -> None:
+    """The one genuinely free offer — must NOT be caught."""
+    assert money_issues(
+        "Kakak bisa mampir ke kampus Menara Sudirman buat lihat langsung, gratis kok", _KB) == []
+
+
+def test_the_paid_demo_event_is_not_an_invented_service() -> None:
+    """The Demo Event is a real carded offer — the invented-service detector must ignore it
+    (its price is validated separately by the grounding check, so keep price out of here)."""
+    from app.modules.conversation.guard import invented_service_offers
+    assert invented_service_offers(
+        "Ada Demo Event Vibe Coding, Kakak bisa coding langsung sama instruktur") == []
+
+
+def test_ordinary_discovery_is_not_a_service_offer() -> None:
+    """A plain question about the lead's business must never trip the invented-service gate."""
+    assert money_issues("Boleh cerita usaha Kakak di bidang apa?", _KB) == []
+
+
 # ── the premature-pitch gate ───────────────────────────────────────────────────
 
 def test_a_pitch_with_no_discovery_yet_is_caught() -> None:

@@ -13,7 +13,13 @@ sales quality — is judged by the critic, which fails OPEN.
 """
 from __future__ import annotations
 
-from .guard import canonical_prices, fabricated_income_figure, quotes_price, ungrounded_urls
+from .guard import (
+    canonical_prices,
+    fabricated_income_figure,
+    invented_service_offers,
+    quotes_price,
+    ungrounded_urls,
+)
 from .signals import DISCOVERY_TURN_CAP
 
 # The correction handed to the model when the gate trips. It names the offence and demands a
@@ -37,11 +43,13 @@ PITCH_CORRECTION = (
 )
 
 MONEY_CORRECTION = (
-    "[System: your draft states something about money or a link that is NOT in the knowledge "
-    "base: {issues}. Rewrite the SAME message keeping its intent and warmth, but state only "
-    "figures and links that appear in the knowledge base above. If you don't have the exact "
-    "number, say what you do know and offer to confirm the precise figure — do not go silent "
-    "and do not hand the lead off.]"
+    "[System: your draft states a figure/link OR offers a service/material that is NOT in the "
+    "knowledge base: {issues}. Rewrite the SAME message keeping its intent and warmth, but "
+    "state only figures and links that appear in the knowledge base above, and offer ONLY what "
+    "the school actually provides — the only free thing you may offer is a campus visit; the "
+    "Demo Event is a paid offer. Do NOT invent a consultation, session, or a document you'll "
+    "prepare. If you don't have the fact, say what you do know and offer to confirm with the "
+    "team — do not go silent and do not hand the lead off.]"
 )
 
 
@@ -101,12 +109,17 @@ def uninvited_price(reply: str, dossier: object) -> bool:
 
 
 def money_issues(reply: str, context: str) -> list[str]:
-    """Ungrounded money/link claims in the draft. Empty means it is safe to send."""
+    """Ungrounded money/link claims AND invented services in the draft — the fail-closed set.
+    Empty means it is safe to send. (Named 'money' for history; it now also gates a promised
+    service/material that isn't part of the offering — same must-not-ship severity.)"""
     issues: list[str] = []
     for url in ungrounded_urls(reply, context):
         issues.append(f"link not in the knowledge base: {url}")
     issues.extend(_ungrounded_prices(reply, context))
     issues.extend(fabricated_income_figure(reply))
+    issues.extend(
+        f"service/material not in the offering (invented): {m}"
+        for m in invented_service_offers(reply))
     return issues
 
 

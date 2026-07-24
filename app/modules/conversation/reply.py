@@ -60,6 +60,7 @@ from .routing import SMART, pick_capability
 from .signals import (
     AD_TEMPLATE_RE,
     BUYING_SIGNAL_RE,
+    DISCOVERY_TURN_CAP,
     PAYMENT_INTENT_RE,
     PRICE_QUESTION_RE,
     is_answerable_question,
@@ -110,9 +111,71 @@ BARE_ACK_NOTE = (
     "either-or choice or one concrete low-friction next step, in one short sentence.]"
 )
 
+# A low-information acknowledgement — the lead is nodding along without adding anything the
+# conversation can build on. Thread 5042 answered "iya kk" TWELVE times: the old pattern only
+# recognized "kak"/"kakak", so "kk"/"ka"/"kaka" and forms like "iya boleh"/"iya siap" all
+# slipped through and the bot kept firing fresh discovery questions at a wall.
 _BARE_ACK_RE = re.compile(
-    r"^(?:iya+|iy|ya+|ok(?:e+)?|okok|sip|baik|siap|oh|hmm?)[\s\W]*(?:kak(?:ak)?)?[\s\W]*$",
+    r"^(?:iya*|iy|ya+|ok(?:e+)?|okok|sip|baik|siap|oh|hmm?|betul|bener)"
+    r"(?:\s+(?:iya*|ya+|ok(?:e+)?|boleh+|sip|siap|aja|dong|deh))?"
+    # optional address suffix: ka / kak / kaka / kakak / kk — 'k' then a short run of a/k
+    r"[\s\W]*(?:k[ak]{0,4})?[\s\W]*$",
     re.IGNORECASE)
+# Past this many consecutive bare acks the bot stops asking and forces a binary choice — a
+# deterministic either-or, no LLM (the BARE_ACK_NOTE prose the model was given got ignored 12
+# turns running on 5042). Two is the note's territory; three is a wall.
+_BARE_ACK_HARD_CAP = 3
+
+BARE_ACK_EITHER_OR = (
+    "Kak, biar nggak muter-muter ya 😊 Kakak mau aku langsung bantuin ke proses daftar/"
+    "booking-nya, atau masih ada yang pengen ditanyain dulu soal program atau biayanya?"
+)
+
+# A question about pay/career outcome — "gaji berapa", "prospek kerjanya gimana". Thread
+# 5049: the bot met "gaji Nye brp" with a hold-line and a phone request, and Citra had to
+# step in ("ini bukan lowongan kerjaan"). A salary question is one of the hottest buying
+# signals there is; the answer (a grounded range) lives in facts_market's income section,
+# but that section is gated behind an open job_outcome objection — which this bare question
+# doesn't raise on its own, so the model answers with no figures in context and stalls.
+# No trailing \b on the multi-word alternatives — "prospek kerjanya" carries a suffix, so a
+# word boundary after "kerja" would (wrongly) fail to match.
+_SALARY_Q_RE = re.compile(
+    r"\bgaji\w*|\bsalary\b|\bpenghasilan\b|\bpendapatan\b|\bincome\b|"
+    r"prospek\s+kerja|peluang\s+kerja|kerja\s+apa|jenjang\s+kar[ie]r|\bkarir\w*|"
+    r"\bberapa\b[^?]{0,25}\b(?:dapat|dpt|hasil)\b",
+    re.IGNORECASE)
+SALARY_NOTE = (
+    "[System: the lead asked about salary/career outcome — a hot buying signal, not a job "
+    "application. Answer THIS turn with the concrete range from the knowledge base (always "
+    "framed 'kisaran/tergantung', never a guarantee). NEVER meet a salary question with a "
+    "hold-line or a request for their phone number — answer it, then move the sale forward.]"
+)
+
+# The lead has stopped engaging as a buyer — trolling, insults, off-topic spam, or plain
+# gibberish. Threads 5091 (reels + "repost akun gue" + incoherence) and 5096 ("Ari kmu
+# mabok??") each got 12 more pitches. One graceful, non-salesy reply, then stop pushing.
+_DISENGAGE_RE = re.compile(
+    r"\b(mabo?k|mabuk|goblo?k|tolol|bego|anjg|anjay|ngaco|garing|apaan\s*si|"
+    r"gaje|halu|spam+|bot\s*(?:ya|kah|nih)|kepo|iseng|becanda|bercanda|"
+    r"repost|folback|followback|follback|endorse|paid\s*promote)\b",
+    re.IGNORECASE)
+DISENGAGEMENT_NOTE = (
+    "[System: the lead is not engaging as a buyer (trolling, joking, off-topic, or asking for "
+    "a follow/repost/endorsement). Do NOT pitch or ask a sales question. Reply once, briefly "
+    "and warmly, staying human; if there's nothing to sell here, it's fine to just close "
+    "politely. Never chase.]"
+)
+
+# Discovery has run its course with nothing landing — past the same cap the stage gate uses,
+# with no pain+gain captured. Thread 5039 asked 6+ discovery questions and never made an
+# offer; the lead faded. Stop interrogating and present.
+DISCOVERY_CAP_NOTE = (
+    "[System: you've asked enough discovery questions and the lead isn't opening up. STOP "
+    "asking open questions. Make a concrete move now: name the fitting product with its "
+    "starting DP/instalment, mention the nearest intake, and offer ONE easy next step (a "
+    "campus visit, the Demo Event, or booking a seat). One question max, and only a "
+    "moving one (which schedule / shall I reserve), never another 'what are you looking for'.]"
+)
 # Explicit yes-words that accept a proposal. Deliberately EXCLUDES bare 'iya'/'ya': to an
 # open question ('proyek apa?') those are filler, not acceptance (thread 5042 answered 'iya
 # kak' eight times to open questions) — only unambiguous accept-words route to the
@@ -122,7 +185,7 @@ _YES_RE = re.compile(
     r"\b[\s\W]*(?:kak(?:ak)?|dong|aja)?[\s\W]*$", re.IGNORECASE)
 
 
-def _turn_note(dialog: list) -> str | None:
+def _turn_note(dialog: list, stored: object = None) -> str | None:
     """The one deterministic coaching note this turn needs, or None.
 
     Buying signal wins over bare-ack: 'boleh'/'mau' after the bot's own offer IS a
@@ -133,9 +196,20 @@ def _turn_note(dialog: list) -> str | None:
     if not ins:
         return None
     last = (ins[-1].text or "").strip()
+    # Priority order is deliberate. Disengagement first — never sell to a troll. Then salary
+    # (a hot question that must be answered this turn, income context force-loaded for it).
+    # Then buying signal (advance, don't re-discover). Then the discovery cap (stop asking,
+    # present). Bare-ack note is the mildest, last.
+    if _DISENGAGE_RE.search(last):
+        return DISENGAGEMENT_NOTE
+    if _SALARY_Q_RE.search(last):
+        return SALARY_NOTE
     if BUYING_SIGNAL_RE.search(last) or PAYMENT_INTENT_RE.search(last) \
             or (_YES_RE.match(last) and _bot_just_offered(dialog)):
         return BUYING_SIGNAL_NOTE
+    if (len(ins) >= DISCOVERY_TURN_CAP and stored is not None
+            and not stored.has_discovery()):
+        return DISCOVERY_CAP_NOTE
     if len(ins) >= 2 and _BARE_ACK_RE.match(last) \
             and _BARE_ACK_RE.match((ins[-2].text or "").strip()):
         return BARE_ACK_NOTE
@@ -145,6 +219,18 @@ def _turn_note(dialog: list) -> str | None:
 def _bot_just_offered(dialog: list) -> bool:
     last_out = next((m for m in reversed(dialog) if m.direction == "out"), None)
     return last_out is not None and "?" in (last_out.text or "")
+
+
+def _consecutive_bare_acks(dialog: list) -> int:
+    """How many of the lead's MOST RECENT messages in a row are bare acks — the counter the
+    hard either-or fires on. Counts back from the last inbound; the first non-ack stops it."""
+    n = 0
+    for m in reversed([m for m in dialog if m.direction == "in"]):
+        if _BARE_ACK_RE.match((m.text or "").strip()):
+            n += 1
+        else:
+            break
+    return n
 
 class ReplyService(ReplyDelivery):
     """Produce one reply for one thread, and remember what it learned.
@@ -210,6 +296,16 @@ class ReplyService(ReplyDelivery):
                         "v3 branch=%d thread=%d move=%s tier=skeleton first=True",
                         self.branch_id, thread_id, skeleton.move)
                     return skeleton.to_legacy(stored)
+        if not is_first_reply and _consecutive_bare_acks(ctx.dialog) >= _BARE_ACK_HARD_CAP:
+            # The lead has stalled on bare acks (thread 5042: "iya kk" ×12). More open
+            # questions won't land — force a binary either-or deterministically, same as the
+            # opener templates. Zero LLM: the model was ignoring the prose note every turn.
+            decision = TurnDecision(
+                reply=BARE_ACK_EITHER_OR, move="handle_objection", stage=Stage.QUALIFYING)
+            self.last_decision = decision
+            logger.info("v3 branch=%d thread=%d tier=bare_ack_either_or", self.branch_id,
+                        thread_id)
+            return decision.to_legacy(stored)
         if ctx.over_budget:
             # prepare() was told to let the zero-cost template branch through; everything
             # from here on calls the broker, so the original budget gate applies now.
@@ -222,9 +318,16 @@ class ReplyService(ReplyDelivery):
         # sent it to the cheap tier with an empty dossier steering every other branch to FAST.
         first_llm_turn = is_first_reply or all(t == AD_TAP_OPENER for t in outs)
         capability = pick_capability(stored, is_first_reply=first_llm_turn)
+        # A salary/outcome question this turn force-loads the income section (facts_market's
+        # job_outcome gate), so the model has the range in context instead of stalling on a
+        # hold-line (thread 5049). It's a live question, not a stored objection, so it's added
+        # for this turn's context only.
+        asked_salary = bool(last_in and _SALARY_Q_RE.search(last_in.text or ""))
+        categories = stored.open_objection_categories()
+        if asked_salary:
+            categories = categories | {"job_outcome"}
         context = await engine.kb_context(
-            ctx, thread_id, light=False,
-            objection_categories=stored.open_objection_categories())
+            ctx, thread_id, light=False, objection_categories=categories)
         # The ad-entry hint asserts "they did not type it and did not ask you anything" —
         # true ONLY when the opening message really was the untouched button prefill. IG's
         # composer is editable: a lead can clear it and type a real question (thread 4972),
@@ -261,7 +364,7 @@ class ReplyService(ReplyDelivery):
             # errors in 24h when this was missing), and other providers silently treat it as a
             # continuation, which isn't the intent either. Nudge a fresh turn instead.
             messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
-        note = _turn_note(ctx.dialog)
+        note = _turn_note(ctx.dialog, stored)
         if note:
             messages.append({"role": "user", "content": note})
 

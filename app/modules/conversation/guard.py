@@ -122,6 +122,36 @@ def whatsapp_delivery_offers(reply: str) -> list[str]:
     return [m.group(0) for m in _WHATSAPP_DELIVERY_RE.finditer(reply or "")]
 
 
+# Services/materials the bot INVENTS out of thin air — the model's most expensive
+# hallucination class after prices, and one no other gate caught (money_gate = figures,
+# false_delivery = files-already-sent). Thread 5018: a "free 30-minute business-strategy
+# consultation" that doesn't exist; thread 5063: a fabricated "break-even estimate / royalty
+# analysis / cost-analysis PDF" for a franchise lead. Policy: the ONLY free thing the bot may
+# offer is a campus visit; the Demo Event is a paid offer with its own product card. A bespoke
+# consultation/session/coaching or a promise to prepare a custom analysis document is never
+# real — facts_policy states outright there is no career-guidance/advisory service.
+_INVENTED_SERVICE_RE = re.compile(
+    # free consultation / session / coaching as a standalone service
+    r"\b(?:konsultasi|sesi|bimbingan|coaching|mentoring)\b[^.!?\n]{0,30}"
+    r"\b(?:gratis|free|cuma-cuma|tanpa biaya)\b"
+    r"|\b(?:gratis|free)\b[^.!?\n]{0,20}\b(?:konsultasi|sesi\s+konsultasi|bimbingan)\b"
+    # a business / marketing / strategy consultation — an invented advisory service
+    r"|\bkonsultasi\b[^.!?\n]{0,30}\b(?:strategi|pemasaran|marketing|bisnis|usaha)\b"
+    # a promise to prepare/send a bespoke analysis / proposal / cost or break-even document
+    r"|\b(?:siapin|siapkan|kirim(?:in|kan)?|buatin|buatkan|susun(?:kan)?)\b[^.!?\n]{0,45}"
+    r"\b(?:analisa|analisis|proposal|estimasi|perhitungan)\b[^.!?\n]{0,35}"
+    r"\b(?:biaya|break.?even|balik\s*modal|royalti|royalty|pdf|dokumen)\b",
+    re.IGNORECASE)
+
+
+def invented_service_offers(reply: str) -> list[str]:
+    """A promised service/session/document that is not part of the offering (threads 5018,
+    5063). Only a campus visit is free; the Demo Event is a paid, carded offer. Everything
+    else here — free consultations, business/marketing strategy sessions, bespoke
+    cost/break-even analyses — is invented and must not reach the lead."""
+    return [m.group(0) for m in _INVENTED_SERVICE_RE.finditer(reply or "")]
+
+
 _ID_MONTHS = {
     "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6, "juli": 7,
     "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12,
