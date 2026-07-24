@@ -250,16 +250,22 @@ def build_messages_v3(  # noqa: PLR0913
     ) if block]
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": "\n\n".join(parts)}]
+    append_dialog(messages, dialog)
+    return messages
+
+
+def append_dialog(messages: list[dict[str, Any]], dialog: list[Message]) -> None:
+    """Append the dialog turns, merging consecutive same-role messages (some providers
+    hard-reject same-role runs). Shared by the scripted and free message builders."""
     for m in dialog:
         content = (m.text or "").strip()
         if not content:
             continue
         role = _role_of(m)
-        if len(messages) > 1 and messages[-1]["role"] == role:
+        if messages and messages[-1]["role"] == role and role != "system":
             messages[-1]["content"] += "\n" + content
         else:
             messages.append({"role": role, "content": content})
-    return messages
 
 
 def _notes_block(notes: list[str] | None) -> str:

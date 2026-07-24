@@ -14,8 +14,11 @@ from .dossier import LeadDossier
 
 SMART = "chat:smart"  # the strong, scarce model
 FAST = "chat:fast"    # the cheap, effectively unlimited one
+# The broker's Sonnet-first chain for free reply mode — used wherever free mode would
+# otherwise pick SMART; falls back to SMART when the chain is capped or down.
+SALES = "chat:sales"
 
-__all__ = ["FAST", "SMART", "pick_capability"]
+__all__ = ["FAST", "SALES", "SMART", "pick_capability"]
 
 
 def pick_capability(dossier: LeadDossier, *, is_first_reply: bool) -> str:

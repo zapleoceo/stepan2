@@ -215,6 +215,12 @@ class Settings(BaseSettings):
                                   "thread (the top-10 longest threads carried 5-13k chars in "
                                   "their newest 30 messages) while the newest turns stay "
                                   "verbatim for the dedup/don't-repeat checks")
+    free_context_char_budget: int = Field(
+        default=90000, description="char ceiling on the FULL KB surface sent in free reply "
+                                   "mode (persona + all facts docs + the whole objection "
+                                   "playbook + every product card). Sized for the strong "
+                                   "chat:sales models; the block is a byte-stable prompt "
+                                   "prefix, so the broker's prompt cache absorbs the size")
     knowledge_context_char_budget: int = Field(
         default=28000, description="char ceiling on the assembled KB context (persona + policy/"
                                    "market facts + the full focus card + the facts catalog). "
