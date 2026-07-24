@@ -418,11 +418,17 @@ class ReplyService(ReplyDelivery):
             capability=capability, branch_id=self.branch_id)
         if decision is None:
             return None
+        # The gates must see what the lead revealed THIS turn, not just prior turns: the model
+        # populates decision.dossier on the same turn it acts on it. Sim p4-close: discovery
+        # landed (pain+goal) exactly on the closing turn, but the pitch gate read `stored`
+        # (turns 1-3 only), saw no discovery, and escalated the close to a hold-line. Fold
+        # this turn's extraction in before vetting so has_discovery() is current.
+        gate_dossier = merge_dossier(stored, decision.dossier)
         decision = await self._vet(
             engine, ctx, messages, thread_id, decision,
             workflow=workflow, capability=capability, context=context, lang=lang,
             last_inbound=(last_in.text if last_in is not None else "") or "",
-            lead_typed_a_question=_typed_a_question(last_in), stored=stored,
+            lead_typed_a_question=_typed_a_question(last_in), stored=gate_dossier,
             inbound_count=sum(1 for m in ctx.dialog if m.direction == "in"),
             lead_ready_signal=_is_buying_signal(ctx.dialog))
 
