@@ -8,7 +8,6 @@ import html as _h
 
 from app.modules.knowledge.canonical import canon, loc
 from app.modules.knowledge.canonical_docs import CATEGORIES
-from app.modules.knowledge.sections import split_sections
 
 from ._i18n import current_lang, t
 
@@ -73,26 +72,27 @@ def _tree_item(d: object, active_id: int | None) -> str:
 
 
 
-def _section_editor(slug: str, content: str, lang: str) -> str:
-    """One textarea per `## ` section; an empty canonical doc shows its section skeleton
-    with localized placeholder hints."""
-    pairs = split_sections(content)
-    hints: dict[str, str] = {}
-    if not pairs and (cd := canon(slug)) is not None and cd.sections:
-        pairs = [(loc(s.title, lang), "") for s in cd.sections]
-        hints = {loc(s.title, lang): loc(s.hint, lang) for s in cd.sections}
-    if not pairs:
-        pairs = [("", content)]
-    blocks = []
-    for i, (heading, body) in enumerate(pairs):
-        ph = _h.escape(hints.get(heading, ""))
-        label = _h.escape(heading) if heading else _h.escape(t("kb.preamble"))
-        blocks.append(
-            f'<div class="kb-sec"><label class="kb-sec-h">{label}</label>'
-            f'<input type="hidden" name="head_{i}" value="{_h.escape(heading)}">'
-            f'<textarea class="frm-ta" name="body_{i}" rows="6" placeholder="{ph}">'
-            f'{_h.escape(body)}</textarea></div>')
-    return f'<input type="hidden" name="nsec" value="{len(pairs)}">' + "".join(blocks)
+def _doc_editor(slug: str, content: str, lang: str) -> str:
+    """ONE textarea holding the document's whole markdown.
+
+    It used to be one textarea per `## ` section. That split was functional back when the
+    prompt pulled individual sections (objection_snippets / market_snippets picked the
+    matching `## category` bank); with the free-only cutover the whole doc rides in the
+    cached prefix, so the boundaries no longer decide anything — while the split-editor
+    form (`nsec` + hidden `head_i`) could only ever edit EXISTING section bodies: adding a
+    section, renaming a heading or pasting a rewritten doc in one piece was impossible
+    without going into the database. An empty canonical doc gets its section skeleton
+    pre-filled as a starting point, with the localized hints as the placeholder."""
+    body = content
+    ph = ""
+    if not content.strip() and (cd := canon(slug)) is not None and cd.sections:
+        body = "\n\n".join(f"## {loc(s.title, lang)}\n" for s in cd.sections)
+        ph = "\n".join(f"## {loc(s.title, lang)} — {loc(s.hint, lang)}" for s in cd.sections)
+    rows = max(18, min(48, body.count("\n") + 6))
+    return (
+        f'<div class="kb-sec"><label class="kb-sec-h">{_h.escape(t("kb.doc_md"))}</label>'
+        f'<textarea class="frm-ta kb-md" name="content" rows="{rows}"'
+        f' placeholder="{_h.escape(ph)}">{_h.escape(body)}</textarea></div>')
 
 
 def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
@@ -116,7 +116,7 @@ def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
         f' hx-swap="innerHTML">'
         f'<div class="frm-grp"><label class="frm-lbl">{_h.escape(t("know.title"))}</label>'
         f'<input class="frm-inp kb-tr-f" name="title" value="{_h.escape(title or "")}"></div>'
-        f'{_section_editor(slug, content, lang)}'
+        f'{_doc_editor(slug, content, lang)}'
         f'<div id="kb-tr-note-{doc_id}" class="kb-tr-note" style="display:none">'
         f'{_h.escape(t("kb.tr_note"))}</div>'
         f'<div style="margin-top:.5rem"><button class="btn-sm btn-p" id="kb-save-{doc_id}">'

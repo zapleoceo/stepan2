@@ -92,7 +92,12 @@ async def knowledge_translate_text(
 
 
 def _content_from_form(form: FormData) -> str:
-    """Reassemble the section textareas (head_i/body_i, nsec) back into markdown."""
+    """The document's markdown, straight from the single editor textarea.
+
+    Falls back to the retired per-section form (`nsec` + `head_i`/`body_i`) so a page left
+    open across the deploy still saves correctly instead of blanking the doc."""
+    if (content := form.get("content")) is not None:
+        return str(content).strip()
     try:
         n = int(str(form.get("nsec") or "0"))
     except ValueError:
