@@ -88,8 +88,8 @@ def _cfg(*, token: str = "tok", account: str = "act_1") -> BranchSettings:  # no
     return BranchSettings(
         agent_enabled=True, hourly_cap=99, daily_cap=99, quiet_start=0, quiet_end=0,
         reply_delay_min_s=0, reply_delay_max_s=0, tz_offset_h=7, tg_group_id="",
-        followup_enabled=False, followup_schedule_h=[], tech_search_enabled=False,
-        tech_usecase_enabled=False, daily_budget_usd=0.0, crm_enabled=False,
+        followup_enabled=False, followup_schedule_h=[], daily_budget_usd=0.0,
+        crm_enabled=False,
         crm_webhook_url="", meta_pixel_id="", meta_capi_token="",
         meta_system_user_token=token, fb_account_id=account,
     )

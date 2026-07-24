@@ -30,7 +30,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Full-page routes that already return a complete shell — never re-wrap these.
-_FULL_PAGE_ROUTES = frozenset({"/ui/inbox", "/ui/coach", "/ui/knowledge", "/ui/reports"})
+_FULL_PAGE_ROUTES = frozenset({"/ui/inbox", "/ui/coach", "/ui/knowledge"})
 
 # First path segment after /ui/ → sidebar nav_id
 _SECTION_NAV = {

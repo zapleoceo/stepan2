@@ -153,37 +153,6 @@ SCHEMA: list[SettingSection] = [
            _l("Ответов на один пост", "Replies / post", "Balasan / post"),
            ph=_l("5", "5", "5"), width="76px", scope="channel"),
     ]),
-    SettingSection("fa-solid fa-brain",
-                   _l("Знания и LLM", "Knowledge & LLM", "Pengetahuan & LLM"), [
-        # Free mode replaces the scripted sales contract (moves/turn-notes/pitch-gate) with a
-        # short goal + the FULL fact surface and lets the model decide how to sell, routed to
-        # the broker's Sonnet-first chat:sales chain. The money gate stays hard in both modes.
-        _f("reply_mode", "text", "scripted",
-           _l("Режим ответов", "Reply mode", "Mode balasan"),
-           choices=[
-               ("scripted", _l("Скрипт (классический)", "Scripted (classic)", "Skrip (klasik)")),
-               ("free", _l("Свободный (сильная модель)", "Free (strong model)",
-                           "Bebas (model kuat)")),
-           ],
-           help=_l("free: модель сама решает, как продавать; жёстким остаётся только "
-                   "контроль цен/ссылок. Продающие ходы идут на chat:sales (Sonnet)",
-                   "free: the model decides how to sell; only the price/link guard stays "
-                   "hard. Decisive turns go to chat:sales (Sonnet)",
-                   "free: model memutuskan cara menjual; hanya penjaga harga/tautan yang "
-                   "tetap ketat. Giliran penting memakai chat:sales (Sonnet)"),
-           width="170px"),
-        # Model routing is baked into code (routing.pick_capability): the strong model handles
-        # every sales-decisive moment (opener, price, menu, objection, money stages, buying
-        # signals), the free pool handles low-stakes chatter. The old reply_routing /
-        # smart_stages toggles were removed 2026-07-19 — no operator tuning needed.
-        # hidden until the RAG / tech-context / web-search features are ported — the
-        # keys are still parsed + seeded, but showing dead toggles misleads the operator.
-        _f("tech_usecase_enabled", "bool", "true",
-           _l("Кейсы под лида", "Tailor use-cases", "Kasus sesuai lead"),
-           width="130px", hidden=True),
-        _f("tech_search_enabled", "bool", "false",
-           _l("Веб-поиск", "Web search", "Pencarian web"), width="130px", hidden=True),
-    ]),
     SettingSection("fa-solid fa-bell",
                    _l("Уведомления", "Notifications", "Notifikasi"), [
         _f("tg_group_id", "text", "",
@@ -229,14 +198,6 @@ SCHEMA: list[SettingSection] = [
         _f("meta_capi_token", "secret", "", _l("CAPI токен (устар.)", "CAPI token (legacy)",
                                                 "Token CAPI (lama)"),
            ph=_l("EAAB…", "EAAB…", "EAAB…"),
-           help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
-                   "Legacy field — use the System User token above. Blank = keep current",
-                   "Field lama — gunakan token System User di atas. Kosong = tetap"),
-           width="340px", hidden=True, scope="channel"),
-        _f("meta_ads_token", "secret", "",
-           _l("Marketing API токен (устар.)", "Marketing API token (legacy)",
-              "Token Marketing API (lama)"),
-           ph=_l("EAAG…", "EAAG…", "EAAG…"),
            help=_l("Устаревшее поле — используйте System User токен выше. Пусто = не менять",
                    "Legacy field — use the System User token above. Blank = keep current",
                    "Field lama — gunakan token System User di atas. Kosong = tetap"),

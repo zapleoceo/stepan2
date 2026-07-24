@@ -15,7 +15,6 @@ from dataclasses import dataclass, field
 
 from app.domain.enums import Stage
 
-from .contract import MOVES
 from .dossier import LeadDossier, Objection
 from .sanitize import clean_reply
 
@@ -209,7 +208,7 @@ class TurnDecision:
 
 async def generate(  # noqa: PLR0913
     engine: object, ctx: object, messages: list[dict], thread_id: int, *,
-    workflow: str, capability: str, branch_id: int, free_moves: bool = False,
+    workflow: str, capability: str, branch_id: int,
 ) -> tuple[TurnDecision | None, dict]:
     """One generation, with a single escalation when the cheap model returns broken JSON.
 
@@ -221,7 +220,7 @@ async def generate(  # noqa: PLR0913
     raw, meta = await engine.run(ctx, messages, thread_id,
                                  workflow=workflow, capability=capability)
     try:
-        return parse_turn_decision(raw, free_moves=free_moves), meta
+        return parse_turn_decision(raw), meta
     except ValueError:
         if capability != FAST:
             logger.warning("%s: unparseable decision branch=%d thread=%d — skip",
@@ -232,18 +231,15 @@ async def generate(  # noqa: PLR0913
     raw, meta = await engine.run(ctx, messages, thread_id,
                                  workflow=workflow, capability=SMART)
     try:
-        return parse_turn_decision(raw, free_moves=free_moves), meta
+        return parse_turn_decision(raw), meta
     except ValueError:
         logger.warning("%s: unparseable on both tiers branch=%d thread=%d — skip",
                        workflow, branch_id, thread_id)
         return None, meta
 
 
-def parse_turn_decision(raw_json: str, *, free_moves: bool = False) -> TurnDecision:
-    """Parse the model's JSON; raises ValueError on a broken contract.
-
-    `free_moves` (free reply mode) keeps the model's own move label instead of coercing to
-    the enumerated set — there the move is a log line, not a gate input."""
+def parse_turn_decision(raw_json: str) -> TurnDecision:
+    """Parse the model's JSON; raises ValueError on a broken contract."""
     try:
         data = json.loads(_strip_fences(raw_json))
     except json.JSONDecodeError as exc:
@@ -258,7 +254,7 @@ def parse_turn_decision(raw_json: str, *, free_moves: bool = False) -> TurnDecis
     lang = str(data.get("reply_language") or "").lower().strip()
     return TurnDecision(
         reply=clean_reply(reply),
-        move=_free_move(data.get("move")) if free_moves else _move(data.get("move")),
+        move=_free_move(data.get("move")),
         stage=_coerce_stage(data.get("stage")),
         dossier=_dossier(data.get("dossier")),
         product_slug=str(data.get("product_slug") or "").strip() or None,
@@ -271,16 +267,6 @@ def parse_turn_decision(raw_json: str, *, free_moves: bool = False) -> TurnDecis
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────
-
-def _move(value: object) -> str:
-    """An off-contract move must never abort a good reply — the text is what reaches the lead.
-    Fall back to the neutral move and log, so a drifting model is visible in the logs."""
-    move = str(value or "").strip().lower()
-    if move in MOVES:
-        return move
-    logger.info("decision: unknown move %r → give_value", value)
-    return "give_value"
-
 
 # Anthropic served via the broker's forced-tool JSON mode intermittently wraps the whole
 # decision in the tool-call envelope ({"parameters": {...}} — measured live on chat:sales,

@@ -19,12 +19,12 @@ from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.domain.enums import Stage
 from app.modules.settings.service import BranchSettings, get_channel_settings
 
-from .contract import build_messages_v3, followup_framing
 from .decision import generate
 from .delivery import _BUBBLE_GAP_S, _reply_bubble_cap, _split_bubbles
 from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
+from .free_mode import build_messages_free
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
 from .repository import (
     CoachingNoteRepo,
@@ -46,6 +46,36 @@ logger = logging.getLogger(__name__)
 # block. Short enough that a real broker blip only costs one missed cycle, long enough that a
 # sustained outage doesn't get re-billed every 10-min cron tick.
 _FAILURE_BACKOFF_MIN = 30
+
+FOLLOWUP_FRAMING = """\
+[System: the lead has gone quiet — there is no new message to answer this turn. This is nudge \
+{n} of {total}. Write ONE short message that earns a reply: something concrete they have NOT \
+heard yet, tied to what the dossier says they care about. Never "masih minat?" or "ada yang \
+bisa dibantu?" — that is begging, not selling. FACTS ONLY FROM THE KNOWLEDGE BASE above: \
+never invent an alumni story, an ROI/percentage figure, a case study tailored to their \
+industry, a discount, or a deadline that is not written there — live nudges fabricated \
+"ROI 30%" and a "manufacturing-plant Meta Ads case" and earned zero replies; the KB's real \
+differentiators always beat invented ones. ESCALATE THE ANGLE by nudge number so each touch \
+is a new reason, not a repeat: an early nudge gives a fresh concrete hook or a real case from \
+the KB; a middle nudge invites them to the low-cost Demo Event — a real, cheap way to see it \
+live before deciding; a late nudge names a GENUINE deadline (the nearest intake or the \
+book-now window) and asks for their WhatsApp to secure a spot — only if that deadline is real \
+in the KB. {refusal_note}If you have nothing genuinely new to say, return an empty reply \
+rather than padding — a nudge that repeats you costs more than silence.]"""
+
+_REFUSAL_NOTES = {
+    "soft": "They already said they'd think about it, so do NOT argue or re-pitch: one light, "
+            "easy-to-ignore touch that gives them a reason to come back. ",
+    "vague": "They already closed the conversation politely — keep this minimal and graceful, "
+             "and make it easy to say nothing at all. ",
+}
+
+
+def followup_framing(attempt: int, total: int, refusal: str) -> str:
+    """The extra turn-instruction for a nudge. Refusal degree changes the tone, not the fact
+    that we're writing — except for a blunt no, which the caller drops before it gets here."""
+    return FOLLOWUP_FRAMING.format(
+        n=attempt, total=total, refusal_note=_REFUSAL_NOTES.get(refusal, ""))
 
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
@@ -194,10 +224,8 @@ class FollowupService:
             return False
 
         lang = await self._lang()
-        context = await engine.kb_context(
-            ctx, thread_id, light=True,
-            objection_categories=stored.open_objection_categories())
-        messages = build_messages_v3(
+        context = await engine.free_kb_context()
+        messages = build_messages_free(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
             manager_note=ctx.lead.manager_note if ctx.lead is not None else None,

@@ -328,7 +328,7 @@ _BODY_EN = r"""
     <p>Then, as the <b>last</b> step, a critic-gate: the guard can only tell that a reply is not fabricated, not whether it actually <i>sells</i>. So a strong model judges every reply against a positive rubric — is every fact grounded in the knowledge base, does it answer what the client actually said, does it advance the sale by one sound step, is a live objection handled, is the register right. If it can't clear the bar even after one rewrite (or the check itself errors) the reply is <b>not sent</b> — it fails closed and the client goes to a human.</p>
     <details class="l3"><summary>All the way down</summary><div class="body">
       <ul>
-        <li>The guard was born after a real incident: the bot invented a link to a "lab", free access and a Cisco certificate. Files: <code>app/modules/conversation/guard.py</code>, orchestration in <code>reply.py</code>, the doc <code>docs/reply-guard.md</code>.</li>
+        <li>The guard was born after a real incident: the bot invented a link to a "lab", free access and a Cisco certificate. Files: <code>app/modules/conversation/guard.py</code>, orchestration in <code>reply.py</code>, the doc <code>docs/free-mode.md</code>.</li>
         <li>A clever saving: the most frequent "risk" is the price. If the price in the reply matches the knowledge base verbatim, the paid LLM check is skipped (hundreds of replies a day).</li>
         <li>False escalations are caught separately: the model wants to call a manager over a price question whose answer is already in the context — it gets a regeneration instead.</li>
         <li>Every regeneration increments a per-client counter — after two, that client is permanently routed to the expensive model.</li>
@@ -936,7 +936,7 @@ _BODY_UK = r"""
     <p>Потім, <b>останнім</b> кроком, — критик-гейт: страховка вміє сказати лише, що відповідь не вигадана, але не те, чи вона справді <i>продає</i>. Тож сильна модель оцінює кожну відповідь за позитивною рубрикою — чи кожен факт заземлений у базі знань, чи вона відповідає на те, що клієнт справді сказав, чи просуває продаж на один розумний крок, чи опрацьоване живе заперечення, чи правильний регістр. Якщо не дотягує навіть після одного переписування (або сама перевірка збоїть) — відповідь <b>не відправляється</b>: критик спрацьовує «в закритий бік», і клієнт іде до людини.</p>
     <details class="l3"><summary>До дна</summary><div class="body">
       <ul>
-        <li>Страховка з'явилася після реального випадку: бот вигадав посилання на «лабораторію», безкоштовний доступ і сертифікат Cisco. Файли: <code>app/modules/conversation/guard.py</code>, оркестрування в <code>reply.py</code>, документ <code>docs/reply-guard.md</code>.</li>
+        <li>Страховка з'явилася після реального випадку: бот вигадав посилання на «лабораторію», безкоштовний доступ і сертифікат Cisco. Файли: <code>app/modules/conversation/guard.py</code>, оркестрування в <code>reply.py</code>, документ <code>docs/free-mode.md</code>.</li>
         <li>Хитра економія: найчастіший «ризик» — ціна. Якщо ціна у відповіді дослівно збігається з базою знань, платна LLM-перевірка пропускається (це сотні відповідей на день).</li>
         <li>Окремо ловляться «хибні ескалації»: модель хоче покликати менеджера на запитання про ціну, відповідь на яке вже є в контексті — натомість регенерація.</li>
         <li>Кожна регенерація збільшує лічильник у клієнта — після двох такий клієнт назавжди переводиться на дорогу модель.</li>

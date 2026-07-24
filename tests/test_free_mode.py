@@ -1,8 +1,7 @@
-"""Free reply mode — the model sells, the code guards only the money.
+"""The reply pipeline — the model sells, the code guards only the money.
 
-Pins the mode's four promises: the prompt prefix is byte-stable (the broker's cache anchor),
-decisive turns ride chat:sales with a chat:smart fallback, the scripted gates and notes stay
-out of the way, and the money gate keeps exactly its scripted severity.
+Pins the pipeline's promises: the prompt prefix is byte-stable (the broker's cache anchor),
+decisive turns ride chat:sales with a chat:smart fallback, and the money gate fails closed.
 """
 from __future__ import annotations
 
@@ -14,7 +13,6 @@ from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation.dossier import LeadDossier
 from app.modules.conversation.free_mode import build_messages_free
 from app.modules.conversation.reply import ESCALATION_HOLD_REPLY, ReplyService
-from app.modules.settings.repository import SettingRepo
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 _KB = "KB FACTS: Vibe Coding — DP Rp 500.000, total Rp 9.000.000"
@@ -79,7 +77,6 @@ async def _thread(s, *, dossier: str | None = None,  # noqa: ANN001
     b = Branch(name="F", lang="id")
     s.add(b)
     await s.flush()
-    await SettingRepo(s).upsert("reply_mode", "free", branch_id=b.id)
     ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
     lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, dossier=dossier)
     s.add_all([ch, lead])
@@ -214,8 +211,3 @@ def test_prompt_prefix_is_byte_stable_across_leads_and_turns() -> None:
     assert a[0]["role"] == "system"
     assert "Budi" not in a[0]["content"] and "Rabu" not in a[0]["content"]
     assert "Budi" in a[1]["content"] and "Sari" in b[1]["content"]
-
-
-def test_default_mode_is_scripted() -> None:
-    from app.modules.settings.schema import field_for
-    assert field_for("reply_mode").default == "scripted"

@@ -75,7 +75,7 @@ occurred_at` и прогони список через `sim.say(8, ...)`.
 | 34 | Skill Booster с длительностью в неделях/месяцах | `booster_wrong_duration` → regen (все бустеры = 1 день; 2 недели только у SMM Intensive) | Выдуманный «Python Skill Booster 2 minggu» (нет цены → is_risky не сработал) | 2864 |
 
 Детекторы/нуджи/приоритеты живут в `app/modules/conversation/situations.py` (один модуль,
-одна цепочка `pick_nudge`); архитектура хода — [reply-pipeline.md](reply-pipeline.md).
+одна цепочка `pick_nudge`); архитектура хода — [free-mode.md](free-mode.md).
 
 **Prohibition-слой (guard):** глобальные баны живут в `policy_prohibitions` (always-injected);
 `guard_verify` enforce-ит любую строку KB с `NEVER / does NOT / jangan / BUKAN`, даже если
@@ -95,7 +95,7 @@ occurred_at` и прогони список через `sim.say(8, ...)`.
 
 Промпт-правила, на которые опирается чеклист, живут в
 `app/modules/conversation/prompt.py`; методология — в
-[sales-methodology.md](sales-methodology.md).
+[free-mode.md](free-mode.md).
 | 35 | Лид вежливо отказал («Next time aja», «Nanti saya fikirkan lagi», «gak dulu») | Стадия `objection` + ОДИН отложенный контакт (расписание схлопнуто до последнего шага, ~5 дней) → потом dormant | Мгновенный `dormant` от модели с нулём фолоапов; ИЛИ полный цикл из 4 нуджей после «нет» (ban-вектор) | аудит ≥2000 |
 | 35 | Лид спрашивает цену, боль ещё НЕ выявлена | `ANSWER_PRICE_NO_PAIN_NUDGE`: ответить честно, но вести с DP/рассрочки, полную сумму — контекстом, и ОДИН вопрос к боли | Голое число: замер 100 чатов — 71% лидов после голой цены не пишут больше никогда | воронка 07-16 |
 | 36 | Бот сказал «data sudah diteruskan ke tim / tim akan hubungi» | `promised_handoff` → `needs_manager=true` по-настоящему (человек уведомлён, бот молчит, фолоапы стоп) | Обещал звонок команды и продолжил слать нуджи; лид завис в dormant | 1230 |

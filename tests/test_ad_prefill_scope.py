@@ -70,17 +70,3 @@ async def test_a_thread_that_never_came_from_an_ad_flags_nothing(db_session) -> 
     assert stored[0].is_ad_referral is False
 
 
-async def test_a_flagged_prefill_does_not_trip_the_answer_gate(db_session) -> None:  # noqa: ANN001
-    """End to end: the tap opens with a question, what the lead types next is a real question."""
-    from app.modules.conversation.reply import _typed_a_question
-
-    bid, cid = await _channel(db_session)
-    svc = IngestService(db_session, bid)
-    stored = await svc.ingest(cid, [
-        _msg("m1", "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?", 0),
-        _msg("m2", "berapa lama durasinya kak?", 1),
-    ])
-    prefill, typed = sorted(stored, key=lambda m: m.occurred_at)
-
-    assert not _typed_a_question(prefill)
-    assert _typed_a_question(typed)

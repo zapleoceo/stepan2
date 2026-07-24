@@ -26,11 +26,11 @@ from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.domain.enums import Stage
 from app.modules.settings.service import BranchSettings
 
-from .contract import build_messages_v3
 from .decision import generate
 from .delivery import _BUBBLE_GAP_S, _split_bubbles
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
+from .free_mode import build_messages_free
 from .money_gate import money_issues
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import FAST
@@ -161,9 +161,9 @@ class ReactivationService:
 
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch is not None else "id"
-        context = await engine.kb_context(ctx, thread_id, light=True)
-        messages = build_messages_v3(context, ctx.dialog, lang, stored,
-                                     now_block=await engine._now_block())  # noqa: SLF001
+        context = await engine.free_kb_context()
+        messages = build_messages_free(context, ctx.dialog, lang, stored,
+                                       now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": _REACTIVATION_FRAMING})
         # The lowest-stakes traffic there is: a month-old dormant lead. Draft cheap; the money
         # gate below is the only thing that can stop it, and it costs nothing when there is no

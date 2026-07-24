@@ -495,7 +495,9 @@ async def test_what_the_lead_already_heard_reaches_the_nudge_prompt(db_session) 
     llm = _CapturingLLM(_v3())
     await _svc(db_session, bid, llm).run()
 
-    system = llm.messages[0][0]["content"]
+    # The dossier rides in the small variable system block, AFTER the byte-stable cached
+    # prefix (messages[0]) — join every system message so the assertion doesn't care which.
+    system = "\n".join(m["content"] for m in llm.messages[0] if m["role"] == "system")
     assert "takut telat mulai" in system
     assert "ALREADY USED" in system and "alumni Dimas" in system
 
