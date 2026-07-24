@@ -17,6 +17,7 @@ from .guard import (
     canonical_prices,
     fabricated_income_figure,
     invented_service_offers,
+    is_hedged_salary_reference,
     quotes_price,
     ungrounded_urls,
 )
@@ -115,7 +116,13 @@ def money_issues(reply: str, context: str) -> list[str]:
     issues: list[str] = []
     for url in ungrounded_urls(reply, context):
         issues.append(f"link not in the knowledge base: {url}")
-    issues.extend(_ungrounded_prices(reply, context))
+    # Price/income grounding runs per bubble so a hedged salary RANGE (a market reference, not
+    # a course price) can be exempted — its numbers can't exact-match the KB and shouldn't
+    # (thread 5049). Everything else in that bubble is still checked normally.
+    for bubble in (reply or "").split("|||"):
+        if is_hedged_salary_reference(bubble):
+            continue
+        issues.extend(_ungrounded_prices(bubble, context))
     issues.extend(fabricated_income_figure(reply))
     issues.extend(
         f"service/material not in the offering (invented): {m}"

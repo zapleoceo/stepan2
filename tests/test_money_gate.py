@@ -56,6 +56,20 @@ def test_instalment_wording_is_not_mistaken_for_an_income_claim() -> None:
     assert money_issues("Cicilannya Rp 2.226.000 per bulan kak", _KB) == []
 
 
+def test_a_hedged_market_salary_range_is_allowed() -> None:
+    """A salary question must be answerable with the facts_market range (thread 5049) — a
+    hedged reference ('kisaran … tergantung') is not a promise and must not be blocked."""
+    assert money_issues(
+        "Kisaran gaji SMM specialist sekitar 5-8 juta per bulan ya Kak, tergantung "
+        "perusahaan dan portfolionya", _KB) == []
+
+
+def test_a_promise_about_our_own_graduates_earnings_is_still_blocked() -> None:
+    """Even hedged, a claim about OUR alumni's earnings is a training-outcome liability."""
+    assert money_issues(
+        "Alumni kami rata-rata dapat Rp 8.000.000 per bulan kok", _KB) != []
+
+
 def test_every_issue_is_reported_not_just_the_first() -> None:
     issues = money_issues("Rp 99.000.000, cek https://scam.example.com", _KB)
     assert len(issues) >= 2

@@ -152,7 +152,13 @@ def compose_typed_opener(entry: Entry, slot: str, lead_name: str | None) -> str:
 
     A slot that overflows, carries markdown, greets a second time, or smuggles a question in
     is trimmed — the frame's own greeting and question must stay the only ones."""
-    cleaned = " ".join((slot or "").split())[:_SLOT_MAX_CHARS].strip()
+    cleaned = " ".join((slot or "").split()).strip()
+    if len(cleaned) > _SLOT_MAX_CHARS:
+        # Trim to the last full sentence within budget, not mid-word ("…mau tahu d." — a live
+        # sim artifact). Fall back to the hard cut only if there's no sentence break to use.
+        head = cleaned[:_SLOT_MAX_CHARS]
+        cut = max(head.rfind("."), head.rfind("!"), head.rfind("…"))
+        cleaned = head[:cut + 1] if cut > 40 else head
     cleaned = _LEADING_GREETING_RE.sub("", cleaned).strip()
     if cleaned:
         cleaned = cleaned[0].upper() + cleaned[1:]

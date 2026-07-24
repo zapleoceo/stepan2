@@ -219,12 +219,39 @@ _PAY_WORD_RE = re.compile(
 _PER_MONTH_MONEY_RE = re.compile(
     r"\d[\d.,]*\s*(?:juta|jt|ribu|rb|k)\b[^.!?\n]{0,18}?(?:per\s*bulan|/?\s*bulan|sebulan"
     r"|perbulan|tiap bulan|sebulannya)", re.IGNORECASE)
+# A hedge turns a figure from a PROMISE into a market REFERENCE — the exact framing SALARY_NOTE
+# asks for. A salary question must be answerable with the facts_market range ("kisaran gaji
+# junior 5-9 juta, tergantung…", thread 5049); grounding it by number is unreliable because the
+# KB writes ranges in Russian "млн" while the reply says "juta", so gate on framing instead.
+_INCOME_HEDGE_RE = re.compile(
+    r"\b(kisaran|sekitar|tergantung|rata-rata|biasanya|umumnya|bervariasi|"
+    r"estimasi|range|nggak|ga|gak|tidak|belum)\s*(?:pasti|tentu)?\b", re.IGNORECASE)
+# A claim specifically about OUR graduates' earnings is a training-outcome PROMISE — always
+# blocked, hedged or not (thread review: "alumni kami rata-rata dapat 8jt" is a liability).
+_OUR_GRADS_RE = re.compile(
+    r"\b(?:alumni|lulusan|siswa|peserta|murid)\b[^.!?\n]{0,15}\b(?:kami|kita)\b"
+    r"|\b(?:kami|kita)\b[^.!?\n]{0,15}\b(?:alumni|lulusan|siswa|peserta|murid)\b",
+    re.IGNORECASE)
+
+
+def is_hedged_salary_reference(bubble: str) -> bool:
+    """A per-month money figure framed as a hedged MARKET range about a profession — not a
+    course price and not a promise about our graduates. This is the legitimate answer to a
+    salary question (thread 5049): 'kisaran gaji … 5-9 juta/bulan, tergantung …'. Its numbers
+    must be exempt from BOTH the course-price grounding and the income-promise check, because
+    a salary RANGE can never number-match the KB exactly (the KB writes ranges in Russian
+    'млн', and 5-8 in the reply won't equal 5-9 in the source)."""
+    if _PAY_WORD_RE.search(bubble):
+        return False  # a course-payment figure, handled by the normal price grounding
+    return bool(
+        _PER_MONTH_MONEY_RE.search(bubble) and _EARN_WORD_RE.search(bubble)
+        and _INCOME_HEDGE_RE.search(bubble) and not _OUR_GRADS_RE.search(bubble))
 
 
 def fabricated_income_figure(reply: str) -> list[str]:
     out = []
     for bubble in (reply or "").split("|||"):
-        if _PAY_WORD_RE.search(bubble):
+        if _PAY_WORD_RE.search(bubble) or is_hedged_salary_reference(bubble):
             continue
         m = _PER_MONTH_MONEY_RE.search(bubble)
         if m and _EARN_WORD_RE.search(bubble):
