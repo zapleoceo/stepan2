@@ -39,7 +39,16 @@ _ASSISTANT_LAST_NUDGE = (
 )
 
 
+# A turn answered without touching the broker (the templated first-contact openers). The
+# chat bubble must still say WHY there is no broker line — a blank chip is indistinguishable
+# from the meta being lost, which is exactly the regression this marker guards against.
+TEMPLATED_META: dict = {"templated": True}
+_TEMPLATED_LINE = "templated | free"
+
+
 def _fmt_llm_meta(meta: dict) -> str | None:
+    if meta.get("templated"):
+        return _TEMPLATED_LINE
     model = (meta.get("model") or "").split("/")[-1]
     t_in = meta.get("tokens_in", 0)
     t_out = meta.get("tokens_out", 0)
