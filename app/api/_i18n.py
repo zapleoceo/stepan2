@@ -135,6 +135,9 @@ _TR: dict[str, dict[str, str]] = {
     "cloud.gains":  {"ru": "Выгоды", "en": "Gains", "id": "Manfaat"},
     # knowledge-base tree / editor / history
     "kb.preamble":  {"ru": "Вступление",  "en": "Intro",       "id": "Intro"},
+    "kb.doc_md":    {"ru": "Текст документа (markdown, ## — заголовок раздела)",
+                     "en": "Document text (markdown, ## marks a section)",
+                     "id": "Teks dokumen (markdown, ## menandai bagian)"},
     "kb.history":   {"ru": "История",      "en": "History",     "id": "Riwayat"},
     "kb.edited_by": {"ru": "правил:",      "en": "edited by",   "id": "diedit oleh"},
     "kb.restore":   {"ru": "Восстановить", "en": "Restore",     "id": "Pulihkan"},

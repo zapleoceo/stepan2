@@ -518,6 +518,10 @@ _CSS = (
     ".kb-sec{margin-bottom:.5rem}"
     ".kb-sec-h{display:block;font-size:.74rem;font-weight:600;color:#9db3c9;"
     "margin-bottom:.15rem}"
+    # the whole doc is edited as markdown in one field — monospace keeps ## headings and
+    # list indentation readable, and the tab stop stays sane on long facts documents
+    ".kb-md{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;"
+    "font-size:.8rem;line-height:1.5;tab-size:2}"
     ".kb-tr-note{margin:.6rem 0;padding:.5rem .7rem;font-size:.78rem;color:#8fb6ff;"
     "background:rgba(90,162,255,.08);border:1px solid rgba(90,162,255,.25);border-radius:6px}"
     ".frm-ta[readonly],.frm-inp[readonly]{color:#8fb6ff;background:#161d2b}"

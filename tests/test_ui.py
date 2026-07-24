@@ -889,21 +889,26 @@ def test_product_delete_button_is_not_a_nested_form() -> None:
     assert 'type="button"' in html and "hx-confirm=" in html  # never submits the form; warns first
 
 
-def test_kb_editor_section_skeleton_for_empty_canonical_doc() -> None:
+def test_kb_editor_seeds_an_empty_canonical_doc_with_its_skeleton() -> None:
     from app.api._ui_kb import kb_editor_html
     _set_lang("en")
     html = kb_editor_html(1, "persona_core", "Persona core", "")
-    assert 'name="body_0"' in html and 'name="nsec"' in html  # section editor
-    assert "Identity" in html                                  # localized section title
-    assert "/ui/knowledge/1/history" in html                   # history button
+    assert 'name="content"' in html                             # one markdown editor
+    assert "## Identity" in html                                # localized skeleton heading
+    assert "/ui/knowledge/1/history" in html                    # history button
 
 
-def test_kb_editor_parses_existing_sections() -> None:
+def test_kb_editor_shows_the_whole_document_in_one_field() -> None:
+    """The per-section split was retired with the free-only cutover: the prompt loads whole
+    docs, and the split form could not add a section, rename a heading or paste a rewrite."""
     from app.api._ui_kb import kb_editor_html
     _set_lang("en")
-    html = kb_editor_html(2, "faq", "FAQ", "## Payment\nWe take cards.\n\n## Hours\n9-5")
-    assert "Payment" in html and "Hours" in html
+    doc = "## Payment\nWe take cards.\n\n## Hours\n9-5"
+    html = kb_editor_html(2, "facts_policy", "Facts", doc)
+    assert 'name="content"' in html
+    assert "## Payment" in html and "## Hours" in html          # headings stay editable text
     assert "We take cards" in html
+    assert 'name="nsec"' not in html and 'name="head_0"' not in html
 
 
 def test_kb_editor_has_translate_all_button() -> None:
@@ -916,7 +921,7 @@ def test_kb_editor_has_translate_all_button() -> None:
     assert 'onclick="kbTrAll(this)"' in html and "Translate all" in html
     assert 'id="kb-form-138"' in html and 'id="kb-save-138"' in html   # JS targets
     assert 'id="kb-tr-note-138"' in html                                # read-only hint slot
-    assert 'name="body_0"' in html                                      # a translatable field
+    assert 'name="content"' in html                                     # a translatable field
 
 
 def test_kb_translate_all_js_and_route_wired() -> None:
