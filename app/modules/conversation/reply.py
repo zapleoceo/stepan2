@@ -199,6 +199,15 @@ DISCOVERY_CAP_NOTE = (
 _YES_RE = re.compile(
     r"^(?:boleh+|mau+|ok(?:e|ee)?|okok|siap|sip|gas(?:s|keun)?|yu+k|ayo+|yaudah|gpp)"
     r"\b[\s\W]*(?:kak(?:ak)?|dong|aja)?[\s\W]*$", re.IGNORECASE)
+# A fresh fear/doubt/objection in the lead's last message — must be handled BEFORE closing.
+# Sim (p3-close): dossier had landed, so the closing trigger fired, but the lead had just
+# said "takutnya aku ga bisa coding" — closing on a live fear reads as steamrolling and got
+# escalated. Address the worry warmly first; the closing trigger waits for the next turn.
+_OBJECTION_RE = re.compile(
+    r"\b(takut\w*|khawatir|kuatir|ragu\w*|bingung|ga\s*bisa|gabisa|ga\s*ngerti|"
+    r"gangerti|susah|sulit|mahal|kemahalan|berat|belum\s*(?:yakin|siap|sanggup)|"
+    r"gimana\s*(?:kalau|kalo)|takutnya|worry|nggak\s*bisa|nggak\s*ngerti)\b",
+    re.IGNORECASE)
 
 
 def _turn_note(dialog: list, stored: object = None) -> str | None:
@@ -223,9 +232,13 @@ def _turn_note(dialog: list, stored: object = None) -> str | None:
     if BUYING_SIGNAL_RE.search(last) or PAYMENT_INTENT_RE.search(last) \
             or (_YES_RE.match(last) and _bot_just_offered(dialog)):
         return BUYING_SIGNAL_NOTE
-    # Discovery has landed but the lead hasn't committed — close, don't keep talking.
+    # Discovery has landed but the lead hasn't committed — close, don't keep talking. BUT a
+    # fresh fear/objection this turn must be handled first: closing over a live worry reads as
+    # steamrolling (and trips the pitch gate). Let the normal handle_objection path take this
+    # turn; the closing trigger fires again once the worry is answered.
     if (stored is not None and stored.has_discovery()
-            and getattr(stored, "readiness", "") != "ready"):
+            and getattr(stored, "readiness", "") != "ready"
+            and not _OBJECTION_RE.search(last)):
         return CLOSING_NOTE
     if (len(ins) >= DISCOVERY_TURN_CAP and stored is not None
             and not stored.has_discovery()):
