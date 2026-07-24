@@ -144,12 +144,34 @@ _INVENTED_SERVICE_RE = re.compile(
     re.IGNORECASE)
 
 
+# Denying a service is the opposite of inventing one, but the pattern above cannot tell them
+# apart: "nggak ada trial gratis atau konsultasi gratis" matched on "gratis atau konsultasi"
+# and the gate escalated the one honest answer to "is there a free trial?" — a direct question
+# every price-sensitive lead asks. A negation anywhere in the clause before the match means the
+# bot is refusing the service, not offering it.
+_SERVICE_NEGATION_RE = re.compile(
+    r"\b(?:nggak|ngga|gak|ga|tidak|tak|belum|bukan|tanpa|no|not|never|hanya|cuma|satu-satunya)\b",
+    re.IGNORECASE)
+_NEGATION_WINDOW = 60
+
+
 def invented_service_offers(reply: str) -> list[str]:
     """A promised service/session/document that is not part of the offering (threads 5018,
     5063). Only a campus visit is free; the Demo Event is a paid, carded offer. Everything
     else here — free consultations, business/marketing strategy sessions, bespoke
-    cost/break-even analyses — is invented and must not reach the lead."""
-    return [m.group(0) for m in _INVENTED_SERVICE_RE.finditer(reply or "")]
+    cost/break-even analyses — is invented and must not reach the lead.
+
+    A match preceded by a negation in the same clause is the bot DENYING the service, which
+    is exactly what facts_policy tells it to do — never an offer."""
+    out: list[str] = []
+    for m in _INVENTED_SERVICE_RE.finditer(reply or ""):
+        clause_start = max(
+            (reply or "").rfind(sep, 0, m.start()) for sep in (".", "!", "?", "\n", "|||"))
+        window = (reply or "")[max(clause_start + 1, m.start() - _NEGATION_WINDOW):m.start()]
+        if _SERVICE_NEGATION_RE.search(window):
+            continue
+        out.append(m.group(0))
+    return out
 
 
 _ID_MONTHS = {
