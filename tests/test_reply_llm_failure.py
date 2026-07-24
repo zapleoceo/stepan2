@@ -55,6 +55,11 @@ async def _world(s) -> tuple[int, int, Lead, ChannelThread]:  # noqa: ANN001
     thread = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
     s.add(thread)
     await s.flush()
+    # A prior bot turn: the opener module now answers every genuine FIRST turn from
+    # templates (zero LLM calls), so exercising the failing-LLM pipeline needs history.
+    s.add(Message(branch_id=branch.id, thread_id=thread.id, channel_id=ch.id,
+                  external_id="m0", direction="out", sent_by="agent", text="Halo Kak!",
+                  occurred_at=_NOW))
     s.add(Message(branch_id=branch.id, thread_id=thread.id, channel_id=ch.id,
                   external_id="m1", direction="in", sent_by="lead", text="halo",
                   occurred_at=_NOW))
@@ -165,7 +170,8 @@ async def test_decide_returns_none_when_both_fast_and_smart_unparseable(db_sessi
                        branch_settings=_parse({}))
     decision = await svc.decide(tid)
     assert decision is None
-    # The opener always runs on the strong model, and a broken STRONG answer is not retried:
-    # two attempts is the ceiling, and burning the second on the tier that just failed buys
-    # nothing. The fast->smart escalation is covered in test_reply.py.
-    assert llm.calls == 1
+    # A mid-conversation cold turn routes FAST first; unparseable fast escalates ONCE to
+    # smart, and a second unparseable answer degrades to None — exactly two attempts, never
+    # a loop. (The genuine first turn no longer generates at all — opener.py owns it — so
+    # this fixture models turn 2+, where the fast→smart ladder lives.)
+    assert llm.calls == 2

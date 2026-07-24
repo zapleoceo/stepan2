@@ -22,6 +22,11 @@ class _DualLLM:
         self.actor_calls = 0
 
     async def chat(self, messages, *, require_json_schema=False, **kw):  # noqa: ANN001, ANN003, ANN201
+        if kw.get("workflow") == "opener":
+            # The skeleton opener's bounded slot (opener.SLOT_SYSTEM) — plain text, no JSON.
+            # The persona's typed first message asks the price, so the slot may carry the
+            # grounded figure; the frame composes the rest deterministically.
+            return "Vibe Coding 13 juta, bisa dicicil ya.", {"model": "x", "cost_usd": 0.0}
         if require_json_schema:  # Stepan's decision
             # move=answer_question because the lead TYPED a price question ("berapa harga") —
             # the pitch gate (premature_pitch) never applies to a directly-asked price, only

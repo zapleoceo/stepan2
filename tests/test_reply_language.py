@@ -63,6 +63,10 @@ async def _thread(s, *, pref: str | None = None) -> tuple[int, int]:
     th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-1")
     s.add(th)
     await s.flush()
+    # A prior bot turn: the opener module answers every genuine FIRST turn from templates,
+    # so the language plumbing under test needs a turn with history (production turn 2+).
+    s.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="m0",
+                  direction="out", sent_by="agent", text="Halo Kak!", occurred_at=_NOW))
     s.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="m1",
                   direction="in", sent_by="lead", text="halo", occurred_at=_NOW))
     await s.flush()

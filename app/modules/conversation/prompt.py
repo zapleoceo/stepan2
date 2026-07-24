@@ -65,13 +65,21 @@ def source_hint(lead_source: str | None) -> str | None:
 _HANDLE_TELL = re.compile(r"[0-9_@.]")
 
 
-def lead_name_hint(display_name: str | None) -> str | None:
-    """Deterministic: a clean given name to address the lead by, or None for a handle."""
+def clean_first_name(display_name: str | None) -> str | None:
+    """A clean given name to address the lead by, or None for a handle/garbage."""
     name = (display_name or "").strip()
     if not name or _HANDLE_TELL.search(name):
         return None
     first = name.split()[0]
     if not (2 <= len(first) <= 20) or not first.isalpha():
+        return None
+    return first
+
+
+def lead_name_hint(display_name: str | None) -> str | None:
+    """Deterministic: a clean given name to address the lead by, or None for a handle."""
+    first = clean_first_name(display_name)
+    if first is None:
         return None
     return (
         f"LEAD NAME: the lead's name is {first}. Address them by it naturally and sparingly, "

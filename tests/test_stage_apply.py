@@ -542,6 +542,14 @@ async def test_hard_stop_when_already_dormant_writes_no_duplicate_event(db_sessi
 
 async def test_budget_gate_blocks_decide(db_session) -> None:
     bid, tid, _ = await _world(db_session, settings={"daily_budget_usd": "0.01"})
+    # A prior bot turn: a genuine FIRST turn is now answered from the opener templates at
+    # zero cost even over budget (deliberately) — the gate under test only governs turns
+    # that would actually call the broker.
+    thread = await _thread_of(db_session, tid)
+    db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=thread.channel_id,
+                           external_id="out-prior", direction="out", sent_by="agent",
+                           text="Halo Kak!", occurred_at=_NOW))
+    await db_session.flush()
     svc = _svc(db_session, bid)
     first = await svc.decide(tid)  # records 0.02 → over budget after this call
     assert first is not None

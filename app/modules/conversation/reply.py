@@ -29,6 +29,7 @@ from .delivery import ReplyDelivery, _script_lang
 from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import _ASSISTANT_LAST_NUDGE, DecisionEngine
+from .guard import quotes_price
 from .money_gate import (
     MONEY_CORRECTION,
     MONEY_ESCALATION_REASON,
@@ -37,9 +38,20 @@ from .money_gate import (
     money_issues,
     premature_pitch,
 )
+from .opener import (
+    AD_TAP_OPENER,
+    AD_TAP_OPENER_PRODUCT,
+    JUNK_OPENER,
+    SLOT_SYSTEM,
+    STORY_OPENER,
+    Entry,
+    compose_typed_opener,
+)
+from .opener import classify as classify_entry
 from .prompt import (
     AD_TYPED_ENTRY_HINT,
     ORGANIC_ENTRY_HINT,
+    clean_first_name,
     lead_name_hint,
     source_hint,
 )
@@ -47,9 +59,9 @@ from .repository import DossierRepo
 from .routing import SMART, pick_capability
 from .signals import (
     AD_TEMPLATE_RE,
-    ANY_POST_SHARE_RE,
     BUYING_SIGNAL_RE,
     PAYMENT_INTENT_RE,
+    PRICE_QUESTION_RE,
     is_answerable_question,
 )
 
@@ -81,33 +93,6 @@ def _escalate(decision: TurnDecision, reason: str) -> TurnDecision:
     already learned survive; the reply the lead actually sees is always the safe hold-line."""
     return replace(decision, reply=ESCALATION_HOLD_REPLY, needs_human=True, human_reason=reason)
 
-
-# The FIRST reply to a known ad-button prefill (AD_TEMPLATE_RE — a fixed, code-certain string,
-# not a guess) is templated instead of generated. 24h measurement (2026-07-23): the same input
-# text got a correct discovery-first opener 80% of the time and a full unprompted pitch the
-# other 20% (11/56 threads), because "is this a tap or a typed question" was left for the model
-# to infer turn by turn from prose (source_hint + THE ONE RULE's carve-out + FIRST_TURN_NOTE)
-# — three scattered signals the model has to synthesize itself, competing against the tapped
-# text's own very concrete "jadwal, durasi, biaya" wording. Code already knows the answer with
-# certainty; asking a probabilistic model to re-derive it every time wastes a broker call AND
-# costs ~1 in 5 leads a pitch gate escalation. No LLM call needed for a fixed input.
-AD_TAP_OPENER = (
-    "Halo, aku MinStep dari IT STEP Academy 😊 Seneng banget Kakak tertarik! Biar aku bisa "
-    "kasih info yang paling pas, boleh cerita dulu — Kakak lagi cari kursus buat apa nih?"
-)
-
-# The enriched variant when the ad→product mapping already names what they tapped on. The
-# 24h sales audit (2026-07-24, 72 threads) measured 61% of leads going silent after a first
-# reply that gave ZERO information — a warm question alone is an exchange with nothing in it.
-# The prefill asked jadwal/durasi/biaya; naming the product back + the DP/instalment frame
-# answers the spirit of the tap with two GROUNDED facts (facts_policy: DP Rp 500.000 books a
-# seat, zero-interest instalments — deterministic text, so no invented-figure risk) before
-# the one discovery question. Full price still waits for the lead to actually ask.
-AD_TAP_OPENER_PRODUCT = (
-    "Halo, aku MinStep dari IT STEP Academy 😊 Kakak tertarik {title} ya — pilihan seru! "
-    "Booking tempatnya cukup DP Rp 500.000, sisanya bisa dicicil tanpa bunga. Biar infonya "
-    "pas buat Kakak: rencananya skill ini mau dipakai buat apa nih?"
-)
 
 # Deterministic per-turn coaching notes — injected as the LAST user message (same mechanism
 # as followup_framing / _ASSISTANT_LAST_NUDGE) only on the turn their trigger fires, so they
@@ -161,37 +146,6 @@ def _bot_just_offered(dialog: list) -> bool:
     last_out = next((m for m in reversed(dialog) if m.direction == "out"), None)
     return last_out is not None and "?" in (last_out.text or "")
 
-_HAS_LETTERS = re.compile(r"[a-zA-Z]")
-# IG's attachment placeholder in its SHORT form — just the icon + a handle ("📷 itstep_jakarta",
-# thread 5095), which ANY_POST_SHARE_RE misses because that pattern requires the full
-# "handle · handle caption" shape. A lead's own typed text never begins with these icons —
-# they're IG-generated markers for a shared post/story/profile.
-_SHARE_ICON_RE = re.compile(r"^[📷🎬📖🎥🎞👤]")
-
-
-def _ad_tap_first_turn(dialog: list, *, from_ad: bool = False) -> bool:
-    """True when the first turn carries NO informative typed content from the lead.
-
-    Two shapes qualify: (1) a known ad-button prefill plus non-typed bubbles — the tap often
-    arrives as TWO bubbles, a 📷 share header + the prefill, in either order (threads
-    5025/5031/5095); (2) for an ad-sourced thread (`from_ad`), a turn of ONLY bare
-    acknowledgements/emoji/shares — thread 5097 opened with just "iyaaaa" from an ad click,
-    which says nothing the discovery opener could build on, exactly like a tap. Any bubble
-    with real typed content routes to the full LLM path."""
-    texts = [(m.text or "").strip() for m in dialog if m.direction == "in"]
-    texts = [t for t in texts if t]
-    if not texts:
-        return False
-    non_typed = all(
-        AD_TEMPLATE_RE.match(t) or ANY_POST_SHARE_RE.match(t) or _SHARE_ICON_RE.match(t)
-        or _BARE_ACK_RE.match(t) or not _HAS_LETTERS.search(t)
-        for t in texts
-    )
-    if not non_typed:
-        return False
-    return from_ad or any(AD_TEMPLATE_RE.match(t) for t in texts)
-
-
 class ReplyService(ReplyDelivery):
     """Produce one reply for one thread, and remember what it learned.
 
@@ -223,19 +177,39 @@ class ReplyService(ReplyDelivery):
 
         outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
         is_first_reply = not outs
-        if is_first_reply and _ad_tap_first_turn(
-            ctx.dialog, from_ad=bool(ctx.thread.ad_id)
-        ):
-            opener = AD_TAP_OPENER
-            title = await self._product_title(ctx.thread.product_slug)
-            if title:
-                opener = AD_TAP_OPENER_PRODUCT.format(title=title)
-            decision = TurnDecision(
-                reply=opener, move="discover_motive", stage=Stage.QUALIFYING)
-            self.last_decision = decision
-            logger.info("v3 branch=%d thread=%d move=%s tier=templated first=True",
-                        self.branch_id, thread_id, decision.move)
-            return decision.to_legacy(stored)
+        if is_first_reply and script_lang is None:
+            # The first contact is classified by CODE and never free-generated — see opener.py
+            # for the incident history this closes. Silent/junk entries ship a pure template;
+            # typed entries ship a fixed frame with one bounded LLM slot; only when the slot
+            # path declines (broker down, unsafe slot) does the full pipeline take over.
+            # Gated on the lead writing in the branch's own script: the templates and frames
+            # are Bahasa-only, so a Cyrillic opener (thread 452's Russian-speaking lead) goes
+            # straight to the full pipeline, which follows the lead's language.
+            fc = classify_entry(ctx.dialog, ctx.thread.lead_source, ctx.thread.ad_id)
+            templated: str | None = None
+            if fc.entry is Entry.AD_SILENT:
+                title = await self._product_title(ctx.thread.product_slug)
+                templated = (AD_TAP_OPENER_PRODUCT.format(title=title) if title
+                             else AD_TAP_OPENER)
+            elif fc.entry is Entry.STORY and not fc.typed_text:
+                templated = STORY_OPENER
+            elif fc.entry is Entry.JUNK:
+                templated = JUNK_OPENER
+            if templated is not None:
+                decision = TurnDecision(
+                    reply=templated, move="discover_motive", stage=Stage.QUALIFYING)
+                self.last_decision = decision
+                logger.info("v3 branch=%d thread=%d move=%s tier=templated first=True",
+                            self.branch_id, thread_id, decision.move)
+                return decision.to_legacy(stored)
+            if not ctx.over_budget and fc.entry in (Entry.AD_TYPED, Entry.ORGANIC):
+                skeleton = await self._skeleton_opener(engine, ctx, fc, thread_id)
+                if skeleton is not None:
+                    self.last_decision = skeleton
+                    logger.info(
+                        "v3 branch=%d thread=%d move=%s tier=skeleton first=True",
+                        self.branch_id, thread_id, skeleton.move)
+                    return skeleton.to_legacy(stored)
         if ctx.over_budget:
             # prepare() was told to let the zero-cost template branch through; everything
             # from here on calls the broker, so the original budget gate applies now.
@@ -455,6 +429,39 @@ class ReplyService(ReplyDelivery):
                          self.branch_id, thread_id)
             return _escalate(final, PITCH_ESCALATION_REASON)
         return final
+
+    async def _skeleton_opener(
+        self, engine: DecisionEngine, ctx, fc, thread_id: int,  # noqa: ANN001
+    ) -> TurnDecision | None:
+        """First reply to a TYPED entry: fixed frame + one bounded LLM slot (see opener.py).
+
+        Returns None whenever the slot can't be trusted — broker error, empty text, a money
+        figure nobody asked for, or an ungrounded claim — and the caller falls through to the
+        full gated pipeline, so this path can only ever be as risky as the old one."""
+        context = await engine.kb_context(ctx, thread_id, light=False)
+        prompt = SLOT_SYSTEM.format(kb=context[:12000], typed=fc.typed_text[:500])
+        try:
+            raw, meta = await self.llm.chat(
+                [{"role": "user", "content": prompt}], capability=SMART, max_tokens=220,
+                workflow="opener", thread_id=thread_id, branch_id=self.branch_id)
+        except Exception as exc:  # noqa: BLE001 — transport-level; full pipeline takes over
+            logger.warning("skeleton opener failed branch=%d thread=%d: %s",
+                           self.branch_id, thread_id, exc)
+            return None
+        if ctx.budget is not None:
+            await ctx.budget.record(float(meta.get("cost_usd") or 0.0))
+        slot = (raw or "").strip().strip('"')
+        if len(slot) < 5:
+            return None
+        if quotes_price(slot) and not PRICE_QUESTION_RE.search(fc.typed_text):
+            return None  # volunteered figure — the full pipeline's gates own that case
+        if money_issues(slot, context):
+            return None  # ungrounded figure/link — never shippable from any path
+        reply = compose_typed_opener(
+            fc.entry, slot,
+            clean_first_name(ctx.lead.display_name if ctx.lead is not None else None))
+        move = "answer_question" if fc.entry is Entry.AD_TYPED else "discover_situation"
+        return TurnDecision(reply=reply, move=move, stage=Stage.QUALIFYING)
 
     async def _product_title(self, slug: str | None) -> str | None:
         """Display title of the ad-mapped product for the enriched templated opener."""

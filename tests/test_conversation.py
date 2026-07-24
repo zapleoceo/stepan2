@@ -195,17 +195,20 @@ async def test_bare_ack_first_message_from_ad_is_templated(db_session):
     assert llm.calls_seen == []
 
 
-async def test_bare_ack_first_message_without_ad_goes_to_llm(db_session):
-    """The same 'iyaaaa' WITHOUT an ad_id has no product anchor — the organic path (deep
-    discovery via the LLM) is correct there, not a product-less template."""
+async def test_bare_ack_first_message_without_ad_gets_the_clarify_template(db_session):
+    """'iyaaaa' with no ad context says nothing a generation could build on — the neutral
+    clarify template answers it deterministically, at zero broker cost (opener.Entry.JUNK)."""
+    from app.modules.conversation.opener import JUNK_OPENER
+
     s = db_session
     branch_id = await _branch(s)
     thread_id = await _thread_with_inbound(s, branch_id, text="iyaaaa")
     llm = FakeLLM(_DECISION)
 
-    await _reply_service(s, branch_id, llm).decide(thread_id)
+    decision = await _reply_service(s, branch_id, llm).decide(thread_id)
 
-    assert llm.calls_seen != []  # LLM path — the broker WAS called
+    assert decision is not None and decision.reply == JUNK_OPENER
+    assert llm.calls_seen == []  # deterministic — no broker call
 
 
 async def test_second_reply_to_ad_tap_text_is_not_templated(db_session):
@@ -237,6 +240,13 @@ async def test_decide_returns_decision_from_fake_llm(db_session):
     thread_id = await _thread_with_inbound(
         s, branch_id,
         dossier=LeadDossier(pains=["takut telat"], desired_state=["kerja remote"]).to_json())
+    # A prior bot turn — the opener module owns every genuine FIRST turn deterministically,
+    # so the full-pipeline plumbing under test needs history (like production turn 2+).
+    from app.modules.conversation.opener import AD_TAP_OPENER as _OPENER
+    thread = (await s.exec(select(ChannelThread).where(ChannelThread.id == thread_id))).first()
+    s.add(Message(branch_id=branch_id, thread_id=thread_id, channel_id=thread.channel_id,
+                  external_id="out-0", direction="out", sent_by="agent", text=_OPENER))
+    await s.flush()
     llm = FakeLLM(_DECISION)
 
     decision = await _reply_service(s, branch_id, llm).decide(thread_id)

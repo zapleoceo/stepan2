@@ -65,7 +65,22 @@ def _answer(**over) -> str:  # noqa: ANN003
 
 
 async def _thread(s, *, texts: tuple[tuple[str, str], ...] = (("in", "halo"),),  # noqa: ANN001
-                  needs: str | None = None, dossier: str | None = None) -> tuple[int, int, int]:
+                  needs: str | None = None, dossier: str | None = None,
+                  first_turn: bool = False) -> tuple[int, int, int]:
+    """Unless first_turn=True, a prior bot greeting is prepended: the opener module now owns
+    every genuine FIRST turn deterministically (opener.py), so tests that exercise the full
+    LLM pipeline must model a turn with history — exactly like production."""
+    if not first_turn and not any(d == "out" for d, _ in texts):
+        # The templated opener is the canonical prior turn: routing treats the turn right
+        # after it as the first REAL generation (SMART), which is what these tests exercised
+        # back when the LLM still wrote the opener itself.
+        from app.modules.conversation.opener import AD_TAP_OPENER  # noqa: PLC0415
+        texts = (("out", AD_TAP_OPENER), *texts)
+    return await _thread_raw(s, texts=texts, needs=needs, dossier=dossier)
+
+
+async def _thread_raw(s, *, texts: tuple[tuple[str, str], ...],  # noqa: ANN001
+                      needs: str | None = None, dossier: str | None = None) -> tuple[int, int, int]:
     b = Branch(name="T", lang="id")
     s.add(b)
     await s.flush()
