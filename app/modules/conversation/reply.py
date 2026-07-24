@@ -114,12 +114,13 @@ BUYING_SIGNAL_NOTE = (
 CLOSING_NOTE = (
     "[System: you now KNOW this lead's need — see the dossier above (their pain and their "
     "goal). Stop asking discovery questions. Connect that need to the fitting product in one "
-    "warm line using THEIR OWN words, then MOVE TO CLOSE: name one concrete next step with "
-    "honest urgency drawn only from the knowledge base — the nearest intake date, the small "
-    "group size, or the book-now discount if it's Vibe Coding — and ask for their WhatsApp "
-    "naturally so the team can secure their seat / send details. Ask HOW, not WHETHER: two "
-    "options that are both a yes (e.g. weekday vs weekend, visit vs online). Never invent a "
-    "date, a limit, or a discount.]"
+    "warm line using THEIR OWN words, then MOVE TO CLOSE: give ONE concrete next step and ask "
+    "for their WhatsApp naturally so the team can secure their seat / send details. Add honest "
+    "urgency IN WORDS (limited seats, the next intake is soon, or a book-now promo) — but "
+    "state an exact figure or date ONLY if it appears in the knowledge base above; otherwise "
+    "keep it general ('ada promo kalau booking cepat, nanti tim jelasin detailnya'). Ask HOW, "
+    "not WHETHER: two options that are both a yes (weekday vs weekend, visit vs online). Never "
+    "invent a number, a date, a limit, or a discount.]"
 )
 BARE_ACK_NOTE = (
     "[System: the lead has now answered twice in a row with bare acknowledgements — your open "
