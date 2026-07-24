@@ -229,8 +229,7 @@ def _turn_note(dialog: list, stored: object = None) -> str | None:
         return DISENGAGEMENT_NOTE
     if _SALARY_Q_RE.search(last):
         return SALARY_NOTE
-    if BUYING_SIGNAL_RE.search(last) or PAYMENT_INTENT_RE.search(last) \
-            or (_YES_RE.match(last) and _bot_just_offered(dialog)):
+    if _is_buying_signal(dialog):
         return BUYING_SIGNAL_NOTE
     # Discovery has landed but the lead hasn't committed — close, don't keep talking. BUT a
     # fresh fear/objection this turn must be handled first: closing over a live worry reads as
@@ -252,6 +251,19 @@ def _turn_note(dialog: list, stored: object = None) -> str | None:
 def _bot_just_offered(dialog: list) -> bool:
     last_out = next((m for m in reversed(dialog) if m.direction == "out"), None)
     return last_out is not None and "?" in (last_out.text or "")
+
+
+def _is_buying_signal(dialog: list) -> bool:
+    """The lead's last message asks to move forward — an explicit intent word, a payment
+    question, or a yes-word right after the bot's own offer. Doubles as the pitch gate's
+    bypass: a lead who's asking to proceed has earned the close even with an empty dossier."""
+    ins = [m for m in dialog if m.direction == "in"]
+    if not ins:
+        return False
+    last = (ins[-1].text or "").strip()
+    return bool(
+        BUYING_SIGNAL_RE.search(last) or PAYMENT_INTENT_RE.search(last)
+        or (_YES_RE.match(last) and _bot_just_offered(dialog)))
 
 
 def _consecutive_bare_acks(dialog: list) -> int:
@@ -411,7 +423,8 @@ class ReplyService(ReplyDelivery):
             workflow=workflow, capability=capability, context=context, lang=lang,
             last_inbound=(last_in.text if last_in is not None else "") or "",
             lead_typed_a_question=_typed_a_question(last_in), stored=stored,
-            inbound_count=sum(1 for m in ctx.dialog if m.direction == "in"))
+            inbound_count=sum(1 for m in ctx.dialog if m.direction == "in"),
+            lead_ready_signal=_is_buying_signal(ctx.dialog))
 
         merged = merge_dossier(stored, decision.dossier)
         if not merged.has_discovery():
@@ -432,7 +445,7 @@ class ReplyService(ReplyDelivery):
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
         decision: TurnDecision, *, workflow: str, capability: str, context: str, lang: str,
         last_inbound: str, lead_typed_a_question: bool = False, stored: object = None,
-        inbound_count: int = 0,
+        inbound_count: int = 0, lead_ready_signal: bool = False,
     ) -> TurnDecision:
         """Four gates, deliberately asymmetric.
 
@@ -463,6 +476,7 @@ class ReplyService(ReplyDelivery):
             if stored is not None and premature_pitch(
                 fixed.move, stored, lead_typed_a_question, fixed.reply,
                 inbound_count=inbound_count,
+            lead_ready_signal=lead_ready_signal,
             ):
                 # Asymmetry with the critic path closed: a money rewrite that dropped the bad
                 # figure could still be an uninvited pitch, and used to ship unchecked.
@@ -500,6 +514,7 @@ class ReplyService(ReplyDelivery):
         if stored is not None and premature_pitch(
             decision.move, stored, lead_typed_a_question, decision.reply,
             inbound_count=inbound_count,
+            lead_ready_signal=lead_ready_signal,
         ):
             # v2 enforced "no pitch before pain+gain" in code (_stage_for). The v3 rebuild only
             # asked for it in prose, and thread 452 showed that wasn't enough: two turns after a
@@ -512,6 +527,7 @@ class ReplyService(ReplyDelivery):
             if discovered is None or premature_pitch(
                 discovered.move, stored, lead_typed_a_question, discovered.reply,
                 inbound_count=inbound_count,
+            lead_ready_signal=lead_ready_signal,
             ):
                 # thread 5005, thread 5019: the rewrite ignored PITCH_CORRECTION and re-quoted
                 # the same price on an empty-dossier turn twice in a row, even on SMART — and
@@ -560,6 +576,7 @@ class ReplyService(ReplyDelivery):
         if stored is not None and premature_pitch(
             final.move, stored, lead_typed_a_question, final.reply,
             inbound_count=inbound_count,
+            lead_ready_signal=lead_ready_signal,
         ):
             logger.error("v3 critic rewrite pitched uninvited branch=%d thread=%d",
                          self.branch_id, thread_id)

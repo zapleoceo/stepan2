@@ -64,7 +64,7 @@ _PITCH_MOVES = frozenset({"give_value", "quote_price", "invite_campus", "close"}
 
 def premature_pitch(
     move: str, dossier: object, lead_asked_directly: bool, reply: str = "",
-    inbound_count: int = 0,
+    inbound_count: int = 0, lead_ready_signal: bool = False,
 ) -> bool:
     """True when the model pitched before earning the right to.
 
@@ -93,6 +93,14 @@ def premature_pitch(
     if uninvited_price(reply, dossier):
         return True
     if dossier.has_discovery():
+        return False
+    # An explicit buying signal ("mau daftar", "pengen banget", "gas") means the lead is
+    # asking to move forward — closing/presenting is exactly right even when the dossier's
+    # pain+goal fields never got populated (sim p3-close2: the model comforted a fear, the
+    # lead said "pengen banget bisa mandiri", the model closed, and this gate escalated it
+    # for "no discovery"). The uninvited-price rule above still applies — a ready signal
+    # invites the close, not a volunteered number.
+    if lead_ready_signal:
         return False
     if inbound_count >= DISCOVERY_TURN_CAP:
         return False
