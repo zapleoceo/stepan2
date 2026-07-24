@@ -150,6 +150,29 @@ async def test_first_reply_to_ad_tap_is_templated_not_generated(db_session):
     assert llm.calls_seen == []  # zero broker calls — fully deterministic
 
 
+async def test_ad_tap_with_short_share_header_is_still_templated(db_session):
+    """thread 5095: the tap arrived as TWO bubbles — '📷 itstep_jakarta' (IG's SHORT share
+    placeholder, no 'handle · handle' caption) + the prefill. The short form failed both the
+    prefill and post-share patterns, fell to the LLM path, and the critic/pitch-gate conflict
+    escalated a brand-new lead. A share icon prefix is never the lead's own typing."""
+    from app.modules.conversation.reply import AD_TAP_OPENER
+
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id, text="📷 itstep_jakarta")
+    thread = (await s.exec(select(ChannelThread).where(ChannelThread.id == thread_id))).first()
+    s.add(Message(branch_id=branch_id, thread_id=thread_id, channel_id=thread.channel_id,
+                  external_id="in-2", direction="in", sent_by="lead",
+                  text="Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"))
+    await s.flush()
+    llm = FakeLLM(_DECISION)
+
+    decision = await _reply_service(s, branch_id, llm).decide(thread_id)
+
+    assert decision is not None and decision.reply == AD_TAP_OPENER
+    assert llm.calls_seen == []  # deterministic — no broker call
+
+
 async def test_second_reply_to_ad_tap_text_is_not_templated(db_session):
     """The prefill only marks the FIRST message after a tap (signals.py) — if this exact
     text somehow reappears once the bot has already replied once, it's no longer special."""

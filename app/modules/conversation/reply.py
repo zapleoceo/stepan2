@@ -157,22 +157,28 @@ def _bot_just_offered(dialog: list) -> bool:
     return last_out is not None and "?" in (last_out.text or "")
 
 _HAS_LETTERS = re.compile(r"[a-zA-Z]")
+# IG's attachment placeholder in its SHORT form — just the icon + a handle ("📷 itstep_jakarta",
+# thread 5095), which ANY_POST_SHARE_RE misses because that pattern requires the full
+# "handle · handle caption" shape. A lead's own typed text never begins with these icons —
+# they're IG-generated markers for a shared post/story/profile.
+_SHARE_ICON_RE = re.compile(r"^[📷🎬📖🎥🎞👤]")
 
 
 def _ad_tap_first_turn(dialog: list) -> bool:
     """True when the first turn is ONLY a known ad-button prefill plus non-typed bubbles.
 
     An ad tap often arrives as TWO bubbles — a 📷 post-share header and the prefill (threads
-    5025/5031) — in either order, so matching only the LAST inbound missed the prefill
-    whenever the share landed second. A shared post's caption and bare emoji aren't the lead's
-    own words either; but any bubble with real typed text alongside the prefill means the lead
-    edited/added something of their own, and that must go through the full LLM path."""
+    5025/5031/5095) — in either order, so matching only the LAST inbound missed the prefill
+    whenever the share landed second. A shared post's caption/handle and bare emoji aren't the
+    lead's own words either; but any bubble with real typed text alongside the prefill means
+    the lead edited/added something of their own, and that must go through the full LLM path."""
     texts = [(m.text or "").strip() for m in dialog if m.direction == "in"]
     texts = [t for t in texts if t]
     if not any(AD_TEMPLATE_RE.match(t) for t in texts):
         return False
     return all(
-        AD_TEMPLATE_RE.match(t) or ANY_POST_SHARE_RE.match(t) or not _HAS_LETTERS.search(t)
+        AD_TEMPLATE_RE.match(t) or ANY_POST_SHARE_RE.match(t) or _SHARE_ICON_RE.match(t)
+        or not _HAS_LETTERS.search(t)
         for t in texts
     )
 
@@ -392,8 +398,16 @@ class ReplyService(ReplyDelivery):
 
         if capability != SMART:
             return decision  # routine turn — not worth a second call
+        # The critic judges raw text and can't tell a tapped ad prefill from a typed question
+        # — thread 5095: it rejected a correct warm opener for "not answering" the prefill's
+        # jadwal/durasi/biaya wording, and its OWN rewrite added the pitch the pitch gate then
+        # had to escalate. When the answer-first machinery already decided nothing was asked
+        # (a tap, not typing), don't show the critic the pseudo-question at all.
+        critic_inbound = last_inbound
+        if not lead_typed_a_question and AD_TEMPLATE_RE.match((last_inbound or "").strip()):
+            critic_inbound = ""
         verdict = await critic.review(
-            self.llm, reply=decision.reply, context=context, last_inbound=last_inbound,
+            self.llm, reply=decision.reply, context=context, last_inbound=critic_inbound,
             lang=lang, branch_id=self.branch_id, thread_id=thread_id, budget=ctx.budget)
         if verdict.sells:
             return decision
