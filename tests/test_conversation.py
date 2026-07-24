@@ -344,6 +344,46 @@ async def test_send_next_sends_flips_sent_and_records_outgoing(db_session):
     assert out_msgs[0].external_id == "ext-1"
 
 
+async def test_the_broker_line_survives_the_hand_off_to_message(db_session):
+    """The chat reads `message.llm_info`, never `outbox.llm_info` — stamping the queue row
+    is only half the chain. If _outgoing() drops the field the chip disappears with every
+    other assertion still green, so this is the link that needs its own guard."""
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id)
+    s.add(Outbox(branch_id=branch_id, thread_id=thread_id, text="hai kak",
+                 llm_info="1.2s | #abc123 | free | 900↑40↓ | gpt-oss-120b"))
+    await s.flush()
+
+    await OutboxSender(s, branch_id, FakeChannel(ok=True)).send_next(thread_id)
+
+    out = [m for m in await ReplyService(
+        s, branch_id, FakeLLM(_DECISION), KnowledgeService(s, branch_id),
+    ).messages.dialog(thread_id) if m.direction == "out"]
+    assert len(out) == 1
+    assert out[0].llm_info == "1.2s | #abc123 | free | 900↑40↓ | gpt-oss-120b"
+
+
+async def test_a_managers_manual_message_carries_no_broker_line(db_session):
+    """A human wrote it — a blank chip is the correct, permanent answer here (it is why ~12%
+    of outgoing prod rows have no llm_info and always will). Guarded so a future 'fill in the
+    blanks' fix can't start attributing manager text to a model."""
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id)
+    s.add(Outbox(branch_id=branch_id, thread_id=thread_id, text="halo, saya Rina",
+                 source="manager", sent_by_name="Rina"))
+    await s.flush()
+
+    await OutboxSender(s, branch_id, FakeChannel(ok=True)).send_next(thread_id)
+
+    out = [m for m in await ReplyService(
+        s, branch_id, FakeLLM(_DECISION), KnowledgeService(s, branch_id),
+    ).messages.dialog(thread_id) if m.direction == "out"]
+    assert out[0].sent_by == "manager" and out[0].sent_by_name == "Rina"
+    assert out[0].llm_info is None
+
+
 async def test_send_next_failure_marks_failed_and_records_nothing(db_session):
     s = db_session
     branch_id = await _branch(s)
