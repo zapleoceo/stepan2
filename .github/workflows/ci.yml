@@ -7,14 +7,14 @@ on:
 
 jobs:
   test:
-    # Self-hosted runner on the Hetzner box (free minutes forever; the repo stays private —
-    # its git history carries a prod DB dump, so it must never go public). The job runs in a
-    # clean python container, not on the host, so prod services are untouched.
-    runs-on: [self-hosted, hetzner]
-    container: python:3.12-slim
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - name: Install
         run: |
           pip install --upgrade pip

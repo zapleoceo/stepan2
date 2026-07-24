@@ -957,7 +957,7 @@ async def test_clear_filters_display(db_session) -> None:
     await db_session.flush()
 
     rows = await fetch_messages(db_session, th.id)
-    shown = [(r[3], bool(r[12])) for r in rows]  # (text, excluded)
+    shown = [(r[3], bool(r[13])) for r in rows]  # (text, excluded — after sent_by_name at 12)
     # both stay visible; the pre-clear one is greyed (excluded), the post-clear one is live
     assert shown == [("msg0", True), ("msg1", False)]
 
@@ -992,7 +992,7 @@ async def test_clear_boundary_matches_llm_dialog_cutoff(db_session) -> None:
 
     rows = await fetch_messages(db_session, th.id)
     dialog = await MessageRepo(db_session, b.id).dialog(th.id, since=cutoff)
-    assert len(rows) == 1 and bool(rows[0][12]) is True  # shown but greyed (excluded)
+    assert len(rows) == 1 and bool(rows[0][13]) is True  # shown but greyed (excluded)
     assert dialog == []  # … and dropped from the LLM prompt, same boundary
 
 

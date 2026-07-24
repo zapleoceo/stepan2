@@ -1026,8 +1026,12 @@ def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str
 
 def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     (mid, direction, sent_by, text, ts, llm_info, link_url, preview_url,
-     media_id, media_kind, media_ready, media_pending, sent_by_name) = row[:13]  # type: ignore[misc]
-    excluded = bool(row[13]) if len(row) > 13 else False  # greyed, out of Stepan's context
+     media_id, media_kind, media_ready, media_pending) = row[:12]  # type: ignore[misc]
+    # Optional trailing columns, in _MSG_COLS order: sent_by_name, then the excluded flag.
+    # Positional pops keep older 12-column callers (tests, legacy fixtures) working unchanged.
+    rest = list(row[12:])  # type: ignore[index]
+    sent_by_name = rest.pop(0) if rest else None
+    excluded = bool(rest.pop(0)) if rest else False  # greyed, out of Stepan's context
     ex = " bb-ex" if excluded else ""
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
