@@ -101,9 +101,25 @@ def _escalate(decision: TurnDecision, reason: str) -> TurnDecision:
 # ceiling). Both address the two highest-frequency losses in the 24h sales audit.
 BUYING_SIGNAL_NOTE = (
     "[System: the lead's last message is a YES / buying signal. Do NOT open a new discovery "
-    "question — deliver exactly what you just offered, or move ONE concrete step toward "
-    "enrolment (schedule choice, visit slot, registration step). Re-asking about their goals "
-    "after they said yes is how this sale gets lost.]"
+    "question — deliver exactly what you just offered AND move ONE concrete step toward "
+    "enrolment: ask for their WhatsApp number so the team can secure their seat or send "
+    "details, or confirm the schedule/DP. Re-asking about their goals after they said yes is "
+    "how this sale gets lost.]"
+)
+
+# The lead's need is known (dossier has a pain AND a goal) but they haven't committed — the
+# moment to stop discovering and START CLOSING. The 24h audit found only 5% of leads gave a
+# phone: the bot kept the conversation open instead of converting a warm lead. Fires once
+# discovery has landed and the lead isn't already `ready`.
+CLOSING_NOTE = (
+    "[System: you now KNOW this lead's need — see the dossier above (their pain and their "
+    "goal). Stop asking discovery questions. Connect that need to the fitting product in one "
+    "warm line using THEIR OWN words, then MOVE TO CLOSE: name one concrete next step with "
+    "honest urgency drawn only from the knowledge base — the nearest intake date, the small "
+    "group size, or the book-now discount if it's Vibe Coding — and ask for their WhatsApp "
+    "naturally so the team can secure their seat / send details. Ask HOW, not WHETHER: two "
+    "options that are both a yes (e.g. weekday vs weekend, visit vs online). Never invent a "
+    "date, a limit, or a discount.]"
 )
 BARE_ACK_NOTE = (
     "[System: the lead has now answered twice in a row with bare acknowledgements — your open "
@@ -207,6 +223,10 @@ def _turn_note(dialog: list, stored: object = None) -> str | None:
     if BUYING_SIGNAL_RE.search(last) or PAYMENT_INTENT_RE.search(last) \
             or (_YES_RE.match(last) and _bot_just_offered(dialog)):
         return BUYING_SIGNAL_NOTE
+    # Discovery has landed but the lead hasn't committed — close, don't keep talking.
+    if (stored is not None and stored.has_discovery()
+            and getattr(stored, "readiness", "") != "ready"):
+        return CLOSING_NOTE
     if (len(ins) >= DISCOVERY_TURN_CAP and stored is not None
             and not stored.has_discovery()):
         return DISCOVERY_CAP_NOTE

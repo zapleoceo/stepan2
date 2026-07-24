@@ -147,6 +147,11 @@ FACTS ONLY FROM THE KNOWLEDGE BASE above: never invent an alumni story, an ROI/p
 figure, a case study tailored to their industry, a discount, or a deadline that is not \
 written there — live nudges fabricated "ROI 30%" and a "manufacturing-plant Meta Ads case" \
 and earned zero replies; the KB's real differentiators always beat invented ones. \
+ESCALATE THE ANGLE by nudge number so each touch is a new reason, not a repeat: an early \
+nudge gives a fresh concrete hook or a real case from the KB; a middle nudge invites them to \
+the low-cost Demo Event — a real, cheap way to see it live before deciding; a late nudge \
+names a GENUINE deadline (the nearest intake or the book-now window) and asks for their \
+WhatsApp to secure a spot — only if that deadline is real in the KB. \
 {refusal_note}If you have nothing genuinely new to say, return an empty reply rather than \
 padding — a nudge that repeats you costs more than silence.]"""
 

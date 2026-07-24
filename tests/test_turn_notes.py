@@ -9,6 +9,7 @@ from app.modules.conversation.dossier import LeadDossier
 from app.modules.conversation.reply import (
     BARE_ACK_NOTE,
     BUYING_SIGNAL_NOTE,
+    CLOSING_NOTE,
     DISCOVERY_CAP_NOTE,
     DISENGAGEMENT_NOTE,
     SALARY_NOTE,
@@ -87,7 +88,20 @@ def test_discovery_cap_note_after_enough_questions_with_empty_dossier() -> None:
     assert _turn_note(d, LeadDossier()) is DISCOVERY_CAP_NOTE
 
 
-def test_no_cap_note_once_discovery_landed() -> None:
-    d = _d(("in", "a"), ("in", "b"), ("in", "c"), ("in", "d"), ("in", "e"))
+def test_discovery_landed_triggers_the_closing_note() -> None:
+    """Once a pain AND a goal are known, stop discovering and CLOSE (Phase 3.1). Only 5% of
+    leads gave a phone — the bot kept the conversation open on warm leads."""
+    d = _d(("in", "iya bener aku takut telat mulai"))
     dossier = LeadDossier(pains=["takut telat"], desired_state=["kerja remote"])
-    assert _turn_note(d, dossier) is None
+    assert _turn_note(d, dossier) is CLOSING_NOTE
+
+
+def test_no_closing_note_once_the_lead_is_ready() -> None:
+    """A lead already flagged ready is in the hand-off path — don't re-close them."""
+    d = _d(("in", "oke lanjut"))
+    dossier = LeadDossier(pains=["x"], desired_state=["y"], readiness="ready")
+    assert _turn_note(d, dossier) is not CLOSING_NOTE
+
+
+def test_closing_note_asks_for_contact_with_honest_urgency() -> None:
+    assert "WhatsApp" in CLOSING_NOTE and "Never invent" in CLOSING_NOTE
