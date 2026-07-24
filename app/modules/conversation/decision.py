@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 
 from app.domain.enums import Stage
@@ -208,7 +209,7 @@ class TurnDecision:
 
 async def generate(  # noqa: PLR0913
     engine: object, ctx: object, messages: list[dict], thread_id: int, *,
-    workflow: str, capability: str, branch_id: int,
+    workflow: str, capability: str, branch_id: int, free_moves: bool = False,
 ) -> tuple[TurnDecision | None, dict]:
     """One generation, with a single escalation when the cheap model returns broken JSON.
 
@@ -220,7 +221,7 @@ async def generate(  # noqa: PLR0913
     raw, meta = await engine.run(ctx, messages, thread_id,
                                  workflow=workflow, capability=capability)
     try:
-        return parse_turn_decision(raw), meta
+        return parse_turn_decision(raw, free_moves=free_moves), meta
     except ValueError:
         if capability != FAST:
             logger.warning("%s: unparseable decision branch=%d thread=%d — skip",
@@ -231,15 +232,18 @@ async def generate(  # noqa: PLR0913
     raw, meta = await engine.run(ctx, messages, thread_id,
                                  workflow=workflow, capability=SMART)
     try:
-        return parse_turn_decision(raw), meta
+        return parse_turn_decision(raw, free_moves=free_moves), meta
     except ValueError:
         logger.warning("%s: unparseable on both tiers branch=%d thread=%d — skip",
                        workflow, branch_id, thread_id)
         return None, meta
 
 
-def parse_turn_decision(raw_json: str) -> TurnDecision:
-    """Parse the model's JSON; raises ValueError on a broken contract."""
+def parse_turn_decision(raw_json: str, *, free_moves: bool = False) -> TurnDecision:
+    """Parse the model's JSON; raises ValueError on a broken contract.
+
+    `free_moves` (free reply mode) keeps the model's own move label instead of coercing to
+    the enumerated set — there the move is a log line, not a gate input."""
     try:
         data = json.loads(_strip_fences(raw_json))
     except json.JSONDecodeError as exc:
@@ -253,7 +257,7 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
     lang = str(data.get("reply_language") or "").lower().strip()
     return TurnDecision(
         reply=clean_reply(reply),
-        move=_move(data.get("move")),
+        move=_free_move(data.get("move")) if free_moves else _move(data.get("move")),
         stage=_coerce_stage(data.get("stage")),
         dossier=_dossier(data.get("dossier")),
         product_slug=str(data.get("product_slug") or "").strip() or None,
@@ -275,6 +279,16 @@ def _move(value: object) -> str:
         return move
     logger.info("decision: unknown move %r → give_value", value)
     return "give_value"
+
+
+_FREE_MOVE_RE = re.compile(r"[^a-z0-9_]+")
+
+
+def _free_move(value: object) -> str:
+    """Free mode keeps whatever label the model chose (sanitized to a short snake_case slug);
+    the gates that read the enumerated moves are off there, so this is telemetry only."""
+    move = _FREE_MOVE_RE.sub("_", str(value or "").strip().lower()).strip("_")[:40]
+    return move or "free_move"
 
 
 def _dossier(value: object) -> LeadDossier:

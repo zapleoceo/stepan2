@@ -29,6 +29,7 @@ from .delivery import ReplyDelivery, _script_lang
 from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import _ASSISTANT_LAST_NUDGE, DecisionEngine
+from .free_mode import build_messages_free
 from .guard import quotes_price
 from .money_gate import (
     MONEY_CORRECTION,
@@ -56,7 +57,7 @@ from .prompt import (
     source_hint,
 )
 from .repository import DossierRepo
-from .routing import SMART, pick_capability
+from .routing import SALES, SMART, pick_capability
 from .signals import (
     AD_TEMPLATE_RE,
     BUYING_SIGNAL_RE,
@@ -292,11 +293,14 @@ class ReplyService(ReplyDelivery):
 
     async def decide(self, thread_id: int, workflow: str = "reply") -> Decision | None:
         """Run one turn. None when the thread is foreign, silent, or waiting on media."""
+        from app.modules.settings.service import get_settings  # noqa: PLC0415 — avoids a cycle
+
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge,
                                 broker_budget_s=self._broker_budget_s)
         ctx = await engine.prepare(thread_id, workflow=workflow, allow_over_budget=True)
         if ctx is None or _awaiting_media(ctx.dialog):
             return None
+        free = (await get_settings(self.session, self.branch_id)).reply_mode == "free"
 
         lead = ctx.lead
         stored = await self.dossiers.load(lead.id if lead is not None else None)
@@ -334,7 +338,10 @@ class ReplyService(ReplyDelivery):
                 logger.info("v3 branch=%d thread=%d move=%s tier=templated first=True",
                             self.branch_id, thread_id, decision.move)
                 return decision.to_legacy(stored)
-            if not ctx.over_budget and fc.entry in (Entry.AD_TYPED, Entry.ORGANIC):
+            # Free mode: the pure templates above stay (anti-ban, zero-cost), but a TYPED
+            # entry goes to the full free pipeline — writing the opener is exactly the kind
+            # of judgement free mode exists to hand to the strong model.
+            if not free and not ctx.over_budget and fc.entry in (Entry.AD_TYPED, Entry.ORGANIC):
                 skeleton = await self._skeleton_opener(engine, ctx, fc, thread_id)
                 if skeleton is not None:
                     self.last_decision = skeleton
@@ -342,7 +349,8 @@ class ReplyService(ReplyDelivery):
                         "v3 branch=%d thread=%d move=%s tier=skeleton first=True",
                         self.branch_id, thread_id, skeleton.move)
                     return skeleton.to_legacy(stored)
-        if not is_first_reply and _consecutive_bare_acks(ctx.dialog) >= _BARE_ACK_HARD_CAP:
+        if not free and not is_first_reply \
+                and _consecutive_bare_acks(ctx.dialog) >= _BARE_ACK_HARD_CAP:
             # The lead has stalled on bare acks (thread 5042: "iya kk" ×12). More open
             # questions won't land — force a binary either-or deterministically, same as the
             # opener templates. Zero LLM: the model was ignoring the prose note every turn.
@@ -358,6 +366,10 @@ class ReplyService(ReplyDelivery):
             logger.warning("branch=%d over daily LLM budget — %s skipped",
                            self.branch_id, workflow)
             return None
+        if free:
+            return await self._decide_free(
+                engine, ctx, thread_id, workflow=workflow, stored=stored, lang=lang,
+                is_first_reply=is_first_reply)
         # The first LLM turn — a plain first reply, OR the turn right after the templated
         # opener (every prior outbound is the template): with the opener no longer generated,
         # the highest-stakes generation moved to turn 2, but routing's is_first_reply=False
@@ -374,27 +386,7 @@ class ReplyService(ReplyDelivery):
             categories = categories | {"job_outcome"}
         context = await engine.kb_context(
             ctx, thread_id, light=False, objection_categories=categories)
-        # The ad-entry hint asserts "they did not type it and did not ask you anything" —
-        # true ONLY when the opening message really was the untouched button prefill. IG's
-        # composer is editable: a lead can clear it and type a real question (thread 4972),
-        # and the metadata still says ad_clicktomsg — injecting the hint then contradicts the
-        # answer-first rule on the very message it matters most for.
-        first_in = next((m for m in ctx.dialog if m.direction == "in"), None)
-        pure_prefill_entry = bool(
-            first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
-        src = ctx.thread.lead_source
-        if src == "ad_clicktomsg" and not pure_prefill_entry:
-            # The lead typed/edited their own first message — the pure-tap hint would lie
-            # ("they did not ask you anything"), but silence left the model with no entry
-            # context at all (thread 5097). The typed-ad variant keeps the product anchor.
-            entry_hint = AD_TYPED_ENTRY_HINT
-        else:
-            entry_hint = source_hint(src)
-        if entry_hint is None and not src and not ctx.thread.ad_id:
-            # A walk-in with no ad/story signal at all — the deep-discovery entry. Injected
-            # every turn like the other entry hints; harmless once the dossier fills (its own
-            # text defers to answer-first and to what the lead has already said).
-            entry_hint = ORGANIC_ENTRY_HINT
+        entry_hint = _entry_hint(ctx)
         messages = build_messages_v3(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
@@ -444,6 +436,97 @@ class ReplyService(ReplyDelivery):
         logger.info("v3 branch=%d thread=%d move=%s tier=%s first=%s",
                     self.branch_id, thread_id, decision.move, capability, is_first_reply)
         return decision.to_legacy(merged)
+
+    async def _decide_free(  # noqa: PLR0913
+        self, engine: DecisionEngine, ctx, thread_id: int, *, workflow: str,  # noqa: ANN001
+        stored, lang: str, is_first_reply: bool,  # noqa: ANN001
+    ) -> Decision | None:
+        """Free mode's turn: one generation on the strong chain, money gate, learn, ship.
+
+        No turn-notes, no answer/pitch gates, no critic — the model owns the selling. What
+        stays is exactly what protects real money or the pipeline: the money gate (fail-
+        closed), the dossier (follow-ups, routing, CRM), and the delivery machinery."""
+        lead = ctx.lead
+        outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
+        first_llm_turn = is_first_reply or all(t == AD_TAP_OPENER for t in outs)
+        tier = pick_capability(stored, is_first_reply=first_llm_turn)
+        capability = SALES if tier == SMART else tier
+        context = await engine.free_kb_context()
+        messages = build_messages_free(
+            context, ctx.dialog, lang, stored,
+            coaching_notes=await self.coaching.active_manager_notes(),
+            source_block=_entry_hint(ctx),
+            name_block=lead_name_hint(lead.display_name if lead is not None else None),
+            manager_note=lead.manager_note if lead is not None else None,
+            now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
+            is_first_reply=is_first_reply,
+        )
+        if messages[-1]["role"] == "assistant":
+            messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
+        decision, _meta = await self._generate_free(
+            engine, ctx, messages, thread_id, workflow=workflow, capability=capability)
+        if decision is None:
+            return None
+        merged = merge_dossier(stored, decision.dossier)
+        if not merged.has_discovery():
+            extra = await extract_discovery(
+                self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id,
+                budget=ctx.budget)
+            merged = merge_dossier(merged, extra)
+        decision = await self._vet_free(
+            engine, ctx, messages, thread_id, decision, workflow=workflow, context=context)
+        await self.dossiers.save(lead.id if lead is not None else None, merged)
+        self.last_decision = decision
+        logger.info("free branch=%d thread=%d move=%s tier=%s first=%s",
+                    self.branch_id, thread_id, decision.move, capability, is_first_reply)
+        return decision.to_legacy(merged)
+
+    async def _generate_free(  # noqa: PLR0913
+        self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
+        workflow: str, capability: str,
+    ) -> tuple[TurnDecision | None, dict]:
+        """One generation, falling back to chat:smart when the chat:sales chain is down or
+        capped — free mode must degrade to today's quality, never to silence."""
+        try:
+            return await generate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                capability=capability, branch_id=self.branch_id, free_moves=True)
+        except Exception as exc:  # noqa: BLE001 — transport-level; the fallback chain owns it
+            if capability != SALES:
+                raise
+            logger.warning(
+                "free: chat:sales failed branch=%d thread=%d (%s) — falling back to chat:smart",
+                self.branch_id, thread_id, exc)
+            return await generate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                capability=SMART, branch_id=self.branch_id, free_moves=True)
+
+    async def _vet_free(  # noqa: PLR0913
+        self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
+        decision: TurnDecision, *, workflow: str, context: str,
+    ) -> TurnDecision:
+        """Free mode's only gate — the money gate, unchanged in severity: one rewrite on the
+        strong chain, then the safe hold-line. A wrong figure is a promise the school has to
+        honour regardless of which mode wrote it."""
+        issues = money_issues(decision.reply, context)
+        if not issues:
+            return decision
+        logger.warning("free money gate branch=%d thread=%d: %s",
+                       self.branch_id, thread_id, "; ".join(issues))
+        try:
+            fixed = await self._regenerate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                correction=MONEY_CORRECTION.format(issues="; ".join(issues)),
+                capability=SALES, free_moves=True)
+        except Exception as exc:  # noqa: BLE001 — a failed rewrite means the hold-line ships
+            logger.warning("free money rewrite failed branch=%d thread=%d: %s",
+                           self.branch_id, thread_id, exc)
+            fixed = None
+        if fixed is None or money_issues(fixed.reply, context):
+            logger.error("free money gate unfixable branch=%d thread=%d — escalating",
+                         self.branch_id, thread_id)
+            return _escalate(fixed or decision, MONEY_ESCALATION_REASON)
+        return fixed
 
     async def _vet(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
@@ -635,15 +718,37 @@ class ReplyService(ReplyDelivery):
 
     async def _regenerate(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
-        workflow: str, correction: str,
+        workflow: str, correction: str, capability: str = SMART, free_moves: bool = False,
     ) -> TurnDecision | None:
         """One rewrite on the strong model. None when it comes back unparseable, in which case
         the caller keeps the original draft rather than losing the turn."""
         rewritten, _meta = await generate(
             engine, ctx, [*messages, {"role": "user", "content": correction}], thread_id,
-            workflow=workflow, capability=SMART, branch_id=self.branch_id)
+            workflow=workflow, capability=capability, branch_id=self.branch_id,
+            free_moves=free_moves)
         return rewritten
 
+
+
+def _entry_hint(ctx) -> str | None:  # noqa: ANN001
+    """The one entry-context hint this thread earns, shared by both reply modes.
+
+    The ad-entry hint asserts "they did not type it and did not ask you anything" — true
+    ONLY when the opening message really was the untouched button prefill. IG's composer is
+    editable: a lead can clear it and type a real question (thread 4972), and the metadata
+    still says ad_clicktomsg — injecting the tap hint then contradicts answer-first on the
+    very message it matters most for, so the typed-ad variant keeps the product anchor
+    (thread 5097). A walk-in with no ad/story signal at all gets the deep-discovery hint."""
+    first_in = next((m for m in ctx.dialog if m.direction == "in"), None)
+    pure_prefill_entry = bool(
+        first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
+    src = ctx.thread.lead_source
+    if src == "ad_clicktomsg" and not pure_prefill_entry:
+        return AD_TYPED_ENTRY_HINT
+    hint = source_hint(src)
+    if hint is None and not src and not ctx.thread.ad_id:
+        return ORGANIC_ENTRY_HINT
+    return hint
 
 
 def _typed_a_question(last_in: object) -> bool:

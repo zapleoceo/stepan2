@@ -110,6 +110,7 @@ class DecisionEngine:
         # assembly — was recomputed identically 2-4× per turn. Memoize it per turn so only the
         # first complete() of a turn pays for retrieval; the regens reuse it.
         self._ctx_cache: dict[tuple[str | None, str, bool], str] = {}
+        self._free_ctx: str | None = None  # free-mode full surface, memoized per turn
         self._tz_offset_h: int | None = None  # branch tz, lazily loaded for the now-hint
 
     async def _now_local(self) -> datetime:
@@ -183,6 +184,16 @@ class DecisionEngine:
             self._ctx_cache[cache_key] = context
         self.last_context = context  # the reply-guard checks the draft against exactly this
         return context
+
+    async def free_kb_context(self) -> str:
+        """Free mode's stable prefix: the whole fact surface, date-annotated, memoized per
+        turn. Stable within a branch-local day (annotate_dates is the only date-dependent
+        input), which is what keeps the broker's prompt cache warm across leads."""
+        if self._free_ctx is None:
+            context = await self.knowledge.full_knowledge_context()
+            self._free_ctx = annotate_dates(context, (await self._now_local()).date())
+        self.last_context = self._free_ctx  # the money gate checks the draft against this
+        return self._free_ctx
 
     async def run(
         self, ctx: DecisionContext, messages: list[dict], thread_id: int, *,
