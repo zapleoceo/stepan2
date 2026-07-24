@@ -37,7 +37,12 @@ from .money_gate import (
     money_issues,
     premature_pitch,
 )
-from .prompt import ORGANIC_ENTRY_HINT, lead_name_hint, source_hint
+from .prompt import (
+    AD_TYPED_ENTRY_HINT,
+    ORGANIC_ENTRY_HINT,
+    lead_name_hint,
+    source_hint,
+)
 from .repository import DossierRepo
 from .routing import SMART, pick_capability
 from .signals import (
@@ -121,7 +126,7 @@ BARE_ACK_NOTE = (
 )
 
 _BARE_ACK_RE = re.compile(
-    r"^(?:iya?|ya|yaa+|ok(?:e|ee)?|okok|sip|baik|siap|oh|hmm?)\b[\s\W]*(?:kak(?:ak)?)?[\s\W]*$",
+    r"^(?:iya+|iy|ya+|ok(?:e+)?|okok|sip|baik|siap|oh|hmm?)[\s\W]*(?:kak(?:ak)?)?[\s\W]*$",
     re.IGNORECASE)
 # Explicit yes-words that accept a proposal. Deliberately EXCLUDES bare 'iya'/'ya': to an
 # open question ('proyek apa?') those are filler, not acceptance (thread 5042 answered 'iya
@@ -164,23 +169,27 @@ _HAS_LETTERS = re.compile(r"[a-zA-Z]")
 _SHARE_ICON_RE = re.compile(r"^[📷🎬📖🎥🎞👤]")
 
 
-def _ad_tap_first_turn(dialog: list) -> bool:
-    """True when the first turn is ONLY a known ad-button prefill plus non-typed bubbles.
+def _ad_tap_first_turn(dialog: list, *, from_ad: bool = False) -> bool:
+    """True when the first turn carries NO informative typed content from the lead.
 
-    An ad tap often arrives as TWO bubbles — a 📷 post-share header and the prefill (threads
-    5025/5031/5095) — in either order, so matching only the LAST inbound missed the prefill
-    whenever the share landed second. A shared post's caption/handle and bare emoji aren't the
-    lead's own words either; but any bubble with real typed text alongside the prefill means
-    the lead edited/added something of their own, and that must go through the full LLM path."""
+    Two shapes qualify: (1) a known ad-button prefill plus non-typed bubbles — the tap often
+    arrives as TWO bubbles, a 📷 share header + the prefill, in either order (threads
+    5025/5031/5095); (2) for an ad-sourced thread (`from_ad`), a turn of ONLY bare
+    acknowledgements/emoji/shares — thread 5097 opened with just "iyaaaa" from an ad click,
+    which says nothing the discovery opener could build on, exactly like a tap. Any bubble
+    with real typed content routes to the full LLM path."""
     texts = [(m.text or "").strip() for m in dialog if m.direction == "in"]
     texts = [t for t in texts if t]
-    if not any(AD_TEMPLATE_RE.match(t) for t in texts):
+    if not texts:
         return False
-    return all(
+    non_typed = all(
         AD_TEMPLATE_RE.match(t) or ANY_POST_SHARE_RE.match(t) or _SHARE_ICON_RE.match(t)
-        or not _HAS_LETTERS.search(t)
+        or _BARE_ACK_RE.match(t) or not _HAS_LETTERS.search(t)
         for t in texts
     )
+    if not non_typed:
+        return False
+    return from_ad or any(AD_TEMPLATE_RE.match(t) for t in texts)
 
 
 class ReplyService(ReplyDelivery):
@@ -214,7 +223,9 @@ class ReplyService(ReplyDelivery):
 
         outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
         is_first_reply = not outs
-        if is_first_reply and _ad_tap_first_turn(ctx.dialog):
+        if is_first_reply and _ad_tap_first_turn(
+            ctx.dialog, from_ad=bool(ctx.thread.ad_id)
+        ):
             opener = AD_TAP_OPENER
             title = await self._product_title(ctx.thread.product_slug)
             if title:
@@ -249,7 +260,13 @@ class ReplyService(ReplyDelivery):
         pure_prefill_entry = bool(
             first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
         src = ctx.thread.lead_source
-        entry_hint = source_hint(src) if src != "ad_clicktomsg" or pure_prefill_entry else None
+        if src == "ad_clicktomsg" and not pure_prefill_entry:
+            # The lead typed/edited their own first message — the pure-tap hint would lie
+            # ("they did not ask you anything"), but silence left the model with no entry
+            # context at all (thread 5097). The typed-ad variant keeps the product anchor.
+            entry_hint = AD_TYPED_ENTRY_HINT
+        else:
+            entry_hint = source_hint(src)
         if entry_hint is None and not src and not ctx.thread.ad_id:
             # A walk-in with no ad/story signal at all — the deep-discovery entry. Injected
             # every turn like the other entry hints; harmless once the dossier fills (its own

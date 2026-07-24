@@ -173,6 +173,41 @@ async def test_ad_tap_with_short_share_header_is_still_templated(db_session):
     assert llm.calls_seen == []  # deterministic — no broker call
 
 
+async def test_bare_ack_first_message_from_ad_is_templated(db_session):
+    """thread 5097: an ad-click lead cleared the prefill and sent just 'iyaaaa' — zero
+    informative content, exactly like a tap. With the product known from the ad mapping, the
+    templated opener applies; the LLM path (which pitched twice on the empty dossier and
+    escalated) is never entered."""
+    from app.modules.conversation.reply import AD_TAP_OPENER
+
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id, text="iyaaaa")
+    thread = (await s.exec(select(ChannelThread).where(ChannelThread.id == thread_id))).first()
+    thread.ad_id = "AD123"
+    s.add(thread)
+    await s.flush()
+    llm = FakeLLM(_DECISION)
+
+    decision = await _reply_service(s, branch_id, llm).decide(thread_id)
+
+    assert decision is not None and decision.reply == AD_TAP_OPENER
+    assert llm.calls_seen == []
+
+
+async def test_bare_ack_first_message_without_ad_goes_to_llm(db_session):
+    """The same 'iyaaaa' WITHOUT an ad_id has no product anchor — the organic path (deep
+    discovery via the LLM) is correct there, not a product-less template."""
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id, text="iyaaaa")
+    llm = FakeLLM(_DECISION)
+
+    await _reply_service(s, branch_id, llm).decide(thread_id)
+
+    assert llm.calls_seen != []  # LLM path — the broker WAS called
+
+
 async def test_second_reply_to_ad_tap_text_is_not_templated(db_session):
     """The prefill only marks the FIRST message after a tap (signals.py) — if this exact
     text somehow reappears once the bot has already replied once, it's no longer special."""

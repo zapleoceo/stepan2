@@ -34,6 +34,17 @@ _SOURCE_HINTS = {
 # minus the product: one shallow question, then drift toward the flagship course. An organic
 # lead is the one segment where deep discovery IS the opener: nothing about them is known, and
 # whatever brought them here is fresh enough that they typed first.
+# The ad lead who TYPED their own first message (cleared/edited the composer prefill) —
+# neither the pure-tap hint (its "they did not ask you anything" would be false) nor no hint
+# at all (thread 5097: with zero entry context the model pitched twice on an empty dossier).
+# The one thing the entry still reveals is the product they tapped.
+AD_TYPED_ENTRY_HINT = (
+    "ENTRY: the lead arrived from one of our paid ads and TYPED their own first message — "
+    "everything they wrote is their real words, and the answer-first rule fully applies. The "
+    "ad they tapped tells you which product drew them; anchor your discovery to it (what they "
+    "want that skill for, why now) instead of a generic 'what are you looking for'."
+)
+
 ORGANIC_ENTRY_HINT = (
     "ENTRY: the lead reached out to the DM on their own — no ad, no story reply, no product "
     "signal. You know NOTHING about them or what they came for, and no product direction may "
