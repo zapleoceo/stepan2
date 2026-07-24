@@ -22,7 +22,7 @@ from .decision import Decision, TurnDecision, generate
 from .delivery import ReplyDelivery, _script_lang
 from .discovery import extract_discovery
 from .dossier import merge_dossier
-from .engine import _ASSISTANT_LAST_NUDGE, DecisionEngine
+from .engine import _ASSISTANT_LAST_NUDGE, TEMPLATED_META, DecisionEngine
 from .free_mode import build_messages_free
 from .money_gate import (
     MONEY_CORRECTION,
@@ -112,6 +112,7 @@ class ReplyService(ReplyDelivery):
                 decision = TurnDecision(
                     reply=templated, move="discover_motive", stage=Stage.QUALIFYING)
                 self.last_decision = decision
+                self._last_llm_meta = TEMPLATED_META
                 logger.info("reply branch=%d thread=%d tier=templated first=True",
                             self.branch_id, thread_id)
                 return decision.to_legacy(stored)
@@ -178,16 +179,21 @@ class ReplyService(ReplyDelivery):
             logger.warning(
                 "reply: chat:sales failed branch=%d thread=%d (%s) — falling back to chat:smart",
                 self.branch_id, thread_id, exc)
-            return await generate(
+            decision, meta = await generate(
                 engine, ctx, messages, thread_id, workflow=workflow,
                 capability=SMART, branch_id=self.branch_id)
-        if decision is None and capability == SALES:
-            logger.warning(
-                "reply: unparseable chat:sales decision branch=%d thread=%d — retry on smart",
-                self.branch_id, thread_id)
-            return await generate(
-                engine, ctx, messages, thread_id, workflow=workflow,
-                capability=SMART, branch_id=self.branch_id)
+        else:
+            if decision is None and capability == SALES:
+                logger.warning(
+                    "reply: unparseable chat:sales decision branch=%d thread=%d — retry on smart",
+                    self.branch_id, thread_id)
+                decision, meta = await generate(
+                    engine, ctx, messages, thread_id, workflow=workflow,
+                    capability=SMART, branch_id=self.branch_id)
+        # enqueue_reply stamps this on every bubble — the only place the broker line reaches
+        # the chat. Assigning it at the single exit is what keeps the fallback chains honest:
+        # the chip must name the model that actually wrote the text the lead sees.
+        self._last_llm_meta = meta
         return decision, meta
 
     async def _vet(  # noqa: PLR0913
@@ -203,11 +209,12 @@ class ReplyService(ReplyDelivery):
         logger.warning("money gate branch=%d thread=%d: %s",
                        self.branch_id, thread_id, "; ".join(issues))
         try:
-            fixed, _meta = await generate(
+            fixed, meta = await generate(
                 engine, ctx,
                 [*messages, {"role": "user",
                              "content": MONEY_CORRECTION.format(issues="; ".join(issues))}],
                 thread_id, workflow=workflow, capability=SALES, branch_id=self.branch_id)
+            self._last_llm_meta = meta  # the rewrite is what ships — its cost is the turn's
         except Exception as exc:  # noqa: BLE001 — a failed rewrite means the hold-line ships
             logger.warning("money rewrite failed branch=%d thread=%d: %s",
                            self.branch_id, thread_id, exc)

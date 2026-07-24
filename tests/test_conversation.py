@@ -211,6 +211,22 @@ async def test_bare_ack_first_message_without_ad_gets_the_clarify_template(db_se
     assert llm.calls_seen == []  # deterministic — no broker call
 
 
+async def test_a_templated_opener_says_so_on_the_bubble(db_session):
+    """No broker call means no broker line — but a BLANK chip is what a lost meta looks like
+    too (the 2026-07-22 regression). The templated turn labels itself instead."""
+    s = db_session
+    branch_id = await _branch(s)
+    thread_id = await _thread_with_inbound(s, branch_id, text="iyaaaa")
+    svc = _reply_service(s, branch_id, FakeLLM(_DECISION))
+
+    decision = await svc.decide(thread_id)
+    assert decision is not None
+    await svc.enqueue_reply(thread_id, decision)
+
+    row = (await s.exec(select(Outbox).where(Outbox.thread_id == thread_id))).first()
+    assert row is not None and row.llm_info == "templated | free"
+
+
 async def test_second_reply_to_ad_tap_text_is_not_templated(db_session):
     """The prefill only marks the FIRST message after a tap (signals.py) — if this exact
     text somehow reappears once the bot has already replied once, it's no longer special."""
