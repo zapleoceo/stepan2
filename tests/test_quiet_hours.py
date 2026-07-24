@@ -12,8 +12,7 @@ from app.worker import wiring
 _ALWAYS_QUIET = BranchSettings(
     agent_enabled=True, hourly_cap=99, daily_cap=99, quiet_start=0, quiet_end=24,
     reply_delay_min_s=0, reply_delay_max_s=0, tz_offset_h=7, tg_group_id="",
-    followup_enabled=True, followup_schedule_h=[4, 24, 72],
-    tech_search_enabled=False, tech_usecase_enabled=True, daily_budget_usd=0.0,
+    followup_enabled=True, followup_schedule_h=[4, 24, 72], daily_budget_usd=0.0,
     crm_enabled=False, crm_webhook_url="", meta_pixel_id="", meta_capi_token="",
 )
 

@@ -178,11 +178,11 @@ async def _queue_call_failed_message(
     if thread_id is None:
         return False
     # local imports break an import cycle (conversation ← leads) — same pattern as coach
-    from app.modules.conversation.contract import build_messages_v3  # noqa: PLC0415
     from app.modules.conversation.decision import generate  # noqa: PLC0415
     from app.modules.conversation.delivery import _BUBBLE_GAP_S, _split_bubbles  # noqa: PLC0415
     from app.modules.conversation.dossier import merge_dossier  # noqa: PLC0415
     from app.modules.conversation.engine import DecisionEngine, _fmt_llm_meta  # noqa: PLC0415
+    from app.modules.conversation.free_mode import build_messages_free  # noqa: PLC0415
     from app.modules.conversation.repository import DossierRepo  # noqa: PLC0415
     from app.modules.conversation.routing import SMART  # noqa: PLC0415
     from app.modules.knowledge.service import KnowledgeService  # noqa: PLC0415
@@ -198,8 +198,8 @@ async def _queue_call_failed_message(
     dossiers = DossierRepo(session, lead.branch_id)
     stored = await dossiers.load(lead.id)
     try:
-        messages = build_messages_v3(
-            await engine.kb_context(ctx, thread_id, light=False),
+        messages = build_messages_free(
+            await engine.free_kb_context(),
             ctx.dialog, lang, stored,
             now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": _CALL_FAILED_NUDGE.format(lang=lang)})

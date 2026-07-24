@@ -31,24 +31,27 @@ async def test_ensure_creates_all_canonical_docs(db_session) -> None:
     created = await ensure_canonical_docs(db_session, bid, "en")
     assert created == len(CANONICAL_DOCS)
     docs = {d.slug: d for d in await KnowledgeRepo(db_session, bid).all()}
-    assert "persona_core" in docs and docs["persona_core"].category == "persona"
-    assert "playbook_price" in docs and docs["playbook_price"].category == "playbook"
+    # The skeleton is EXACTLY the docs the reply prompt loads — no phantom editors.
+    assert set(docs) == {"persona_core", "facts_policy", "facts_market", "objection_playbook"}
+    assert docs["persona_core"].category == "persona"
+    assert docs["objection_playbook"].category == "playbook"
 
 
 async def test_ensure_is_idempotent_and_keeps_content(db_session) -> None:
     bid = await _branch(db_session)
-    # a pre-existing doc with real content and no category (like the branch-7 seed)
-    db_session.add(KnowledgeDoc(branch_id=bid, slug="faq", title="FAQ", content="real answers"))
+    # a pre-existing canonical doc with real content and no category
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="facts_policy", title="Facts",
+                                content="real answers"))
     await db_session.flush()
 
     first = await ensure_canonical_docs(db_session, bid, "en")
     second = await ensure_canonical_docs(db_session, bid, "en")
     assert second == 0  # nothing new the second time
-    assert first == len(CANONICAL_DOCS) - 1  # faq already existed
+    assert first == len(CANONICAL_DOCS) - 1  # facts_policy already existed
 
-    faq = await KnowledgeRepo(db_session, bid).by_slug("faq")
-    assert faq.content == "real answers"  # content untouched
-    assert faq.category == "reference"    # but category stamped
+    doc = await KnowledgeRepo(db_session, bid).by_slug("facts_policy")
+    assert doc.content == "real answers"  # content untouched
+    assert doc.category == "facts"        # but category stamped
 
 
 async def test_ensure_bumps_updated_at_on_existing_doc(db_session) -> None:
@@ -56,11 +59,11 @@ async def test_ensure_bumps_updated_at_on_existing_doc(db_session) -> None:
     otherwise a UI sorted by recency shows a doc as untouched right after this ran."""
     bid = await _branch(db_session)
     old = datetime(2020, 1, 1)
-    db_session.add(KnowledgeDoc(branch_id=bid, slug="faq", title="FAQ",
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="facts_policy", title="Facts",
                                 content="real answers", updated_at=old))
     await db_session.flush()
 
     await ensure_canonical_docs(db_session, bid, "en")
 
-    faq = await KnowledgeRepo(db_session, bid).by_slug("faq")
-    assert faq.updated_at > old
+    doc = await KnowledgeRepo(db_session, bid).by_slug("facts_policy")
+    assert doc.updated_at > old

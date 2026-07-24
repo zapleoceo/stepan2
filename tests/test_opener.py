@@ -1,6 +1,5 @@
-"""The first-contact classifier and skeletons — the module that ended the July opener
-incidents (threads 4943, 5005, 5019, 5024, 5029, 5031, 5095, 5097): the entry is classified
-by code, and the first message is never free-generated."""
+"""The first-contact classifier — silent/junk entries get a template, typed ones go to the
+full reply pipeline."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,7 +8,6 @@ from app.modules.conversation.opener import (
     AD_TAP_OPENER,  # noqa: F401 — re-export surface used by reply.py and older tests
     Entry,
     classify,
-    compose_typed_opener,
 )
 
 _PREFILL = "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"
@@ -93,30 +91,3 @@ def test_greeting_only_walk_in_is_junk_not_organic() -> None:
     assert classify(_dlg("halo"), None, None).entry is Entry.JUNK
 
 
-# ── skeleton composition ─────────────────────────────────────────────────────
-
-def test_compose_trims_a_question_out_of_the_slot() -> None:
-    """The frame's own question must stay the only one (one-question-per-message)."""
-    msg = compose_typed_opener(Entry.AD_TYPED, "SMM Intensive 2 minggu, mau tahu lebih?", None)
-    assert msg.count("?") == 1
-    assert "mau tahu lebih" in msg  # content kept, question mark stripped
-
-
-def test_compose_includes_the_lead_name_when_clean() -> None:
-    msg = compose_typed_opener(Entry.ORGANIC, "Datanya ada di kurikulum kami.", "Maria")
-    assert "Kak Maria" in msg
-    assert "MinStep" in msg  # the fixed intro frame survives
-
-
-def test_compose_caps_slot_length() -> None:
-    msg = compose_typed_opener(Entry.AD_TYPED, "x" * 2000, None)
-    assert len(msg) < 600
-
-
-def test_compose_strips_a_second_greeting_from_the_slot() -> None:
-    """Live sim (branch 8): the slot opened with its own 'Halo Kak, senang banget…' despite
-    SLOT_SYSTEM's no-greeting rule — the frame already greets, so the clause is stripped."""
-    msg = compose_typed_opener(
-        Entry.ORGANIC, "Halo Kak, senang banget bisa bantu! Vibe Coding cocok banget.", None)
-    assert msg.count("Halo") == 1  # only the frame's own greeting survives
-    assert "Vibe Coding cocok" in msg  # the content after the greeting is kept

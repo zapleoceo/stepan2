@@ -46,9 +46,11 @@ def test_a_broken_contract_raises_rather_than_returning_a_bad_reply(bad: str) ->
         parse_turn_decision(bad)
 
 
-def test_an_unknown_move_degrades_instead_of_aborting_the_turn() -> None:
-    assert parse_turn_decision(_raw(move="upsell_hard")).move == "give_value"
-    assert parse_turn_decision(_raw(move=None)).move == "give_value"
+def test_the_models_own_move_label_is_kept_sanitized() -> None:
+    """The move is telemetry, not a gate input — keep the model's label, slugified."""
+    assert parse_turn_decision(_raw(move="upsell_hard")).move == "upsell_hard"
+    assert parse_turn_decision(_raw(move="Comfort Then Close!")).move == "comfort_then_close"
+    assert parse_turn_decision(_raw(move=None)).move == "free_move"
 
 
 def test_an_unknown_stage_falls_back_to_an_active_one() -> None:
