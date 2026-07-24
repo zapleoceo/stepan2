@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sqlalchemy import text
@@ -29,6 +29,11 @@ EVENT_THINKING = "thinking"
 # A FAILED push is NOT marked, so it retries next run (and auto-drains once the CRM endpoint
 # is fixed). Keyed the same way reactivation keys its cap/gap off a StageEvent reason.
 PUSHED_REASON = "crm_pushed"
+# Separate marker for the HAND-OFF push (ready/manager exit): the warm-lead PUSHED_REASON may
+# already be set from a drain that ran BEFORE the hand-off (thread 4529: pushed as warm on
+# 23.07, RSVP'd + escalated on 24.07 — the escalation is a materially new CRM event, not a
+# re-push of the same state), so hand-off idempotency needs its own key.
+PUSHED_HANDOFF_REASON = "crm_pushed_handoff"
 DRAIN_BATCH = 25
 
 
@@ -250,6 +255,79 @@ async def drain_writeback(
         else:
             failed += 1
             logger.warning("crm writeback failed lead=%d: %s", lead.lead_id, detail)
+    if pushed:
+        await session.flush()
+    return {"eligible": len(leads), "pushed": pushed, "failed": failed}
+
+
+async def fetch_unpushed_handoffs(
+    session: AsyncSession, branch_id: int, limit: int = DRAIN_BATCH,
+    now: datetime | None = None,
+) -> list[LeadToPush]:
+    """Human-led leads (ready/manager/handed_off) WITH a phone whose hand-off never reached
+    the CRM — the phone typically arrives AFTER the escalation muted the bot (thread 4529:
+    RSVP escalated at 01:09 with no contact, the number landed 03:41 via ingest's miner, and
+    nothing ever told the CRM). The flip-time push (delivery.push_crm_after_commit) covers the
+    phone-first case and writes PUSHED_HANDOFF_REASON; this sweep catches the phone-later and
+    push-failed leftovers. Windowed to hand-offs from the last 7 days so history that managers
+    already worked by hand isn't re-announced."""
+    now = now or datetime.now(UTC).replace(tzinfo=None)
+    rows = (await session.execute(text(
+        "SELECT l.id, l.phone_e164,"
+        " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.needs,"
+        " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
+        "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
+        " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
+        " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
+        "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
+        "   AND EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
+        "     AND se.to_stage IN ('ready','manager','handed_off') AND se.created_at >= :since)"
+        "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
+        "     AND se.reason=:pushed)"
+        " ORDER BY l.last_active_at DESC NULLS LAST LIMIT :lim"),
+        {"bid": branch_id, "lim": limit, "pushed": PUSHED_HANDOFF_REASON,
+         "since": now - timedelta(days=7)})).all()
+    out = []
+    seen: set[int] = set()
+    for r in rows:
+        if r[0] in seen:
+            continue
+        seen.add(r[0])
+        dossier = parse_dossier(r[7], legacy_needs=r[8])
+        out.append(LeadToPush(
+            lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
+            product=r[4], days_idle=0, last_msg=r[9] or "",
+            job_to_be_done=dossier.job_to_be_done,
+            pains=dossier.pains, desired_state=dossier.desired_state))
+    return out
+
+
+async def drain_handoffs(
+    session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
+    limit: int = DRAIN_BATCH,
+) -> dict[str, Any]:
+    """Sweep un-pushed hand-offs into the CRM (see fetch_unpushed_handoffs). Same
+    marker-on-success / retry-on-failure contract as drain_writeback."""
+    from app.adapters.db.models import StageEvent  # noqa: PLC0415
+
+    leads = await fetch_unpushed_handoffs(session, branch_id, limit=limit)
+    pushed, failed = 0, 0
+    for lead in leads:
+        comment = _comment_for(lead).replace(
+            "Perlu di-follow up (telepon/WA).",
+            "Lead SUDAH diserahkan ke tim (hand-off) - hubungi segera.")
+        ok, detail = await pusher.add_lead_event(
+            lead.phone, EVENT_WAIT_CALL, comment=comment, name=lead.name)
+        if ok:
+            pushed += 1
+            session.add(StageEvent(
+                branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
+                from_stage=lead.stage, to_stage=lead.stage,
+                actor="system", reason=PUSHED_HANDOFF_REASON))
+        else:
+            failed += 1
+            logger.warning("crm handoff sweep failed lead=%d: %s", lead.lead_id, detail)
     if pushed:
         await session.flush()
     return {"eligible": len(leads), "pushed": pushed, "failed": failed}

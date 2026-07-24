@@ -633,7 +633,11 @@ class ReplyDelivery:
         if cfg is None:
             return
         from app.adapters.db.session import session_scope  # noqa: PLC0415
-        from app.modules.crm.push_mcp import EVENT_WAIT_CALL, CrmMcpPusher  # noqa: PLC0415
+        from app.modules.crm.push_mcp import (  # noqa: PLC0415
+            EVENT_WAIT_CALL,
+            PUSHED_HANDOFF_REASON,
+            CrmMcpPusher,
+        )
         from app.modules.notifications.summarize import build_alert_body  # noqa: PLC0415
         try:
             async with session_scope() as session:
@@ -645,7 +649,7 @@ class ReplyDelivery:
                 body = await build_alert_body(
                     session, self.llm, thread_id, branch_lang=lang,
                     reason_en=reason, reason_ru=reason, branch_id=self.branch_id)
-                phone, name = lead.phone_e164, lead.display_name
+                phone, name, stage = lead.phone_e164, lead.display_name, str(lead.stage)
             pusher = CrmMcpPusher(
                 cfg.crm_mcp_url, cfg.crm_mcp_city_alias,
                 timeout_s=settings().crm_mcp_timeout_s)
@@ -654,6 +658,14 @@ class ReplyDelivery:
                 name=name or "Stepan")
             if not ok:
                 logger.warning("crm handoff-push failed lead=%d: %s", lead_id, detail)
+                return  # unmarked → the drain_handoffs sweep retries it next cron run
+            async with session_scope() as session:
+                # Success marker in its own tx — keeps drain_handoffs (the phone-arrived-later
+                # sweep) from double-announcing a hand-off this push already delivered.
+                session.add(StageEvent(
+                    branch_id=self.branch_id, lead_id=lead_id, thread_id=thread_id,
+                    from_stage=stage, to_stage=stage,
+                    actor="system", reason=PUSHED_HANDOFF_REASON))
         except Exception:
             logger.warning("crm handoff-push errored lead=%d", lead_id, exc_info=True)
 

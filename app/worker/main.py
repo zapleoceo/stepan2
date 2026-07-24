@@ -495,7 +495,11 @@ async def sync_crm_writeback_branch(ctx: dict[str, Any], branch_id: int) -> int:
     (crm_lead_add_event, keyed by phone). Fail-open — a broken /lead/add-contact just logs a 404
     and the lead stays unmarked, so it retries next run and auto-drains once the endpoint is
     fixed. Gated by crm_writeback_enabled + a configured crm_mcp_url."""
-    from app.modules.crm.push_mcp import CrmMcpPusher, drain_writeback  # noqa: PLC0415
+    from app.modules.crm.push_mcp import (  # noqa: PLC0415
+        CrmMcpPusher,
+        drain_handoffs,
+        drain_writeback,
+    )
     try:
         async with session_scope() as session:
             cfg = await get_settings(session, branch_id)
@@ -504,10 +508,16 @@ async def sync_crm_writeback_branch(ctx: dict[str, Any], branch_id: int) -> int:
             pusher = CrmMcpPusher(
                 cfg.crm_mcp_url, cfg.crm_mcp_city_alias, settings().crm_mcp_timeout_s)
             res = await drain_writeback(session, branch_id, pusher)
-        if res["pushed"] or res["failed"]:
-            logger.info("crm writeback branch=%d: pushed=%d failed=%d eligible=%d",
-                        branch_id, res["pushed"], res["failed"], res["eligible"])
-        return int(res["pushed"])
+            # Hand-offs whose phone arrived AFTER the escalation muted the bot (thread 4529:
+            # the flip-time push found no contact; the number landed hours later via ingest's
+            # miner, and nothing else would ever tell the CRM).
+            handoffs = await drain_handoffs(session, branch_id, pusher)
+        if res["pushed"] or res["failed"] or handoffs["pushed"] or handoffs["failed"]:
+            logger.info(
+                "crm writeback branch=%d: warm pushed=%d failed=%d · handoffs pushed=%d "
+                "failed=%d", branch_id, res["pushed"], res["failed"],
+                handoffs["pushed"], handoffs["failed"])
+        return int(res["pushed"]) + int(handoffs["pushed"])
     except Exception:
         logger.exception("crm writeback: branch=%s failed, skipping", branch_id)
         return 0
