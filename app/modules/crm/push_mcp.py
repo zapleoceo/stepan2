@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.modules.conversation.dossier import parse_dossier
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,9 @@ class LeadToPush:
     product: str | None
     days_idle: int
     last_msg: str
+    job_to_be_done: str = ""
+    pains: list[str] = field(default_factory=list)
+    desired_state: list[str] = field(default_factory=list)
 
 
 class CrmMcpPusher:
@@ -62,7 +67,7 @@ class CrmMcpPusher:
         from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
 
         try:
-            async with streamablehttp_client(self.url) as (r, w, _):
+            async with streamablehttp_client(self.url, timeout=self.timeout_s) as (r, w, _):
                 async with ClientSession(r, w) as s:
                     await s.initialize()
                     # crm_lead_add_event assumes the phone is ALREADY a CRM contact — for an
@@ -141,11 +146,23 @@ def _coerce_dt(v: Any) -> datetime | None:
 
 
 def _comment_for(lead: LeadToPush) -> str:
+    """SPIN-shaped summary for managerComment — job_to_be_done/pains/desired_state straight
+    from the dossier, so a manager reads why the lead is here before ever opening the chat.
+    Falls back to the last inbound line when discovery hasn't landed yet (dossier empty),
+    same as before this dossier data existed — never leaves the comment blank."""
     prod = lead.product or "belum jelas"
-    last = (lead.last_msg or "").strip()[:120] or "-"
+    spin = [
+        f"Tujuan: {lead.job_to_be_done}" if lead.job_to_be_done else "",
+        f"Kendala: {'; '.join(lead.pains)}" if lead.pains else "",
+        f"Ingin: {'; '.join(lead.desired_state)}" if lead.desired_state else "",
+    ]
+    body = " | ".join(p for p in spin if p)
+    if not body:
+        last = (lead.last_msg or "").strip()[:120] or "-"
+        body = f"Belum ada discovery. Pesan terakhir lead: \"{last}\""
     return (
-        f"[Stepan IG] Lead hangat, stage={lead.stage}, minat={prod}, diam {lead.days_idle} hari. "
-        f"Pesan terakhir lead: \"{last}\". Perlu di-follow up (telepon/WA)."
+        f"[Stepan IG] {body}. Minat: {prod}, stage={lead.stage}, diam {lead.days_idle} hari. "
+        f"Perlu di-follow up (telepon/WA)."
     )
 
 
@@ -163,7 +180,7 @@ async def fetch_leads_with_phone(
     rows = (await session.execute(text(
         "SELECT l.id, l.phone_e164,"  # noqa: S608 — not_pushed is a fixed fragment, values bound
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
-        " l.stage, ct.product_slug, l.created_at, l.last_active_at,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.needs,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
@@ -173,14 +190,24 @@ async def fetch_leads_with_phone(
         " ORDER BY l.created_at DESC LIMIT :lim"),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_REASON})).all()
     out = []
+    seen: set[int] = set()
     for r in rows:
+        if r[0] in seen:
+            # A cross-channel-merged lead has several threads → the JOIN yields one row per
+            # thread, which used to push N duplicate wait_call events (and N PUSHED markers)
+            # for one person. First row wins — created_at DESC puts the newest thread first.
+            continue
+        seen.add(r[0])
         created, last_active = _coerce_dt(r[5]), _coerce_dt(r[6])
         cands = [x for x in (created, last_active) if x is not None]
         recency = max(cands) if cands else now
         days_idle = max(0, (now - recency).days)
+        dossier = parse_dossier(r[7], legacy_needs=r[8])
         out.append(LeadToPush(
             lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
-            product=r[4], days_idle=days_idle, last_msg=r[7] or ""))
+            product=r[4], days_idle=days_idle, last_msg=r[9] or "",
+            job_to_be_done=dossier.job_to_be_done,
+            pains=dossier.pains, desired_state=dossier.desired_state))
     return out
 
 

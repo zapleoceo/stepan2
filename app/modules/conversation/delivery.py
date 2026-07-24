@@ -189,6 +189,11 @@ class ReplyDelivery:
         self.outbox = OutboxRepo(session, branch_id)
         self.coaching = CoachingNoteRepo(session, branch_id)
         self._last_llm_meta: dict = {}
+        # (lead_id, thread_id, reason) queued by a hand-off for the worker to push into the
+        # CRM AFTER the reply transaction commits — the push used to run inline, holding the
+        # thread's advisory lock through an LLM summary + two MCP round-trips, and a rollback
+        # after a successful push left a duplicate event in the CRM (side effect pre-commit).
+        self.pending_crm_push: tuple[int, int, str] | None = None
 
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.
@@ -386,6 +391,7 @@ class ReplyDelivery:
         lead.stage = new_stage
         if new_stage == Stage.MANAGER:
             lead.agent_enabled = False  # human takes over; manager may re-enable
+            self._queue_crm_push(lead, thread, reason_text or "Lead escalated to manager")
         if new_stage == Stage.READY:
             await self._handoff(lead, thread, eff_subtype)
         self.session.add(lead)
@@ -594,38 +600,62 @@ class ReplyDelivery:
                 event_id=f"handoff-{self.branch_id}-{lead.id}",
                 phone=lead.phone_e164,
             )
-        await self._push_crm_ready(lead, thread)
+        self._queue_crm_push(
+            lead, thread, f"Lead ready to enrol ({lead.ready_subtype or 'deal'})")
 
-    async def _push_crm_ready(self, lead: Lead, thread) -> None:
-        """Push the ready-to-enrol lead into the CRM funnel with the chat's own summary as
-        context — push_mcp.drain_writeback (the background warm-lead push) deliberately
-        EXCLUDES ready/manager/handed_off leads, so a hand-off used to reach the Telegram
-        alert only, with nothing landing in the CRM a manager actually works from (thread
-        452). Reuses crm_writeback_enabled/crm_mcp_url — same feature flag and transport as
-        the warm-lead drain, just a different trigger."""
+    def _queue_crm_push(self, lead: Lead, thread, reason: str) -> None:
+        """Mark a lead that just exited to a human (ready OR manager) for a CRM push — the
+        actual push runs in push_crm_after_commit(), called by the WORKER once the reply
+        transaction has committed. push_mcp.drain_writeback (the background warm-lead push)
+        deliberately EXCLUDES ready/manager/handed_off leads, so both kinds of hand-off used
+        to reach the Telegram alert only, with nothing landing in the CRM a manager actually
+        works from (thread 452). Contact-less hand-offs are skipped: the CRM joins by phone."""
         if not lead.phone_e164:
             return
         cfg = self.settings
         if cfg is None or not cfg.crm_writeback_enabled or not cfg.crm_mcp_url:
             return
+        self.pending_crm_push = (lead.id, thread.id, reason)
+
+    async def push_crm_after_commit(self) -> None:
+        """Run the queued CRM push in its OWN session, after the reply transaction committed.
+
+        Inline (the first version) it held the thread's advisory lock and row locks through an
+        LLM summary plus two MCP round-trips, and a rollback after a successful push meant a
+        duplicate CRM event on the retry. Post-commit, the worst failure mode inverts to the
+        benign one: the hand-off is committed and only the CRM event is missing — visible in
+        the log, re-creatable by hand, and never a duplicate."""
+        if self.pending_crm_push is None:
+            return
+        lead_id, thread_id, reason = self.pending_crm_push
+        self.pending_crm_push = None
+        cfg = self.settings
+        if cfg is None:
+            return
+        from app.adapters.db.session import session_scope  # noqa: PLC0415
         from app.modules.crm.push_mcp import EVENT_WAIT_CALL, CrmMcpPusher  # noqa: PLC0415
         from app.modules.notifications.summarize import build_alert_body  # noqa: PLC0415
-        branch = await self.session.get(Branch, self.branch_id)
-        lang = branch.lang if branch is not None else "id"
-        reason = f"Lead ready to enrol ({lead.ready_subtype or 'deal'})"
-        body = await build_alert_body(
-            self.session, self.llm, thread.id, branch_lang=lang,
-            reason_en=reason, reason_ru=reason, branch_id=self.branch_id)
-        comment = body.summary_branch or reason
-        pusher = CrmMcpPusher(cfg.crm_mcp_url, cfg.crm_mcp_city_alias)
         try:
+            async with session_scope() as session:
+                lead = await session.get(Lead, lead_id)
+                if lead is None or not lead.phone_e164:
+                    return
+                branch = await session.get(Branch, self.branch_id)
+                lang = branch.lang if branch is not None else "id"
+                body = await build_alert_body(
+                    session, self.llm, thread_id, branch_lang=lang,
+                    reason_en=reason, reason_ru=reason, branch_id=self.branch_id)
+                phone, name = lead.phone_e164, lead.display_name
+            pusher = CrmMcpPusher(
+                cfg.crm_mcp_url, cfg.crm_mcp_city_alias,
+                timeout_s=settings().crm_mcp_timeout_s)
             ok, detail = await pusher.add_lead_event(
-                lead.phone_e164, EVENT_WAIT_CALL, comment=comment,
-                name=lead.display_name or "Stepan")
+                phone, EVENT_WAIT_CALL, comment=body.summary_branch or reason,
+                name=name or "Stepan")
             if not ok:
-                logger.warning("crm ready-push failed lead=%d: %s", lead.id, detail)
+                logger.warning("crm handoff-push failed lead=%d: %s", lead_id, detail)
         except Exception:
-            logger.warning("crm ready-push errored lead=%d", lead.id, exc_info=True)
+            logger.warning("crm handoff-push errored lead=%d", lead_id, exc_info=True)
 
     async def _handoff_openhouse(self, lead: Lead, thread) -> None:
         """Lead RSVP'd to an event (open house / demo day): notify the team with a

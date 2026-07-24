@@ -16,6 +16,7 @@ this replaces how a reply is produced, not how it is delivered."""
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import replace
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
@@ -39,7 +40,7 @@ from .money_gate import (
 from .prompt import lead_name_hint, source_hint
 from .repository import DossierRepo
 from .routing import SMART, pick_capability
-from .signals import AD_TEMPLATE_RE, is_answerable_question
+from .signals import AD_TEMPLATE_RE, ANY_POST_SHARE_RE, is_answerable_question
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,26 @@ AD_TAP_OPENER = (
     "kasih info yang paling pas, boleh cerita dulu — Kakak lagi cari kursus buat apa nih?"
 )
 
+_HAS_LETTERS = re.compile(r"[a-zA-Z]")
+
+
+def _ad_tap_first_turn(dialog: list) -> bool:
+    """True when the first turn is ONLY a known ad-button prefill plus non-typed bubbles.
+
+    An ad tap often arrives as TWO bubbles — a 📷 post-share header and the prefill (threads
+    5025/5031) — in either order, so matching only the LAST inbound missed the prefill
+    whenever the share landed second. A shared post's caption and bare emoji aren't the lead's
+    own words either; but any bubble with real typed text alongside the prefill means the lead
+    edited/added something of their own, and that must go through the full LLM path."""
+    texts = [(m.text or "").strip() for m in dialog if m.direction == "in"]
+    texts = [t for t in texts if t]
+    if not any(AD_TEMPLATE_RE.match(t) for t in texts):
+        return False
+    return all(
+        AD_TEMPLATE_RE.match(t) or ANY_POST_SHARE_RE.match(t) or not _HAS_LETTERS.search(t)
+        for t in texts
+    )
+
 
 class ReplyService(ReplyDelivery):
     """Produce one reply for one thread, and remember what it learned.
@@ -101,7 +122,7 @@ class ReplyService(ReplyDelivery):
         """Run one turn. None when the thread is foreign, silent, or waiting on media."""
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge,
                                 broker_budget_s=self._broker_budget_s)
-        ctx = await engine.prepare(thread_id, workflow=workflow)
+        ctx = await engine.prepare(thread_id, workflow=workflow, allow_over_budget=True)
         if ctx is None or _awaiting_media(ctx.dialog):
             return None
 
@@ -114,18 +135,27 @@ class ReplyService(ReplyDelivery):
             lead.preferred_language = script_lang
             self.session.add(lead)
 
-        is_first_reply = not any(m.direction == "out" for m in ctx.dialog)
-        if (
-            is_first_reply and last_in is not None
-            and AD_TEMPLATE_RE.match((last_in.text or "").strip())
-        ):
+        outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
+        is_first_reply = not outs
+        if is_first_reply and _ad_tap_first_turn(ctx.dialog):
             decision = TurnDecision(
                 reply=AD_TAP_OPENER, move="discover_motive", stage=Stage.QUALIFYING)
             self.last_decision = decision
             logger.info("v3 branch=%d thread=%d move=%s tier=templated first=True",
                         self.branch_id, thread_id, decision.move)
             return decision.to_legacy(stored)
-        capability = pick_capability(stored, is_first_reply=is_first_reply)
+        if ctx.over_budget:
+            # prepare() was told to let the zero-cost template branch through; everything
+            # from here on calls the broker, so the original budget gate applies now.
+            logger.warning("branch=%d over daily LLM budget — %s skipped",
+                           self.branch_id, workflow)
+            return None
+        # The first LLM turn — a plain first reply, OR the turn right after the templated
+        # opener (every prior outbound is the template): with the opener no longer generated,
+        # the highest-stakes generation moved to turn 2, but routing's is_first_reply=False
+        # sent it to the cheap tier with an empty dossier steering every other branch to FAST.
+        first_llm_turn = is_first_reply or all(t == AD_TAP_OPENER for t in outs)
+        capability = pick_capability(stored, is_first_reply=first_llm_turn)
         context = await engine.kb_context(
             ctx, thread_id, light=False,
             objection_categories=stored.open_objection_categories())
@@ -216,7 +246,19 @@ class ReplyService(ReplyDelivery):
                 engine, ctx, messages, thread_id, workflow=workflow,
                 correction=ANSWER_FIRST_CORRECTION)
             if answered is not None:
-                return answered  # shipped as-is; a second rewrite is what v2 did
+                # Same lesson as the critic path (thread 5010): a correction that demands
+                # "give the actual answer FIRST" is exactly the instruction that talks the
+                # model into a figure — and this rewrite used to ship with no check at all.
+                # The original draft passed money_issues above; its rewrite must too. (No
+                # premature_pitch re-check needed: lead_typed_a_question is True on this
+                # branch, which is that gate's own bypass.)
+                rewrite_issues = money_issues(answered.reply, context)
+                if rewrite_issues:
+                    logger.error(
+                        "answer gate rewrite added an ungrounded claim branch=%d thread=%d: %s",
+                        self.branch_id, thread_id, "; ".join(rewrite_issues))
+                    return _escalate(answered, MONEY_ESCALATION_REASON)
+                return answered  # one rewrite only; a second rewrite is what v2 did
 
         if stored is not None and premature_pitch(
             decision.move, stored, lead_typed_a_question, decision.reply,

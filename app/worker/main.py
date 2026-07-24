@@ -338,7 +338,11 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                 "reply branch=%d thread=%d %s in %.1fs (%d broker calls incl. retries)",
                 branch_id, thread_id, "queued" if queued else "skipped",
                 time.time() - started, getattr(llm, "calls", 0))
-            return queued
+        # Outside session_scope on purpose: the hand-off is committed, the thread's advisory
+        # lock is released, and only now does the CRM push (LLM summary + MCP round-trips)
+        # run — see ReplyDelivery.push_crm_after_commit for the failure-mode analysis.
+        await reply.push_crm_after_commit()
+        return queued
     except BrokerUnavailable as exc:
         # The gateway is down, not this thread's fault — trip the guard so the next tick sends
         # ONE canary instead of the whole backlog. Cleared the instant any call succeeds.

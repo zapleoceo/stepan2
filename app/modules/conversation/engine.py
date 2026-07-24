@@ -76,6 +76,10 @@ class DecisionContext:
     lead: Lead | None
     stored_needs: NeedsProfile
     budget: BudgetService
+    # The branch is over its daily LLM budget. Only set when prepare() was called with
+    # allow_over_budget=True — reply.decide() uses it to still ship the zero-cost templated
+    # ad-tap opener (no LLM call) while skipping every path that would bill.
+    over_budget: bool = False
 
 
 class DecisionEngine:
@@ -120,8 +124,14 @@ class DecisionEngine:
         session date."""
         return now_hint(await self._now_local())
 
-    async def prepare(self, thread_id: int, workflow: str) -> DecisionContext | None:
-        """None if the thread is foreign, has no dialog, or the branch is over budget."""
+    async def prepare(
+        self, thread_id: int, workflow: str, *, allow_over_budget: bool = False,
+    ) -> DecisionContext | None:
+        """None if the thread is foreign, has no dialog, or the branch is over budget.
+
+        allow_over_budget=True returns the context anyway with ctx.over_budget set, for the
+        one caller (reply.decide) that can answer without spending: the templated ad-tap
+        opener costs nothing, and dropping it on over-budget days silenced first contact."""
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
@@ -129,13 +139,14 @@ class DecisionEngine:
         if not dialog:
             return None
         budget = BudgetService(self.session, self.branch_id)
-        if await budget.over_budget():
+        over = await budget.over_budget()
+        if over and not allow_over_budget:
             logger.warning(
                 "branch=%d over daily LLM budget — %s skipped", self.branch_id, workflow)
             return None
         lead = await self.session.get(Lead, thread.lead_id)
         stored_needs = parse_needs(lead.needs if lead is not None else None)
-        return DecisionContext(thread, dialog, lead, stored_needs, budget)
+        return DecisionContext(thread, dialog, lead, stored_needs, budget, over_budget=over)
 
     async def kb_context(
         self, ctx: DecisionContext, thread_id: int, *, light: bool,
