@@ -22,6 +22,7 @@ from app.modules.settings.service import get_settings
 from app.ports.llm import LLMPort
 
 from .delivery import _split_bubbles
+from .engine import _fmt_llm_meta
 from .reply import ReplyService
 
 _SIM_HANDLE = "__sim__"
@@ -91,7 +92,7 @@ class SimService:
                 branch_id=branch_id, thread_id=th.id, channel_id=th.channel_id,
                 external_id=f"sim-{th.id}-out-{n}-{i}", direction="out", sent_by="agent",
                 text=b, occurred_at=base + timedelta(seconds=i),
-                llm_info=reply._last_llm_meta.get("model")))  # noqa: SLF001
+                llm_info=_fmt_llm_meta(reply._last_llm_meta)))  # noqa: SLF001
         th.last_out_at = base
         # Persist the segment + stage the model decided so multi-turn funnel movement and
         # segmentation are visible (decide() alone doesn't apply them — that's enqueue's job).

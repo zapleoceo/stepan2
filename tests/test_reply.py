@@ -35,7 +35,10 @@ class _LLM:
         self.capabilities.append(kw.get("capability", ""))
         self.messages.append(messages)
         answer = self._answers.pop(0) if len(self._answers) > 1 else self._answers[0]
-        return answer, {"model": "fake", "cost_usd": 0.0}
+        # request_id differs per call so a test can tell WHICH generation's meta ended up
+        # on the bubble (the rewrite's, when the money gate fired).
+        return answer, {"model": "fake", "cost_usd": 0.0,
+                        "request_id": f"req{len(self.capabilities)}"}
 
     async def embed(self, texts, **kw):  # noqa: ANN001, ANN003, ANN201
         return [[0.0] for _ in texts]
@@ -301,3 +304,48 @@ async def test_a_grounded_price_costs_no_rewrite(db_session) -> None:  # noqa: A
 
     assert decision is not None and "13.360.000" in decision.reply
     assert len(llm.capabilities) == 1
+
+
+# ── the broker line on the bubble ─────────────────────────────────────────────
+
+
+async def test_every_bubble_carries_the_broker_line(db_session) -> None:  # noqa: ANN001
+    """The chat chip ('🤖 71.2s | #1281991 | free | … | model') is the owner's only view of
+    what a reply cost. Between 2026-07-22 and this fix the reply path never recorded the
+    meta at all (the v2 engine's `_last_llm_meta = meta` went with it), so 100% of agent
+    bubbles on prod rendered a blank chip while follow-ups kept theirs."""
+    from sqlmodel import select
+
+    from app.adapters.db.models import Outbox
+
+    bid, tid, _ = await _thread(db_session, dossier=_DISCOVERED)
+    service = _service(db_session, bid, _LLM(_answer(reply="satu|||dua")))
+    decision = await service.decide(tid)
+    assert decision is not None
+    await service.enqueue_reply(tid, decision)
+
+    rows = list((await db_session.exec(
+        select(Outbox).where(Outbox.thread_id == tid).order_by(Outbox.scheduled_at))).all())
+    assert [r.text for r in rows] == ["satu", "dua"]
+    assert all(r.llm_info and "fake" in r.llm_info for r in rows)
+    assert rows[0].llm_info == rows[1].llm_info
+
+
+async def test_the_rewrite_is_the_meta_the_bubble_shows(db_session) -> None:  # noqa: ANN001
+    """When the money gate rewrites a draft, the shipped text comes from the SECOND call —
+    charging the chip with the first call's id would misattribute the turn."""
+    bid, tid, _ = await _thread(db_session, dossier=_DISCOVERED)
+    llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak"),
+               _answer(reply="Investasinya Rp 13.360.000 kak"))
+    service = _service(db_session, bid, llm, _KB_PRICES)
+    await service.decide(tid)
+    assert service._last_llm_meta.get("request_id") == "req2"  # noqa: SLF001
+
+
+def test_a_reply_with_no_broker_call_is_labelled_not_blank() -> None:
+    """A templated opener genuinely has no broker line — say so, so the owner can tell
+    'no LLM ran' apart from 'the meta was lost'."""
+    from app.modules.conversation.engine import TEMPLATED_META, _fmt_llm_meta
+
+    assert _fmt_llm_meta(TEMPLATED_META) == "templated | free"
+    assert _fmt_llm_meta({}) is None
