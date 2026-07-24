@@ -151,9 +151,23 @@ def test_seo_endpoints_render() -> None:
     from app.api._seo import og_svg, robots_txt, sitemap_xml
     r = robots_txt()
     assert "Sitemap:" in r and "Disallow: /ui/" in r and "GPTBot" in r and "ClaudeBot" in r
+    assert "Disallow: /hiw" in r  # internal system map, never for crawlers
     sm = sitemap_xml()
-    assert "/whats-new" in sm and "<urlset" in sm
+    assert "/privacy" in sm and "<urlset" in sm
+    assert "/whats-new" not in sm and "/whats-new" not in r  # public changelog is gone
     assert og_svg().startswith("<svg") and "Stepan" in og_svg()
+
+
+def test_llms_txt_states_quotable_facts() -> None:
+    """Answer engines quote checkable statements — the file must carry the product's facts,
+    and must never name a client."""
+    from app.api._seo import llms_txt
+    t = llms_txt()
+    assert t.startswith("# Stepan")
+    for fact in ("Instagram Direct", "WhatsApp", "Bahasa Indonesia", "CRM", "Meta Graph API"):
+        assert fact in t, fact
+    low = t.lower()
+    assert "it step" not in low and "itstep" not in low  # client never revealed
 
 
 # ─── Meta pixel on the landing (selling Stepan) ───────────────────────────────
