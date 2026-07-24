@@ -1,7 +1,7 @@
 """Internal "How it works" page — an interactive, top-down map of the whole system.
 
 Served at /hiw for the team (technical reviews, onboarding new members) in two
-languages: English (default) and Ukrainian, switched via ?lang=uk. NOT in the
+English only. NOT in the
 public allowlist (app/api/_auth.py), so with auth enabled it requires a session
 like the rest of the app. Self-contained HTML (own <!doctype> + inline CSS/JS,
 no CDN). Content drills down in three levels per topic: plain-language gist →
@@ -177,11 +177,6 @@ _JS = r"""
 """
 
 
-def _langsw(active: str) -> str:
-    en = ' class="on"' if active == "en" else ""
-    uk = ' class="on"' if active == "uk" else ""
-    return (f'<div class="langsw" aria-label="Language">'
-            f'<a href="/hiw?lang=en"{en}>EN</a><a href="/hiw?lang=uk"{uk}>УКР</a></div>')
 
 
 # ─── English body ─────────────────────────────────────────────────────────────
@@ -323,17 +318,13 @@ _BODY_EN = r"""
   </div>
 
   <div class="pipe-panel" id="p4" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Verification: a fabrication never reaches the client — and the reply has to actually sell</h3>
-    <p>Between "the AI drafted a reply" and "the reply went out" stand two checks. First a safety layer (reply-guard) that catches known-bad shapes: instant free checks — a link that does not exist in the knowledge base; the phrase "I already sent you the file" (the bot cannot send files); two questions in one message; an offer to hop on a call (the bot only types) — then a selective check by a second model, only for "risky" replies. A problem caught → one regeneration; still bad → the safe phrase "let me check with the team" and a handoff to a manager.</p>
-    <p>Then, as the <b>last</b> step, a critic-gate: the guard can only tell that a reply is not fabricated, not whether it actually <i>sells</i>. So a strong model judges every reply against a positive rubric — is every fact grounded in the knowledge base, does it answer what the client actually said, does it advance the sale by one sound step, is a live objection handled, is the register right. If it can't clear the bar even after one rewrite (or the check itself errors) the reply is <b>not sent</b> — it fails closed and the client goes to a human.</p>
+    <h3 style="margin-top:0">Verification: a fabrication never reaches the client</h3>
+    <p>Between "the AI drafted a reply" and "the reply went out" stands exactly one check — the money gate. It is deterministic and free: every price figure, link, income claim and offered service in the draft must exist in the knowledge base. A problem caught → one regeneration on the strong chain; still bad → the safe hold-line ships instead and the client goes to a manager. Everything else about the reply — tone, structure, sales approach — is the model's own call; the 2026-07 A/B showed the strong model sells better without a review layer (agreements 6/10 vs 3/10, forced hand-offs 0/10 vs 8/10).</p>
     <details class="l3"><summary>All the way down</summary><div class="body">
       <ul>
-        <li>The guard was born after a real incident: the bot invented a link to a "lab", free access and a Cisco certificate. Files: <code>app/modules/conversation/guard.py</code>, orchestration in <code>reply.py</code>, the doc <code>docs/free-mode.md</code>.</li>
-        <li>A clever saving: the most frequent "risk" is the price. If the price in the reply matches the knowledge base verbatim, the paid LLM check is skipped (hundreds of replies a day).</li>
-        <li>False escalations are caught separately: the model wants to call a manager over a price question whose answer is already in the context — it gets a regeneration instead.</li>
-        <li>Every regeneration increments a per-client counter — after two, that client is permanently routed to the expensive model.</li>
-        <li>Per-branch guard modes: full / links only / off. The verifier prompt is edited like any other knowledge-base document.</li>
-        <li>The critic (<code>app/modules/conversation/critic.py</code>, <code>reply.apply_critic</code>) is per-branch too: <code>off</code> / <code>shadow</code> (logs its verdict without changing the reply, to measure the reject rate) / <code>on</code> (blocks, regenerates, hands off). When it is on, the guard's paid LLM check is skipped as redundant — the critic already re-checks grounding, more strictly.</li>
+        <li>The gate was born after a real incident: the bot invented a link to a "lab", free access and a Cisco certificate. Files: <code>app/modules/conversation/money_gate.py</code> + <code>guard.py</code> (the detectors), orchestration in <code>reply.py</code>, the doc <code>docs/free-mode.md</code>.</li>
+        <li>It fails CLOSED: an ungrounded figure never ships, and the escalation replaces the offending draft with a content-free hold-line — the flag alone used to protect the CRM record but not the client.</li>
+        <li>A hedged market salary range ("kisaran 5-8 juta, tergantung…") is exempt — it is a market reference the KB can't enumerate, not a promise about our own alumni.</li>
       </ul>
     </div></details>
   </div>
@@ -419,7 +410,7 @@ _BODY_EN = r"""
         <li><b>The sales contract</b> + the chat history.</li>
       </ol>
       <details class="l3"><summary>All the way down: limits and caching</summary><div class="body">
-        <p>The total context budget is capped (24k characters): beyond ~30k, cheap models stop returning valid JSON. The facts-only KB is authored to sit well under the cap, which is only a defensive backstop — on overflow the assembled context is simply truncated. Context assembly is cheap and deterministic (no retrieval), so regenerations (guard, dedup, escalation, critic) reuse it freely. Files: <code>prompt.py</code> (a pure function, no database access), <code>app/modules/knowledge/service.py</code> (<code>knowledge_context</code>).</p>
+        <p>The whole fact surface (persona + facts docs + every product card + the objection bank) rides in one byte-stable system prefix, capped at 90k characters — the broker's prompt cache absorbs the size (91% cache-hit measured live), so stability beats trimming. Everything per-client lives in a small second block after it. Context assembly is cheap and deterministic (no retrieval), memoized per turn. Files: <code>free_mode.py</code> (prompt assembly), <code>app/modules/knowledge/service.py</code> (<code>full_knowledge_context</code>).</p>
       </div></details>
     </div>
   </details>
@@ -616,7 +607,7 @@ _BODY_EN = r"""
       <ul>
         <li>The write is atomic — one "insert or add" SQL statement with no races (<code>app/modules/budget/service.py</code>). The code records a real incident: an ambiguous column reference crashed the write on PostgreSQL and an already-paid reply was silently dropped (SQLite in tests swallowed it).</li>
         <li>The limit check happens <b>before</b> the model call; the charge — after a successful reply. Sandbox simulations are billed too — they run on the dedicated sandbox branch and charge its own ledger, so nothing escapes the accounting.</li>
-        <li>Every broker call is a row in the <code>broker_log</code> journal: scenario (reply/reminder/guard/critic/translation), provider, model, tokens, price, latency, success. Kept 30 days, viewed in the admin with a histogram. A journal-write failure never breaks the client's reply.</li>
+        <li>Every broker call is a row in the <code>broker_log</code> journal: scenario (reply/followup/discovery/translation), provider, model, tokens, price, latency, success. Kept 30 days, viewed in the admin with a histogram. A journal-write failure never breaks the client's reply.</li>
       </ul>
     </div>
   </details>
@@ -792,608 +783,18 @@ _BODY_EN = r"""
 """
 
 
-# ─── Ukrainian body ───────────────────────────────────────────────────────────
 
-_BODY_UK = r"""
-<div class="hero">
-  <div class="hero-in">
-    <div class="topline"><a class="back" href="/ui/inbox">← до адмінки</a>__LANGSW__</div>
-    <div class="eyebrow">Карта проєкту · від загального до часткового</div>
-    <h1>Як влаштований Степан</h1>
-    <p class="lede">Платформа, де ШІ сам листується з клієнтами в Instagram і WhatsApp: з'ясовує, що людині потрібно, добирає курс, відповідає на заперечення й передає «гарячого» клієнта живому менеджеру. Кожна філія — ізольований «мешканець» зі своєю базою знань, ботом і людьми.</p>
-    <div class="stats">
-      <div class="stat"><b>146</b><span>файлів коду (Python)</span></div>
-      <div class="stat"><b>~1 070</b><span>автотести у 98 файлах</span></div>
-      <div class="stat"><b>10</b><span>фонових задач за розкладом</span></div>
-      <div class="stat"><b>3</b><span>канали: Instagram · WhatsApp · Meta</span></div>
-      <div class="stat"><b>0–5</b><span>фази розвитку — всі закриті</span></div>
-    </div>
-    <p class="hint">Кожна тема нижче розкривається на три рівні: <b>суть</b> → <b>як це працює</b> → <b>до самого дна</b> (файли, нюанси, реальні інциденти). Користуйтеся пошуком і кнопкою «Розгорнути все».</p>
-  </div>
-</div>
-
-<main>
-<nav class="toc" aria-label="Зміст">
-  <a href="#idea">Задум</a>
-  <a href="#journey">Шлях повідомлення</a>
-  <a href="#brain">Мозок</a>
-  <a href="#guard">Стоп-крани</a>
-  <a href="#kb">Знання</a>
-  <a href="#leads">Ліди</a>
-  <a href="#channels">Канали</a>
-  <a href="#worker">Конвеєр</a>
-  <a href="#access">Доступ</a>
-  <a href="#money">Гроші</a>
-  <a href="#crm">CRM і реклама</a>
-  <a href="#extras">Обв'язка</a>
-  <a href="#quality">Якість</a>
-  <a href="#review">Шпаргалка</a>
-  <a href="#glossary">Словничок</a>
-</nav>
-
-<div class="controls">
-  <input id="q" type="search" placeholder="Пошук по документу… (наприклад: телефон, бюджет, guard)" aria-label="Пошук по документу">
-  <button class="ctl" id="openAll" type="button">Розгорнути все</button>
-  <button class="ctl" id="closeAll" type="button">Згорнути все</button>
-</div>
-
-<!-- ЗАДУМ -->
-<section class="card reveal" id="idea">
-  <div class="kicker">01 · Задум</div>
-  <h2>Що це і навіщо</h2>
-  <p class="gist">Степан-2 — «готель для ботів-продавців». Одна платформа обслуговує багато <b>філій</b>: у кожної — своя база знань, свої курси й ціни, свій характер бота, своя мова і свої співробітники. Дані філій ніколи не перетинаються — це головне правило безпеки всього проєкту.</p>
-  <details>
-    <summary>Чим друга версія відрізняється від першої</summary>
-    <div class="body">
-      <ul>
-        <li><b>Степан-1</b> — бот для одного клієнта: один акаунт, одна база, все зашито під Індонезію.</li>
-        <li><b>Степан-2</b> — платформа: філії додаються без переписування коду. «Філії за замовчуванням» немає — кожна живе під своїм номером.</li>
-        <li>Усі звернення до нейромереж ідуть через єдиний зовнішній шлюз (<b>AIbroker</b>): у проєкті немає жодного ключа від провайдерів моделей, а кожен виклик повертає точну ціну в доларах — за нею ведеться бюджет кожної філії.</li>
-        <li>Месенджери сховані за спільним «перехідником» (адаптером): спосіб роботи з Instagram можна замінити, не чіпаючи мозок бота.</li>
-        <li>Повна незалежність від першої версії: окремий репозиторій, окрема база, окремі контейнери. Степан-1 продовжує працювати, перемикання — за готовністю.</li>
-      </ul>
-      <details class="l3">
-        <summary>До дна: бізнес-логіка грошей і статус</summary>
-        <div class="body">
-          <ul>
-            <li>Економія на моделях: дорога нейромережа вмикається лише в «грошові» моменти (ціна, оплата, готовність), дешева — на всьому іншому обсязі. Межу допомагає добирати офлайн-скрипт <code>scripts/bakeoff_capability.py</code>: ганяє реальні діалоги через обидві моделі й порівнює рішення.</li>
-            <li>Далекий план — замкнути рекламну петлю: реклама → лід → договір у CRM → сигнал назад у Meta, щоб реклама оптимізувалася на покупців.</li>
-            <li>Статус: фази 0–5 закриті, платформа в проді. «Конвеєр» відправлення навмисно вимкнений до фінального перемикання зі Степана-1 — два боти не мають писати в один Instagram-акаунт одночасно (ризик бану).</li>
-            <li>Документація: <code>README.md</code>, <code>docs/multitenant-design.md</code> (ключовий документ), 19 тематичних файлів у <code>docs/</code>.</li>
-          </ul>
-        </div>
-      </details>
-    </div>
-  </details>
-  <details>
-    <summary>З чого побудовано (технології — одним абзацом)</summary>
-    <div class="body">
-      <p>Python 3.12. Веб-частина — FastAPI (сторінки малюються на сервері, оживають через HTMX — без важкого фронтенду). База — PostgreSQL, черга фонових задач — Redis + ARQ. Схема бази змінюється міграціями Alembic. Усе запаковано в 4 docker-контейнери: база, Redis, веб-застосунок, воркер.</p>
-      <details class="l3">
-        <summary>До дна: архітектурний стиль</summary>
-        <div class="body">
-          <p>«Порти та адаптери» (гексагональна архітектура): ядро (<code>app/domain/</code>, <code>app/modules/</code>) не знає про Instagram, нейромережі й Telegram — воно розмовляє з абстрактними інтерфейсами-«портами» (<code>app/ports/</code>: канал, LLM, сповіщення). Конкретні реалізації — «адаптери» (<code>app/adapters/</code>). Плюс модульний моноліт: кожен модуль (<code>auth</code>, <code>conversation</code>, <code>knowledge</code>, <code>leads</code>…) — своя зона відповідальності. Будь-який шматок інфраструктури можна замінити, не перебудовуючи мозок.</p>
-        </div>
-      </details>
-    </div>
-  </details>
-</section>
-
-<!-- ШЛЯХ ПОВІДОМЛЕННЯ -->
-<section class="card reveal" id="journey">
-  <div class="kicker">02 · Головний сюжет</div>
-  <h2>Шлях одного повідомлення</h2>
-  <p class="gist">Усе, що робить платформа, — це шість кроків між «клієнт написав» і «клієнт отримав відповідь». Натисніть на крок, щоб розкрити його.</p>
-
-  <div class="pipe" role="tablist" aria-label="Кроки шляху повідомлення">
-    <button role="tab" aria-selected="true" data-panel="p1"><span class="n">КРОК 1</span><span class="t">Клієнт пише</span><span class="s">Instagram / WhatsApp</span></button>
-    <button role="tab" aria-selected="false" data-panel="p2"><span class="n">КРОК 2</span><span class="t">Приймання</span><span class="s">хто це і що нового</span></button>
-    <button role="tab" aria-selected="false" data-panel="p3"><span class="n">КРОК 3</span><span class="t">Рішення</span><span class="s">ШІ думає над відповіддю</span></button>
-    <button role="tab" aria-selected="false" data-panel="p4"><span class="n">КРОК 4</span><span class="t">Перевірка</span><span class="s">без вигадок, і має продавати</span></button>
-    <button role="tab" aria-selected="false" data-panel="p5"><span class="n">КРОК 5</span><span class="t">Черга</span><span class="s">по-людськи</span></button>
-    <button role="tab" aria-selected="false" data-panel="p6"><span class="n">КРОК 6</span><span class="t">Відправлення</span><span class="s">ліміти та ввічливість</span></button>
-  </div>
-
-  <div class="pipe-panel" id="p1" role="tabpanel">
-    <h3 style="margin-top:0">Клієнт пише — а платформа сама питає «що нового?»</h3>
-    <p>Месенджери не надсилають сповіщень самі (у приватних API їх просто немає). Тому кожні <b>2 хвилини</b> платформа опитує всі активні канали всіх філій: «з'явилися нові повідомлення?». Перед кожним опитуванням — випадкова пауза, щоб не стукати в Instagram у ту саму секунду (захист від бану).</p>
-    <details class="l3"><summary>До дна</summary><div class="body">
-      <p>Задача <code>ingest_active_channels</code> в <code>app/worker/main.py</code> розкидає по окремому завданню на філію; кожен канал опитується у своїй транзакції — збій одного не ламає решту. Instagram читається через приватний API (instagrapi), причому розбирається сирий JSON — штатний розбирач бібліотеки падає на пересланих постах (<code>app/adapters/channels/ig_parse.py</code>). Читаються і «запити на листування» (pending inbox) — там живуть холодні ліди з реклами. Якщо сесія каналу «захворіла» (Instagram вимагає підтвердження) — канал заморожується в усіх циклах, а менеджеру летить алерт «потрібен повторний вхід».</p>
-    </div></details>
-  </div>
-
-  <div class="pipe-panel" id="p2" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Приймання: зрозуміти, хто написав, і нічого не задвоїти</h3>
-    <p>Кожне нове повідомлення проходить фільтри: чи не бачили ми його раніше (захист від дублів), хто автор — клієнт чи наш менеджер, що відповів вручну з телефона. Далі головний фокус: <b>одна людина в різних месенджерах = один клієнт</b>. Склеювання — за номером телефону всередині філії. Свіже повідомлення подовжує 24-годинне «вікно відповіді», скасовує заплановані нагадування і будить бота, якщо той спав.</p>
-    <details class="l3"><summary>До дна</summary><div class="body">
-      <ul>
-        <li><code>app/modules/leads/ingest.py</code> — єдина точка запису вхідних; ідемпотентність за парою (канал, зовнішній id повідомлення).</li>
-        <li>Телефон дістається прямо з тексту (<code>phone.py</code>) з урахуванням країни філії: «0812…», «62812…» і «+62 812…» дають один ключ; ціна «Rp 1.200.000» номером не вважається.</li>
-        <li>Захист від «захоплення» чату: склеювання за телефоном працює тільки для цілком нового діалогу. Якщо людина надрукувала чужий номер в наявному чаті — її листування не переїде до власника цього номера (<code>identity.py</code>).</li>
-        <li>Ручна відповідь менеджера з застосунку Instagram теж потрапляє в базу і зсуває позначку «ми відповіли» — бот ніколи не пише поверх людини.</li>
-        <li>Сплячий клієнт від нового повідомлення «прокидається» у стадію виявлення потреби; але якщо клієнта вже веде людина (стадії «готовий», «переданий», «менеджер») — бот не вмикається.</li>
-      </ul>
-    </div></details>
-  </div>
-
-  <div class="pipe-panel" id="p3" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Рішення: ШІ читає все і відповідає строго за формою</h3>
-    <p>Раз на хвилину платформа знаходить чати, де клієнт написав останнім, і для кожного збирає «досьє»: характер бота, потрібні шматки бази знань, картку обговорюваного курсу, історію листування, накопичені потреби клієнта і звід правил продажів. Нейромережа повертає не просто текст, а <b>структуроване рішення</b>: що відповісти, на якій стадії воронки клієнт, які в нього болі й цілі, чи потрібен живий менеджер.</p>
-    <details class="l3"><summary>До дна</summary><div class="body">
-      <ul>
-        <li>Диспетчер <code>reply_pending</code> стартує на 45-й секунді хвилини — одразу після циклу приймання, щоб відповісти тієї ж хвилини. Кожен чат — окреме завдання з блокуванням (подвійний виклик нейромережі для одного чату виключений — реальний випадок подвійного білінгу, закритий advisory-lock'ом).</li>
-        <li>Серце — <code>ReplyService.decide</code> (<code>app/modules/conversation/reply.py</code>) і <code>DecisionEngine</code> (<code>engine.py</code>). Перед викликом: перевірка денного бюджету філії, очікування розшифровки голосових, визначення мови відповіді.</li>
-        <li>Вибір моделі (<code>routing.py</code>): дешева «fast» — на обсяг, дорога «smart» — на грошові стадії та на клієнтів, у яких страховка вже ловила вигадки; «deep» (думає до 8 хвилин) — лише для внутрішнього ШІ-редактора бази знань.</li>
-        <li>Якщо дешева модель повернула биту відповідь — один повтор на дорогій. Якщо відповідь надто схожа на попередню — регенерація з поправкою «не повторюйся».</li>
-        <li>Усі виклики йдуть через шлюз AIbroker в асинхронному режимі «поставив завдання — опитуй готовність» (<code>app/adapters/llm/broker.py</code>): повільна модель не обриває з'єднання по таймаутах проксі.</li>
-      </ul>
-    </div></details>
-  </div>
-
-  <div class="pipe-panel" id="p4" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Перевірка: вигадка ніколи не йде клієнту — і відповідь мусить продавати</h3>
-    <p>Між «ШІ придумав відповідь» і «відповідь пішла» стоять дві перевірки. Спершу страхувальний шар (reply-guard), що ловить відомо-погані форми: миттєві безкоштовні перевірки — посилання, якого немає в базі знань; фраза «вже надіслав вам файл» (бот не вміє надсилати файли); два запитання в одному повідомленні; пропозиція подзвонити (бот лише пише) — потім вибіркова перевірка другою нейромережею, тільки для «ризикованих» відповідей. Впіймали проблему → одна регенерація; не допомогло → безпечна фраза «уточню в команди» і передавання менеджеру.</p>
-    <p>Потім, <b>останнім</b> кроком, — критик-гейт: страховка вміє сказати лише, що відповідь не вигадана, але не те, чи вона справді <i>продає</i>. Тож сильна модель оцінює кожну відповідь за позитивною рубрикою — чи кожен факт заземлений у базі знань, чи вона відповідає на те, що клієнт справді сказав, чи просуває продаж на один розумний крок, чи опрацьоване живе заперечення, чи правильний регістр. Якщо не дотягує навіть після одного переписування (або сама перевірка збоїть) — відповідь <b>не відправляється</b>: критик спрацьовує «в закритий бік», і клієнт іде до людини.</p>
-    <details class="l3"><summary>До дна</summary><div class="body">
-      <ul>
-        <li>Страховка з'явилася після реального випадку: бот вигадав посилання на «лабораторію», безкоштовний доступ і сертифікат Cisco. Файли: <code>app/modules/conversation/guard.py</code>, оркестрування в <code>reply.py</code>, документ <code>docs/free-mode.md</code>.</li>
-        <li>Хитра економія: найчастіший «ризик» — ціна. Якщо ціна у відповіді дослівно збігається з базою знань, платна LLM-перевірка пропускається (це сотні відповідей на день).</li>
-        <li>Окремо ловляться «хибні ескалації»: модель хоче покликати менеджера на запитання про ціну, відповідь на яке вже є в контексті — натомість регенерація.</li>
-        <li>Кожна регенерація збільшує лічильник у клієнта — після двох такий клієнт назавжди переводиться на дорогу модель.</li>
-        <li>Режими страховки на філію: повний / лише посилання / вимкнено. Текст промпта-перевіряльника редагується як звичайний документ бази знань.</li>
-        <li>Критик (<code>app/modules/conversation/critic.py</code>, <code>reply.apply_critic</code>) теж налаштовується на філію: <code>off</code> / <code>shadow</code> (лише логує вердикт, не змінюючи відповідь, — щоб виміряти частку відхилень) / <code>on</code> (блокує, регенерує, передає людині). Коли він увімкнений, платна LLM-перевірка страховки пропускається як надлишкова — критик і так суворіше переперевіряє заземлення.</li>
-      </ul>
-    </div></details>
-  </div>
-
-  <div class="pipe-panel" id="p5" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Черга: єдині двері назовні</h3>
-    <p>Готова відповідь не відправляється безпосередньо — вона кладеться у вихідну чергу (outbox). Це єдиний шлях будь-якого повідомлення назовні, тому всі ліміти й правила застосовуються рівно один раз. Довга відповідь ріжеться на «бульбашки» (до трьох коротких повідомлень), між ними — паузи, а сама відповідь іде з невеликою випадковою затримкою — ніби друкує людина.</p>
-    <details class="l3"><summary>До дна</summary><div class="body">
-      <p>Таблиця <code>outbox</code>; джерела рядків: відповідь бота, ручне повідомлення менеджера з панелі, нагадування (follow-up). Розділювач бульбашок — <code>|||</code> у відповіді моделі. Перед постановкою — контрольна перевірка «а чи не відповів уже паралельний процес» (<code>enqueue_reply</code> у <code>reply.py</code>). Разом із постановкою застосовується рішення моделі: зсув стадії воронки, алерт менеджеру, фіксація потреб клієнта (<code>needs.py</code> — злиття без дублів).</p>
-    </div></details>
-  </div>
-
-  <div class="pipe-panel" id="p6" role="tabpanel" hidden>
-    <h3 style="margin-top:0">Відправлення: ліміти, тихі години і ввічливість до CRM</h3>
-    <p>Кожні 20 секунд відправник бере по одному готовому повідомленню на чат і перевіряє ланцюжок правил: чи ввімкнене відправлення взагалі; чи не тихі зараз години (нічні нагадування чекають ранку, живі відповіді йдуть завжди); чи не вичерпаний ліміт повідомлень на годину/день (захист від бану); чи відкрите 24-годинне вікно Meta; і чи не зайнятий клієнтом живий менеджер у CRM — тоді бот ввічливо мовчить. Перед відправленням бот «читає» повідомлення клієнта і витримує паузу — точнісінько як людина.</p>
-    <details class="l3"><summary>До дна</summary><div class="body">
-      <ul>
-        <li><code>OutboxSender.send_next</code> (<code>app/modules/conversation/outbox.py</code>); пріоритет — справжня відповідь раніше за нагадування, ручні повідомлення менеджера йдуть поза всіма лімітами.</li>
-        <li>М'яке блокування Instagram (challenge / rate limit) → повтор із наростною паузою; постійна помилка → чат присипляється. Закрите вікно Meta → рядок позначається «пропущено», чат спить до нового вхідного (інакше бот палив би гроші на регенерацію кожен тік — реальний інцидент «Meta 400 loop»).</li>
-        <li>Після успішного відправлення планується наступне нагадування. Розклад нагадувань — по кожному каналу окремо; вибір каналу: відкрите вікно → WhatsApp → Instagram.</li>
-        <li>Якщо клієнт попросив не турбувати («jangan ganggu», «diem») — нагадування скасовуються назавжди. Якщо нагадування вийшло повтором старого — «спалюється» цілий крок розкладу, а не спроба (раніше це був найбільший пожирач токенів: ~1 300 генерацій на день).</li>
-      </ul>
-    </div></details>
-  </div>
-</section>
-
-<!-- МОЗОК -->
-<section class="card reveal" id="brain">
-  <div class="kicker">03 · Мозок</div>
-  <h2>Як Степан продає: методологія</h2>
-  <p class="gist">Головне правило: <b>спершу з'ясуй, потім пропонуй</b>. Навіть якщо людина з порога спитала ціну, Степан спершу поставить одне запитання про ситуацію — і лише зрозумівши біль, презентує курс. Це класичні техніки продажів (SPIN + Value Proposition Canvas), зашиті в незмінний «контракт» для нейромережі.</p>
-  <div class="stagechips" aria-label="Стадії воронки">
-    <span class="chip">новий</span><span class="arrow">→</span>
-    <span class="chip">прогрів</span><span class="arrow">→</span>
-    <span class="chip hot">виявлення</span><span class="arrow">→</span>
-    <span class="chip">презентація</span><span class="arrow">→</span>
-    <span class="chip">заперечення</span><span class="arrow">→</span>
-    <span class="chip hot">готовий</span><span class="arrow">→</span>
-    <span class="chip">переданий менеджеру</span>
-  </div>
-  <div class="legend"><i>Плюс дві особливі стадії: <b>спить</b> (не відповідає, розбудить нове повідомлення) і <b>менеджер</b> (взяла людина — бот мовчить).</i></div>
-
-  <details>
-    <summary>Правила, які модель не може порушити</summary>
-    <div class="body">
-      <ul>
-        <li><b>Одне запитання за хід.</b> Два знаки питання — страховка ріже до першого.</li>
-        <li><b>Факти лише з бази знань.</b> Ціни, дати, кейси випускників — нічого «з голови».</li>
-        <li><b>Телефон до передавання.</b> Не можна віддати клієнта менеджеру без номера телефону: якщо модель рветься ескалювати, а телефону немає — бот спершу просить WhatsApp. (З'явилося після клієнта, що поїхав до менеджера з порожнім номером.)</li>
-        <li><b>Презентація лише після болю.</b> Подвійний захист: правило в промпті + гейт у коді — якщо модель просить стадію «презентація», але біль клієнта не зафіксований, код відкочує її у «виявлення». Після 4 ходів розпитувань гейт відпускає — щоб не влаштовувати допит.</li>
-        <li><b>Готовність вирішує система.</b> Модель не може сама поставити стадію «готовий» — лише підняти прапорець, рішення ухвалює код.</li>
-      </ul>
-      <details class="l3"><summary>До дна: що саме повертає модель</summary><div class="body">
-        <p>Відповідь — строгий JSON (контракт <code>_DECISION_CONTRACT</code> в <code>app/modules/conversation/prompt.py</code>): текст відповіді, стадія та її причина, обговорюваний курс, прапорці «готовий»/«потрібен менеджер», телефон, мова відповіді, дві осі класифікації клієнта — температура (гарячий/теплий/холодний/без бюджету/нецільовий) і аудиторія (дорослий/школяр — школяр не відмова: знижка 10% і оплата батьками), плюс роботи/болі/вигоди клієнта (копляться у профілі й підкладаються в кожен наступний промпт). Для нагадувань є полегшений контракт на третину розміру.</p>
-      </div></details>
-    </div>
-  </details>
-
-  <details>
-    <summary>З чого збирається промпт (по порядку)</summary>
-    <div class="body">
-      <ol style="padding-left:22px">
-        <li><b>Персона</b> — характер і голос Степана (завжди цілком, першим блоком).</li>
-        <li><b>Повна картка обговорюваного курсу</b> — картка цілком: суть, ціна, розклад, формат, результат. Реструктуровані картки компактні, тож ідуть повністю.</li>
-        <li><b>Факт-документи</b> — правила оплати/знижок/школярів і факти ринку/конкурентів плюс список заборон (кожен хід — саме тут живуть політики й ринкові факти).</li>
-        <li><b>Каталог курсів</b> — однорядкове зведення QUICK FACTS по кожному іншому продукту, щоб міжкурсове запитання було відповідним без вивалювання всіх п'ятнадцяти повних карток.</li>
-        <li><b>Сьогоднішня дата</b> за часом філії — щоб не пропонувати минулі заняття.</li>
-        <li><b>Нотатки менеджера</b>: правила на всю філію + особиста позначка на клієнта («перевірено, ще не готовий»).</li>
-        <li><b>Відомі потреби клієнта</b> — все, що накопичили минулі ходи.</li>
-        <li><b>Контракт продажів</b> + історія листування.</li>
-      </ol>
-      <details class="l3"><summary>До дна: обмеження і кеш</summary><div class="body">
-        <p>Загальний бюджет контексту обмежений (24 тис. символів): за ~30 тис. дешеві моделі перестають повертати валідний JSON. Факт-БЗ написана так, щоб сидіти значно нижче ліміту, а сам ліміт — лише захисний запобіжник: у разі переповнення зібраний контекст просто обрізається. Збирання контексту дешеве й детерміноване (без ретриву), тож регенерації (страховка, дедуп, ескалація, критик) вільно його перевикористовують. Файли: <code>prompt.py</code> (чиста функція, без звернень до бази), <code>app/modules/knowledge/service.py</code> (<code>knowledge_context</code>).</p>
-      </div></details>
-    </div>
-  </details>
-
-  <details>
-    <summary>Характер: бібліотека персон</summary>
-    <div class="body">
-      <p>Методологія («що робити») однакова для всіх філій і зашита в код. А ось <b>як звучати</b> — налаштовується: у бібліотеці лежать версіоновані персони («Консультативний закривач», «Теплий порадник», «Швидкий»), кожна описана секціями: голос і тон, стиль розпитувань, робота із запереченнями, стиль закриття, межі. Філія обирає персону і може дописати свої доповнення до будь-якої секції — вони переживають зміну персони.</p>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p><code>app/modules/persona/service.py</code>; таблиці <code>persona</code> (загальноплатформна, версії), <code>branch_persona</code> (вибір + доповнення), <code>persona_favorite</code>. Персона потрапляє в промпт безпосередньо з документа <code>persona_core</code> бази знань філії і навмисно дублює правило «ніколи не вигадуй» — друга лінія оборони до страховки.</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- СТОП-КРАНИ -->
-<section class="card reveal" id="guard">
-  <div class="kicker">04 · Три рівні «стоп-крана»</div>
-  <h2>Хто і як може вимкнути бота</h2>
-  <p class="gist">Бота можна зупинити точково або цілком — і система завжди знає, хто головніший.</p>
-  <div class="cols2">
-    <div>
-      <h3>Вимикачі</h3>
-      <ul>
-        <li><b>Уся платформа</b> — загальний стоп-кран (лише суперадмін): гасить усе, що пише в Instagram.</li>
-        <li><b>Філія</b> — тумблер бота й окремо тумблер відправлення.</li>
-        <li><b>Один клієнт</b> — перемикач у панелі чату (перехоплення менеджером).</li>
-      </ul>
-    </div>
-    <div>
-      <h3>Пріоритет людини</h3>
-      <ul>
-        <li>Менеджер відповів вручну — бот не пише поверх.</li>
-        <li>Клієнт у стадії «менеджер/готовий/переданий» — нові повідомлення бота не будять; воронку рухає лише людина.</li>
-        <li>Позначка менеджера на клієнті перекриває судження моделі кожен хід.</li>
-        <li>Якщо бот вимкнений, а клієнт написав — менеджеру летить алерт «клієнт чекає».</li>
-      </ul>
-    </div>
-  </div>
-  <div class="inv"><b>Інваріант:</b> «тихі» стадії (готовий · переданий · спить) — бот мовчить безумовно; «людські» стадії (готовий · переданий · менеджер) — вхідне повідомлення не вмикає бота знову. Сплячий — виняток: він прокидається у «виявлення».</div>
-</section>
-
-<!-- ЗНАННЯ -->
-<section class="card reveal" id="kb">
-  <div class="kicker">05 · Знання</div>
-  <h2>База знань: єдине джерело правди</h2>
-  <p class="gist">Усе, що Степан каже про школу, лежить у базі знань філії: <b>документи</b> (персона плюс факти політик і ринку) і <b>картки курсів</b> — єдине місце, звідки беруться ціни. База — тільки факти, і вся вона потрапляє в кожен промпт — без пошуку, без «запасних» шляхів.</p>
-  <details>
-    <summary>Як знання потрапляють у промпт (тільки факти, БЗ цілком)</summary>
-    <div class="body">
-      <p>Пошукового кроку немає. База знань — тільки факти й достатньо мала, щоб уміститися в одне вікно контексту, тож кожній відповіді дається вся: персона, факти політик/ринку, повна картка продукту у фокусі та однорядкове зведення фактів по кожному іншому продукту. Без ембедингів, без індексу, без сторожа — правка в редакторі БЗ жива вже в наступній відповіді.</p>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <ul>
-          <li><code>app/modules/knowledge/service.py</code> детерміновано збирає контекст; продажні тактики, що колись жили в «playbook»-документах БЗ, тепер у промпті відповіді, тож БЗ несе лише факти.</li>
-          <li>Жорсткий ліміт символів захисно обмежує зібраний контекст (дешеві JSON-провайдери перестають повертати валідний JSON після ~30k символів); на практиці факт-БЗ значно менша.</li>
-        </ul>
-      </div></details>
-    </div>
-  </details>
-  <details>
-    <summary>Спільна база на кілька філій і захист від «розповзання» фактів</summary>
-    <div class="body">
-      <ul>
-        <li><b>Зв'язати:</b> філія може читати базу іншої філії наживо (одне джерело правди, власна база в цьому режимі лише для читання, один «стрибок» — джерело саме не може бути зв'язаним). Так тестова філія перевіряє актуальну бойову базу.</li>
-        <li><b>Скопіювати:</b> разовий клон, далі бази живуть незалежно.</li>
-        <li>Чати, клієнти, воронка і налаштування — завжди свої; спільна лише база знань.</li>
-        <li>Деякі факти навмисно продубльовані в кількох документах (щоб пошук знайшов їх з будь-якого кута). Небезпека — правка в одному місці й забуті копії (реальний випадок: історію Степана оновили в 4 місцях із 6). Контроль — аудит-скрипт <code>scripts/kb_fact_audit.py</code>.</li>
-      </ul>
-      <details class="l3"><summary>До дна: правки та ШІ-редактор</summary><div class="body">
-        <p>Кожна правка документа чи картки журналюється (хто, що, старий → новий текст) із відновленням будь-якої версії в один клік (<code>history.py</code>). Є ШІ-редактор «Коуч»: менеджер пише побажання («додай розстрочку у FAQ»), нейромережа пропонує точковий диф, менеджер застосовує або відхиляє (<code>coach_service.py</code>, використовує «мислячу» модель). Також є директиви боту на всю філію — обов'язкові правила в кожен промпт.</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- ЛІДИ -->
-<section class="card reveal" id="leads">
-  <div class="kicker">06 · Клієнти</div>
-  <h2>Лід: одна людина, багато месенджерів</h2>
-  <p class="gist">Картка клієнта (лід) живе у філії, а не в месенджері. В одного ліда може бути кілька чатів — Instagram і WhatsApp — і всі вони склеєні в одну історію за номером телефону. У картці копиться все: ім'я, телефон, стадія, температура, аудиторія, болі й цілі, лічильник підписників в Instagram, позначка менеджера.</p>
-  <details>
-    <summary>Нагадування (follow-up): як бот «доганяє» тих, хто замовк</summary>
-    <div class="body">
-      <p>Якщо клієнт замовк, бот за розкладом надсилає нагадування. Канал обирається розумно: відкрите 24-годинне вікно — пишемо там само; закрите — через WhatsApp, потім Instagram (приватні API вміють писати після вікна). Будь-яке нове повідомлення клієнта скидає цикл і скасовує заплановане нагадування. Вичерпав розклад без відповіді — клієнт засинає.</p>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p><code>app/modules/conversation/followup.py</code>, роутер каналів — <code>app/modules/leads/router.py</code>. Планування кожні 10 хвилин; розклад і ввімкненість — на кожен канал окремо. Тихі години не скасовують нагадування, а відкладають відправлення до ранку. Текст нагадування генерується за полегшеним контрактом із меншим обсягом знань.</p>
-      </div></details>
-    </div>
-  </details>
-  <details>
-    <summary>Видалення без втрат: канал не володіє клієнтом</summary>
-    <div class="body">
-      <p>Під час видалення каналу каскадом чистяться його чати, повідомлення, медіа і черга — але клієнт, у якого залишився чат в іншому каналі, <b>виживає</b> (втрачає лише чат видаленого каналу). Видаляються лише «сироти» — ті, у кого чатів більше ніде немає. Усе в одній транзакції: збій — повний відкат.</p>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p><code>app/modules/channels/service.py</code> (<code>purge</code>), порядок видалення безпечний для зовнішніх ключів; тести — <code>tests/test_channel_purge.py</code>. Окремо: журнал переходів стадій (<code>stage_event</code> — хто посунув: бот/менеджер/система/CRM і чому) і технічний лог чату (очищення контексту, зміна курсу, позначки).</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- КАНАЛИ -->
-<section class="card reveal" id="channels">
-  <div class="kicker">07 · Канали</div>
-  <h2>Месенджери: офіційні двері та приватні</h2>
-  <p class="gist">Центральна ідея: <b>читати</b> повідомлення — через офіційний API Meta (надійно), а <b>доганяти</b> клієнта після закриття 24-годинного вікна — через приватні API (Instagram instagrapi, WhatsApp Evolution), які офіційно цього не дозволяють. Заради цієї можливості — цілий арсенал «анти-бан»-заходів.</p>
-  <div class="tablewrap"><table>
-    <tr><th>Канал</th><th>Як під'єднаний</th><th>Уміє</th></tr>
-    <tr><td><b>Instagram</b></td><td>приватний API (instagrapi)</td><td>читати (вкл. запити листування), писати після вікна, «прочитано», відкликання повідомлень, завантаження медіа, профіль клієнта</td></tr>
-    <tr><td><b>WhatsApp</b></td><td>власний сервер Evolution API</td><td>читати, писати після вікна</td></tr>
-    <tr><td><b>Meta Business</b></td><td>офіційний Graph API</td><td>канонічне читання; відповідь лише всередині 24-годинного вікна</td></tr>
-  </table></div>
-  <details>
-    <summary>Анти-бан: як не втратити акаунт</summary>
-    <div class="body">
-      <ul>
-        <li>Той самий проксі й гео-локаль для входу і для роботи (розбіжність — певний шлях до «підозрілої активності»).</li>
-        <li>Паузи 2–5 секунд між приватними викликами; випадкова затримка перед кожним циклом опитування.</li>
-        <li>Ліміти відправлення на годину і на день на кожен канал; людиноподібна поведінка: «прочитати» → пауза → відповідь.</li>
-        <li>Секрети сесій (куки Instagram, токени) зберігаються лише в зашифрованому вигляді (Fernet) і ніколи не показуються в адмінці.</li>
-      </ul>
-      <details class="l3"><summary>До дна: найнебезпечніший баг читання</summary><div class="body">
-        <p>Напрямок повідомлення (наше/клієнта) визначається порівнянням автора з власним ID акаунта. Якщо ID не вдалося визначити — цикл опитування <b>падає цілком</b>, а не продовжує наосліп: одного разу 1 401 наше повідомлення було позначене як вхідні від клієнтів. Файли: <code>app/adapters/channels/transports.py</code> (<code>_resolve_own_id</code>), збирання клієнта з проксі/гео — <code>ig_client.py</code>.</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- КОНВЕЄР -->
-<section class="card reveal" id="worker">
-  <div class="kicker">08 · Конвеєр</div>
-  <h2>Фоновий воркер: 10 задач за розкладом</h2>
-  <p class="gist">Усю рутину крутить один спільний воркер. Кожна задача — «диспетчер», що роздає по окремому завданню на філію: філії обробляються паралельно й незалежно, збій однієї не чіпає інших.</p>
-  <div class="tablewrap"><table>
-    <tr><th>Задача</th><th>Як часто</th><th>Що робить</th></tr>
-    <tr><td>Опитування каналів</td><td>2 хв</td><td>забирає нові повідомлення</td></tr>
-    <tr><td>Диспетчер відповідей</td><td>1 хв (на :45)</td><td>знаходить чати, що чекають відповіді</td></tr>
-    <tr><td>Відправлення черги</td><td>20 сек</td><td>по одному повідомленню на чат</td></tr>
-    <tr><td>Нагадування</td><td>10 хв</td><td>зводить і ставить follow-up</td></tr>
-    <tr><td>Видалення</td><td>1 хв</td><td>відкликання повідомлень в Instagram</td></tr>
-    <tr><td>Синк CRM</td><td>5 хв</td><td>події в CRM + читання стану</td></tr>
-    <tr><td>Профілі клієнтів</td><td>30 хв</td><td>підписники й аватарки активної воронки</td></tr>
-    <tr><td>Дозавантаження медіа</td><td>3 хв</td><td>завантаження і розпізнавання голосових/картинок</td></tr>
-    <tr><td>Хмара потреб</td><td>1 р/добу</td><td>нічна аналітика (північ Джакарти)</td></tr>
-    <tr><td>Чищення логів</td><td>1 р/добу</td><td>журнал викликів брокера старший за 30 днів</td></tr>
-  </table></div>
-  <details>
-    <summary>Чому нічого не задвоюється і не губиться</summary>
-    <div class="body">
-      <ul>
-        <li>Завдання на філію отримує стабільний ID: поки попереднє летить, нове не ставиться.</li>
-        <li>Блокування на рівні чату (advisory-lock бази): два тіки, що перетнулися, не викличуть нейромережу і не відправлять повідомлення двічі.</li>
-        <li>Транзакція на кожен чат, а не на весь список — таймаут посередині не відкочує вже зроблене (реальний старий баг).</li>
-        <li>Секунди розкладів дібрані так, щоб у межах хвилини йшло «приймання → відповідь → відправлення».</li>
-        <li>Ліміт одночасних «повільних» генерацій — щоб сплеск відповідей не заморив приймання і відправлення.</li>
-      </ul>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p><code>app/worker/main.py</code> (задачі та cron), <code>app/worker/wiring.py</code> (збирання адаптерів, вибірки, блокування, заморожування сесій). Рушій — ARQ поверх Redis.</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- ДОСТУП -->
-<section class="card reveal" id="access">
-  <div class="kicker">09 · Люди і доступ</div>
-  <h2>Хто що бачить: три ролі й жорстка ізоляція</h2>
-  <p class="gist">Вхід — через Telegram (віджет, підпис перевіряється криптографічно, сесія — підписана cookie на 30 днів). Ролі: <b>суперадмін</b> (уся платформа), <b>адмін філії</b> (читає і пише у своїй), <b>спостерігач</b> (лише читає). Одна людина може бути адміном в одній філії і спостерігачем в іншій.</p>
-  <details>
-    <summary>Ізоляція філій: п'ять шарів</summary>
-    <div class="body">
-      <ol style="padding-left:22px">
-        <li><b>Дані:</b> майже кожна таблиця несе номер філії; фільтрація — централізовано в одному класі-обгортці (<code>BranchScoped</code>), модулі не пишуть фільтри вручну.</li>
-        <li><b>Сесія:</b> список доступних і записуваних філій зашитий у підписану cookie.</li>
-        <li><b>Фільтр вигляду:</b> обрані в інтерфейсі філії завжди перетинаються на сервері з дозволеними — підробка cookie не розширює доступ.</li>
-        <li><b>Порядкова перевірка</b> в кожному маршруті чатів/знань/каналів — захист від підстановки чужого ID в адресу (IDOR).</li>
-        <li><b>Два шари захисту запису:</b> загальний шлагбаум (будь-який змінювальний запит від «спостерігача» — 403; жоден із ~30 маршрутів запису не можна забути закрити) + точна перевірка філії в самому маршруті. Все fail-closed: стара cookie без нового поля прав = лише читання до перелогіну.</li>
-      </ol>
-      <details class="l3"><summary>До дна: дві адмінки</summary><div class="body">
-        <p>Робоча адмінка — <code>/ui/**</code>: інбокс, панель чату (п'ять SQL-запитів на відмальовування, ліниві переклади, без звернень до нейромережі при відкритті), знання, звіти, налаштування, учасники, філії. Друга — сирий SQLAdmin на <code>/admin/**</code>: прямий доступ до таблиць, <b>лише суперадмін і завжди</b>, навіть при вимкненій автентифікації (інакше можна було б підняти собі роль). Таблиця з шифрованими секретами в неї навмисно не виведена. Файли: <code>app/api/_auth.py</code> (4 middleware), <code>app/admin/_branch.py</code> (гварди), <code>app/modules/auth/rbac.py</code> (таблиця прав — єдине джерело правди, «заборонено за замовчуванням»).</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- ГРОШІ -->
-<section class="card reveal" id="money">
-  <div class="kicker">10 · Гроші</div>
-  <h2>Бюджет: кожен цент під обліком</h2>
-  <p class="gist">Кожен виклик нейромережі повертає точну ціну від брокера. Ціна складається в денну «касову книгу» філії. Заданий денний ліміт і він вичерпаний — бот філії просто мовчить до кінця дня (за місцевим часом філії). Бюджети філій не впливають один на одного.</p>
-  <details>
-    <summary>До дна: як це не ламається під навантаженням</summary>
-    <div class="body">
-      <ul>
-        <li>Запис атомарний — одна SQL-команда «вставити або доповнити» без гонок (<code>app/modules/budget/service.py</code>). У коді зафіксований реальний інцидент: неоднозначне посилання на колонку валило запис у PostgreSQL, і вже оплачена відповідь тихо губилася (SQLite у тестах це ковтав).</li>
-        <li>Перевірка ліміту — <b>до</b> виклику нейромережі; списання — після успішної відповіді. Пісочничні симуляції теж тарифікуються — вони живуть в окремій тестовій філії і списуються з її власної «касової книги», тож повз облік не проходить нічого.</li>
-        <li>Кожен виклик брокера — рядок у журналі <code>broker_log</code>: сценарій (відповідь/нагадування/страховка/критик/переклад), провайдер, модель, токени, ціна, затримка, успіх. Зберігається 30 днів, переглядається в адмінці з гістограмою. Помилка запису журналу ніколи не валить відповідь клієнту.</li>
-      </ul>
-    </div>
-  </details>
-</section>
-
-<!-- CRM І РЕКЛАМА -->
-<section class="card reveal" id="crm">
-  <div class="kicker">11 · Зовнішній світ</div>
-  <h2>CRM, реклама й аналітика потреб</h2>
-  <p class="gist">Степан — це листування; CRM школи — це дзвінки, договори і гроші. Вони не дублюють одне одного, а <b>зшиваються за номером телефону</b>. Залізний принцип: збій CRM ніколи не змусить бота замовкнути (fail-open).</p>
-  <details>
-    <summary>Дві зв'язки з CRM</summary>
-    <div class="body">
-      <ul>
-        <li><b>Читання («не заважай людині»):</b> перед відправленням бот питає стан клієнта в CRM. Якщо клієнтом зайнявся менеджер, призначений дзвінок або підписаний договір — вердикт «стоп»: повідомлення не йде, клієнт переводиться у стадію «менеджер». Стан кешується на 5 хвилин; періодичний синк гріє кеш заздалегідь.</li>
-        <li><b>Запис:</b> події «клієнт готовий / потрібен менеджер» ідуть у CRM вебхуком; невдале відправлення повторюється наступним тіком.</li>
-      </ul>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p><code>app/modules/crm/gate.py</code>, <code>pull.py</code>, <code>service.py</code>. Усі прапорці за замовчуванням вимкнені — код у проді спить, доки оператор не ввімкне. Є захист від SSRF: вебхук — лише https і лише на публічні адреси (щоб не можна було злити дані на внутрішню адресу хмари). Ручні повідомлення менеджера гейт не чіпає. Далекий план: запис стадій у CRM і сигнали покупок у Meta CAPI — спроєктовано, не ввімкнено.</p>
-      </div></details>
-    </div>
-  </details>
-  <details>
-    <summary>Реклама: яке оголошення приводить клієнтів</summary>
-    <div class="body">
-      <p>З Instagram-листування дістається ID рекламного оголошення, з якого прийшов клієнт. Якому курсу відповідає оголошення — задає оператор у табличці відповідностей (автоматика лише підказує з історії, але ніколи не записує сама — це самопідсилювальний сигнал). Чат клієнта з реклами отримує <b>мітку</b> рекламованого курсу — для атрибуції та як контекст для бота. Сама ж розмова все одно починається з виявлення потреби: детерміноване правило першого ходу забороняє презентувати продукт, ціну чи розклад, доки не з'явиться справжня потреба клієнта (додано після реального інциденту, коли клік по рекламі отримав повний піч на першому ході).</p>
-      <details class="l3"><summary>До дна: звіти</summary><div class="body">
-        <p>Сторінка звітів: воронка по кожному оголошенню (кліки ведуть у відфільтрований інбокс); сегменти за температурою × аудиторією з відсотком успіху; діаграма потоку по стадіях (санкей за журналом переходів, видно відкати назад); джерело продукту в чаті — реклама/модель/менеджер, і модель ніколи не перебиває ручний вибір менеджера. Файли: <code>app/modules/ads/mapping.py</code>, <code>app/api/_ui_panels.py</code>.</p>
-        <p><b>Реальні витрати, по кожному оголошенню.</b> Воронка тепер стоїть поруч із тим, що Meta справді списала. Тонкість — у стику: ad id, який дає приватний API Instagram, це <i>не</i> ad id з Marketing API — він у іншому просторі ідентифікаторів, і Graph відповідає «об'єкт не існує». Містком є media pk: шорткод медіа — це той самий pk, записаний у base64 алфавітом Instagram, а Marketing API віддає цей шорткод у permalink креатива. Покриття виміряне, а не припущене: 93,6% медіа з лідами доходять аж до оголошення, і панель друкує цей відсоток просто на собі. Щоб дійти сюди, довелося зрозуміти, ЧОМУ було 45%: одне оголошення крутиться в стрічці, сторіс і reels, і Meta рендерить окремий Instagram-пост під кожен плейсмент — сусідні шорткоди, створені в ту саму секунду, — а API зізнається лише в одному. Лід зазвичай бачив інший. Спільне в усіх варіантів — вихідна картинка, тож її хеш і є ниткою, що прив'язує осиротілий пост назад до оголошення. Вона показує ціну <i>нашого</i> ліда і ліда, що дійшов до передачі, — а не заголовкову «ціну переписки» від Meta, яка оцінює тап. Власні лічильники глибини розмови від Meta (дійшов до 3-го, до 5-го повідомлення) стоять поруч із нашими стадіями як незалежна друга думка, а блокування показані як сигнал спаму. Файли: <code>app/modules/ads/bridge.py</code>, <code>app/adapters/meta_ads.py</code>.</p>
-        <p><b>Одне дерево, а не дві таблиці.</b> Витрати й воронка згруповані за кампаніями — тією одиницею, в якій гроші й плануються, — тож «скільки ця кампанія коштувала і що принесла» видно з одного погляду. Оголошення, які не вдалося зіставити з кампанією, не викидаються: вони мають власну групу зі своєю воронкою й без витрат, бо викинути їх означало б тихо зменшити базу лідів і зробити вигляд витрат повнішим, ніж він є.</p>
-        <p><b>Чому фонова синхронізація — це не застарілі дані.</b> Два набори даних мають протилежні потреби в оновленні. Карта media→ad <i>незмінна</i> (permalink креатива не змінюється), тому вона ніколи не пересинхронізується — лише доповнюється, і лише коли прийшов лід із незіставленим медіа; усталений режим коштує нуль запитів до Graph. Витрати — ковзний 14-денний кеш із денною гранулярністю, тож будь-який діапазон дат на сторінці це локальний SUM, а не виклик API; до того ж Meta сама переглядає атрибуцію ~7 днів — гнатися за секундами не має сенсу. Рекламний акаунт троттлить увесь акаунт після серії сторінок (спіймали живцем під час розробки), тому притлумлене витягування не комітить нічого, замість того щоб тихо занизити витрати. Відсоток покриття і час синхронізації друкуються на панелі: таблиця витрат, що приховує власні прогалини, читається як повна й отримує незаслужену довіру.</p>
-      </div></details>
-    </div>
-  </details>
-  <details>
-    <summary>Хмара потреб: що насправді хвилює клієнтів</summary>
-    <div class="body">
-      <p>Раз на добу ШІ розкладає зібрані ботом болі/цілі/вигоди всіх клієнтів за стійкими категоріями («не можу знайти роботу», «хочу змінити професію»…). Віджет у звітах показує три колонки з частотами за будь-який період — менеджер бачить картину ринку, не читаючи кожен чат.</p>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p><code>app/modules/needs_cloud/service.py</code>. Хитрість — стабільність категорій: модель зобов'язана перевикористовувати наявні, нові заводить лише за потреби; обробляються лише клієнти зі зміненим профілем (порівняння за хешем). Категорії канонічні; переклади для інтерфейсу кешуються. Є фільтр «дрейфу алфавіту»: провайдер іноді повертав арабську в'язь — такі мітки відкидаються. Щоденні знімки частот копляться для історії.</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- ОБВ'ЯЗКА -->
-<section class="card reveal" id="extras">
-  <div class="kicker">12 · Обв'язка</div>
-  <h2>Сповіщення, голосові, зовнішній пульт</h2>
-  <details open>
-    <summary>Сповіщення менеджерам — у Telegram</summary>
-    <div class="body">
-      <p>У кожної філії — Telegram-група з темами (форум): на кожного клієнта заводиться своя тема. Типи алертів: 🔥 готовий до угоди · 📆 записався на день відкритих дверей · ❓ потрібна людина · 🔇 бот вимкнений, а клієнт пише · «канал вимагає повторного входу». Тіло алерта: зведення чату мовою філії + те саме зведення мовою операторів + посилання прямо в панель чату. Збій відправлення ніколи не блокує передавання клієнта — запис у базі вже зроблений.</p>
-      <details class="l3"><summary>До дна</summary><div class="body"><p><code>app/modules/notifications/</code>, <code>app/adapters/notify/telegram.py</code>. Видалена тема пересоздається автоматично; зведення — один виклик нейромережі, у разі збою деградація до порожніх зведень, а не відмова.</p></div></details>
-    </div>
-  </details>
-  <details>
-    <summary>Голосові й картинки: бот відповідає на зміст</summary>
-    <div class="body">
-      <p>Прийшло голосове чи фото — у чат одразу пишеться заглушка (🎤 / 🖼), і бот <b>чекає</b>, не відповідаючи на заглушку. Фонова задача завантажує файл, голос розшифровує в текст, картинку описує словами (скриншот, чек про оплату, фото). Лише після цього бот відповідає — вже на зміст. Не вдалося розпізнати за 6 годин — заглушка змінюється на «не зміг прослухати», і бот ввічливо просить написати текстом.</p>
-      <details class="l3"><summary>До дна</summary><div class="body"><p><code>app/modules/media/service.py</code>; ліміт завантаження 60 МБ; тимчасова помилка — повтор кожні 3 хвилини, постійна — зняття прапорця назавжди. Переклад для операторської панелі перераховується після розпізнавання.</p></div></details>
-    </div>
-  </details>
-  <details>
-    <summary>MCP: зовнішній пульт керування воронкою</summary>
-    <div class="body">
-      <p>Зовнішні системи (і Claude) можуть керувати клієнтом за номером телефону: знайти, пересунути по стадії, закрити угоду, позначити «не додзвонилися» (тоді Степан сам напише клієнту «намагалися додзвонитися — давайте тут»). Окремий <b>лише читальний</b> доступ — для рев'юера: дивитися й аналізувати чати, фізично без можливості щось змінити.</p>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p>Три поверхні: локальний процес для Claude Desktop (<code>mcp_server/stepan_mcp.py</code>), веб-конектор <code>/connector/mcp</code>, читалка <code>/reader/mcp</code>. Токени зберігаються лише хешами (показуються один раз), бувають на одну філію або на всі; правило доступу — єдина функція, fail-closed: немає контексту авторизації — відмова, а не «доступ до всього». Токен філії не діє на чужого клієнта, навіть якщо телефон знайшовся в іншій філії. Є пісочниця <code>sim_say</code>: репліка через справжній рушій (пошук + страховка), без Instagram — тарифікується на власну «касову книгу» тестової філії і логується як будь-який інший виклик; на ній ганяється регресійний набір із 17 сценаріїв (<code>docs/dialogue-qa-checklist.md</code>).</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- ЯКІСТЬ -->
-<section class="card reveal" id="quality">
-  <div class="kicker">13 · Якість і доставлення</div>
-  <h2>Тести, CI/CD і шлях у прод</h2>
-  <p class="gist">~1 070 автотестів у 98 файлах покривають усі підсистеми: ізоляцію філій, склеювання клієнтів, воркер, страховку, базу знань, бюджет, MCP. Плюс окремий «живий» регресійний набір діалогів — сценарії, на яких бот колись ламався і був полагоджений.</p>
-  <details>
-    <summary>Як код потрапляє в прод</summary>
-    <div class="body">
-      <ol style="padding-left:22px">
-        <li>Кожен push: лінтер + усі тести (GitHub Actions).</li>
-        <li>Push у main: тести → синхронізація коду на сервер → збирання контейнера → <b>міграції бази застосовуються новим образом, поки старий ще обслуговує</b> (немає вікна «новий код проти старої схеми») → заміна веб-контейнера → перевірка живості (10 спроб).</li>
-        <li>Воркер під час деплою перезапускається лише якщо вже був запущений — увімкнення відправлення залишається ручним рішенням (перемикання зі Степаном-1).</li>
-        <li>Відкат — revert коміту і повторний деплой.</li>
-      </ol>
-      <details class="l3"><summary>До дна</summary><div class="body">
-        <p>Тести біжать на SQLite у пам'яті (швидко; порядок рандомізується), тому весь SQL написаний сумісно з обома базами. База і Redis назовні не стирчать (лише всередині docker-мережі), веб — на локальний порт за nginx + Cloudflare. Застосунок у контейнері працює не від root — свідоме рішення: воркер розбирає недовірені дані з Instagram. Секрети — лише в <code>.env</code> на сервері. Файли: <code>.github/workflows/ci.yml</code>, <code>deploy.yml</code>, <code>infra/docker-compose.yml</code>, <code>Dockerfile</code>, <code>tests/conftest.py</code>.</p>
-      </div></details>
-    </div>
-  </details>
-</section>
-
-<!-- ШПАРГАЛКА -->
-<section class="card reveal" id="review">
-  <div class="kicker">14 · До рев'ю</div>
-  <h2>Шпаргалка: сильне, спірне і ймовірні запитання</h2>
-  <details open>
-    <summary>Чим пишатися</summary>
-    <div class="body">
-      <ul>
-        <li>Ізоляція філій — багатошарова і централізована, з fail-closed-поведінкою в усіх спірних місцях.</li>
-        <li>Вигадки нейромережі реально перехоплюються до відправлення, а не «заборонені промптом».</li>
-        <li>Кожен долар на нейромережі порахований і обмежений по філіях.</li>
-        <li>Ідемпотентність скрізь: дублі повідомлень, подвійні тіки, гонки — закриті блокуваннями й унікальними ключами.</li>
-        <li>Код документує реальні інциденти прямо в коментарях: видно, <i>чому</i> рішення саме таке.</li>
-        <li>Свідомі компроміси: CRM — fail-open (збій не глушить бота), алерти — best-effort (пропущений пінг не губить дані).</li>
-      </ul>
-    </div>
-  </details>
-  <details open>
-    <summary>Чесні слабкі місця (краще назвати самим)</summary>
-    <div class="body">
-      <ul>
-        <li>Уся внутрішня частина — за автентифікацією: публічні лише лендинг, сторінка новин і політика приватності, а кожен інший запит перевіряється middleware при кожному зверненні. Чесне застереження: примус тримається на деплой-прапорці (його вимикають лише для найпершого запуску, поки не налаштований Telegram-бот входу, — з гучним попередженням у логах) — неправильно сконфігурований деплой працював би відкритим. У проді прапорець увімкнений; сира адмінка захищена завжди, незалежно від прапорця.</li>
-        <li>Спостерігач бачить кнопки запису — сервер поверне 403, але інтерфейс їх не ховає (межа безпеки серверна, приховування — косметика, поки не зроблено).</li>
-        <li>pgvector встановлений, але не використовується: відбитки — JSON, близькість рахується в Python (сумісність із тестами на SQLite; на поточних обсягах ок, на більших — точка зростання).</li>
-        <li>CRM-інтеграція наполовину план: читання і push подій готові (вимкнені прапорцями), запис стадій і сигнали в Meta — спроєктовані, не реалізовані.</li>
-      </ul>
-    </div>
-  </details>
-  <details>
-    <summary>Імовірні запитання — короткі відповіді</summary>
-    <div class="body">
-      <dl class="qa">
-        <dt>«Чому полінг, а не вебхуки?»</dt>
-        <dd>Приватні API (instagrapi, Evolution) вебхуків не дають, а саме вони дозволяють писати після 24-годинного вікна. Офіційні вебхуки Meta під'єднані як канал, але загальний пайплайн побудований на опитуванні.</dd>
-        <dt>«Що заважає ботам двох філій переплутати дані?»</dt>
-        <dd>Фільтрація за філією зашита в єдиний клас доступу до даних; інтерфейс додатково перетинає вибір із правами на сервері й перевіряє кожен рядок. Плюс тести ізоляції.</dd>
-        <dt>«Що буде, якщо нейромережа вигадає ціну?»</dt>
-        <dd>Детермінована перевірка звірить ціну з базою знань; розбіжність — регенерація на дорогій моделі; знову погано — безпечна фраза і передавання менеджеру. Клієнт вигадку не побачить.</dd>
-        <dt>«Що при падінні брокера / CRM / Telegram?»</dt>
-        <dd>Брокер: до 5 тимчасових помилок опитування терпиться, чат перевідповідає наступним тіком. CRM: fail-open, бот продовжує. Telegram: алерт губиться, запис у базі — ні.</dd>
-        <dt>«Як масштабується на нову філію?»</dt>
-        <dd>Створити філію в інтерфейсі (канонічний скелет бази знань створюється сам), під'єднати канали, обрати персону, за бажанням — зв'язати базу знань із наявною. Коду писати не потрібно.</dd>
-        <dt>«Чому воркер вимкнений у docker-compose?»</dt>
-        <dd>Навмисно: воркери Степана-1 і Степана-2 не мають писати в один Instagram-акаунт одночасно (бан). Увімкнення — ручний крок перемикання.</dd>
-      </dl>
-    </div>
-  </details>
-</section>
-
-<!-- СЛОВНИЧОК -->
-<section class="card reveal" id="glossary">
-  <div class="kicker">15 · Словничок</div>
-  <h2>Терміни за 30 секунд</h2>
-  <div class="tablewrap"><table>
-    <tr><th>Термін</th><th>По-людськи</th></tr>
-    <tr><td><b>Філія (branch)</b></td><td>ізольований «мешканець» платформи: своя база, курси, бот, люди, канали</td></tr>
-    <tr><td><b>Лід</b></td><td>картка клієнта у філії; одна людина = один лід, навіть у різних месенджерах</td></tr>
-    <tr><td><b>Тред</b></td><td>один чат ліда в одному каналі (у ліда їх може бути кілька)</td></tr>
-    <tr><td><b>Воронка</b></td><td>шлях клієнта: новий → виявлення → презентація → заперечення → готовий → переданий</td></tr>
-    <tr><td><b>Брокер (AIbroker)</b></td><td>зовнішній шлюз до всіх нейромереж; повертає ціну кожного виклику</td></tr>
-    <tr><td><b>База знань</b></td><td>тільки факти: персона, факти політик/ринку і картки курсів — вантажаться в кожен промпт цілком, без кроку пошуку</td></tr>
-    <tr><td><b>Reply-guard</b></td><td>страховка: перевірка чернетки відповіді на вигадки до відправлення</td></tr>
-    <tr><td><b>Критик-гейт</b></td><td>остання перевірка: сильна модель оцінює кожну відповідь за позитивною рубрикою (заземлена, доречна, продає) і за провалу передає людині</td></tr>
-    <tr><td><b>Outbox</b></td><td>вихідна черга — єдині двері назовні, де застосовуються всі ліміти</td></tr>
-    <tr><td><b>Follow-up</b></td><td>нагадування клієнту, що замовк, за розкладом</td></tr>
-    <tr><td><b>24-годинне вікно</b></td><td>строк після повідомлення клієнта, у який Meta офіційно дозволяє відповісти</td></tr>
-    <tr><td><b>MCP</b></td><td>протокол, за яким зовнішня система (або Claude) керує воронкою</td></tr>
-    <tr><td><b>Cutover</b></td><td>фінальне перемикання зі Степана-1 на Степана-2 (увімкнення воркера)</td></tr>
-  </table></div>
-</section>
-
-<footer>
-  Внутрішня сторінка команди. Складено за кодом і документацією репозиторію; рівні «до дна» містять шляхи до файлів — за ними можна перевірити кожне твердження.
-</footer>
-</main>
-"""
-
-_TITLES = {"en": "How Stepan Works — project map", "uk": "Як влаштований Степан — карта проєкту"}
-_BODIES = {"en": _BODY_EN, "uk": _BODY_UK}
+_TITLE = "How Stepan Works — project map"
 
 
 def hiw_html(lang: str = "en") -> str:
-    """The complete /hiw page in the requested language (en default, uk)."""
-    lang = lang if lang in _BODIES else "en"
-    body = _BODIES[lang].replace("__LANGSW__", _langsw(lang))
+    """The complete /hiw page (English only — the Ukrainian twin was removed 2026-07-25:
+    not a product language, and it doubled the maintenance of a 1.4k-line page)."""
+    del lang  # accepted for URL compatibility (?lang=uk still resolves here)
+    body = _BODY_EN.replace("__LANGSW__", "")
     return (
         "<!doctype html>\n"
-        f'<html lang="{lang}">\n<head>\n<meta charset="utf-8">\n'
+        '<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '<meta name="robots" content="noindex,nofollow">\n'
         # inline favicon: avoids the browser's automatic /favicon.ico 404
@@ -1407,7 +808,7 @@ def hiw_html(lang: str = "en") -> str:
         '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
         '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600'
         '&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">\n'
-        f"<title>{_TITLES[lang]}</title>\n"
+        f"<title>{_TITLE}</title>\n"
         f"<style>{_CSS}</style>\n</head>\n<body>"
         f"{body}"
         f"<script>{_JS}</script>\n</body>\n</html>\n"
