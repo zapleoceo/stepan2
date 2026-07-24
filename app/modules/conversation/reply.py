@@ -485,10 +485,12 @@ class ReplyService(ReplyDelivery):
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
         workflow: str, capability: str,
     ) -> tuple[TurnDecision | None, dict]:
-        """One generation, falling back to chat:smart when the chat:sales chain is down or
-        capped — free mode must degrade to today's quality, never to silence."""
+        """One generation, falling back to chat:smart when the chat:sales chain is down,
+        capped, or returns an unparseable body — free mode must degrade to today's quality,
+        never to silence. (generate() itself only escalates FAST→SMART, so the sales-tier
+        parse failure needs its own retry here.)"""
         try:
-            return await generate(
+            decision, meta = await generate(
                 engine, ctx, messages, thread_id, workflow=workflow,
                 capability=capability, branch_id=self.branch_id, free_moves=True)
         except Exception as exc:  # noqa: BLE001 — transport-level; the fallback chain owns it
@@ -500,6 +502,14 @@ class ReplyService(ReplyDelivery):
             return await generate(
                 engine, ctx, messages, thread_id, workflow=workflow,
                 capability=SMART, branch_id=self.branch_id, free_moves=True)
+        if decision is None and capability == SALES:
+            logger.warning(
+                "free: unparseable chat:sales decision branch=%d thread=%d — retry on smart",
+                self.branch_id, thread_id)
+            return await generate(
+                engine, ctx, messages, thread_id, workflow=workflow,
+                capability=SMART, branch_id=self.branch_id, free_moves=True)
+        return decision, meta
 
     async def _vet_free(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001

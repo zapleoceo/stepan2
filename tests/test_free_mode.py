@@ -129,6 +129,28 @@ async def test_sales_chain_down_falls_back_to_smart(db_session) -> None:  # noqa
     assert llm.capabilities == ["chat:sales", "chat:smart"]
 
 
+async def test_unparseable_sales_body_retries_on_smart(db_session) -> None:  # noqa: ANN001
+    """A garbage chat:sales body costs a retry, not the turn."""
+    bid, tid, _ = await _thread(db_session, dossier=_HOT)
+    llm = _LLM("sonnet had a bad day", _answer())
+    decision = await _service(db_session, bid, llm).decide(tid)
+    assert decision is not None
+    assert decision.reply == "halo kak"
+    assert llm.capabilities == ["chat:sales", "chat:smart"]
+
+
+async def test_tool_envelope_wrapped_decision_is_unwrapped(db_session) -> None:  # noqa: ANN001
+    """Anthropic via the broker's forced-tool JSON mode intermittently wraps the decision in
+    {"parameters": {...}} (measured live, ~half of chat:sales turns) — unwrap, don't skip."""
+    bid, tid, _ = await _thread(db_session, dossier=_HOT)
+    wrapped = json.dumps({"parameters": json.loads(_answer(reply="dari envelope kak"))})
+    llm = _LLM(wrapped)
+    decision = await _service(db_session, bid, llm).decide(tid)
+    assert decision is not None
+    assert decision.reply == "dari envelope kak"
+    assert llm.capabilities == ["chat:sales"]
+
+
 # ── freedom ───────────────────────────────────────────────────────────────────
 
 async def test_model_keeps_its_own_move_label(db_session) -> None:  # noqa: ANN001
