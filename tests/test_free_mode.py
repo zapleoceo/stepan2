@@ -221,3 +221,14 @@ def test_the_contract_bans_calling_the_place_a_campus() -> None:
     contract = free_contract("id")
     assert "not a university" in contract
     assert "tempat kursus" in contract
+
+
+def test_the_contract_pins_the_address_form() -> None:
+    """normalize_address (a blind kamu->Kakak regex on every bubble) was removed on the
+    argument that a strong model holds the register by itself. Six live hours later: 12 of 178
+    outgoing messages had drifted to "kamu" and 5 to "Anda", against zero the day before —
+    the regex had been doing real work. Stating it in the contract is the honest fix; rewriting
+    the model's sentences is not."""
+    contract = free_contract("id")
+    assert "Kak/Kakak" in contract
+    assert "kamu" in contract and "Anda" in contract
