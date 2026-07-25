@@ -232,3 +232,12 @@ def test_the_contract_pins_the_address_form() -> None:
     contract = free_contract("id")
     assert "Kak/Kakak" in contract
     assert "kamu" in contract and "Anda" in contract
+
+
+def test_an_unanswered_question_outranks_everything() -> None:
+    """The single largest measured loss: in 30 of 50 live threads the lead's question sat
+    unanswered under later messages the bot preferred to send, and those threads died. One
+    thread waited five days for an answer while receiving six pitches."""
+    contract = free_contract("id")
+    assert "unanswered question outranks" in contract
+    assert "don't change the subject" in contract
