@@ -652,8 +652,11 @@ _STC: dict[str, str] = {
 # (and left) from ANY active stage when they go quiet mid-conversation (84% of entries into
 # it came from qualifying/presenting/objection, not from new), exactly like dormant already
 # is. It moved out of the linear pipeline into the side-track for that reason.
-_PIPELINE = ("new", "qualifying", "presenting", "objection", "ready", "handed_off")
-_SIDE_STAGES = ("nurturing", "dormant", "manager")
+# The line every won lead walks once, in order. `objection` and `nurturing` are NOT steps —
+# both are entered from and returned to any active stage (see domain/enums.Stage), so in the
+# line they made the funnel read as if doubt and silence were places on the way to a sale.
+_PIPELINE = ("new", "qualifying", "presenting", "ready", "handed_off")
+_SIDE_STAGES = ("objection", "nurturing", "dormant", "manager")
 _STAGE_COLOR: dict[str, str] = {
     "new": "#4da6ff", "nurturing": "#d6a96f", "qualifying": "#9b7aff",
     "presenting": "#4adb7a", "objection": "#ffa94d", "ready": "#51cf66",
@@ -1263,9 +1266,11 @@ def messages_html(
     return "".join(parts)
 
 
+# Funnel order first, then the side states — objection and nurturing are events that can
+# happen at any step, not steps themselves (see domain/enums.Stage).
 _STAGES = (
-    "new", "qualifying", "presenting", "objection", "ready", "handed_off",
-    "nurturing", "dormant", "manager",
+    "new", "qualifying", "presenting", "ready", "handed_off",
+    "objection", "nurturing", "dormant", "manager",
 )
 
 

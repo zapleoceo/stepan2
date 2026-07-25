@@ -1669,3 +1669,20 @@ def test_demo_persona_carries_the_current_sales_methodology() -> None:
     assert "EVERY part answered" in _SYSTEM               # multi-part questions
     assert "near-verbatim" in _SYSTEM                     # anti-repeat
     assert "Never mention or imply any specific real client" in _SYSTEM
+
+
+def test_the_funnel_line_holds_only_real_steps() -> None:
+    """A funnel step is something every won lead passes once, in order. objection and
+    nurturing are not: measured over 30 live days, objection was entered from qualifying
+    (39%), presenting (24%), new (14%) and even ready — and left back to all of them. Kept in
+    the line they rendered an ordinary moment of doubt as a mandatory station before the sale.
+    Both now sit with the side states, in every place the funnel is drawn."""
+    from app.api._ui_html import _PIPELINE, _SIDE_STAGES
+    from app.api._ui_panels import _FLOW_SPINE, _FUNNEL_PIPELINE, _FUNNEL_SIDE
+
+    for line in (_PIPELINE, _FUNNEL_PIPELINE, _FLOW_SPINE):
+        assert "objection" not in line, line
+        assert "nurturing" not in line, line
+    assert _PIPELINE[:4] == ("new", "qualifying", "presenting", "ready")
+    for side in (_SIDE_STAGES, _FUNNEL_SIDE):
+        assert "objection" in side and "nurturing" in side

@@ -28,9 +28,10 @@ _STC: dict[str, str] = {
     "objection": "so", "ready": "sr", "handed_off": "sh", "dormant": "sd",
     "manager": "sm",
 }
+# Rendered in this order in the segment tree (line first, then side states).
 _ALL_STAGES = (
-    "new", "nurturing", "qualifying", "presenting", "objection",
-    "ready", "handed_off", "dormant", "manager",
+    "new", "qualifying", "presenting", "ready", "handed_off",
+    "objection", "nurturing", "dormant", "manager",
 )
 
 
@@ -1557,12 +1558,16 @@ def _ad_tree_html(
 # directly 657 times against 8 that land in nurturing first, and 84% of entries into
 # nurturing come from an already-active stage going quiet, not from "new" — it's a side
 # state entered from (and returned to) any active stage, not a step in the sequence.
-_FUNNEL_PIPELINE = ("new", "qualifying", "presenting", "objection", "ready")
-_FUNNEL_SIDE = ("nurturing", "handed_off", "dormant", "manager")
+# objection left the line on 2026-07-25 for the same reason nurturing did: over 30 days it was
+# entered from qualifying (39%), presenting (24%), new (14%) and even ready, and left back to
+# all of them. In the line it made the report show doubt as a mandatory station between
+# presenting and ready — an ordinary moment of any sale rendered as a bottleneck.
+_FUNNEL_PIPELINE = ("new", "qualifying", "presenting", "ready")
+_FUNNEL_SIDE = ("objection", "nurturing", "handed_off", "dormant", "manager")
 
 # Flow diagram: pipeline spine on the top lane, side branches on the bottom lane.
-_FLOW_SPINE = ("new", "qualifying", "presenting", "objection", "ready", "handed_off")
-_FLOW_EXITS = ("nurturing", "dormant", "manager")
+_FLOW_SPINE = ("new", "qualifying", "presenting", "ready", "handed_off")
+_FLOW_EXITS = ("objection", "nurturing", "dormant", "manager")
 
 
 def _funnel_flow_html(
