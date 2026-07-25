@@ -82,25 +82,20 @@ def _is_typed(t: str) -> bool:
 
 # ── deterministic templates (no LLM) ─────────────────────────────────────────
 
+# Retired 2026-07-25 as a SENT opener — the model writes ad taps and story replies now (it
+# was answered 14.3% of the time against 36.3% for a written first reply, and it opened with
+# the DP figure before the lead said a word). Kept as a constant because live threads still
+# carry it as their first outbound: reply.decide reads it to tell "the template already went
+# out" from "the model has spoken", which decides whether the next turn is the first real
+# generation.
 AD_TAP_OPENER = (
     "Halo, aku MinStep dari IT STEP Academy 😊 Seneng banget Kakak tertarik! Biar aku bisa "
     "kasih info yang paling pas, boleh cerita dulu — Kakak lagi cari kursus buat apa nih?"
 )
-# The 24h sales audit (2026-07-24, 72 threads) measured 61% first-reply silence when the
-# opener carried no information. Naming the tapped product + the DP/instalment frame answers
-# the spirit of the tap with grounded facts before the one discovery question.
-AD_TAP_OPENER_PRODUCT = (
-    "Halo, aku MinStep dari IT STEP Academy 😊 Kakak tertarik {title} ya — pilihan seru! "
-    "Booking tempatnya cukup DP Rp 500.000, sisanya bisa dicicil tanpa bunga. Biar infonya "
-    "pas buat Kakak: rencananya skill ini mau dipakai buat apa nih?"
-)
-STORY_OPENER = (
-    "Halo, aku MinStep dari IT STEP Academy 😊 Makasih udah respon story-nya! "
-    "Lagi kepikiran belajar skill baru, atau sekadar penasaran nih?"
-)
 # Neutral on purpose: it answers a bare greeting ("halo") and unreadable garble ("Qqq b
 # nnq", thread 5020) equally well — no "I didn't understand", which reads oddly to someone
-# who only said hello.
+# who only said hello. The one first contact still shipped by code: an emoji or garble gives
+# the model nothing to react to, so a fixed clarifier is as good as a written one and free.
 JUNK_OPENER = (
     "Halo Kak, aku MinStep dari IT STEP Academy Jakarta 😊 Boleh cerita, Kakak lagi cari "
     "info tentang apa ya? Biar aku bisa bantu yang paling pas."

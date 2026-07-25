@@ -31,6 +31,28 @@ FIRST_TURN_NOTE = (
     "wrote. Never describe the campus, its address or its floor. End on a question.]"
 )
 
+# The lead tapped an ad and sent nothing of their own (the prefill is the ad's text, not
+# theirs). Until 2026-07-25 this shipped a fixed template that opened with the DP figure —
+# money before a single word from the lead, the exact move the contract forbids everywhere
+# else. Measured over 30 days: the template was answered 14.3% of the time against 36.3%
+# for a written first reply. The model writes it now; this note carries the two things the
+# template encoded (which product, and that nothing was actually asked) plus the price rule.
+AD_TAP_FIRST_TURN_NOTE = (
+    "[This is your FIRST message to this person and they have NOT written anything yet — "
+    "they tapped an ad{product}. The text you see from them is the ad's own prefill, not "
+    "their words, so there is nothing to answer and nothing about them is known. Say who you "
+    "are in one short clause, react to the topic they tapped, and ask ONE opening question "
+    "about them — why that skill, what they want it for. Do NOT quote a price, a DP or an "
+    "instalment: nobody asked, and money before you know anything is what loses these leads. "
+    "Never describe the campus. Keep it to 1-2 short bubbles.]"
+)
+
+
+def ad_tap_note(product_title: str | None) -> str:
+    """The first-turn note for a silent ad tap, naming the product when the ad maps to one."""
+    return AD_TAP_FIRST_TURN_NOTE.format(
+        product=f" for {product_title}" if product_title else "")
+
 # The branch language as a person would name it. "Reply in id" is an instruction about a
 # string; "Reply in Bahasa Indonesia" is an instruction about a language. Same length.
 _LANG_NAMES = {"id": "Bahasa Indonesia", "ms": "Bahasa Melayu", "en": "English",
@@ -171,11 +193,15 @@ def build_messages_free(  # noqa: PLR0913
     manager_note: str | None = None,
     now_block: str | None = None,
     is_first_reply: bool = False,
+    first_turn_note: str | None = None,
 ) -> list[dict[str, Any]]:
     """Stable cached prefix first, then one small per-lead system block, then the dialog.
 
     messages[0] must stay byte-identical between turns and between leads (same branch +
-    language) — it is the broker's prompt-cache anchor. A test pins this invariant."""
+    language) — it is the broker's prompt-cache anchor. A test pins this invariant.
+
+    `first_turn_note` overrides the default opener note — a silent ad tap needs different
+    instructions from a lead who wrote something (see ad_tap_note)."""
     stable = knowledge.rstrip() + "\n\n" + free_contract(lang)
     variable = [block for block in (
         (now_block or "").strip(),
@@ -184,7 +210,7 @@ def build_messages_free(  # noqa: PLR0913
         (source_block or "").strip(),
         (name_block or "").strip(),
         dossier_block(dossier),
-        FIRST_TURN_NOTE if is_first_reply else "",
+        (first_turn_note or FIRST_TURN_NOTE) if is_first_reply else "",
     ) if block]
     messages: list[dict[str, Any]] = [{"role": "system", "content": stable}]
     if variable:

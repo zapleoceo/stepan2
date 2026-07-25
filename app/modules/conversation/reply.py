@@ -23,19 +23,13 @@ from .delivery import ReplyDelivery, _script_lang
 from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import _ASSISTANT_LAST_NUDGE, TEMPLATED_META, DecisionEngine
-from .free_mode import build_messages_free
+from .free_mode import ad_tap_note, build_messages_free
 from .money_gate import (
     MONEY_CORRECTION,
     MONEY_ESCALATION_REASON,
     money_issues,
 )
-from .opener import (
-    AD_TAP_OPENER,
-    AD_TAP_OPENER_PRODUCT,
-    JUNK_OPENER,
-    STORY_OPENER,
-    Entry,
-)
+from .opener import AD_TAP_OPENER, JUNK_OPENER, Entry
 from .opener import classify as classify_entry
 from .prompt import (
     AD_TYPED_ENTRY_HINT,
@@ -57,6 +51,10 @@ ESCALATION_HOLD_REPLY = (
     "Kakak, bentar ya - aku cek dulu ke tim supaya infonya pas dan akurat. "
     "Nanti dibantu langsung di jam kerja (Senin-Jumat, 09.00-18.00 WIB) 🙏"
 )
+
+# Threads opened before 2026-07-25 carry a retired ad-tap template as their only outbound;
+# the turn after it is still the first REAL generation and belongs on the strong chain.
+_LEGACY_TAP_PREFIX = "Halo, aku MinStep dari IT STEP Academy"
 
 
 def _escalate(decision: TurnDecision, reason: str) -> TurnDecision:
@@ -92,30 +90,29 @@ class ReplyService(ReplyDelivery):
 
         outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
         is_first_reply = not outs
+        first_note: str | None = None
         if is_first_reply and script_lang is None:
-            # Silent/junk first contacts ship a pure template — classified by CODE, zero LLM,
-            # zero cost (see opener.py for the incident history). A TYPED entry goes to the
-            # full pipeline: writing the opener is exactly the judgement the model owns now.
-            # Gated on the lead writing in the branch's own script: the templates are
-            # Bahasa-only, so a Cyrillic opener goes straight to the full pipeline.
+            # Only JUNK still ships a template: an emoji or a garbled string carries nothing
+            # to react to, so a fixed clarifying line is as good as a written one and costs
+            # nothing. Every other first contact — including a SILENT ad tap — is written by
+            # the model. The tap used to get a template that opened with the DP figure; over
+            # 30 days it was answered 14.3% of the time against 36.3% for a written reply,
+            # and quoting money before the lead says a word contradicts the contract itself.
+            # Gated on the lead writing in the branch's own script: the template is
+            # Bahasa-only, so a Cyrillic first contact goes straight to the model.
             fc = classify_entry(ctx.dialog, ctx.thread.lead_source, ctx.thread.ad_id)
-            templated: str | None = None
-            if fc.entry is Entry.AD_SILENT:
-                title = await self._product_title(ctx.thread.product_slug)
-                templated = (AD_TAP_OPENER_PRODUCT.format(title=title) if title
-                             else AD_TAP_OPENER)
-            elif fc.entry is Entry.STORY and not fc.typed_text:
-                templated = STORY_OPENER
-            elif fc.entry is Entry.JUNK:
-                templated = JUNK_OPENER
-            if templated is not None:
+            if fc.entry is Entry.JUNK:
                 decision = TurnDecision(
-                    reply=templated, move="discover_motive", stage=Stage.QUALIFYING)
+                    reply=JUNK_OPENER, move="discover_motive", stage=Stage.QUALIFYING)
                 self.last_decision = decision
                 self._last_llm_meta = TEMPLATED_META
                 logger.info("reply branch=%d thread=%d tier=templated first=True",
                             self.branch_id, thread_id)
                 return decision.to_legacy(stored)
+            if fc.entry is Entry.AD_SILENT or (fc.entry is Entry.STORY and not fc.typed_text):
+                # Nothing of the lead's own to answer — the note tells the model that, names
+                # the tapped product, and holds back the price until they ask.
+                first_note = ad_tap_note(await self._product_title(ctx.thread.product_slug))
         if ctx.over_budget:
             # prepare() was told to let the zero-cost template branch through; everything
             # from here on calls the broker, so the original budget gate applies now.
@@ -123,9 +120,12 @@ class ReplyService(ReplyDelivery):
                            self.branch_id, workflow)
             return None
 
-        # The first LLM turn — a plain first reply, OR the turn right after the templated
-        # opener: the highest-stakes generation, always on the strong chain.
-        first_llm_turn = is_first_reply or all(t == AD_TAP_OPENER for t in outs)
+        # The first LLM turn — a plain first reply, OR the turn right after the one remaining
+        # template (the junk clarifier): the highest-stakes generation, always on the strong
+        # chain. Historic ad-tap templates count too, for threads opened before 2026-07-25.
+        first_llm_turn = is_first_reply or all(
+            t in (JUNK_OPENER, AD_TAP_OPENER) or t.startswith(_LEGACY_TAP_PREFIX)
+            for t in outs)
         tier = pick_capability(stored, is_first_reply=first_llm_turn)
         capability = SALES if tier == SMART else tier
         context = await engine.free_kb_context()
@@ -137,6 +137,7 @@ class ReplyService(ReplyDelivery):
             manager_note=lead.manager_note if lead is not None else None,
             now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
             is_first_reply=is_first_reply,
+            first_turn_note=first_note,
         )
         if messages[-1]["role"] == "assistant":
             # A re-triggered tick can reach here with the bot's own last message trailing.
