@@ -33,7 +33,7 @@ from .repository import (
     OutboxRepo,
     ThreadRepo,
 )
-from .routing import FAST, SMART
+from .routing import SALES, SMART
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -259,7 +259,14 @@ class FollowupService:
             now_block=await engine._now_block())  # noqa: SLF001 — engine owns the branch clock
         messages.append({"role": "user", "content": followup_framing(
             sent_so_far + 1, len(self.settings.followup_schedule_h), stored.refusal)})
-        capability = SMART if stored.open_objections() else FAST
+        # A nudge is the hardest message in the funnel: no question to answer, a lead who
+        # already stopped replying, and one shot at being worth their attention. It used to
+        # run on FAST unless open_objections() was set — a dossier field the model fills for
+        # ~5% of leads (see discovery.py), so in practice 81% of nudges (328 of 405 over six
+        # live hours) were written by the weakest model in the chain, against 22 replies on
+        # Sonnet. Freedom given to a weak model is not freedom, it is drift; SMART is the
+        # floor. The first touch — the one most likely to be read — gets the sales chain.
+        capability = SALES if sent_so_far == 0 else SMART
 
         decision, meta = await generate(
             engine, ctx, messages, thread_id, workflow="followup",
