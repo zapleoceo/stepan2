@@ -89,13 +89,16 @@ _DUE_Q = (  # noqa: S608
     " ORDER BY ct.last_in_at DESC LIMIT :batch"
 )
 
+# Same principle as the follow-up framing (2026-07-25): state the situation, hand over the
+# decision. The previous version prescribed three moves — reopen on X, give ONE reason, signal
+# that time has passed — which is the ladder we retired everywhere else, just shorter.
 _REACTIVATION_FRAMING = (
-    "[System: this lead went quiet days ago and is parked as dormant. This is ONE personalized "
-    "attempt to earn a single reply — not to close. Reopen on what the dossier says they "
-    "actually cared about, or the exact point the conversation stalled, and give ONE concrete "
-    "reason to look again that they have not already been given. Signal that time has passed, "
-    "the way a person re-opening a quiet chat does. If you have no genuinely fresh hook, "
-    "return an empty reply — a stale echo costs more than staying quiet.]"
+    "[System: this lead went quiet days ago and is parked as dormant. Days have passed since "
+    "anyone wrote — they are not in the middle of this conversation any more. This is ONE "
+    "attempt to earn a single reply, not to close. You decide whether it is worth writing at "
+    "all and what would make THIS person answer; the dossier above is everything you know "
+    "about them. If nothing you could say is genuinely worth their attention, return an empty "
+    "reply — a stale echo costs more than staying quiet.]"
 )
 
 
