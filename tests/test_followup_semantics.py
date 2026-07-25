@@ -473,7 +473,8 @@ async def test_a_softly_refused_lead_still_gets_a_gentler_touch(db_session) -> N
 
     assert await _svc(db_session, bid, llm).run() == 1
     framing = llm.messages[0][-1]["content"]
-    assert "do NOT argue" in framing
+    assert "don't argue or re-pitch" in framing
+    assert "or nothing at all" in framing  # staying silent is an option, not a fallback
 
 
 async def test_the_nudge_is_told_not_to_beg(db_session) -> None:  # noqa: ANN001
@@ -583,3 +584,32 @@ async def test_a_price_nudge_is_fine_once_the_lead_is_ready(db_session) -> None:
     assert await _svc(db_session, bid, llm).run() == 1
     row = await _pending(db_session, tid)
     assert row is not None and "500.000" in row.text
+
+
+async def test_the_nudge_knows_which_product_the_lead_came_for(db_session) -> None:  # noqa: ANN001
+    """thread 5267: a lead who tapped an SMM ad got two Vibe Coding pitches in a row. The
+    thread has carried the ad→product mapping all along; the nudge just never saw it."""
+    from app.adapters.db.models import Product
+
+    bid, _tid, _lead, thread = await _world(db_session, timer_due=True)
+    thread.product_slug = "vibe"  # the ad→product mapping the thread has carried all along
+    db_session.add(thread)
+    db_session.add(Product(branch_id=bid, slug="vibe", title="Vibe Coding", is_active=True))
+    await db_session.flush()
+    llm = _CapturingLLM(_v3())
+
+    assert await _svc(db_session, bid, llm).run() == 1
+    prompt = "\n".join(m["content"] for m in llm.messages[0] if m["role"] == "system")
+    assert "WHAT THEY CAME FOR" in prompt and "Vibe Coding" in prompt
+
+
+async def test_the_nudge_may_choose_silence(db_session) -> None:  # noqa: ANN001
+    """Writing nothing is a correct outcome, not a failure — the framing has to say so, or the
+    model pads to fill the turn and the lead gets a message that repeats us."""
+    bid, _tid, _lead, _ = await _world(db_session, timer_due=True)
+    llm = _CapturingLLM(_v3())
+
+    await _svc(db_session, bid, llm).run()
+    framing = llm.messages[0][-1]["content"]
+    assert "return an EMPTY reply" in framing
+    assert "You decide whether to write at all" in framing
