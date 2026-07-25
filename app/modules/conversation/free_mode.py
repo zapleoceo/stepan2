@@ -169,23 +169,30 @@ HARD RULES — the only ones:
   and never go silent.
 """
 
-# The selling model no longer carries the dossier (2026-07-25). It was filling it for ~5% of
-# leads because the reply always wins that competition for attention (discovery.py has the
-# measurement), so reading the lead moved to its own chat:fast call whose only job that is.
-# What stays here is what the model alone can know at send time: the reply, where the funnel
-# now stands, whether they are ready, the number they just typed, whether a human is needed,
-# and any figure this reply quoted (a promise the next turn must not contradict).
+# What the selling model is asked for, and nothing else. Everything the code can determine on
+# its own was taken back on 2026-07-25:
+#   phone           — leads/phone.extract_phone already mines it from the inbound at ingest,
+#                     shape-matched to the branch's country; the model was a second, weaker
+#                     copy of that
+#   reply_language  — delivery._script_lang reads the lead's own script, and its docstring
+#                     records why: the model's self-report drifted back to the branch default
+#                     mid-conversation even after the lead switched languages
+#   prices_quoted   — guard.canonical_prices finds every figure in the text the model just
+#                     wrote; asking the author to also list them is redundant
+#   the dossier     — its own chat:fast call now (discovery.py)
+# What remains is judgement no amount of parsing recovers: what to say, where the funnel now
+# stands, which course this actually became about, whether they are ready, whether a human is
+# needed. Attention spent on bookkeeping is attention not spent on the person.
 _FREE_SCHEMA = """\
 Return ONLY this JSON, no prose and no markdown fences:
 {{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, \
-"phone": str|null, "needs_human": bool, "human_reason": str|null, "reply_language": str|null, \
-"prices_quoted": [str]}}
+"needs_human": bool, "human_reason": str|null}}
 
+reply: what you send them. Everything else here is a judgement only you can make.
 stage: new|nurturing|qualifying|presenting|objection|dormant. Not 'ready' — that's the flag.
+product_slug: the course this conversation is actually about now, if it changed.
 ready: true only when they gave a contact AND want to enrol or reserve now.
-phone: their number exactly as they typed it, the turn they share it; else null.
-reply_language: ISO code when you replied in something other than {lang}, else null.
-prices_quoted: any figure you quoted in THIS reply, so a later turn knows what was promised.
+needs_human / human_reason: see the rule above.
 """
 
 

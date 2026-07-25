@@ -251,22 +251,36 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
     if not isinstance(reply, str):
         raise ValueError("decision missing a string 'reply'")
 
+    text = clean_reply(reply)
     lang = str(data.get("reply_language") or "").lower().strip()
     return TurnDecision(
-        reply=clean_reply(reply),
+        reply=text,
         move=_free_move(data.get("move")),
         stage=_coerce_stage(data.get("stage")),
-        # Reading the lead belongs to discovery.py now (2026-07-25); the selling model only
-        # reports the prices IT quoted, which nothing else can know. A `dossier` object is
-        # still accepted so a reply already in flight during the deploy isn't dropped.
-        dossier=_dossier(data.get("dossier"), prices=str_list(data.get("prices_quoted"))),
+        # Reading the lead is discovery.py's job now; the prices are read off the reply itself
+        # (guard.canonical_prices), so the author no longer has to list what it just wrote.
+        # Both a full `dossier` and an explicit `prices_quoted` are still accepted, so a reply
+        # generated just before the 2026-07-25 deploy loses nothing.
+        dossier=_dossier(data.get("dossier"),
+                         prices=str_list(data.get("prices_quoted")) or _prices_in(text)),
         product_slug=str(data.get("product_slug") or "").strip() or None,
         ready=bool(data.get("ready", False)),
+        # Kept for replies still in flight from the old schema — the live path takes the number
+        # from leads.phone.extract_phone, which mines the lead's own inbound at ingest.
         phone=str(data.get("phone") or "").strip() or None,
         needs_human=bool(data.get("needs_human", False)),
         human_reason=str(data.get("human_reason") or "").strip()[:300] or None,
         reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
     )
+
+
+def _prices_in(reply: str) -> list[str]:
+    """Figures quoted in the reply, read off the text instead of asked for. A price already
+    given is a commitment the next turn must not contradict, so it still has to be recorded —
+    but the model that wrote the sentence is the least efficient way to find out."""
+    from .guard import canonical_prices  # noqa: PLC0415 — guard imports nothing from here
+
+    return [f"{value:,}".replace(",", ".") for value in sorted(canonical_prices(reply or ""))]
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────
