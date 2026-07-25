@@ -78,8 +78,9 @@ def dossier_block(d: LeadDossier) -> str:
     ) if value]
     open_objections = d.open_objections()
     if open_objections:
-        lines.append("- STILL UNRESOLVED (handle before anything else): "
-                     + "; ".join(open_objections))
+        # Stated, not ordered: "handle before anything else" forced the old objection back to
+        # the top of the turn even when the lead had moved on to a fresh question.
+        lines.append("- raised and not yet resolved: " + "; ".join(open_objections))
     handled = [f"{o.text} → {o.handled_by}" for o in d.objections
                if o.status == "handled" and o.handled_by]
     if handled:
@@ -146,8 +147,9 @@ HARD RULES — the only ones:
   were not given: say the schedule isn't fixed yet and offer to confirm it with the team,
   rather than implying classes begin right after payment.
 - Reply in {lang}; if the lead writes in another language, answer in theirs and stay in it.
-- Write like a human in a chat: short messages, at most one question per message, at most 3
-  bubbles split by '|||' (usually 1-2), at most one emoji. Match their length and energy.
+- Write like a human in a chat, not like a brochure: short messages, at most 3 bubbles split
+  by '|||'. How many questions, how much emoji, how long — you judge, from their length and
+  energy. The bubble cap is the only hard limit here; it protects the account, not the style.
 - Set needs_human=true ONLY when they ask for a human, complain, raise a legal issue, or
   have a problem with a payment they already made. Not knowing something is not a reason —
   and never go silent.

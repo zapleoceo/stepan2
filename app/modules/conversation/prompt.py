@@ -18,11 +18,8 @@ _SOURCE_HINTS = {
         "ENTRY: this chat opened when the lead TAPPED one of our paid ads. Their first message "
         "is the ad's own prefilled text — they did not type it and did not ask you anything, "
         "so there is nothing to answer yet. It tells you the topic they tapped on and NOTHING "
-        "else: no goal, no age, no background, no budget. Open warmly with ONE question about "
-        "them. Anchor your discovery to the product they tapped — what they want THAT skill "
-        "for, what made it interesting now — rather than a generic 'what are you looking "
-        "for'; they already showed you the direction. The answer-first rule applies from the "
-        "moment they type something themselves."
+        "else: no goal, no age, no background, no budget. The product they tapped is the one "
+        "thing they did show you."
     ),
     "story": (
         "ENTRY: the lead replied to one of our Instagram stories — a light, casual opening."
@@ -48,10 +45,7 @@ AD_TYPED_ENTRY_HINT = (
 ORGANIC_ENTRY_HINT = (
     "ENTRY: the lead reached out to the DM on their own — no ad, no story reply, no product "
     "signal. You know NOTHING about them or what they came for, and no product direction may "
-    "be assumed. Run the full discovery arc, one question per message: who they are and where "
-    "they're starting from, what pushed them to write today, what a good outcome would look "
-    "like — and only then map a product to it. Their own words are the only source; the "
-    "answer-first rule still wins whenever they ask something directly."
+    "be assumed: their own words are the only source you have."
 )
 
 

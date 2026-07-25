@@ -89,10 +89,15 @@ def _clean_bubble(text: str) -> str:
     """Strip markdown artifacts that read as noise in a chat bubble — a horizontal rule
     (---, ***, ___) or a lone heading marker (live thread 2778: a trailing '---' shipped to
     the lead). Conservative: only removes lines that are ONLY the artifact, never trims real
-    content (so 'Rp 500.000 - 600.000' is untouched)."""
+    content (so 'Rp 500.000 - 600.000' is untouched).
+
+    No longer rewrites the model's words: normalize_address swapped every "kamu" for "Kakak"
+    with a blind regex, which also hit quotes of the lead's own message and phrasings where
+    the substitution reads wrong. The address form is the persona's job (it says "everyone is
+    Kak until you know better"), and a strong model holds it without a find-and-replace."""
     cleaned = _MD_ARTIFACT_RE.sub("", text or "")
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
-    return guard.normalize_address(cleaned.strip())
+    return cleaned.strip()
 
 
 def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
@@ -105,11 +110,15 @@ def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
 
 
 def _reply_bubble_cap(reply: str) -> int:
-    """At most TWO messages in a row for a normal reply — three DMs with no lead turn between
-    reads as a monolog and raises spam-detection risk (20-chat audit: bot share ~65-70%). The
-    numbered-menu turns (ad opener, clarify/goal menu) genuinely need their 3rd bubble for the
-    options, so those keep the full _MAX_BUBBLES; everything else is capped at 2."""
-    return _MAX_BUBBLES if "1️⃣" in (reply or "") else 2
+    """The account-safety cap on bubbles per turn — _MAX_BUBBLES (3), same number the contract
+    tells the model.
+
+    It used to be 2 for everything except numbered menus ("1️⃣"), from the era when the bot
+    monologued. The menus went with the scripted opener, so the exception was dead and the cap
+    was silently always 2 — a model writing three short bubbles had its third merged onto the
+    end of the second (_split_bubbles), producing exactly the long clumped message the cap
+    existed to prevent. One number, stated once, in both places."""
+    return _MAX_BUBBLES
 
 
 async def guard_prompt(session: AsyncSession, branch_id: int) -> str | None:
