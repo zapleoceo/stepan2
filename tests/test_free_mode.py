@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation.dossier import LeadDossier
-from app.modules.conversation.free_mode import build_messages_free
+from app.modules.conversation.free_mode import build_messages_free, free_contract
 from app.modules.conversation.reply import ESCALATION_HOLD_REPLY, ReplyService
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
@@ -211,3 +211,13 @@ def test_prompt_prefix_is_byte_stable_across_leads_and_turns() -> None:
     assert a[0]["role"] == "system"
     assert "Budi" not in a[0]["content"] and "Rabu" not in a[0]["content"]
     assert "Budi" in a[1]["content"] and "Sari" in b[1]["content"]
+
+
+def test_the_contract_bans_calling_the_place_a_campus() -> None:
+    """The rule lived only in facts_policy, ~7k chars deep, and the nudge path (now on the
+    cheaper chain) kept writing "kampus" — 10 of 12 live occurrences in six hours were
+    follow-ups. A claim about what the school IS belongs in the contract, next to the other
+    facts the model must not get wrong."""
+    contract = free_contract("id")
+    assert "not a university" in contract
+    assert "tempat kursus" in contract
