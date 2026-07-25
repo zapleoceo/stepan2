@@ -1,41 +1,27 @@
-"""Which model tier a turn runs on — decided from state, not from text patterns.
+"""Which model tier a turn runs on.
 
-The previous router keyed partly off regexes over the lead's last message ("bayar", "mahal",
-…), so a phrasing nobody had seen yet quietly got the cheap model at the exact moment a sale
-was on the line. This one reads the dossier and the turn index: both structural, so an unseen
-phrasing cannot downgrade a decisive turn.
+Live replies no longer route at all: every one of them goes to the sales chain. The tiering
+that used to live here — cheap model unless the dossier showed an objection, a money
+conversation, readiness or a refusal — had a hole big enough to cost sales. Those conditions
+read the dossier, and the dossier was populated for ~5% of leads (discovery.py), so in
+practice everything but the first reply fell through to the cheapest model in the chain.
 
-Routing is a cost decision, invisible to the lead — a wrong call costs money or a slightly
-weaker sentence, never a wrong claim. Quality is a separate concern (money_gate, critic).
+Thread 4681 is what that looked like: an engaged lead answering questions, asking "ini bayar
+kah kk?" — a money question — and being answered by gpt-oss-120b, which replied with numbered
+menus and "terima kasih sudah pilih mau beralih karier", brochure language nobody speaks.
+
+Measured before removing it: 52 of 202 replies in 24h ran on the cheap tier. With the prompt
+cache warm a sales-chain reply costs $0.00057 (97.4% cache hit over the last hour), so moving
+them is roughly three cents a day — and it warms the cache further, which makes every other
+reply cheaper. There was no saving here worth a single lost conversation.
+
+FAST stays for work the lead never sees: extracting the dossier, translating for the admin UI.
 """
 from __future__ import annotations
 
-from .dossier import LeadDossier
-
-SMART = "chat:smart"  # the strong, scarce model
-FAST = "chat:fast"    # the cheap, effectively unlimited one
-# The broker's Sonnet-first chain for free reply mode — used wherever free mode would
-# otherwise pick SMART; falls back to SMART when the chain is capped or down.
+SMART = "chat:smart"  # the strong, scarce model — fallback when the sales chain is capped
+FAST = "chat:fast"    # the cheap, effectively unlimited one — service work only
+# The broker's Sonnet-first chain. Every live reply rides this.
 SALES = "chat:sales"
 
-__all__ = ["FAST", "SALES", "SMART", "pick_capability"]
-
-
-def pick_capability(dossier: LeadDossier, *, is_first_reply: bool) -> str:
-    """The strong model whenever this turn can plausibly cost the sale, else the cheap one.
-
-    The opener is included because it is the single highest-stakes turn in the funnel: 65% of
-    this branch's leads never write a third message, so a weak first reply is most of the loss.
-    Everything else keys off the dossier — an unresolved objection, a live money conversation,
-    a lead who is weighing it up, or one who has started saying no."""
-    if is_first_reply:
-        return SMART
-    if dossier.open_objections():
-        return SMART
-    if dossier.prices_quoted or dossier.payment_preference or dossier.budget_signal:
-        return SMART
-    if dossier.readiness in ("considering", "ready"):
-        return SMART
-    if dossier.refusal != "none":
-        return SMART
-    return FAST
+__all__ = ["FAST", "SALES", "SMART"]

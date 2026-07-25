@@ -35,7 +35,8 @@ class FakeLLM:
         self._payload = json.dumps(decision)
         self.seen: list[dict[str, Any]] | None = None
         # `.seen` is overwritten by every chat() call — a first-reply turn is always SMART
-        # (routing.pick_capability), which also runs the critic's own separate review call
+        # (all replies ride the sales chain now), which also runs the critic's own
+        # separate review call
         # on the same LLM, so `.seen` alone can't tell "the main decide() call" apart from
         # "the critic's own prompt". Keep every call so assertions can target the first one.
         self.calls_seen: list[list[dict[str, Any]]] = []

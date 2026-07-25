@@ -12,7 +12,7 @@ from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation.dossier import LeadDossier, Objection
 from app.modules.conversation.reply import ReplyService
 from app.modules.conversation.repository import DossierRepo
-from app.modules.conversation.routing import FAST, SALES, SMART
+from app.modules.conversation.routing import SALES, SMART
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
@@ -201,19 +201,25 @@ async def test_the_first_llm_turn_runs_on_the_sales_chain(db_session) -> None:  
     assert llm.capabilities[0] == SALES
 
 
-async def test_a_quiet_mid_conversation_turn_runs_cheap(db_session) -> None:  # noqa: ANN001
+async def test_even_a_quiet_mid_conversation_turn_rides_the_sales_chain(db_session) -> None:  # noqa: ANN001
+    """Routing by dossier was removed on 2026-07-25: its conditions read fields populated for
+    ~5% of leads, so an engaged lead asking "ini bayar kah kk?" was answered by the cheapest
+    model in the chain (thread 4681, numbered menus and brochure language). With the cache warm
+    a sales reply costs $0.00057 — there was no saving worth a lost conversation."""
     bid, tid, _ = await _thread(
         db_session, texts=(("in", "halo"), ("out", "hai kak"), ("in", "oke")),
         dossier=LeadDossier(readiness="exploring", pains=["takut telat"],
                             desired_state=["kerja remote"]).to_json())
     llm = _LLM()
     await _service(db_session, bid, llm).decide(tid)
-    assert llm.capabilities == [FAST]
+    assert llm.capabilities == [SALES]
 
 
 # ── failure handling: a turn is never lost to a contract slip ─────────────────
 
-async def test_a_broken_cheap_answer_escalates_once_to_the_strong_model(db_session) -> None:  # noqa: ANN001
+async def test_a_broken_answer_escalates_once_to_the_fallback_chain(db_session) -> None:  # noqa: ANN001
+    """Every reply starts on the sales chain; an unparseable body costs one retry on smart,
+    never the turn."""
     bid, tid, _ = await _thread(
         db_session, texts=(("in", "halo"), ("out", "hai"), ("in", "oke")),
         dossier=LeadDossier(readiness="exploring", pains=["takut telat"],
@@ -223,7 +229,7 @@ async def test_a_broken_cheap_answer_escalates_once_to_the_strong_model(db_sessi
 
     assert decision is not None
     assert decision.reply == "kembali normal"
-    assert llm.capabilities == [FAST, SMART]
+    assert llm.capabilities == [SALES, SMART]
 
 
 async def test_a_broken_sales_answer_retries_once_on_smart(db_session) -> None:  # noqa: ANN001

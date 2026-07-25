@@ -29,7 +29,7 @@ from .money_gate import (
     MONEY_ESCALATION_REASON,
     money_issues,
 )
-from .opener import AD_TAP_OPENER, JUNK_OPENER, Entry
+from .opener import JUNK_OPENER, Entry
 from .opener import classify as classify_entry
 from .prompt import (
     AD_TYPED_ENTRY_HINT,
@@ -38,7 +38,7 @@ from .prompt import (
     source_hint,
 )
 from .repository import DossierRepo
-from .routing import SALES, SMART, pick_capability
+from .routing import SALES, SMART
 from .signals import AD_TEMPLATE_RE
 
 logger = logging.getLogger(__name__)
@@ -120,14 +120,10 @@ class ReplyService(ReplyDelivery):
                            self.branch_id, workflow)
             return None
 
-        # The first LLM turn — a plain first reply, OR the turn right after the one remaining
-        # template (the junk clarifier): the highest-stakes generation, always on the strong
-        # chain. Historic ad-tap templates count too, for threads opened before 2026-07-25.
-        first_llm_turn = is_first_reply or all(
-            t in (JUNK_OPENER, AD_TAP_OPENER) or t.startswith(_LEGACY_TAP_PREFIX)
-            for t in outs)
-        tier = pick_capability(stored, is_first_reply=first_llm_turn)
-        capability = SALES if tier == SMART else tier
+        # Every live reply rides the sales chain. The dossier-based tiering that used to sit
+        # here demoted engaged leads to the cheapest model whenever the dossier was thin —
+        # which was almost always. See routing.py for the measurement and thread 4681.
+        capability = SALES
         context = await engine.free_kb_context()
         messages = build_messages_free(
             context, ctx.dialog, lang, stored,

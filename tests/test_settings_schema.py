@@ -226,6 +226,6 @@ async def test_tz_comes_from_the_branch_row_not_app_setting(db_session) -> None:
 
 
 def test_routing_settings_removed_from_ui() -> None:
-    # model routing is baked into routing.pick_capability now — no operator toggles
+    # every live reply rides the sales chain now — no operator toggles
     assert S.field_for("smart_stages") is None
     assert S.field_for("reply_routing") is None

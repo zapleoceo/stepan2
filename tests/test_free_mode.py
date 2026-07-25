@@ -108,12 +108,14 @@ async def test_decisive_turn_rides_sales_with_one_call(db_session) -> None:  # n
     assert llm.capabilities == ["chat:sales"]
 
 
-async def test_routine_turn_stays_on_fast(db_session) -> None:  # noqa: ANN001
+async def test_a_cold_turn_rides_the_sales_chain_too(db_session) -> None:  # noqa: ANN001
+    """No live reply runs on the cheap tier any more — see routing.py. The dossier used to
+    decide this, and it is empty for ~95% of leads, so "cold" mostly meant "unread"."""
     bid, tid, _ = await _thread(db_session, dossier=_COLD)
     llm = _LLM()
     decision = await _service(db_session, bid, llm).decide(tid)
     assert decision is not None
-    assert llm.capabilities == ["chat:fast"]
+    assert llm.capabilities == ["chat:sales"]
 
 
 async def test_sales_chain_down_falls_back_to_smart(db_session) -> None:  # noqa: ANN001
