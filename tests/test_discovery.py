@@ -95,3 +95,30 @@ async def test_extraction_captures_objections_too() -> None:
     dialog = [_msg("in", "aku takut ga dapat kerja setelah lulus")]
     delta = await extract_discovery(llm, dialog, LeadDossier(), "id", branch_id=1, thread_id=1)
     assert [o.text for o in delta.objections] == ["takut ga dapat kerja"]
+
+
+def test_the_extractor_now_owns_the_whole_read() -> None:
+    """From 2026-07-25 the selling model no longer carries the dossier — this call does. It
+    must therefore return the fields routing and follow-up tone depend on, not just pains."""
+    from app.modules.conversation.discovery import _parse
+
+    got = _parse(json.dumps({
+        "job_to_be_done": "cari sampingan sambil kuliah",
+        "pains": ["belum punya skill"], "desired_state": ["bisa freelance"],
+        "objections": ["mahal"], "role": "student", "readiness": "considering",
+        "refusal": "soft", "payment_preference": "cicilan", "budget_signal": "masih pelajar",
+    }))
+    assert got.role == "student"
+    assert got.readiness == "considering"
+    assert got.refusal == "soft"
+    assert got.payment_preference == "cicilan" and got.budget_signal == "masih pelajar"
+
+
+def test_an_unknown_enum_from_the_extractor_is_dropped() -> None:
+    """readiness and refusal feed pick_capability — a stray label would silently reroute the
+    next turn to the wrong model, so anything off-list is discarded rather than stored."""
+    from app.modules.conversation.discovery import _parse
+
+    got = _parse(json.dumps({"readiness": "very hot", "refusal": "maybe", "role": "ceo"}))
+    assert got.readiness == "" and got.role == ""
+    assert got.refusal == "none"

@@ -169,33 +169,23 @@ HARD RULES — the only ones:
   and never go silent.
 """
 
-# Every field here is read by something downstream — routing, follow-up tone, stage events,
-# hand-off, CRM. Five were dropped on 2026-07-25 after grepping for their readers and finding
-# none: `move` (a label the model invented each turn for one log line), `decides_with`,
-# `products_named`, `cases_used`, `arguments_used`. The last three were fed back as "don't
-# repeat yourself", which the dialogue above already shows — the model was paying attention
-# to restate its own transcript. Attention spent on the schema is attention not spent on the
-# person, and the dossier was only being filled for ~5% of leads (see discovery.py).
+# The selling model no longer carries the dossier (2026-07-25). It was filling it for ~5% of
+# leads because the reply always wins that competition for attention (discovery.py has the
+# measurement), so reading the lead moved to its own chat:fast call whose only job that is.
+# What stays here is what the model alone can know at send time: the reply, where the funnel
+# now stands, whether they are ready, the number they just typed, whether a human is needed,
+# and any figure this reply quoted (a promise the next turn must not contradict).
 _FREE_SCHEMA = """\
 Return ONLY this JSON, no prose and no markdown fences:
 {{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, \
 "phone": str|null, "needs_human": bool, "human_reason": str|null, "reply_language": str|null, \
-"dossier": {{"role": str, "job_to_be_done": str, "pains": [str], "desired_state": [str], \
-"readiness": str, "prices_quoted": [str], "payment_preference": str, "budget_signal": str, \
-"objections": [{{"text": str, "status": str, "handled_by": str, "category": str}}], \
-"refusal": str}}}}
+"prices_quoted": [str]}}
 
 stage: new|nurturing|qualifying|presenting|objection|dormant. Not 'ready' — that's the flag.
 ready: true only when they gave a contact AND want to enrol or reserve now.
 phone: their number exactly as they typed it, the turn they share it; else null.
 reply_language: ISO code when you replied in something other than {lang}, else null.
-dossier: what you now know about this PERSON — carry forward what's in LEAD DOSSIER above and
-  add what this turn revealed. Record what they revealed, not what you offered; leave a field
-  empty when you don't know.
-  role: school|student|working|jobseeking|parent. readiness: exploring|considering|ready.
-  refusal: none|soft|vague|blunt. objections: everything raised so far, status 'open' or
-  'handled' with how you handled it; category: price|time|trust|job_outcome|self_study_free|
-  parent_approval, else empty.
+prices_quoted: any figure you quoted in THIS reply, so a later turn knows what was promised.
 """
 
 

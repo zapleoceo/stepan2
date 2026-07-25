@@ -256,7 +256,10 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
         reply=clean_reply(reply),
         move=_free_move(data.get("move")),
         stage=_coerce_stage(data.get("stage")),
-        dossier=_dossier(data.get("dossier")),
+        # Reading the lead belongs to discovery.py now (2026-07-25); the selling model only
+        # reports the prices IT quoted, which nothing else can know. A `dossier` object is
+        # still accepted so a reply already in flight during the deploy isn't dropped.
+        dossier=_dossier(data.get("dossier"), prices=str_list(data.get("prices_quoted"))),
         product_slug=str(data.get("product_slug") or "").strip() or None,
         ready=bool(data.get("ready", False)),
         phone=str(data.get("phone") or "").strip() or None,
@@ -296,24 +299,24 @@ def _free_move(value: object) -> str:
     return move or "free_move"
 
 
-def _dossier(value: object) -> LeadDossier:
-    """The turn's delta. A malformed dossier costs this turn's learning, never the reply."""
+def _dossier(value: object, prices: list[str] | None = None) -> LeadDossier:
+    """What the selling model reported about the lead this turn.
+
+    Since 2026-07-25 that is only the prices it quoted — reading the person is discovery.py's
+    job. A full `dossier` object is still parsed when present so a reply generated just before
+    the deploy (or by a follow-up path yet to be migrated) loses nothing."""
     if not isinstance(value, dict):
-        return LeadDossier()
+        return LeadDossier(prices_quoted=prices or [])
     return LeadDossier(
         role=_text(value.get("role")),
         job_to_be_done=_text(value.get("job_to_be_done")),
         pains=_str_list(value.get("pains")),
         desired_state=_str_list(value.get("desired_state")),
-        decides_with=_text(value.get("decides_with")),
         readiness=_text(value.get("readiness")),
-        prices_quoted=_str_list(value.get("prices_quoted")),
+        prices_quoted=_str_list(value.get("prices_quoted")) or (prices or []),
         payment_preference=_text(value.get("payment_preference")),
         budget_signal=_text(value.get("budget_signal")),
         objections=_objections(value.get("objections")),
-        products_named=_str_list(value.get("products_named")),
-        cases_used=_str_list(value.get("cases_used")),
-        arguments_used=_str_list(value.get("arguments_used")),
         refusal=_text(value.get("refusal")),
     )
 

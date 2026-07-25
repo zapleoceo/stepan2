@@ -150,11 +150,12 @@ class ReplyService(ReplyDelivery):
         if decision is None:
             return None
         merged = merge_dossier(stored, decision.dossier)
-        if not merged.has_discovery():
-            extra = await extract_discovery(
-                self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id,
-                budget=ctx.budget)
-            merged = merge_dossier(merged, extra)
+        # Reading the lead is its own call now, and it runs every turn — not only when the
+        # dossier looks empty. The selling model used to own this and filled it for ~5% of
+        # leads; a call with no reply to write has no competing task (see discovery.py).
+        extra = await extract_discovery(
+            self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id, budget=ctx.budget)
+        merged = merge_dossier(merged, extra)
         decision = await self._vet(
             engine, ctx, messages, thread_id, decision, workflow=workflow, context=context)
         await self.dossiers.save(lead.id if lead is not None else None, merged)

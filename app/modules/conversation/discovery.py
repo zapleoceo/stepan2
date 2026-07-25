@@ -1,18 +1,19 @@
-"""A second, decoupled pass whose only job is filling `pains`/`desired_state`/`objections`.
+"""Reading the lead is a separate job from selling to them, so it gets its own model call.
 
-The main turn (decision.generate + the free_mode schema) already asks one model call to write
-a warm, on-brand reply AND correctly populate a 21-field dossier at the same time. Measured
-live on branch_id=1 (2026-07-23): of 1215 leads active in the last 7 days, only ~5% had ANY
-dossier saved, and only ~2% had pains+desired_state both filled — the reply wins that
-competition for attention essentially every time, so discovery gets left empty out of
-generation pressure, not because the lead never said anything.
+This started as a backstop for the main turn, which was asked to write a warm reply AND fill
+a 21-field dossier at once. Measured live (2026-07-23): of 1215 leads active in 7 days, only
+~5% had ANY dossier saved and ~2% had pains+desired_state — the reply wins that competition
+for attention every time. On 2026-07-25 it stopped being a backstop and became the owner:
+the selling model no longer carries the dossier at all, and this call runs on every turn.
 
-This module is the backstop, not a replacement: a SEPARATE chat:fast call, given only the
-dialog and what pains/desired_state are already known, with the ONE job of reading what the
-lead revealed. No reply to write, no stage to pick, no 21-field contract to juggle — a tiny
-schema is the entire hypothesis being tested. It never blocks or gates the reply: any failure
-(broker error, timeout, unparseable JSON) is swallowed and logged — an unreachable extractor
-must never cost the lead their answer.
+Why that is better rather than merely cheaper: the extractor has no competing task. It reads
+a transcript and answers one question — what did this person reveal about themselves — with
+no reply to compose, no stage to choose, no register to hold. The selling model gets the same
+attention back for the thing only it can do.
+
+Runs on chat:fast (free) and never blocks the reply: any failure — broker error, timeout,
+unparseable JSON — is swallowed and logged. An unreachable extractor costs a turn of learning,
+never the lead's answer.
 """
 from __future__ import annotations
 
@@ -34,31 +35,43 @@ _DIALOG_BUDGET = 20  # last N turns — discovery lives in recent talk, not the 
 
 _SYSTEM = """\
 You read one Instagram DM conversation between a lead and a sales rep at an IT school. Your \
-ONLY job: extract what the LEAD revealed about their goal, pains and desired outcome — their \
-own meaning, not what the rep suggested. Capture it whenever the lead DESCRIBES a situation, \
-a problem, a wish, a fear, or a reason — you do NOT need the exact word "pain" or "goal", and \
-you do NOT need a full sentence; a short phrase in the lead's own words is enough. Paraphrase \
-tightly into Indonesian. Only a bare "iya"/"ok"/"boleh" with no content of its own reveals \
-nothing. Never invent something the lead never said. Extract only what is NEW — don't repeat \
-what's already listed as known below. If nothing new was revealed, return empty lists/string.
+ONLY job: report what the LEAD revealed about themselves — their own meaning, not what the \
+rep suggested or offered. Capture it whenever the lead DESCRIBES a situation, a problem, a \
+wish, a fear, a constraint or a reason — you do NOT need the exact word, and you do NOT need \
+a full sentence; a short phrase in their own words is enough. Paraphrase tightly into \
+Indonesian. A bare "iya"/"ok"/"boleh" with no content of its own reveals nothing. Never \
+invent anything they did not say. Report only what is NEW — don't repeat what is already \
+listed as known below. Nothing new: return empty values.
 
 job_to_be_done: WHY they're here now — the task they want done.
 pains: what's not working now, what worries them, what holds them back (incl. fears like \
 "takut nggak bisa coding").
 desired_state: the outcome they want — the goal, not the product.
 objections: a reason to hesitate (price/time/trust/parents/…), in their words. Empty if none.
+role: school|student|working|jobseeking|parent — only if they said so. Empty otherwise.
+readiness: exploring|considering|ready — how close they are to committing, from THEIR words. \
+"ready" only if they asked to enrol/pay or gave contact details to be called. Empty if unclear.
+refusal: none|soft|vague|blunt. soft = "nanti saya pikirkan", "belum sekarang" (a polite no \
+with a reason); vague = they closed the conversation politely with no reason; blunt = an \
+explicit "no"/"stop"/"not interested". Default none.
+payment_preference: e.g. "cicilan", "bayar penuh" — only if they raised it.
+budget_signal: what they said about money being a problem — "mahal", "belum ada budget", \
+"masih pelajar". Empty if they never raised it.
 
 Examples (lead line -> what to capture):
 - "biar bisa terima order online, sekarang masih manual ribet" -> pains:["proses order \
 masih manual dan ribet"], desired_state:["bisa terima order online"]
 - "takutnya aku nggak bisa coding" -> pains:["takut nggak bisa coding"]
-- "pengen banget bisa bikin aplikasi sendiri buat usaha" -> desired_state:["bisa bikin \
-aplikasi sendiri untuk usahanya"]
-- "mahal banget ya" -> objections:["harga terlalu mahal"]
+- "mahal banget ya" -> objections:["harga terlalu mahal"], budget_signal:"harga terasa mahal"
+- "saya masih kuliah, cari sampingan" -> role:"student", job_to_be_done:"cari penghasilan \
+sampingan sambil kuliah"
+- "nanti saya pikirkan dulu ya kak" -> refusal:"soft"
+- "boleh minta nomor rekeningnya?" -> readiness:"ready"
 - "iya kak" -> nothing
 
 Return ONLY this JSON, no prose, no markdown fences:
-{"job_to_be_done": str, "pains": [str], "desired_state": [str], "objections": [str]}
+{"job_to_be_done": str, "pains": [str], "desired_state": [str], "objections": [str], \
+"role": str, "readiness": str, "refusal": str, "payment_preference": str, "budget_signal": str}
 """
 
 
@@ -115,6 +128,18 @@ async def extract_discovery(  # noqa: PLR0913
         return LeadDossier()
 
 
+_ROLES = frozenset({"school", "student", "working", "jobseeking", "parent"})
+_READINESS = frozenset({"exploring", "considering", "ready"})
+_REFUSALS = frozenset({"none", "soft", "vague", "blunt"})
+
+
+def _one_of(value: object, allowed: frozenset[str]) -> str:
+    """An enum the extractor may only fill with a known value — a stray label would silently
+    change routing (readiness/refusal both feed pick_capability), so drop what we don't know."""
+    text = str(value or "").strip().lower()
+    return text if text in allowed else ""
+
+
 def _parse(raw: str) -> LeadDossier:
     try:
         data = json.loads(strip_fences(raw))
@@ -129,4 +154,9 @@ def _parse(raw: str) -> LeadDossier:
         pains=str_list(data.get("pains")),
         desired_state=str_list(data.get("desired_state")),
         objections=objections,
+        role=_one_of(data.get("role"), _ROLES),
+        readiness=_one_of(data.get("readiness"), _READINESS),
+        refusal=_one_of(data.get("refusal"), _REFUSALS) or "none",
+        payment_preference=str(data.get("payment_preference") or "").strip(),
+        budget_signal=str(data.get("budget_signal") or "").strip(),
     )
