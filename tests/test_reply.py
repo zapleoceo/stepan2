@@ -151,15 +151,19 @@ async def test_learning_accumulates_across_turns(db_session) -> None:  # noqa: A
 
 
 async def test_the_dossier_reaches_the_prompt_so_nothing_is_re_asked(db_session) -> None:  # noqa: ANN001
+    """What the lead revealed rides into the prompt. What the BOT said does not: stories told
+    and arguments made were dropped from the schema on 2026-07-25 — the transcript below the
+    dossier already shows them, and restating them cost the model attention for nothing.
+    A quoted price is the exception: it is a commitment, not a talking point."""
     bid, tid, _ = await _thread(
         db_session, dossier=LeadDossier(pains=["takut telat"],
-                                        cases_used=["alumni Dimas"]).to_json())
+                                        prices_quoted=["Rp 13.000.000"]).to_json())
     llm = _LLM()
     await _service(db_session, bid, llm).decide(tid)
 
     system = _system_of(llm)
     assert "takut telat" in system
-    assert "ALREADY USED" in system and "alumni Dimas" in system
+    assert "prices you already gave them" in system and "Rp 13.000.000" in system
 
 
 async def test_a_lead_with_only_legacy_needs_still_gets_its_context(db_session) -> None:  # noqa: ANN001

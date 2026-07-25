@@ -71,6 +71,23 @@ _READY_HANDOFF_CLOSING = (
     "WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) untuk langkah pembayaran & jadwal 🙏"
 )
 
+# Did the model already tell the lead what happens next? Deliberately loose: it only has to
+# name the team/contact and a channel or the working hours, in any wording. A false positive
+# costs a canned reassurance the model already gave in its own words; a false negative costs
+# one duplicated bubble — both cheap, unlike the silence this whole path exists to prevent.
+_WHATS_NEXT_RE = re.compile(
+    r"\b(tim|team|admin|manager|menghubungi|hubungi|dihubungi|kontak)\b[^.!?\n]{0,80}"
+    r"\b(whatsapp|wa\b|telepon|telfon|call|chat|jam kerja|09[.:]00|senin|besok|hari ini)\b"
+    r"|\b(whatsapp|wa\b|telepon|jam kerja)\b[^.!?\n]{0,80}"
+    r"\b(tim|team|admin|manager|menghubungi|hubungi|dihubungi)\b",
+    re.IGNORECASE)
+
+
+def _says_what_happens_next(reply: str) -> bool:
+    """True when the reply already promises the follow-up contact — see the call site."""
+    return bool(_WHATS_NEXT_RE.search(reply or ""))
+
+
 def _script_lang(text: str) -> str | None:
     """Cyrillic in the lead's own text -> 'ru', independent of the model's self-report.
 
@@ -245,11 +262,13 @@ class ReplyDelivery:
         exit_kind: str | None = None
         if lead is not None:
             exit_kind = await self._apply_decision(lead, thread, decision)
-        if exit_kind is not None:
-            # The lead just exited the funnel (manager hand-off or a won deal) — say what
-            # happens next instead of going silent (thread 1023: a lead who sent a follow-up
-            # phone number 2 days after a needs_manager mute got zero acknowledgment). READY
-            # relied on the model's reply confirming next steps; now it's guaranteed too.
+        if exit_kind is not None and not _says_what_happens_next(decision.reply):
+            # The lead just exited the funnel (manager hand-off or a won deal) and must not be
+            # left in silence (thread 1023: a lead who sent a phone number 2 days after a
+            # needs_manager mute got zero acknowledgment). This is a SAFETY NET, not a habit:
+            # when the model already told them what happens next — which it usually does, it
+            # knows the working hours — appending a canned line repeats it in different words
+            # and spends a bubble against the anti-ban cap on the sharpest turn of the funnel.
             if exit_kind == "manager":
                 closing = (_MANAGER_HANDOFF_CLOSING if lead.phone_e164
                           else _MANAGER_HANDOFF_CLOSING_NO_PHONE)

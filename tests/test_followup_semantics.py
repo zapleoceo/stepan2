@@ -487,12 +487,14 @@ async def test_the_nudge_is_told_not_to_beg(db_session) -> None:  # noqa: ANN001
 
 
 async def test_what_the_lead_already_heard_reaches_the_nudge_prompt(db_session) -> None:  # noqa: ANN001
-    """Repetition is prevented by telling the model what it already used, not by diffing text."""
+    """What the lead revealed reaches the nudge, and so does any price already quoted — a
+    figure is a commitment. What the bot merely said is visible in the transcript itself and
+    was dropped from the schema (2026-07-25)."""
     from app.modules.conversation.dossier import LeadDossier
 
     bid, _tid, lead, _ = await _world(db_session, timer_due=True)
     await _set_dossier(db_session, lead, LeadDossier(
-        pains=["takut telat mulai"], cases_used=["alumni Dimas"]))
+        pains=["takut telat mulai"], prices_quoted=["Rp 13.000.000"]))
     llm = _CapturingLLM(_v3())
     await _svc(db_session, bid, llm).run()
 
@@ -500,7 +502,7 @@ async def test_what_the_lead_already_heard_reaches_the_nudge_prompt(db_session) 
     # prefix (messages[0]) — join every system message so the assertion doesn't care which.
     system = "\n".join(m["content"] for m in llm.messages[0] if m["role"] == "system")
     assert "takut telat mulai" in system
-    assert "ALREADY USED" in system and "alumni Dimas" in system
+    assert "prices you already gave them" in system and "Rp 13.000.000" in system
 
 
 async def test_a_nudge_records_what_it_learned(db_session) -> None:  # noqa: ANN001

@@ -617,3 +617,25 @@ async def test_engaged_lead_is_not_snoozed(db_session) -> None:
 
     assert await _svc(db_session, bid)._snooze_on_soft_no(lead, thread) is False
     assert thread.followups_sent == 0
+
+
+def test_the_closing_is_a_safety_net_not_a_habit() -> None:
+    """The hand-off closing exists so a lead is never left in silence (thread 1023). But when
+    the model already said what happens next — which it usually does, it knows the hours —
+    appending the canned line repeats it in different words and burns a bubble against the
+    anti-ban cap on the sharpest turn in the funnel."""
+    from app.modules.conversation.delivery import _says_what_happens_next
+
+    for already_said in (
+        "Nanti tim kami hubungi lewat WhatsApp ya Kak",
+        "Terima kasih! Tim kami akan menelepon di jam kerja 09.00-18.00",
+        "Aku teruskan ke tim ya, nanti dihubungi via telepon hari ini",
+    ):
+        assert _says_what_happens_next(already_said), already_said
+
+    for silent_on_next_step in (
+        "Siap Kak, senang bisa bantu!",
+        "Baik, aku catat ya",
+        "Vibe Coding itu 4 bulan, 37 sesi, malam hari",
+    ):
+        assert not _says_what_happens_next(silent_on_next_step), silent_on_next_step

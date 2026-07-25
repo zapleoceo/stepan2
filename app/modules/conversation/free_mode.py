@@ -73,7 +73,6 @@ def dossier_block(d: LeadDossier) -> str:
         ("what they want", d.job_to_be_done),
         ("what worries them", "; ".join(d.pains)),
         ("what a good outcome looks like", "; ".join(d.desired_state)),
-        ("who decides", d.decides_with),
         ("how ready they are", d.readiness),
         ("payment preference", d.payment_preference),
         ("budget signal", d.budget_signal),
@@ -87,12 +86,12 @@ def dossier_block(d: LeadDossier) -> str:
                if o.status == "handled" and o.handled_by]
     if handled:
         lines.append("- already answered (don't re-argue): " + "; ".join(handled))
-    spent = [f"{label}: {', '.join(items)}" for label, items in (
-        ("prices given", d.prices_quoted), ("products named", d.products_named),
-        ("stories told", d.cases_used), ("arguments made", d.arguments_used),
-    ) if items]
-    if spent:
-        lines.append("- ALREADY USED, don't repeat: " + " | ".join(spent))
+    # Only prices survive here. "products named / stories told / arguments made" were the
+    # model restating its own transcript back to itself — the dialogue below already shows
+    # what it said. A quoted figure is different: it is a commitment, and knowing it was
+    # already given changes whether repeating it is a reminder or a new offer.
+    if d.prices_quoted:
+        lines.append("- prices you already gave them: " + ", ".join(d.prices_quoted))
     if d.refusal != "none":
         lines.append(f"- they have said no, degree: {d.refusal}")
     return "LEAD DOSSIER (what you already know — never re-ask it):\n" + "\n".join(lines) \
@@ -170,33 +169,33 @@ HARD RULES — the only ones:
   and never go silent.
 """
 
-# Same fields as the scripted schema — the pipeline downstream (stage events, hand-off, CRM
-# push, follow-ups) reads them — but `move` is the model's own label, not an enumerated set.
+# Every field here is read by something downstream — routing, follow-up tone, stage events,
+# hand-off, CRM. Five were dropped on 2026-07-25 after grepping for their readers and finding
+# none: `move` (a label the model invented each turn for one log line), `decides_with`,
+# `products_named`, `cases_used`, `arguments_used`. The last three were fed back as "don't
+# repeat yourself", which the dialogue above already shows — the model was paying attention
+# to restate its own transcript. Attention spent on the schema is attention not spent on the
+# person, and the dossier was only being filled for ~5% of leads (see discovery.py).
 _FREE_SCHEMA = """\
 Return ONLY this JSON, no prose and no markdown fences:
-{{"reply": str, "move": str, "stage": str, "product_slug": str|null, "ready": bool, \
+{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, \
 "phone": str|null, "needs_human": bool, "human_reason": str|null, "reply_language": str|null, \
 "dossier": {{"role": str, "job_to_be_done": str, "pains": [str], "desired_state": [str], \
-"decides_with": str, "readiness": str, "prices_quoted": [str], "payment_preference": str, \
-"budget_signal": str, \
+"readiness": str, "prices_quoted": [str], "payment_preference": str, "budget_signal": str, \
 "objections": [{{"text": str, "status": str, "handled_by": str, "category": str}}], \
-"products_named": [str], "cases_used": [str], "arguments_used": [str], "refusal": str}}}}
+"refusal": str}}}}
 
-move: a short snake_case label YOU choose for what you did this turn (e.g. build_rapport,
-  quote_price, close) — free-form, for the log.
 stage: new|nurturing|qualifying|presenting|objection|dormant. Not 'ready' — that's the flag.
 ready: true only when they gave a contact AND want to enrol or reserve now.
 phone: their number exactly as they typed it, the turn they share it; else null.
 reply_language: ISO code when you replied in something other than {lang}, else null.
-dossier: your updated read of this person. Carry forward what's in LEAD DOSSIER above and
-  add what this turn revealed.
-  role: school|student|working|jobseeking|parent. decides_with: self|parents|family.
-  readiness: exploring|considering|ready. refusal: none|soft|vague|blunt.
-  objections: everything raised so far; status 'open' or 'handled' with how you handled it.
-  category: price|time|trust|job_outcome|self_study_free|parent_approval, else empty.
-  prices_quoted / products_named / cases_used / arguments_used: what you have ALREADY used
-  with this lead, so you don't serve the same thing twice. Append, never drop.
-  Record what the LEAD revealed, not what you suggested. Leave a field empty when unknown.
+dossier: what you now know about this PERSON — carry forward what's in LEAD DOSSIER above and
+  add what this turn revealed. Record what they revealed, not what you offered; leave a field
+  empty when you don't know.
+  role: school|student|working|jobseeking|parent. readiness: exploring|considering|ready.
+  refusal: none|soft|vague|blunt. objections: everything raised so far, status 'open' or
+  'handled' with how you handled it; category: price|time|trust|job_outcome|self_study_free|
+  parent_approval, else empty.
 """
 
 
