@@ -19,6 +19,7 @@ from app.adapters.db.models import (
     Lead,
     Message,
     Outbox,
+    Product,
 )
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import Decision, OutboxSender, ReplyService
@@ -129,13 +130,11 @@ def _reply_service(s, branch_id: int, llm: FakeLLM) -> ReplyService:
     return ReplyService(s, branch_id, llm, KnowledgeService(s, branch_id))
 
 
-async def test_first_reply_to_ad_tap_is_templated_not_generated(db_session):
-    """24h measurement (2026-07-23): the same fixed ad-button text got a correct opener 80%
-    of the time and a full unprompted pitch the other 20% (11/56 threads) — the model had to
-    re-derive "this is a tap, not a question" from prose every time. Code already knows this
-    string with certainty (AD_TEMPLATE_RE), so no broker call happens at all for it."""
-    from app.modules.conversation.reply import AD_TAP_OPENER
-
+async def test_first_reply_to_ad_tap_is_written_by_the_model(db_session):
+    """The tap used to ship a fixed template that opened with the DP figure. Measured over 30
+    live days it was answered 14.3% of the time against 36.3% for a written first reply — and
+    quoting money before the lead says a word contradicts the contract everywhere else. The
+    model writes it now; the note tells it nothing was actually asked and holds the price."""
     s = db_session
     branch_id = await _branch(s)
     thread_id = await _thread_with_inbound(
@@ -145,18 +144,16 @@ async def test_first_reply_to_ad_tap_is_templated_not_generated(db_session):
     decision = await _reply_service(s, branch_id, llm).decide(thread_id)
 
     assert isinstance(decision, Decision)
-    assert decision.reply == AD_TAP_OPENER
     assert decision.stage is Stage.QUALIFYING
-    assert llm.calls_seen == []  # zero broker calls — fully deterministic
+    assert llm.calls_seen, "the tap must reach the model, not a template"
+    note = "\n".join(
+        m["content"] for m in llm.calls_seen[0] if m["role"] == "system")
+    assert "tapped an ad" in note and "Do NOT quote a price" in note
 
 
-async def test_ad_tap_with_short_share_header_is_still_templated(db_session):
-    """thread 5095: the tap arrived as TWO bubbles — '📷 itstep_jakarta' (IG's SHORT share
-    placeholder, no 'handle · handle' caption) + the prefill. The short form failed both the
-    prefill and post-share patterns, fell to the LLM path, and the critic/pitch-gate conflict
-    escalated a brand-new lead. A share icon prefix is never the lead's own typing."""
-    from app.modules.conversation.reply import AD_TAP_OPENER
-
+async def test_ad_tap_note_names_the_mapped_product(db_session):
+    """The ad→product mapping is the one thing the tap does tell us — the note carries it so
+    discovery anchors on that skill instead of a generic "what are you looking for"."""
     s = db_session
     branch_id = await _branch(s)
     thread_id = await _thread_with_inbound(s, branch_id, text="📷 itstep_jakarta")
@@ -164,22 +161,20 @@ async def test_ad_tap_with_short_share_header_is_still_templated(db_session):
     s.add(Message(branch_id=branch_id, thread_id=thread_id, channel_id=thread.channel_id,
                   external_id="in-2", direction="in", sent_by="lead",
                   text="Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"))
+    s.add(Product(branch_id=branch_id, slug="vibe", title="Vibe Coding", is_active=True))
     await s.flush()
     llm = FakeLLM(_DECISION)
 
-    decision = await _reply_service(s, branch_id, llm).decide(thread_id)
+    await _reply_service(s, branch_id, llm).decide(thread_id)
 
-    assert decision is not None and decision.reply == AD_TAP_OPENER
-    assert llm.calls_seen == []  # deterministic — no broker call
+    note = "\n".join(m["content"] for m in llm.calls_seen[0] if m["role"] == "system")
+    assert "for Vibe Coding" in note
 
 
-async def test_bare_ack_first_message_from_ad_is_templated(db_session):
-    """thread 5097: an ad-click lead cleared the prefill and sent just 'iyaaaa' — zero
-    informative content, exactly like a tap. With the product known from the ad mapping, the
-    templated opener applies; the LLM path (which pitched twice on the empty dossier and
-    escalated) is never entered."""
-    from app.modules.conversation.reply import AD_TAP_OPENER
-
+async def test_bare_ack_first_message_from_ad_reaches_the_model(db_session):
+    """thread 5097: an ad-click lead cleared the prefill and sent just 'iyaaaa' — as
+    uninformative as a tap, and classified the same way. It goes to the model with the tap
+    note rather than to a template."""
     s = db_session
     branch_id = await _branch(s)
     thread_id = await _thread_with_inbound(s, branch_id, text="iyaaaa")
@@ -191,8 +186,8 @@ async def test_bare_ack_first_message_from_ad_is_templated(db_session):
 
     decision = await _reply_service(s, branch_id, llm).decide(thread_id)
 
-    assert decision is not None and decision.reply == AD_TAP_OPENER
-    assert llm.calls_seen == []
+    assert decision is not None
+    assert llm.calls_seen, "an ad-context ack must reach the model"
 
 
 async def test_bare_ack_first_message_without_ad_gets_the_clarify_template(db_session):
