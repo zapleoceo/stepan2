@@ -64,3 +64,31 @@ def test_text_without_dates_is_untouched() -> None:
 
 def test_empty_input_is_safe() -> None:
     assert annotate_dates("", _TODAY) == ""
+
+
+# ── English card dates ────────────────────────────────────────────────────────
+# The product cards are written in English ("Next group: August 9, 2026") while replies are
+# in Indonesian. Annotating only the Indonesian spelling left every card date unmarked, and
+# on 25 July the bot offered "batch berikutnya 19 Juli" — a session that had run six days
+# earlier. The annotator has to read the language the cards are actually written in.
+
+def test_an_english_card_date_is_annotated() -> None:
+    out = annotate_dates("Next group: August 9, 2026 (09:00-14:00)", _TODAY)
+    assert "[hari Minggu, 17 hari lagi]" in out
+
+
+def test_an_expired_english_card_date_is_marked() -> None:
+    """The exact live failure: a July 19 batch still offered on July 25."""
+    out = annotate_dates("Next group: July 19, 2026", date(2026, 7, 25))
+    assert EXPIRED_NOTE in out
+
+
+def test_an_english_date_without_a_year_rolls_forward() -> None:
+    """Same rule as the Indonesian spelling: an undated card means the next time it comes."""
+    assert EXPIRED_NOTE not in annotate_dates("Next group: August 8", date(2026, 9, 1))
+
+
+def test_a_weekday_prefixed_card_date_annotates_once() -> None:
+    """Cards now carry the weekday inline — the annotation must not double up on it."""
+    out = annotate_dates("Sunday (Minggu), August 9, 2026", _TODAY)
+    assert out.count("hari lagi") == 1

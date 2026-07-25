@@ -19,6 +19,7 @@ from .guard import (
     invented_service_offers,
     is_hedged_salary_reference,
     quotes_price,
+    stale_dates,
     ungrounded_urls,
 )
 
@@ -76,6 +77,11 @@ def money_issues(reply: str, context: str) -> list[str]:
     issues.extend(
         f"service/material not in the offering (invented): {m}"
         for m in invented_service_offers(reply))
+    # A batch date that has already run is as wrong as an invented price — the lead waits for
+    # a session nobody will hold. The KB annotator marks expired dates so the model shouldn't
+    # reach one, but a card left un-updated is a standing trap (live: "batch berikutnya 19
+    # Juli" offered on 25 July), so the send is blocked too.
+    issues.extend(stale_dates(reply))
     return issues
 
 
