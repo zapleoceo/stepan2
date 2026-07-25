@@ -52,11 +52,18 @@ def _has_fake_phone(line: str) -> bool:
     )
 
 
+# A URL ending a sentence collects the full stop: "…/view." — 39 such messages went out in
+# 30 days. Instagram's autolinker takes the dot as part of the address, so the lead taps a
+# link that 404s. The sentence reads the same without it; the link only works without it.
+_URL_TRAILING_DOT = re.compile(r"(https?://[^\s]*[a-zA-Z0-9/=_-])\.(?=\s|$)")
+
+
 def clean_reply(text: str) -> str:
     """Strip zero-width chars, AI punctuation, and fabricated Indonesian phone lines."""
     s = (text or "").translate(_ZW)
     s = _strip_markdown(s)
     s = _DASH.sub(" - ", s)
+    s = _URL_TRAILING_DOT.sub(r"\1", s)
     for pat, repl in _HUMANIZE:
         s = pat.sub(repl, s)
     # Drop remaining C-category control chars (keep \n)
