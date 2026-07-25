@@ -47,27 +47,34 @@ logger = logging.getLogger(__name__)
 # sustained outage doesn't get re-billed every 10-min cron tick.
 _FAILURE_BACKOFF_MIN = 30
 
+# The nudge used to be a scripted ladder: touch 1 gives a hook, touch 2 invites to the Demo
+# Event, touch 3 names a deadline — the model executed a prescribed sequence regardless of who
+# the lead was or what they came for (a lead who tapped an SMM ad got two Vibe Coding pitches).
+# That is the same scaffolding the reply path shed on 2026-07-25, kept alive one module over.
+# What survives is what actually earns its place: the silence is the situation, the facts are
+# the KB's, and writing nothing is a real option — not a fallback.
 FOLLOWUP_FRAMING = """\
-[System: the lead has gone quiet — there is no new message to answer this turn. This is nudge \
-{n} of {total}. Write ONE short message that earns a reply: something concrete they have NOT \
-heard yet, tied to what the dossier says they care about. Never "masih minat?" or "ada yang \
-bisa dibantu?" — that is begging, not selling. FACTS ONLY FROM THE KNOWLEDGE BASE above: \
-never invent an alumni story, an ROI/percentage figure, a case study tailored to their \
-industry, a discount, or a deadline that is not written there — live nudges fabricated \
-"ROI 30%" and a "manufacturing-plant Meta Ads case" and earned zero replies; the KB's real \
-differentiators always beat invented ones. ESCALATE THE ANGLE by nudge number so each touch \
-is a new reason, not a repeat: an early nudge gives a fresh concrete hook or a real case from \
-the KB; a middle nudge invites them to the low-cost Demo Event — a real, cheap way to see it \
-live before deciding; a late nudge names a GENUINE deadline (the nearest intake or the \
-book-now window) and asks for their WhatsApp to secure a spot — only if that deadline is real \
-in the KB. {refusal_note}If you have nothing genuinely new to say, return an empty reply \
-rather than padding — a nudge that repeats you costs more than silence.]"""
+[System: the lead has gone quiet — there is no new message to answer this turn, and no \
+guarantee they want another one. This is touch {n} of at most {total} before we stop.
+
+You decide whether to write at all, and what to say. There is no prescribed sequence of \
+angles: read the dossier above — what they came for, what they asked, what they worried \
+about, what you have already used — and choose the one thing most likely to make THIS person \
+reply. Stay on the product they actually came for unless they told you otherwise.
+
+If there is nothing genuinely new and worth their attention, return an EMPTY reply. That is a \
+correct, expected outcome, not a failure: silence costs nothing, a message that repeats you \
+costs a lead. Never "masih minat?" or "ada yang bisa dibantu?" — that is begging, not selling.
+
+Facts only from the knowledge base: never invent an alumni story, a percentage, an income \
+figure, a discount, or a deadline that is not written there. Real differentiators always beat \
+invented ones. {refusal_note}Keep it to one short message.]"""
 
 _REFUSAL_NOTES = {
-    "soft": "They already said they'd think about it, so do NOT argue or re-pitch: one light, "
-            "easy-to-ignore touch that gives them a reason to come back. ",
-    "vague": "They already closed the conversation politely — keep this minimal and graceful, "
-             "and make it easy to say nothing at all. ",
+    "soft": "They already said they'd think about it — don't argue or re-pitch; one light, "
+            "easy-to-ignore touch, or nothing at all. ",
+    "vague": "They already closed the conversation politely — either stay silent or keep it "
+             "minimal and graceful, and make it easy to say nothing back. ",
 }
 
 
@@ -199,6 +206,25 @@ class FollowupService:
         branch = await self.session.get(Branch, self.branch_id)
         return branch.lang if branch is not None else "id"
 
+    async def _entry_block(self, product_slug: str | None) -> str | None:
+        """Which product this lead actually came for. The thread has carried the ad→product
+        mapping all along, but the nudge never put it in the prompt: a lead who tapped an SMM
+        ad got two Vibe Coding pitches in a row (thread 5267)."""
+        if not product_slug:
+            return None
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.adapters.db.models import Product  # noqa: PLC0415
+        row = (await self.session.execute(
+            select(Product.title).where(
+                Product.branch_id == self.branch_id, Product.slug == product_slug,
+                Product.is_active == True))).first()  # noqa: E712 — SQLAlchemy needs the comparison
+        title = (row[0] or "").strip() if row else ""
+        return (f"WHAT THEY CAME FOR: this lead arrived asking about {title}. Stay on it "
+                "unless they themselves moved the conversation elsewhere — pitching a "
+                "different course to someone who never showed interest in it reads as spam."
+                ) if title else None
+
     async def _queue_followup(
         self, thread_id: int, product_slug: str | None, sent_so_far: int, now: datetime,
     ) -> bool:
@@ -228,6 +254,7 @@ class FollowupService:
         messages = build_messages_free(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
+            source_block=await self._entry_block(product_slug),
             manager_note=ctx.lead.manager_note if ctx.lead is not None else None,
             now_block=await engine._now_block())  # noqa: SLF001 — engine owns the branch clock
         messages.append({"role": "user", "content": followup_framing(
