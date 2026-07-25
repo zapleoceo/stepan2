@@ -42,8 +42,8 @@ _COMMENT_PROMPT = (
     "{invite} Do NOT use markdown. Return ONLY the reply text, nothing else.\n\n"
     "KNOWLEDGE BASE:\n{kb}\n\nPOST CAPTION: {caption}\n\nCOMMENT: {comment}"
 )
-_DM_INVITE = ("End with a short invite to DM us for full details (e.g. 'DM aku ya Kak buat "
-              "info lengkapnya 🙏').")
+_DM_INVITE = ("This commenter sounds like a buyer, so the conversation belongs in DM — move "
+              "it there in your own words.")
 # Correction fed to the regen when the verifier flags unsupported claims (same shape as the
 # DM guard's CORRECTION, tuned for the public price-list failure mode).
 _CORRECTION = (
@@ -163,8 +163,13 @@ class CommentService:
         unsupported degrades to the DM invite rather than shipping the fact."""
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch else "id"
-        context = await self.knowledge.knowledge_context(
-            product_slug=None, lang=lang, query=c.text, light=True)
+        # The same full fact surface the DM path uses. It used to get the catalog view — one
+        # anchor line per course, no product cards — so a comment asking what a course covers
+        # or how long it runs had no answer to ground on and degraded to the DM invite: three
+        # of six live replies in a week were the canned "DM aku ya". A public reply that
+        # answers the question is worth far more than one that redirects, and the identical
+        # prefix rides the broker's prompt cache the DM path already keeps warm.
+        context = await self.knowledge.full_knowledge_context()
         prompt = _COMMENT_PROMPT.format(
             lang=lang, kb=context, caption=(c.media_caption or "")[:400], comment=c.text,
             invite=_DM_INVITE if is_warm(c.text) else "")
