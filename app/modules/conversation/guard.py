@@ -122,6 +122,27 @@ def whatsapp_delivery_offers(reply: str) -> list[str]:
     return [m.group(0) for m in _WHATSAPP_DELIVERY_RE.finditer(reply or "")]
 
 
+# The same impossible promise without naming WhatsApp — "mau saya kirimkan video 5 menit demo
+# dashboard?" (live thread, 25 July). The lead answered "Boleh, gratis?" and got "maaf, video
+# belum bisa aku kirim lewat chat": we asked for a yes and refused it one turn later, which is
+# worse than never offering. Stepan sends TEXT in one Instagram DM thread — no video, no file,
+# no module sample, no deck. Offering to TELL them about something is fine; offering to SEND
+# an artefact is not, so the verb must be a send-verb and the object a deliverable.
+_MEDIA_DELIVERY_RE = re.compile(
+    r"\b(?:kirim(?:in|kan)?|share|bagikan|forward)\b[^.!?\n]{0,40}"
+    r"\b(?:video|rekaman|file|dokumen|pdf|brosur|katalog|deck|materi|modul|silabus|"
+    r"screenshot|foto|gambar|contoh\s+modul|sampel)\b",
+    re.IGNORECASE)
+
+
+def media_delivery_offers(reply: str) -> list[str]:
+    """A promise to send a file, video or material into the chat — Stepan can only send text.
+
+    Separate from whatsapp_delivery_offers: that one needs WhatsApp named, this one fires on
+    the promise itself regardless of channel."""
+    return [m.group(0) for m in _MEDIA_DELIVERY_RE.finditer(reply or "")]
+
+
 # Services/materials the bot INVENTS out of thin air — the model's most expensive
 # hallucination class after prices, and one no other gate caught (money_gate = figures,
 # false_delivery = files-already-sent). Thread 5018: a "free 30-minute business-strategy
@@ -345,18 +366,12 @@ def wrong_channel_claims(reply: str) -> list[str]:
 # Used when the model wants a manager hand-off but we have no phone/WhatsApp for the lead:
 # ask for the contact first (a manager can't follow up on a contact-less lead), keeping the
 # bot on. Only a later turn WITH a phone actually mutes the bot and escalates.
-# The persona addresses the lead as "Kakak" (warm-polite), but the model drifts to the
-# familiar "kamu" mid-conversation — threads 4091/4060/2733/2816 mix both in one chat, which
-# reads as two different people talking. "kamu" and "Kakak" are grammatically interchangeable
-# as a second-person address, so a straight substitution is safe and needs no regen (a prompt
-# rule alone didn't hold — the drift is in the model's default register). Applied per bubble.
-_KAMU_RE = re.compile(r"\bkamu\b", re.IGNORECASE)
-
-
-def normalize_address(text: str) -> str:
-    """Force the persona's address form: the familiar 'kamu' → 'Kakak' (always capitalised,
-    the way an ID honorific is written). Leaves everything else untouched."""
-    return _KAMU_RE.sub("Kakak", text or "")
+# normalize_address (a blind "kamu" → "Kakak" substitution on every outgoing bubble) was
+# removed 2026-07-25. It was written for a weaker model that drifted between the two forms
+# mid-chat, but it rewrote the model's words with no way to opt out for a turn: it also hit
+# quotes of the lead's own message and phrasings where the swap reads wrong. The address form
+# belongs to the persona, which states it plainly, and this class of fix — code editing the
+# model's sentences — is what free mode exists to end.
 
 
 GUARD_HANDOFF_REASON = (
