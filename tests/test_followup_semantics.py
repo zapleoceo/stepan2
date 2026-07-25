@@ -518,27 +518,31 @@ async def test_a_nudge_records_what_it_learned(db_session) -> None:  # noqa: ANN
     assert stored.pains == ["takut telat mulai"]        # nothing already known was lost
 
 
-async def test_an_open_objection_buys_the_strong_model(db_session) -> None:  # noqa: ANN001
-    from app.modules.conversation.dossier import LeadDossier, Objection
-
-    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
-    await _set_dossier(db_session, lead, LeadDossier(
-        objections=[Objection("mahal")], pains=["takut telat"],
-        desired_state=["kerja remote"]))
-    llm = _CapturingLLM(_v3())
-    await _svc(db_session, bid, llm).run()
-    assert llm.capabilities == ["chat:smart"]
-
-
-async def test_an_ordinary_nudge_runs_cheap(db_session) -> None:  # noqa: ANN001
+async def test_the_first_touch_runs_on_the_sales_chain(db_session) -> None:  # noqa: ANN001
+    """The first message after a lead goes quiet is the one most likely to be read at all —
+    it gets the strongest chain, not the cheapest."""
     from app.modules.conversation.dossier import LeadDossier
 
-    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True, followups_sent=0)
     await _set_dossier(db_session, lead, LeadDossier(
         pains=["takut telat"], desired_state=["kerja remote"]))
     llm = _CapturingLLM(_v3())
     await _svc(db_session, bid, llm).run()
-    assert llm.capabilities == ["chat:fast"]
+    assert llm.capabilities == ["chat:sales"]
+
+
+async def test_later_touches_run_on_smart_never_the_cheapest(db_session) -> None:  # noqa: ANN001
+    """Routing used to key off open_objections(), a dossier field the model fills for ~5% of
+    leads — so 81% of live nudges (328 of 405 in six hours) were written by the weakest model
+    in the chain. Freedom handed to a weak model is drift, not freedom: SMART is the floor."""
+    from app.modules.conversation.dossier import LeadDossier
+
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True, followups_sent=1)
+    await _set_dossier(db_session, lead, LeadDossier(
+        pains=["takut telat"], desired_state=["kerja remote"]))
+    llm = _CapturingLLM(_v3())
+    await _svc(db_session, bid, llm).run()
+    assert llm.capabilities == ["chat:smart"]
 
 
 async def test_nothing_new_to_say_burns_the_step_instead_of_sending(db_session) -> None:  # noqa: ANN001
