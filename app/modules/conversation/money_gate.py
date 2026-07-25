@@ -18,6 +18,7 @@ from .guard import (
     fabricated_income_figure,
     invented_service_offers,
     is_hedged_salary_reference,
+    media_delivery_offers,
     quotes_price,
     stale_dates,
     ungrounded_urls,
@@ -82,6 +83,11 @@ def money_issues(reply: str, context: str) -> list[str]:
     # reach one, but a card left un-updated is a standing trap (live: "batch berikutnya 19
     # Juli" offered on 25 July), so the send is blocked too.
     issues.extend(stale_dates(reply))
+    # Offering to send a video/file/module the bot cannot send: the lead says yes and gets a
+    # refusal one turn later (live, 25 July — 6 such offers in 24h). An offer we retract is
+    # worse than no offer, so it never ships.
+    issues.extend(
+        f"cannot be sent in this chat (text only): {m}" for m in media_delivery_offers(reply))
     return issues
 
 

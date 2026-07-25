@@ -165,3 +165,25 @@ def test_a_price_is_fine_once_the_lead_is_ready() -> None:
 
     ready = LeadDossier(readiness="ready")
     assert not uninvited_price("Investasinya Rp 1.882.955 kak.", ready)
+
+
+# ── promises to send things (text-only channel) ───────────────────────────────
+
+def test_offering_to_send_a_video_is_blocked() -> None:
+    """Live 25 July: "mau saya kirimkan video 5 menit demo dashboard?" — the lead said "Boleh,
+    gratis?" and got "maaf, video belum bisa aku kirim lewat chat" the next turn. Asking for a
+    yes and refusing it is worse than never offering."""
+    assert money_issues("Mau saya kirimkan video 5 menit demo dashboard?", _KB) != []
+
+
+def test_offering_to_send_a_module_sample_is_blocked() -> None:
+    assert money_issues("Kami bisa kirim contoh modul pertama biar Kakak lihat dulu", _KB) != []
+    assert money_issues("Mau saya kirim materi silabusnya?", _KB) != []
+
+
+def test_telling_about_the_material_is_still_allowed() -> None:
+    """The block is on SENDING an artefact, not on describing it — the bot must stay able to
+    explain the syllabus in words, which is all it ever could do."""
+    assert money_issues(
+        "Aku jelasin isi modul pertamanya ya: logika dasar dan algoritma", _KB) == []
+    assert money_issues("Di kelas nanti Kakak bikin dashboard sendiri", _KB) == []
