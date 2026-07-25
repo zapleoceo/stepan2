@@ -31,20 +31,22 @@ FIRST_TURN_NOTE = (
     "wrote. Never describe the campus, its address or its floor. End on a question.]"
 )
 
-# The lead tapped an ad and sent nothing of their own (the prefill is the ad's text, not
-# theirs). Until 2026-07-25 this shipped a fixed template that opened with the DP figure —
-# money before a single word from the lead, the exact move the contract forbids everywhere
-# else. Measured over 30 days: the template was answered 14.3% of the time against 36.3%
-# for a written first reply. The model writes it now; this note carries the two things the
-# template encoded (which product, and that nothing was actually asked) plus the price rule.
+# The lead tapped an ad; the visible first message is the ad's prefill, not their typing.
+# The old fixed template opened with the DP figure and was answered 14.3% of the time against
+# 36.3% for a written reply — so this note replaced it, and it carried a flat ban on quoting
+# any price. That ban went too far: the prefill Meta ships reads "Boleh info jadwal, durasi,
+# dan biaya?", so the person believes they asked about money, and a 9-day audit found only
+# 24% of 453 such threads ever got a figure — the single largest measured loss in the funnel.
+# The template failed because it led with money before saying anything else, not because a
+# price is forbidden. State what the prefill is and let the model decide when the number lands.
 AD_TAP_FIRST_TURN_NOTE = (
-    "[This is your FIRST message to this person and they have NOT written anything yet — "
-    "they tapped an ad{product}. The text you see from them is the ad's own prefill, not "
-    "their words, so there is nothing to answer and nothing about them is known. Say who you "
-    "are in one short clause, react to the topic they tapped, and ask ONE opening question "
-    "about them — why that skill, what they want it for. Do NOT quote a price, a DP or an "
-    "instalment: nobody asked, and money before you know anything is what loses these leads. "
-    "Never describe the campus. Keep it to 1-2 short bubbles.]"
+    "[This is your FIRST message to this person. They tapped an ad{product} — the text you "
+    "see from them is Meta's prefill, not their typing, so nothing about them is known yet. "
+    "But note what that prefill says: it asks about schedule, duration and cost, and from "
+    "their side it looks like they asked. Do not stonewall it — a person who taps a price ad "
+    "and gets only questions back usually leaves. Whether you give the figure straight away, "
+    "or a starting price plus one question, or ask first because their goal changes which "
+    "product applies, is your call. Never describe the campus. Keep it to 1-2 short bubbles.]"
 )
 
 
