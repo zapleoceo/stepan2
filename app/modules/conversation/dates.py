@@ -23,11 +23,21 @@ _MONTHS = {
     "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
     "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12,
 }
+# The cards are written in English ("Next group: August 9, 2026") while the replies are in
+# Indonesian — annotating only the Indonesian spelling left every card date unannotated, so
+# an expired batch reached the lead as "batch berikutnya 19 Juli" six days after it ran.
+_MONTHS_EN = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+    "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
 # Monday-indexed, matching date.weekday().
 _WEEKDAYS = ("Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu")
 
+# "19 juli 2026" (Indonesian, day first) or "July 19, 2026" (English, month first).
 _DATE_RE = re.compile(
-    r"\b(?P<day>\d{1,2})\s+(?P<month>" + "|".join(_MONTHS) + r")\b(?:\s+(?P<year>\d{4}))?",
+    r"\b(?P<day>\d{1,2})\s+(?P<month>" + "|".join(_MONTHS) + r")\b(?:\s+(?P<year>\d{4}))?"
+    r"|\b(?P<month_en>" + "|".join(_MONTHS_EN) + r")\s+(?P<day_en>\d{1,2})"
+    r"(?:,?\s+(?P<year_en>\d{4}))?",
     re.IGNORECASE)
 
 EXPIRED_NOTE = "SUDAH LEWAT — jangan tawarkan"
@@ -54,8 +64,12 @@ def annotate_dates(text: str, today: date) -> str:
 def _resolve(m: re.Match[str], today: date) -> date | None:
     """The date a match refers to. A card that omits the year means the next time it comes
     round, so an undated '8 Agustus' in September points at next year, not eight months ago."""
-    day, month = int(m.group("day")), _MONTHS[m.group("month").lower()]
-    year = m.group("year")
+    if m.group("month_en"):
+        day, month = int(m.group("day_en")), _MONTHS_EN[m.group("month_en").lower()]
+        year = m.group("year_en")
+    else:
+        day, month = int(m.group("day")), _MONTHS[m.group("month").lower()]
+        year = m.group("year")
     try:
         if year:
             return date(int(year), month, day)
