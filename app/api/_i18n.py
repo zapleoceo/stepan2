@@ -475,9 +475,18 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Leads in play: nurturing, qualifying, presenting, objection.",
         "id": "Lead dalam proses."},
     "rep.won.hint": {
-        "ru": "Дошли до готовности или переданы менеджеру (ready + handed_off).",
-        "en": "Reached ready or were handed off.",
-        "id": "Siap atau diserahkan."},
+        "ru": "Из тех, чей разговор НАЧАЛСЯ в этом окне, сколько сейчас в ready/handed_off. "
+              "Когорта: продажа лиду, пришедшему раньше, сюда не попадёт — она в «Продано "
+              "за период».",
+        "en": "Of the leads whose conversation STARTED in this window, how many are now "
+              "ready/handed_off. A sale to an older lead lands in 'Closed in period'.",
+        "id": "Dari lead yang mulai di periode ini, berapa yang sekarang ready/handed_off."},
+    "rep.closed_period.hint": {
+        "ru": "Сколько сделок закрылось ВНУТРИ окна, независимо от того, когда лид написал "
+              "впервые. Это ответ на «сколько продали за период».",
+        "en": "Deals that closed INSIDE the window, whenever the lead first wrote. This is "
+              "the 'how much did we sell' number.",
+        "id": "Deal yang ditutup dalam periode ini, kapan pun lead pertama menulis."},
     "rep.dormant.hint": {
         "ru": "Замолчали и не отвечают. Обычно это те самые односложные «Hi».",
         "en": "Went silent. Usually the one-word 'Hi' crowd.",
@@ -1139,8 +1148,9 @@ _TR: dict[str, dict[str, str]] = {
     "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
     "rep.total":   {"ru": "Всего лидов",    "en": "Total leads",  "id": "Total lead"},
     "rep.pipeline":{"ru": "В работе",       "en": "Pipeline",     "id": "Pipeline"},
-    "rep.won":     {"ru": "Закрытые",       "en": "Won",          "id": "Berhasil"},
-    "rep.closed_period": {"ru": "Закрыто за период", "en": "Closed in period",
+    "rep.won":     {"ru": "Продано из пришедших", "en": "Won (cohort)",
+                    "id": "Berhasil (kohort)"},
+    "rep.closed_period": {"ru": "Продано за период", "en": "Closed in period",
                           "id": "Ditutup periode ini"},
     "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},
     "rep.dormant": {"ru": "Спящие",         "en": "Dormant",      "id": "Tidak aktif"},

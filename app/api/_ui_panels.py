@@ -1981,7 +1981,6 @@ def reports_panel_html(
     pipeline = sum(stage_counts.get(s, 0) for s in _pipeline)
     won = sum(stage_counts.get(s, 0) for s in _won)
     dormant = stage_counts.get("dormant", 0)
-    conv = round(won / total * 100, 1) if total else 0.0
 
     def _kpi(label: str, value: str, color: str = "#e8eef4") -> str:
         return (
@@ -1994,13 +1993,15 @@ def reports_panel_html(
         _kpi("rep.total", str(total))
         + _kpi("rep.pipeline", str(pipeline), "#9b7aff")
         + _kpi("rep.won", str(won), "#51cf66")
-        + _kpi("rep.conv", f"{conv}%", "#ffa94d")
         + _kpi("rep.dormant", str(dormant), "#868e96")
     )
     # 'Won' above counts the CHOSEN COHORT's current stage (leads that started in the window).
     # This one counts deals actually closed INSIDE the window whenever the lead first wrote —
     # over 3 days the cohort read 2 while 11 really closed (2026-07-15). Both are true; showing
     # them side by side stops "sales this period" from being read off the cohort number.
+    # The old "Конверсия" tile sat between them and was neither: won ÷ total, a third number
+    # derived from two already on screen, and on a 24h window it is mostly noise (1.3% off a
+    # single sale). Dropped 2026-07-26.
     if closed_in_period is not None:
         kpis += _kpi("rep.closed_period", str(closed_in_period), "#51cf66")
     if discovery is not None:
