@@ -390,9 +390,12 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
         if is_branch_forbidden(branch_id, allowed):
             return HTMLResponse(chat_bot_pill_html(thread_id, bool(enabled)))
         new_val = not bool(enabled)
+        # Record that a HUMAN decided this, so ingest._revive_bot doesn't undo it the moment
+        # the lead writes again. Turning the bot back on clears the flag: whoever switched it
+        # on is handing the thread back.
         await session.execute(
-            text("UPDATE lead SET agent_enabled = :v WHERE id = :id"),
-            {"v": new_val, "id": lead_id},
+            text("UPDATE lead SET agent_enabled = :v, agent_off_manual = :m WHERE id = :id"),
+            {"v": new_val, "m": not new_val, "id": lead_id},
         )
     return HTMLResponse(chat_bot_pill_html(thread_id, new_val))
 

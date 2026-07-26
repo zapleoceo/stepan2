@@ -86,6 +86,13 @@ class Lead(SQLModel, table=True):
         default=None,
         description="кэш перевода needs: {lang: {ориг.фраза: перевод}} — не биллить повторно")
     agent_enabled: bool = Field(default=True, description="per-lead бот-тумблер (manager takeover)")
+    agent_off_manual: bool = Field(
+        default=False,
+        description="бота выключил ЧЕЛОВЕК кнопкой, а не система. agent_enabled сам по себе "
+                    "не помнит причины, а причин две: система паркует спящего (должен "
+                    "проснуться от нового сообщения) и менеджер забирает тред себе (не "
+                    "должен). Без этого флага ingest._revive_bot возвращал бота на любой "
+                    "входящий, и ручное решение отменялось молча")
     is_blocked: bool = Field(default=False, index=True, description="спам/бан — бот игнорит")
     handed_off_at: datetime | None = Field(default=None)
     follower_count: int | None = Field(default=None)

@@ -361,3 +361,38 @@ async def test_adapter_maps_direction_and_item_id() -> None:
     }]), handle="acc")
     (msg,) = await adapter.fetch_inbound()
     assert msg.direction == "out" and msg.external_id == "it-5"
+
+
+async def test_a_managers_mute_survives_the_leads_next_message(db_session) -> None:
+    """agent_enabled never recorded WHY it was off, and two different things set it: the system
+    parking a lead (should wake on a fresh inbound) and a person pressing Bot OFF (must not).
+    _revive_bot treated both alike, so a manager who muted a lead in `qualifying` got the bot
+    back the moment that lead wrote again — silently, and with no record anywhere that a human
+    had intervened, because the toggle writes no audit trail either."""
+    bid, cid, lead, _thread = await _world(db_session)
+    lead.stage = Stage.QUALIFYING  # NOT a human-led stage — the old escape hatch
+    lead.agent_enabled = False
+    lead.agent_off_manual = True
+    await db_session.flush()
+
+    await IngestService(db_session, bid, notifier=_FakeNotifier()).ingest(
+        cid, [_in("halo kak masih ada slot?", ext="i21")])
+
+    assert lead.agent_enabled is False, "a human's decision outlives one inbound"
+    assert lead.stage is Stage.QUALIFYING
+
+
+async def test_a_system_park_still_wakes_up(db_session) -> None:
+    """The other half: a lead the system put to sleep (follow-ups exhausted, undeliverable) has
+    no human behind the mute, and a fresh message is exactly the signal to start again."""
+    bid, cid, lead, _thread = await _world(db_session)
+    lead.stage = Stage.DORMANT
+    lead.agent_enabled = False
+    lead.agent_off_manual = False
+    await db_session.flush()
+
+    await IngestService(db_session, bid, notifier=_FakeNotifier()).ingest(
+        cid, [_in("kak aku jadi tertarik", ext="i22")])
+
+    assert lead.agent_enabled is True
+    assert lead.stage is Stage.QUALIFYING

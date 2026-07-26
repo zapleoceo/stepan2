@@ -294,10 +294,17 @@ class IngestService:
         )
 
     def _revive_bot(self, lead, thread) -> None:
-        """Fresh inbound re-enables the bot — except when a human leads the stage.
+        """Fresh inbound re-enables the bot — except when a human leads the stage, or a human
+        switched the bot off by hand.
 
-        Dormant leads wake up into qualifying (S1 semantics) with a journal entry."""
-        if lead.is_blocked or lead.stage in HUMAN_LED_STAGES:
+        Dormant leads wake up into qualifying (S1 semantics) with a journal entry.
+
+        agent_off_manual is the difference between the two ways the bot ends up off. The system
+        parks a lead (undeliverable, follow-ups exhausted) and that mute SHOULD lift when they
+        write again. A person pressing Bot OFF in the chat has decided to take the thread, and
+        that decision has to outlive the lead's next message — it used to be reversed silently,
+        with nothing anywhere recording that a human had intervened at all."""
+        if lead.is_blocked or lead.agent_off_manual or lead.stage in HUMAN_LED_STAGES:
             return
         if lead.stage == Stage.DORMANT:
             self.session.add(StageEvent(

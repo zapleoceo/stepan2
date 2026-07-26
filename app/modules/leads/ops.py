@@ -110,6 +110,9 @@ async def move_lead(
         lead.agent_enabled = False
     elif target not in BOT_SILENT_STAGES:
         lead.agent_enabled = True
+        # An explicit move back into the funnel hands the thread to the bot again, so a
+        # manual mute set earlier by the Bot OFF pill is cleared with it.
+        lead.agent_off_manual = False
     session.add(lead)
     await session.flush()
     return _result(lead, from_stage, reason)
@@ -158,6 +161,7 @@ async def call_failed(
     await _journal(session, lead, target, reason)
     lead.stage = target
     lead.agent_enabled = True
+    lead.agent_off_manual = False  # the bot is explicitly being handed the thread back
     session.add(lead)
     await session.flush()
 
