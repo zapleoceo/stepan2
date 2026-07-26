@@ -33,7 +33,7 @@ from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import money_issues
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
-from .routing import FAST
+from .routing import SALES
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -168,12 +168,14 @@ class ReactivationService:
         messages = build_messages_free(context, ctx.dialog, lang, stored,
                                        now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": _REACTIVATION_FRAMING})
-        # The lowest-stakes traffic there is: a month-old dormant lead. Draft cheap; the money
-        # gate below is the only thing that can stop it, and it costs nothing when there is no
-        # figure in the text.
+        # "Lowest-stakes, so draft cheap" had it backwards. This is at most two messages ever,
+        # to someone who already stopped answering, with no question to lean on — the hardest
+        # writing in the funnel, and the same reasoning that moved the first follow-up touch off
+        # FAST (see followup.py: 81% of nudges were written by the weakest model in the chain).
+        # Cheap here does not save money, it wastes the touch and burns the lead's patience.
         decision, meta = await generate(
             engine, ctx, messages, thread_id, workflow="followup",
-            capability=FAST, branch_id=self.branch_id)
+            capability=SALES, branch_id=self.branch_id)
         if decision is None:
             return False  # transient bad JSON — retries next run, not suppressed
         if not decision.reply.strip() or money_issues(decision.reply, context):
