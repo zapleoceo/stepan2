@@ -528,6 +528,14 @@ _CSS = (
     "SFMono-Regular,Menlo,monospace}"
     ".kb-doc .ch{border:0;background:transparent}"
     ".kb-doc .ch-n{display:none}"
+    # The save button sat under the textarea, and the textarea is sized from the document —
+    # facts_policy is 15.7k chars, so 48 rows, so the button was ~1500px below the fold and
+    # read as missing. Stuck to the bottom of the scrolling panel instead; the gradient keeps
+    # the text from running into it.
+    ".kb-save-bar{position:sticky;bottom:0;margin-top:.5rem;padding:.7rem 0 .5rem;"
+    "display:flex;align-items:center;gap:.6rem;z-index:5;"
+    "background:linear-gradient(to top,#0f1117 65%,rgba(15,17,23,0))}"
+    ".kb-save-hint{font-size:.7rem;color:#6b7685}"
     ".kb-sec{margin-bottom:.5rem}"
     ".kb-sec-h{display:block;font-size:.74rem;font-weight:600;color:#9db3c9;"
     "margin-bottom:.15rem}"

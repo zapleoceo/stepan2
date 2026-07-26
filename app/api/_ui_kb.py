@@ -152,8 +152,9 @@ def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
         f'{_doc_editor(slug, content, lang)}'
         f'<div id="kb-tr-note-{doc_id}" class="kb-tr-note" style="display:none">'
         f'{_h.escape(t("kb.tr_note"))}</div>'
-        f'<div style="margin-top:.5rem"><button class="btn-sm btn-p" id="kb-save-{doc_id}">'
-        f'{_h.escape(t("know.save"))}</button></div>'
+        f'<div class="kb-save-bar"><button class="btn-sm btn-p" id="kb-save-{doc_id}">'
+        f'{_h.escape(t("know.save"))}</button>'
+        f'<span class="kb-save-hint">{_h.escape(t("kb.save_hint"))}</span></div>'
         f'</form></div>'
     )
 
