@@ -427,20 +427,38 @@ def test_a_thread_with_no_inbound_has_no_pace() -> None:
     assert pace_hint(_dt(2026, 7, 26, 13, 0), None, _dt(2026, 7, 26, 14, 0)) is None
 
 
-def test_the_stage_list_the_model_reads_matches_the_funnel_it_lives_in() -> None:
-    """The schema listed "new|nurturing|qualifying|presenting|objection|dormant" — nurturing
-    second, i.e. the step after new. The UI, the enum and the data all say otherwise: over 30
-    days, 2363 leads went new → qualifying, and nurturing was entered from qualifying (165),
-    new (85), presenting (57), dormant (53) and ready (24) — from everywhere, which is what a
-    side state looks like. Everything downstream was corrected on 2026-07-25; the one list the
-    model actually reads was left in the old order."""
+def test_the_selling_model_is_asked_for_the_reply_and_nothing_it_does_not_decide() -> None:
+    """Every field the code or the extractor can answer is gone from the sales call.
+
+    stage went because _stage_for overrode it in six branches and the outbox/follow-up/
+    reactivation paths owned DORMANT and NURTURING outright; ready went because discovery
+    already reports readiness from the lead's own words; product_slug went because it is a
+    classification of the transcript, which is the extractor's job. What is left is the reply
+    and the one judgement that stops the bot talking."""
     from app.modules.conversation.free_mode import free_contract
 
     schema = free_contract("id")
-    line = schema[schema.index("stage:"):]
-    assert line.index("new") < line.index("qualifying") < line.index("presenting")
-    # The side states are named as such, after the line — not spliced into it.
-    assert "side states" in line
-    assert line.index("presenting") < line.index("nurturing")
-    # ready and handed_off are not the model's to set.
-    assert "that's the flag" in line
+    tail = schema[schema.index("Return ONLY this JSON"):]
+    assert '"reply"' in tail and '"needs_human"' in tail and '"human_reason"' in tail
+    for gone in ('"stage"', '"product_slug"', '"ready"', '"dossier"', '"phone"'):
+        assert gone not in tail, gone
+
+
+def test_the_stage_is_read_off_the_dossier() -> None:
+    """The three lines that survived the model no longer being asked for a stage."""
+    from app.domain.enums import Stage
+    from app.modules.conversation.decision import _stage_from
+    from app.modules.conversation.dossier import LeadDossier, Objection
+
+    assert _stage_from(LeadDossier(), ready=True) is Stage.READY
+    assert _stage_from(LeadDossier(objections=[Objection("mahal")]),
+                       ready=False) is Stage.OBJECTION
+    assert _stage_from(LeadDossier(pains=["takut telat"], desired_state=["kerja remote"]),
+                       ready=False) is Stage.PRESENTING
+    # A captured pain alone is not the emotional layer — keep discovering.
+    assert _stage_from(LeadDossier(pains=["takut telat"]), ready=False) is Stage.QUALIFYING
+    assert _stage_from(LeadDossier(), ready=False) is Stage.QUALIFYING
+    # An open objection outranks a completed discovery: never pitch over a live doubt.
+    assert _stage_from(
+        LeadDossier(pains=["takut telat"], desired_state=["kerja remote"],
+                    objections=[Objection("mahal")]), ready=False) is Stage.OBJECTION

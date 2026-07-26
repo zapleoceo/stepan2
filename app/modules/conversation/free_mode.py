@@ -181,8 +181,20 @@ HARD RULES — the only ones:
   and never go silent.
 """
 
-# What the selling model is asked for, and nothing else. Everything the code can determine on
-# its own was taken back on 2026-07-25:
+# What the selling model is asked for, and nothing else. On 2026-07-26 that became the reply
+# and the one judgement that stops it talking. Three more fields went, all of them answers the
+# code or the cheap extractor already had:
+#   stage           — _stage_for overrode it in six branches (human-led lead, ready with and
+#                     without a phone, needs_manager, presenting without a captured need, a
+#                     soft no read as dormant), and DORMANT/NURTURING are set by the outbox,
+#                     follow-up and reactivation paths, never by the seller. What was left is
+#                     derivable from the dossier: an open objection, a captured pain+gain, or
+#                     neither
+#   ready           — discovery already reports readiness=exploring|considering|ready from the
+#                     lead's own words, and the phone comes from the ingest miner
+#   product_slug    — a classification of the transcript, which is discovery's job; asking the
+#                     author of the reply to also file it is the same tax the dossier was
+# Taken back earlier, on 2026-07-25:
 #   phone           — leads/phone.extract_phone already mines it from the inbound at ingest,
 #                     shape-matched to the branch's country; the model was a second, weaker
 #                     copy of that
@@ -197,16 +209,9 @@ HARD RULES — the only ones:
 # needed. Attention spent on bookkeeping is attention not spent on the person.
 _FREE_SCHEMA = """\
 Return ONLY this JSON, no prose and no markdown fences:
-{{"reply": str, "stage": str, "product_slug": str|null, "ready": bool, \
-"needs_human": bool, "human_reason": str|null}}
+{{"reply": str, "needs_human": bool, "human_reason": str|null}}
 
-reply: what you send them. Everything else here is a judgement only you can make.
-stage: the line is new → qualifying → presenting, each passed once in that order. Then there
-  are side states a conversation can enter from anywhere and leave back to anywhere:
-  objection (they raised a doubt), nurturing (gone quiet but not cold), dormant (given up on).
-  Not 'ready' — that's the flag below, and not 'handed_off'/'manager' — the code sets those.
-product_slug: the course this conversation is actually about now, if it changed.
-ready: true only when they gave a contact AND want to enrol or reserve now.
+reply: what you send them — the whole of your work this turn.
 needs_human / human_reason: see the rule above.
 """
 

@@ -269,7 +269,10 @@ async def test_decide_returns_decision_from_fake_llm(db_session):
 
     assert isinstance(decision, Decision)
     assert decision.reply == _DECISION["reply"]
-    assert decision.stage is Stage.QUALIFYING
+    # The stage follows the DOSSIER, not the model's word for it: this lead has a pain and a
+    # desired state, so the conversation is presenting whatever the reply's JSON claims. The
+    # fixture still says "qualifying" on purpose — a stale field must not win (2026-07-26).
+    assert decision.stage is Stage.PRESENTING
     assert decision.product_slug == "vibe"
     assert llm.json_required is True  # require_json_schema flowed through
     first_call = llm.calls_seen[0]  # the main decide() call — a critic review may follow it

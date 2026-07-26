@@ -57,6 +57,9 @@ explicit "no"/"stop"/"not interested". Default none.
 payment_preference: e.g. "cicilan", "bayar penuh" — only if they raised it.
 budget_signal: what they said about money being a problem — "mahal", "belum ada budget", \
 "masih pelajar". Empty if they never raised it.
+product_slug: which course this conversation is about NOW, from the list of slugs below. \
+Empty if no single course is in play or nothing changed. Read it off what is being discussed, \
+not off what the rep offered in passing.
 
 Examples (lead line -> what to capture):
 - "biar bisa terima order online, sekarang masih manual ribet" -> pains:["proses order \
@@ -71,7 +74,8 @@ sampingan sambil kuliah"
 
 Return ONLY this JSON, no prose, no markdown fences:
 {"job_to_be_done": str, "pains": [str], "desired_state": [str], "objections": [str], \
-"role": str, "readiness": str, "refusal": str, "payment_preference": str, "budget_signal": str}
+"role": str, "readiness": str, "refusal": str, "payment_preference": str, \
+"budget_signal": str, "product_slug": str}
 """
 
 
@@ -106,6 +110,7 @@ def _known_block(dossier: LeadDossier) -> str:
 async def extract_discovery(  # noqa: PLR0913
     llm: LLMPort, dialog: list[Message], dossier: LeadDossier, lang: str,
     branch_id: int, thread_id: int, budget: object = None,
+    product_slugs: list[str] | None = None,
 ) -> LeadDossier:
     """The dialog's discovery delta, extracted on chat:fast. Empty LeadDossier on any failure —
     the caller merges this straight into what's already known via merge_dossier, so a soft
@@ -113,7 +118,9 @@ async def extract_discovery(  # noqa: PLR0913
     transcript = _transcript(dialog)
     if not transcript:
         return LeadDossier()
-    user = f"{_known_block(dossier)}\n\nCONVERSATION (lang: {lang}):\n{transcript}"
+    slugs = ("COURSE SLUGS (product_slug must be one of these, or empty): "
+             + ", ".join(product_slugs) + "\n\n") if product_slugs else ""
+    user = f"{slugs}{_known_block(dossier)}\n\nCONVERSATION (lang: {lang}):\n{transcript}"
     try:
         raw, meta = await llm.chat(
             [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
@@ -121,7 +128,7 @@ async def extract_discovery(  # noqa: PLR0913
             workflow="discovery", thread_id=thread_id, branch_id=branch_id)
         if budget is not None:
             await budget.record(float(meta.get("cost_usd") or 0.0))
-        return _parse(raw)
+        return _parse(raw, frozenset(product_slugs) if product_slugs else None)
     except Exception as exc:  # noqa: BLE001 — an unreachable extractor must not cost the reply
         logger.warning("discovery unavailable branch=%d thread=%d: %s — skipped",
                        branch_id, thread_id, exc)
@@ -141,7 +148,7 @@ def _one_of(value: object, allowed: frozenset[str]) -> str:
     return text if text in allowed else ""
 
 
-def _parse(raw: str) -> LeadDossier:
+def _parse(raw: str, allowed_slugs: frozenset[str] | None = None) -> LeadDossier:
     try:
         data = json.loads(strip_fences(raw))
     except (json.JSONDecodeError, TypeError):
@@ -160,4 +167,6 @@ def _parse(raw: str) -> LeadDossier:
         refusal=_one_of(data.get("refusal"), _REFUSALS) or "none",
         payment_preference=str(data.get("payment_preference") or "").strip(),
         budget_signal=str(data.get("budget_signal") or "").strip(),
+        product_slug=_one_of(data.get("product_slug"), allowed_slugs)
+        if allowed_slugs else str(data.get("product_slug") or "").strip(),
     )

@@ -70,6 +70,9 @@ class LeadDossier:
     # decision
     decides_with: str = ""
     readiness: str = ""
+    # which course the conversation is about now — a classification of the transcript, so it
+    # is read by the extractor rather than filed by the model writing the reply
+    product_slug: str = ""
     # money
     prices_quoted: list[str] = field(default_factory=list)
     payment_preference: str = ""
@@ -104,6 +107,7 @@ class LeadDossier:
             "desired_state": self.desired_state,
             "decides_with": self.decides_with,
             "readiness": self.readiness,
+            "product_slug": self.product_slug,
             "prices_quoted": self.prices_quoted,
             "payment_preference": self.payment_preference,
             "budget_signal": self.budget_signal,
@@ -153,6 +157,7 @@ def merge_dossier(stored: LeadDossier, delta: LeadDossier) -> LeadDossier:
         desired_state=_union(stored.desired_state, delta.desired_state),
         decides_with=_pick(delta.decides_with, stored.decides_with, DECIDES_WITH),
         readiness=_pick(delta.readiness, stored.readiness, READINESS),
+        product_slug=delta.product_slug.strip() or stored.product_slug,
         prices_quoted=_union(stored.prices_quoted, delta.prices_quoted),
         payment_preference=delta.payment_preference.strip() or stored.payment_preference,
         budget_signal=delta.budget_signal.strip() or stored.budget_signal,
@@ -233,6 +238,7 @@ def _from_json(raw: str | None) -> LeadDossier | None:
         desired_state=_strings(d.get("desired_state")),
         decides_with=_pick(str(d.get("decides_with") or ""), "", DECIDES_WITH),
         readiness=_pick(str(d.get("readiness") or ""), "", READINESS),
+        product_slug=str(d.get("product_slug") or "").strip(),
         prices_quoted=_strings(d.get("prices_quoted")),
         payment_preference=str(d.get("payment_preference") or "").strip(),
         budget_signal=str(d.get("budget_signal") or "").strip(),

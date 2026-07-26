@@ -183,16 +183,18 @@ class TurnDecision:
         """A Decision the existing pipeline can carry, populated from the merged dossier.
 
         `merged` (not self.dossier) is passed in so the legacy fields reflect everything known
-        about the lead, not just what this one turn added."""
+        about the lead, not just what this one turn added — and since 2026-07-26 the stage, the
+        readiness and the course are READ off it rather than asked of the selling model."""
+        ready = merged.readiness == "ready"
         return Decision(
             reply=self.reply,
-            stage=self.stage,
-            product_slug=self.product_slug,
-            ready=self.ready,
+            stage=_stage_from(merged, ready=ready),
+            product_slug=merged.product_slug or self.product_slug,
+            ready=ready or self.ready,
             needs_manager=self.needs_human,
             manager_question=self.human_reason,
             kb_gap=self.human_reason,
-            ready_subtype="deal" if self.ready else None,
+            ready_subtype="deal" if (ready or self.ready) else None,
             lead_type=_lead_type_of(merged),
             audience=_audience_of(merged),
             reply_language=self.reply_language,
@@ -204,6 +206,25 @@ class TurnDecision:
             open_objections=merged.open_objections(),
             hard_stop=merged.refusal == "blunt",
         )
+
+
+def _stage_from(d: LeadDossier, *, ready: bool) -> Stage:
+    """Where this conversation stands, read off what is known rather than asked of the seller.
+
+    The selling model used to return a stage, and _stage_for (delivery.py) overrode it in six
+    branches — a human-led lead, ready with a phone, ready without one, needs_manager, a
+    PRESENTING with no captured need, a soft no misread as DORMANT. DORMANT and NURTURING it
+    never owned at all: the outbox, the follow-up sweep and reactivation set those. What was
+    genuinely left is these three lines, and they need no model to decide them.
+
+    _stage_for still runs on top; this only supplies the proposal it used to get."""
+    if ready:
+        return Stage.READY
+    if d.open_objections():
+        return Stage.OBJECTION
+    if d.has_discovery():
+        return Stage.PRESENTING
+    return Stage.QUALIFYING
 
 
 async def generate(  # noqa: PLR0913
@@ -253,10 +274,13 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
 
     text = clean_reply(reply)
     lang = str(data.get("reply_language") or "").lower().strip()
+    # stage / product_slug / ready are still READ when present — a reply generated just before
+    # the 2026-07-26 deploy, or the occasional model that volunteers them anyway, loses
+    # nothing — but nothing asks for them any more, and to_legacy prefers the dossier's answer.
     return TurnDecision(
         reply=text,
         move=_free_move(data.get("move")),
-        stage=_coerce_stage(data.get("stage")),
+        stage=_coerce_stage(data.get("stage")) if data.get("stage") else Stage.QUALIFYING,
         # Reading the lead is discovery.py's job now; the prices are read off the reply itself
         # (guard.canonical_prices), so the author no longer has to list what it just wrote.
         # Both a full `dossier` and an explicit `prices_quoted` are still accepted, so a reply

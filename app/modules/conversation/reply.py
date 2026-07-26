@@ -153,7 +153,8 @@ class ReplyService(ReplyDelivery):
         # dossier looks empty. The selling model used to own this and filled it for ~5% of
         # leads; a call with no reply to write has no competing task (see discovery.py).
         extra = await extract_discovery(
-            self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id, budget=ctx.budget)
+            self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id, budget=ctx.budget,
+            product_slugs=await self._product_slugs())
         merged = merge_dossier(merged, extra)
         decision = await self._vet(
             engine, ctx, messages, thread_id, decision, workflow=workflow, context=context)
@@ -225,6 +226,18 @@ class ReplyService(ReplyDelivery):
                          self.branch_id, thread_id)
             return _escalate(fixed or decision, MONEY_ESCALATION_REASON)
         return fixed
+
+    async def _product_slugs(self) -> list[str]:
+        """The branch's active course slugs — the closed set the extractor may pick from, so a
+        hallucinated slug can never reach the thread."""
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.adapters.db.models import Product  # noqa: PLC0415
+        rows = (await self.session.execute(
+            select(Product.slug).where(
+                Product.branch_id == self.branch_id,
+                Product.is_active == True))).all()  # noqa: E712 — SQLAlchemy needs the comparison
+        return [r[0] for r in rows if r[0]]
 
     async def _product_title(self, slug: str | None) -> str | None:
         """Display title of the ad-mapped product for the enriched templated opener."""
