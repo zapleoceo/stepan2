@@ -24,7 +24,9 @@ from .discovery import extract_discovery
 from .dossier import merge_dossier
 from .engine import _ASSISTANT_LAST_NUDGE, TEMPLATED_META, DecisionEngine
 from .free_mode import ad_tap_note, build_messages_free
+from .guard import quotes_price
 from .money_gate import (
+    AD_TAP_PRICE_CORRECTION,
     MONEY_CORRECTION,
     MONEY_ESCALATION_REASON,
     money_issues,
@@ -148,6 +150,9 @@ class ReplyService(ReplyDelivery):
             engine, ctx, messages, thread_id, workflow=workflow, capability=capability)
         if decision is None:
             return None
+        if first_note is not None and quotes_price(decision.reply):
+            decision = await self._strip_first_turn_price(
+                engine, ctx, messages, thread_id, decision, workflow=workflow)
         merged = merge_dossier(stored, decision.dossier)
         # Reading the lead is its own call now, and it runs every turn — not only when the
         # dossier looks empty. The selling model used to own this and filled it for ~5% of
@@ -197,6 +202,35 @@ class ReplyService(ReplyDelivery):
         # the chip must name the model that actually wrote the text the lead sees.
         self._last_llm_meta = meta
         return decision, meta
+
+    async def _strip_first_turn_price(  # noqa: PLR0913
+        self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
+        decision: TurnDecision, *, workflow: str,
+    ) -> TurnDecision:
+        """One rewrite when the opening message to a silent ad tap quotes a figure.
+
+        Measured over 819 pure-prefill threads: a first message with a number in it is
+        answered 16.1% of the time against 36.3% without one (see AD_TAP_FIRST_TURN_NOTE for
+        the day-by-day collapse). The note forbids it, but Meta's prefill mentions cost and the
+        model keeps reading a button press as a question — so it is enforced here.
+
+        Fails OPEN: if the rewrite is unusable we ship the original. A priced opener is a weak
+        opener, not a false one, and silence is worse than either."""
+        logger.info("ad-tap opener quoted a price branch=%d thread=%d — rewriting",
+                    self.branch_id, thread_id)
+        try:
+            fixed, meta = await generate(
+                engine, ctx,
+                [*messages, {"role": "user", "content": AD_TAP_PRICE_CORRECTION}],
+                thread_id, workflow=workflow, capability=SALES, branch_id=self.branch_id)
+        except Exception as exc:  # noqa: BLE001 — an opener still beats no opener
+            logger.warning("ad-tap price rewrite failed branch=%d thread=%d: %s",
+                           self.branch_id, thread_id, exc)
+            return decision
+        if fixed is None or not fixed.reply.strip() or quotes_price(fixed.reply):
+            return decision
+        self._last_llm_meta = meta
+        return fixed
 
     async def _vet(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001

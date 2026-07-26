@@ -32,21 +32,42 @@ FIRST_TURN_NOTE = (
 )
 
 # The lead tapped an ad; the visible first message is the ad's prefill, not their typing.
-# The old fixed template opened with the DP figure and was answered 14.3% of the time against
-# 36.3% for a written reply — so this note replaced it, and it carried a flat ban on quoting
-# any price. That ban went too far: the prefill Meta ships reads "Boleh info jadwal, durasi,
-# dan biaya?", so the person believes they asked about money, and a 9-day audit found only
-# 24% of 453 such threads ever got a figure — the single largest measured loss in the funnel.
-# The template failed because it led with money before saying anything else, not because a
-# price is forbidden. State what the prefill is and let the model decide when the number lands.
+#
+# This note has been wrong twice in opposite directions, and the measurement that settles it
+# was run on 2026-07-26 over 819 pure-prefill threads — every one starting from an identical
+# place (the lead typed nothing), so the only variable is the shape of our first message:
+#
+#   first message carries NO figure   n=695   36.3% answered
+#   first message carries a figure    n=124   16.1% answered
+#
+# And by day, as leading with money spread through the fleet:
+#   19.07  3/57 led with a price   50.9% answered
+#   22.07  0/52                    30.8%
+#   24.07 36/49                    26.5%
+#   25.07 20/47                    14.9%
+#   26.07 14/28                     7.1%
+#
+# Note that 36.3% is the exact number the retired template was measured against, and the
+# template scored 14.3% — the same collapse, for the same reason. It was never the template
+# that failed; it was opening with money. A stronger model reproduced the failure faithfully
+# because the prefill asks about cost and the model reads that as a question.
+#
+# It is not. Nobody typed it. The 24%-of-453-threads-never-got-a-figure finding that removed
+# the earlier ban is still true and still matters — but the answer to it is "give the number
+# the moment they say anything of their own", not "lead with it".
 AD_TAP_FIRST_TURN_NOTE = (
     "[This is your FIRST message to this person. They tapped an ad{product} — the text you "
-    "see from them is Meta's prefill, not their typing, so nothing about them is known yet. "
-    "But note what that prefill says: it asks about schedule, duration and cost, and from "
-    "their side it looks like they asked. Do not stonewall it — a person who taps a price ad "
-    "and gets only questions back usually leaves. Whether you give the figure straight away, "
-    "or a starting price plus one question, or ask first because their goal changes which "
-    "product applies, is your call. Never describe the campus."
+    "see from them is Meta's prefill, NOT their typing. It mentions schedule, duration and "
+    "cost, but they did not ask: they pressed a button.\n"
+    "So this one message carries no figure — no price, no DP, no instalment, no discount. "
+    "Measured over 819 such threads: a first message with a number in it is answered 16% of "
+    "the time against 36% without one. It reads as a quote to someone who has not told you "
+    "what they want, and most of them simply stop reading.\n"
+    "The moment they write ONE thing of their own, money is fair game and you should be quick "
+    "with it — a lead who asks and gets deflected is the other way to lose this. But not now.\n"
+    "Keep it short — the same measurement puts a reply under 200 characters at 35% and one "
+    "over 400 at 25%. Say hello, say what the course actually gives them in a line, and ask "
+    "one thing that is easy to answer. Never describe the campus."
 )
 
 

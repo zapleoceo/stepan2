@@ -149,11 +149,14 @@ async def test_first_reply_to_ad_tap_is_written_by_the_model(db_session):
     assert llm.calls_seen, "the tap must reach the model, not a template"
     note = "\n".join(
         m["content"] for m in llm.calls_seen[0] if m["role"] == "system")
-    # The note states what the prefill is and that it asks about cost; whether the figure
-    # lands this turn is the model's call. The flat price ban it used to carry cost us the
-    # answer entirely: only 24% of 453 price-ad threads in 9 days ever got a number.
+    # The note states what the prefill is — and that this one message carries no figure.
+    # Leaving that to the model's judgement was measured on 2026-07-26 over 819 pure-prefill
+    # threads: 16.1% answered when the opener carried a number against 36.3% when it did not.
+    # The 24%-of-453-never-got-a-figure finding still stands, and the note answers it in the
+    # same breath: money the moment they write one thing of their own, just not before.
     assert "tapped an ad" in note
-    assert "prefill" in note and "Do not stonewall" in note
+    assert "prefill" in note
+    assert "no price" in note and "money is fair game" in note
 
 
 async def test_ad_tap_note_names_the_mapped_product(db_session):

@@ -44,6 +44,20 @@ PITCH_CORRECTION = (
     "value first; the numbers come when they ask.]"
 )
 
+# The first message to a SILENT ad tap must carry no figure. See free_mode's
+# AD_TAP_FIRST_TURN_NOTE for the measurement: 36.3% answered without a number against 16.1%
+# with one, over 819 threads that all started from the same place. The note says so, but the
+# prefill sitting right in front of the model asks about cost, and the model keeps reading that
+# as a question — so this is enforced, the same way the bubble cap is.
+AD_TAP_PRICE_CORRECTION = (
+    "[System: this is the first message to someone who only pressed an ad button — they have "
+    "not told you anything, and the cost line they 'asked' is Meta's prefill, not their words. "
+    "Your draft quotes a figure. Rewrite it with NO number of any kind: no price, no DP, no "
+    "instalment, no discount, no 'starting from'. Keep the warmth and keep it short. Say what "
+    "the course gives them in one line, and ask one easy thing. The price is the right answer "
+    "to their next message, not to a button press.]"
+)
+
 MONEY_CORRECTION = (
     "[System: your draft states a figure/link OR offers a service/material that is NOT in the "
     "knowledge base: {issues}. Rewrite the SAME message keeping its intent and warmth, but "

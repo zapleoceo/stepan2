@@ -16,6 +16,11 @@ from app.modules.conversation.routing import SALES, SMART
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
+# A knowledge base that actually contains the figures, so the fail-closed money gate — a
+# separate check with its own reason to exist — does not swallow tests whose subject is the
+# ad-tap opener gate.
+_KB_WITH_PRICES = "Vibe Coding: Rp 13.000.000, DP Rp 500.000, cicilan 4x Rp 3.250.000"
+
 
 class _LLM:
     """Records how it was called and replays scripted raw answers."""
@@ -499,3 +504,85 @@ def test_the_cache_anchor_is_unchanged_by_the_reminder() -> None:
     b = build_messages_free("KB", [_M(direction="in", sent_by="lead", text="beda")], "id",
                             LeadDossier(role="student"))
     assert a[0]["content"] == b[0]["content"]
+
+
+async def _silent_tap(s) -> tuple[int, int]:  # noqa: ANN001
+    """A genuine first contact: an ad thread whose only message is Meta's untouched prefill,
+    with no outbound of ours yet — the one state the opener gate applies to."""
+    prefill = "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"
+    b = Branch(name="T", lang="id")
+    s.add(b)
+    await s.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.NEW)
+    s.add_all([ch, lead])
+    await s.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="ig-tap",
+                       lead_source="ad_clicktomsg", ad_id="AD1")
+    s.add(th)
+    await s.flush()
+    s.add(Message(branch_id=b.id, thread_id=th.id, channel_id=ch.id, external_id="m0",
+                  direction="in", sent_by="lead", text=prefill, occurred_at=_NOW))
+    await s.flush()
+    return b.id, th.id
+
+
+async def test_the_opening_message_to_a_silent_ad_tap_carries_no_figure(db_session) -> None:  # noqa: ANN001
+    """Measured 2026-07-26 over 819 pure-prefill threads — every one starting from the same
+    place, the lead having typed nothing:
+
+        first message with no figure   n=695   36.3% answered
+        first message with a figure    n=124   16.1% answered
+
+    And by day, as leading with money spread through the fleet: 50.9% (3 of 57 priced) ->
+    26.5% (36 of 49) -> 7.1% (14 of 28). 36.3% is the exact number the retired template was
+    measured against, and the template scored 14.3% — the same collapse for the same reason.
+    It was never the template that failed, it was opening with money, and a stronger model
+    reproduced it faithfully because Meta's prefill mentions cost and the model reads that as
+    a question. It is not one: nobody typed it."""
+    bid, tid = await _silent_tap(db_session)
+    llm = _LLM(_answer(reply="Halo Kak! Vibe Coding Rp 13.000.000, DP Rp 500.000 ya"),
+               _answer(reply="Halo Kak! Di Vibe Coding AI yang nulis kodenya, Kakak yang "
+                             "ngarahin. Kakak pengen bikin apa?"))
+    decision = await _service(db_session, bid, llm).decide(tid)
+
+    assert decision is not None
+    assert "13.000.000" not in decision.reply, "the priced opener must not ship"
+    assert "ngarahin" in decision.reply, "the rewrite is what goes out"
+    assert len(llm.capabilities) == 2, "one generation, one rewrite"
+
+
+async def test_a_priced_opener_still_ships_when_the_rewrite_fails(db_session) -> None:  # noqa: ANN001
+    """Fails OPEN. A priced opener is a weak opener, not a false one — and silence is worse
+    than either, so an unusable rewrite loses to the original."""
+    bid, tid = await _silent_tap(db_session)
+    llm = _LLM(_answer(reply="Halo Kak! Vibe Coding Rp 13.000.000 ya"),
+               _answer(reply="Halo Kak! Rp 13.000.000 tetap ya"))  # rewrite still priced
+    decision = await _service(db_session, bid, llm, _KB_WITH_PRICES).decide(tid)
+
+    assert decision is not None
+    assert "13.000.000" in decision.reply
+
+
+async def test_a_lead_who_typed_their_own_words_is_not_gated(db_session) -> None:  # noqa: ANN001
+    """The gate exists because a button press is not a question. Someone who wrote to us HAS
+    asked, and deflecting them is the other way to lose the thread."""
+    bid, tid, _ = await _thread(db_session, texts=(("in", "kak harganya berapa ya?"),))
+    llm = _LLM(_answer(reply="Vibe Coding Rp 13.000.000 kak, bisa 4x Rp 3.250.000"))
+    decision = await _service(db_session, bid, llm, _KB_WITH_PRICES).decide(tid)
+
+    assert decision is not None
+    assert "13.000.000" in decision.reply
+    assert len(llm.capabilities) == 1, "no rewrite — nothing to correct"
+
+
+def test_the_ad_tap_note_forbids_a_figure_and_says_why() -> None:
+    """The instruction has to carry the number that justifies it — a rule without its reason
+    is the first thing a strong model argues itself out of."""
+    from app.modules.conversation.free_mode import ad_tap_note
+
+    note = ad_tap_note("Vibe Coding")
+    assert "no price" in note and "no DP" in note
+    assert "16%" in note and "36%" in note
+    # …and it must NOT tell the model to withhold money once the lead actually speaks.
+    assert "money is fair game" in note
