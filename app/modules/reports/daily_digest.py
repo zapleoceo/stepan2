@@ -7,7 +7,6 @@ Read-only: no IG writes, no lead mutation.
 """
 from __future__ import annotations
 
-import json
 import re
 from collections import defaultdict
 from datetime import date
@@ -15,6 +14,7 @@ from datetime import date
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.signals import AD_TEMPLATE_RE, is_auto_reply
 from app.modules.reports._releases import RELEASES
 
@@ -33,14 +33,21 @@ def _lead_spoke(texts: list[str]) -> bool:
 
 
 def _fmt_needs(raw: str | None) -> str:
-    """The needs profile as the bot stored it → a short human line."""
-    try:
-        n = json.loads(raw or "{}")
-    except ValueError:
+    """The needs profile as the bot stored it → a short human line.
+
+    Goes through parse_needs rather than reading keys directly: this used to look for `jobs`
+    and `gains`, which are the v2 names. The v3 dossier calls them job_to_be_done and
+    desired_state, so two of the three lines were blank for every lead written since the
+    cutover — the digest read "боли: …" and nothing else, or "ничего не выявлено" outright.
+
+    A record that will not parse still reads "—", kept distinct from "nothing was captured":
+    one says the row is broken, the other says the conversation gave us nothing."""
+    if raw and not raw.lstrip().startswith("{"):
         return "—"
-    parts = [f"{label}: {', '.join(v)}" for label, key in
-             (("цели", "jobs"), ("боли", "pains"), ("выгоды", "gains"))
-             if (v := n.get(key))]
+    profile = parse_needs(raw)
+    parts = [f"{label}: {', '.join(v)}" for label, v in
+             (("цели", profile.jobs), ("боли", profile.pains), ("выгоды", profile.gains))
+             if v]
     return " · ".join(parts) or "— (ничего не выявлено)"
 
 
@@ -76,7 +83,10 @@ async def _cloud_section(session: AsyncSession, branch_id: int) -> str:
 
 async def _threads(session: AsyncSession, branch_id: int, limit: int):  # noqa: ANN202
     rows = (await session.execute(text(
-        "SELECT ct.id, l.stage, l.needs, ct.product_slug"
+        # coalesce: `needs` is the v2 column and nothing has written it since the cutover, so
+        # the digest's "с болью" line and every "что бот понял" read empty. Fourth place the
+        # same dead column turned up (chat panel, needs cloud, reports KPI, here).
+        "SELECT ct.id, l.stage, coalesce(l.dossier, l.needs), ct.product_slug"
         " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
         " WHERE l.branch_id = :b AND ct.last_out_at IS NOT NULL"
         " ORDER BY ct.last_out_at DESC LIMIT :n"), {"b": branch_id, "n": limit})).all()

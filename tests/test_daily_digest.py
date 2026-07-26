@@ -50,3 +50,19 @@ def test_funnel_counts_the_steps_that_matter() -> None:
     assert "| Цена названа | 1 |" in md          # only thread 1 quotes a figure
     assert "| Попытка закрытия | 2 |" in md      # DP 500 (t1) + nomor WA (t3)
     assert "| Дошло до ready/handoff/manager | 1 |" in md
+
+
+def test_fmt_needs_reads_the_v3_dossier_too() -> None:
+    """It used to look for `jobs` and `gains` — the v2 names. The v3 dossier calls them
+    job_to_be_done and desired_state, so two of three lines were blank for every lead written
+    since the cutover, and the digest's "Что бот понял" mostly read "ничего не выявлено"."""
+    raw = json.dumps({
+        "job_to_be_done": "bikin aplikasi toko",
+        "pains": ["masih manual"],
+        "desired_state": ["aplikasi berdiri sendiri"],
+        "objections": [{"text": "mahal", "status": "open"}],
+    })
+    line = _fmt_needs(raw)
+    assert "цели: bikin aplikasi toko" in line
+    assert "боли: masih manual" in line
+    assert "выгоды: aplikasi berdiri sendiri" in line
