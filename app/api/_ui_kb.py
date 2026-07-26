@@ -21,6 +21,31 @@ def _cat_label(cat: str, lang: str) -> str:
     return {"ru": "Прочее", "en": "Other", "id": "Lainnya"}.get(lang, "Other")
 
 
+def kb_all_html(docs: list) -> str:
+    """Every document of the branch, one after another, each with its own save form.
+
+    Replaces the sidebar picker (2026-07-25). Four documents all ride in the same prompt, so
+    a lead-in index just hid what the operator came to edit. Each editor keeps its own form
+    and its own POST target, so saving one never touches the others. A multi-branch view
+    still groups by branch name, since two branches can hold the same slug."""
+    if not docs:
+        return f'<div class="emp">{_h.escape(t("know.select"))}</div>'
+    branches = sorted({d[7] for d in docs if len(d) > 7})
+    multi = len(branches) > 1
+    out: list[str] = []
+    for br in (branches or [""]):
+        rows = [d for d in docs if (d[7] if len(d) > 7 else "") == br]
+        if not rows:
+            continue
+        if multi:
+            out.append(f'<div class="ch"><span class="ch-n">{_h.escape(br)}</span></div>')
+        out.extend(
+            kb_editor_html(d[0], str(d[1]), str(d[2] or d[1]), str(d[3] or ""), d[6])
+            for d in sorted(rows, key=lambda r: (r[5] or 0, str(r[1])))
+        )
+    return "".join(out)
+
+
 def kb_tree_html(docs: list, active_id: int | None = None) -> str:
     """Persona-tab sidebar: docs grouped by category. When the view spans >1 branch, each
     branch's category groups are wrapped in an outer collapsible branch group

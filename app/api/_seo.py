@@ -1,8 +1,8 @@
-"""SEO surfaces for the public site: robots.txt, sitemap.xml and a social/OG card.
+"""SEO surfaces for the public site: robots.txt, sitemap.xml, llms.txt and a social/OG card.
 
-The marketing pages (/, /whats-new, /privacy) are open to search engines AND to LLM
-crawlers so the product can be discovered and cited. Everything behind auth (the /ui app,
-/admin, the MCP mounts) is disallowed. Base URL comes from settings().public_url."""
+The marketing pages (/, /privacy) are open to search engines AND to LLM crawlers so the
+product can be discovered and cited. Everything behind auth (the /ui app, /admin, the MCP
+mounts) is disallowed. Base URL comes from settings().public_url."""
 from __future__ import annotations
 
 from app.config import settings
@@ -10,7 +10,6 @@ from app.config import settings
 # Public, indexable marketing pages (path, changefreq, priority).
 _PUBLIC_PAGES = (
     ("/", "weekly", "1.0"),
-    ("/whats-new", "weekly", "0.7"),
     ("/privacy", "yearly", "0.3"),
 )
 
@@ -30,15 +29,15 @@ def _base() -> str:
 def robots_txt() -> str:
     base = _base()
     lines = ["User-agent: *", "Allow: /$"]
-    for path in ("/whats-new", "/privacy", "/og.svg"):
+    for path in ("/privacy", "/llms.txt", "/og.svg"):
         lines.append(f"Allow: {path}")
     for path in ("/ui/", "/admin/", "/connector/", "/reader/", "/mcp/",
-                 "/webhooks/", "/demo/", "/login", "/api/"):
+                 "/webhooks/", "/demo/", "/login", "/api/", "/hiw"):
         lines.append(f"Disallow: {path}")
     # Named AI crawlers — explicit Allow so a future site-wide block doesn't silently
     # exclude them from the marketing pages.
     for agent in _AI_AGENTS:
-        lines += ["", f"User-agent: {agent}", "Allow: /$", "Allow: /whats-new",
+        lines += ["", f"User-agent: {agent}", "Allow: /$", "Allow: /llms.txt",
                   "Allow: /privacy", "Disallow: /ui/", "Disallow: /admin/"]
     lines += ["", f"Sitemap: {base}/sitemap.xml"]
     return "\n".join(lines) + "\n"
@@ -54,6 +53,51 @@ def sitemap_xml() -> str:
     return ('<?xml version="1.0" encoding="UTF-8"?>'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
             f"{urls}</urlset>")
+
+
+def llms_txt() -> str:
+    """Plain-fact product summary for answer engines.
+
+    Answer engines quote checkable statements, not adjectives — so this is numbers and
+    capabilities, no marketing copy. Every figure here must also appear on the landing page:
+    a fact only stated in llms.txt reads as unverifiable and gets dropped."""
+    base = _base()
+    return f"""# Stepan
+
+> An AI sales agent that answers, qualifies and closes leads inside Instagram Direct,
+> WhatsApp and Facebook Messenger — in the customer's own language, 24 hours a day.
+> Built for businesses whose leads arrive as direct messages.
+
+## What it does
+- Replies to a new direct message in under 60 seconds, day or night.
+- Answers only from the business's own uploaded facts (price list, schedule, terms) — it
+  cannot invent a price or a promise.
+- Qualifies the buyer in conversation (need, timing, fit) instead of a form.
+- Captures the phone number and pushes the contact, the conversation and the source ad into
+  the business's CRM over an open MCP connector.
+- Hands a hot lead to a human the moment it is ready to buy.
+- Follows up with silent leads on a human-paced schedule.
+- Runs on the official Meta Graph API with per-hour and per-day sending caps and quiet hours.
+
+## Channels
+Instagram Direct, WhatsApp, Facebook Messenger. Telegram on request. TikTok planned.
+
+## Languages
+Replies in the language the customer writes in, including Bahasa Indonesia — one agent, no
+separate setup per market.
+
+## How it differs from a free platform assistant
+- It is grounded in the business's own documents, not only a product catalogue and past chats.
+- The captured contact is pushed into the business's own CRM.
+- Instagram Direct is automated, not only WhatsApp.
+- Conversations are never used to train anyone else's model.
+
+## Links
+- Product: {base}/
+- Pricing: {base}/#pricing
+- Safety and account limits: {base}/#safety
+- Privacy policy: {base}/privacy
+"""
 
 
 def og_svg() -> str:

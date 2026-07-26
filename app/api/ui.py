@@ -55,7 +55,7 @@ from ._ui_html import (
     thread_list_html,
     viewer_tz_offset,
 )
-from ._ui_kb import kb_tree_html
+from ._ui_kb import kb_all_html
 from ._ui_panels import coach_chat_html
 
 
@@ -154,9 +154,10 @@ async def knowledge_page(request: Request) -> HTMLResponse:
             f" {where} ORDER BY b.name, k.sort_order, k.id"
         )
         docs = (await session.execute(text(q), params)).all()
-    thr = kb_tree_html(list(docs))
-    empty = f'<div class="emp">{_h.escape(t("know.select"))}</div>'
-    return HTMLResponse(app_shell(lang, empty, active_nav="know", thr_html=thr,
+    # Every doc on one page, no picker. The tree earned its place when a branch carried the
+    # 14-doc canonical skeleton; the free-only cutover left four documents that all ride in
+    # the same prompt, so an index in front of four items costs more than it saves.
+    return HTMLResponse(app_shell(lang, kb_all_html(list(docs)), active_nav="know",
                                   is_super=is_super_admin(request)))
 
 

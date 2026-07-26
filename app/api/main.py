@@ -134,11 +134,12 @@ def create_app() -> FastAPI:
         from app.api._privacy import privacy_html  # noqa: PLC0415
         return HTMLResponse(privacy_html())
 
-    @app.get("/whats-new", include_in_schema=False, response_class=HTMLResponse)
-    async def whats_new() -> HTMLResponse:
-        # Public, customer-facing changelog + project version (see app/api/_changelog.py).
-        from app.api._changelog import changelog_html  # noqa: PLC0415
-        return HTMLResponse(changelog_html())
+    @app.get("/llms.txt", include_in_schema=False, response_class=PlainTextResponse)
+    async def llms_txt_route() -> PlainTextResponse:
+        # The de-facto convention for telling answer engines what this product is, in the
+        # plain-fact form they quote well. See app/api/_seo.py.
+        from app.api._seo import llms_txt  # noqa: PLC0415
+        return PlainTextResponse(llms_txt())
 
     @app.get("/hiw", include_in_schema=False, response_class=HTMLResponse)
     async def how_it_works(lang: str = "en") -> HTMLResponse:
