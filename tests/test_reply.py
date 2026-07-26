@@ -462,3 +462,40 @@ def test_the_stage_is_read_off_the_dossier() -> None:
     assert _stage_from(
         LeadDossier(pains=["takut telat"], desired_state=["kerja remote"],
                     objections=[Objection("mahal")]), ready=False) is Stage.OBJECTION
+
+
+def test_the_output_shape_is_restated_next_to_the_dialogue() -> None:
+    """The contract defining the JSON sits in the cached prefix, ~34 000 tokens above the
+    lead's newest message, and an instruction that far from the point of generation loses to
+    everything nearer — roughly half of Sonnet's answers came back wrapped in a tool-call
+    envelope, which is what a model does when it has lost the output shape.
+
+    Twenty tokens restate it where the model can still see it. It must NOT be a second copy of
+    the schema (two statements of one contract drift, and the near one then wins the wrong
+    argument) and it must NOT touch messages[0], which is the cache anchor."""
+    from app.adapters.db.models import Message as _M
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.free_mode import build_messages_free
+
+    dialog = [_M(direction="in", sent_by="lead", text="halo")]
+    msgs = build_messages_free("KB", dialog, "id", LeadDossier())
+    per_lead = msgs[1]["content"]
+    assert per_lead.rstrip().endswith("no markdown fence.]"), "must be the last thing read"
+    assert "needs_human" in per_lead
+    # A pointer, not a duplicate contract.
+    assert "Return ONLY this JSON" not in per_lead
+    assert '{{' not in per_lead and '"reply": str' not in per_lead
+
+
+def test_the_cache_anchor_is_unchanged_by_the_reminder() -> None:
+    """messages[0] is byte-identical across leads or the whole prompt cache is worthless —
+    a cold Sonnet call costs $0.138 against $0.018 warm (measured 2026-07-26)."""
+    from app.adapters.db.models import Message as _M
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.free_mode import build_messages_free
+
+    a = build_messages_free("KB", [_M(direction="in", sent_by="lead", text="hi")], "id",
+                            LeadDossier(pains=["mahal"]))
+    b = build_messages_free("KB", [_M(direction="in", sent_by="lead", text="beda")], "id",
+                            LeadDossier(role="student"))
+    assert a[0]["content"] == b[0]["content"]

@@ -216,6 +216,21 @@ needs_human / human_reason: see the rule above.
 """
 
 
+# The last line before the dialogue starts. The contract that defines this JSON sits in the
+# cached prefix, ~34 000 tokens above the lead's newest message — and an instruction that far
+# from the point of generation loses to everything nearer. Live evidence: roughly half of
+# Sonnet's answers came back wrapped in a tool-call envelope, which is what a model does when
+# it has lost track of the output shape it was asked for.
+#
+# Twenty tokens, restated where the model can still see it. Deliberately NOT a second copy of
+# the schema: two statements of the same contract drift, and then the near one wins the wrong
+# argument. It only names the keys and points back.
+_SHAPE_REMINDER = (
+    "[Reply with the JSON object the contract above defines — reply, needs_human, "
+    "human_reason — and nothing else: no prose around it, no markdown fence.]"
+)
+
+
 def free_contract(lang: str) -> str:
     named = language_name(lang)
     return _FREE_CONTRACT.format(lang=named) + "\n" + _FREE_SCHEMA.format(lang=named)
@@ -250,6 +265,7 @@ def build_messages_free(  # noqa: PLR0913
         (name_block or "").strip(),
         dossier_block(dossier),
         (first_turn_note or FIRST_TURN_NOTE) if is_first_reply else "",
+        _SHAPE_REMINDER,
     ) if block]
     messages: list[dict[str, Any]] = [{"role": "system", "content": stable}]
     if variable:
