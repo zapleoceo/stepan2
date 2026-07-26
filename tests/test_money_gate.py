@@ -167,19 +167,12 @@ def test_a_price_is_fine_once_the_lead_is_ready() -> None:
     assert not uninvited_price("Investasinya Rp 1.882.955 kak.", ready)
 
 
-def test_a_price_is_fine_for_someone_who_raised_money_themselves() -> None:
-    """Silence about money is what makes a figure uninvited, not readiness. A lead who asked
-    "berapa", got the answer and went quiet is exactly the person a payment plan is for —
-    gating on readiness alone muted the number for them."""
+def test_a_lead_who_never_mentioned_money_gets_no_figure_volunteered() -> None:
     from app.modules.conversation.dossier import LeadDossier
     from app.modules.conversation.money_gate import uninvited_price
 
-    nudge = "Cicilannya bisa dari Rp 1.670.000 per bulan lho kak."
-    assert not uninvited_price(nudge, LeadDossier(prices_quoted=["Rp 13.000.000"]))
-    assert not uninvited_price(nudge, LeadDossier(budget_signal="mahal"))
-    assert not uninvited_price(nudge, LeadDossier(payment_preference="cicilan"))
-    # …but a lead who never brought money up still gets no figure volunteered at them.
-    assert uninvited_price(nudge, LeadDossier(pains=["takut telat"]))
+    assert uninvited_price("Cicilannya bisa dari Rp 1.670.000 per bulan lho kak.",
+                           LeadDossier(pains=["takut telat"]))
 
 
 # ── promises to send things (text-only channel) ───────────────────────────────
@@ -237,3 +230,30 @@ def test_offering_a_call_never_reaches_the_lead() -> None:
 
     assert money_issues("Boleh aku jelasin lewat telepon, Kak?", "KB")
     assert money_issues("Aku kirim voice note ya biar jelas", "KB")
+
+
+def test_a_price_we_sent_does_not_license_the_next_one() -> None:
+    """prices_quoted records the figures WE sent — decision._prices_in reads them off the bot's
+    own reply — so treating it as "they raised money" made one quote exempt every later nudge
+    for good. Thread 5393: a spec sheet at 12:17 filled prices_quoted, and an hour later an
+    unprompted Demo Event pitch with its own price sailed through to a lead who had not said
+    a word. The exemption belongs to what THEY said, not to what we already did."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import uninvited_price
+
+    nudge = "Ada Demo Event tanggal 8 Agustus, tiketnya Rp 100.000 aja"
+    already_pitched = LeadDossier(prices_quoted=["Rp 13.000.000", "Rp 500.000"])
+    assert uninvited_price(nudge, already_pitched), "our own quote is not their invitation"
+
+
+def test_a_lead_who_brought_money_up_still_gets_the_number() -> None:
+    """The case the exemption exists for: someone who asked what it costs, got the answer and
+    went quiet is exactly who a payment plan is useful to. Both signals are lead-sourced —
+    discovery records budget_signal from their words, including a bare "berapa?"."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import uninvited_price
+
+    nudge = "Cicilannya bisa dari Rp 1.670.000 per bulan lho kak."
+    assert not uninvited_price(nudge, LeadDossier(budget_signal="tanya harga"))
+    assert not uninvited_price(nudge, LeadDossier(payment_preference="cicilan"))
+    assert not uninvited_price(nudge, LeadDossier(readiness="ready"))

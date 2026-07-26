@@ -77,13 +77,20 @@ def uninvited_price(reply: str, dossier: object) -> bool:
     Silence about money is what makes a figure uninvited, not the lead's readiness. Gating on
     `readiness != "ready"` alone muted the number for every lead who had asked "berapa", got
     the answer, and then went quiet — the exact person for whom a payment plan is the most
-    useful thing left to say. If they raised money themselves (a quoted price, a budget signal,
-    a stated payment preference), repeating a figure is a reminder, not a new pitch."""
+    useful thing left to say. So the exemption is: if THEY raised money, repeating a figure is
+    a reminder rather than a new pitch.
+
+    `prices_quoted` is emphatically not that signal, and reading it as one (2026-07-26, same
+    day) reversed the rule inside a morning. It records the figures WE sent — decision._prices_in
+    reads them off the bot's own reply — so one quote made every later nudge exempt for good.
+    Thread 5393 is what that looks like: a spec sheet at 12:17 filled prices_quoted, and an
+    hour later an unprompted Demo Event pitch with its own price sailed through to someone who
+    had not said a word. Both remaining signals come from the lead's own words (discovery.py)."""
     if not quotes_price(reply):
         return False
     if dossier.readiness == "ready":
         return False
-    return not (dossier.prices_quoted or dossier.budget_signal or dossier.payment_preference)
+    return not (dossier.budget_signal or dossier.payment_preference)
 
 
 def money_issues(reply: str, context: str) -> list[str]:

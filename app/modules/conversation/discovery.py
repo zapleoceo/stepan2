@@ -55,8 +55,10 @@ refusal: none|soft|vague|blunt. soft = "nanti saya pikirkan", "belum sekarang" (
 with a reason); vague = they closed the conversation politely with no reason; blunt = an \
 explicit "no"/"stop"/"not interested". Default none.
 payment_preference: e.g. "cicilan", "bayar penuh" — only if they raised it.
-budget_signal: what they said about money being a problem — "mahal", "belum ada budget", \
-"masih pelajar". Empty if they never raised it.
+budget_signal: what THEY said about money — a worry ("mahal", "belum ada budget", "masih \
+pelajar") or simply asking what it costs ("berapa?", "harganya berapa kak"). Record the \
+asking too: it is how we know money is on their mind and a figure is welcome rather than \
+volunteered at them. Empty only if they never brought money up at all.
 product_slug: which course this conversation is about NOW, from the list of slugs below. \
 Empty if no single course is in play or nothing changed. Read it off what is being discussed, \
 not off what the rep offered in passing.
