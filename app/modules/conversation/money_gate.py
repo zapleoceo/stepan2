@@ -16,9 +16,11 @@ from __future__ import annotations
 from .guard import (
     canonical_prices,
     fabricated_income_figure,
+    impossible_capability_offers,
     invented_service_offers,
     is_hedged_salary_reference,
     media_delivery_offers,
+    profile_inspection_claims,
     quotes_price,
     stale_dates,
     ungrounded_urls,
@@ -98,6 +100,17 @@ def money_issues(reply: str, context: str) -> list[str]:
     # worse than no offer, so it never ships.
     issues.extend(
         f"cannot be sent in this chat (text only): {m}" for m in media_delivery_offers(reply))
+    # Offering a call or a voice note: the bot has neither, so the lead is promised a channel
+    # that will never open. The check has existed since v2 and was wired into the comments path
+    # and the audit — but never into the reply gate, so live DMs have never been checked by it.
+    issues.extend(
+        f"a channel the bot does not have: {m}" for m in impossible_capability_offers(reply))
+    # "I had a look at your profile / your posts are great": invented, and invented as flattery,
+    # which is the worst place to be caught. See guard._PROFILE_CLAIM_RE and thread 5333 — once
+    # such a claim is in the transcript the next turn treats it as fact and elaborates on it.
+    issues.extend(
+        f"claims to have seen something it cannot see: {m}"
+        for m in profile_inspection_claims(reply))
     return issues
 
 

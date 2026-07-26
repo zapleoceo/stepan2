@@ -202,3 +202,38 @@ def test_telling_about_the_material_is_still_allowed() -> None:
     assert money_issues(
         "Aku jelasin isi modul pertamanya ya: logika dasar dan algoritma", _KB) == []
     assert money_issues("Di kelas nanti Kakak bikin dashboard sendiri", _KB) == []
+
+
+# ── claims about things the bot cannot see or do ──────────────────────────────
+
+def test_claiming_to_have_looked_at_the_profile_is_blocked() -> None:
+    """The bot gets a display name and message text. Nothing else. Thread 5333 shipped
+    "makasih udah share linknya - profilnya keren" to a lead whose only message was an
+    autoresponder, then a day later read its own claim back out of the transcript and
+    elaborated: "aku udah mampir ke link profil Kakak … kumpulan AI prompts & tools gratisnya
+    juga menarik". A fabrication in the transcript is one the next turn treats as true."""
+    from app.modules.conversation.money_gate import money_issues
+
+    assert money_issues("Tadi aku udah mampir ke link profil Kakak - keren banget", "KB")
+    assert money_issues("Makasih udah share linknya - profilnya keren!", "KB")
+    assert money_issues("Aku lihat postingan Kakak, keren", "KB")
+    assert money_issues("Dari postingan kakak kelihatan suka desain ya", "KB")
+
+
+def test_ordinary_warmth_is_not_a_profile_claim() -> None:
+    """The gate must not fire on praise for the person or their idea — only on praise for
+    something the bot would have had to look at."""
+    from app.modules.conversation.money_gate import money_issues
+
+    assert not money_issues("Ide Kakak keren banget!", "KB")
+    assert not money_issues("Keren nih rencananya, Kak", "KB")
+    assert not money_issues("Nanti Kakak bikin portofolio yang bagus", "KB")
+
+
+def test_offering_a_call_never_reaches_the_lead() -> None:
+    """impossible_capability_offers has existed since v2 and was wired into the comments path
+    and the learning audit — but never into the reply gate, so live DMs were never checked."""
+    from app.modules.conversation.money_gate import money_issues
+
+    assert money_issues("Boleh aku jelasin lewat telepon, Kak?", "KB")
+    assert money_issues("Aku kirim voice note ya biar jelas", "KB")

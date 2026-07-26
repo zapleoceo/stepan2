@@ -91,6 +91,31 @@ def impossible_capability_offers(reply: str) -> list[str]:
     return [m.group(0) for m in _IMPOSSIBLE_CAPABILITY_RE.finditer(reply or "")]
 
 
+# Claims of having LOOKED at the lead's profile, posts, bio or stories. The bot receives a
+# display name and message text — nothing else — so every one of these is invented, and they
+# arrive as flattery ("profilnya keren"), which is the most damaging place to be caught out.
+#
+# Thread 5333 is why this is fail-closed rather than a knowledge-base rule. Turn one:
+# "makasih udah share linknya - profilnya keren, suka banget vibesnya", to a lead whose only
+# message was a generic autoresponder. A day later, with the KB rule already in place, the
+# model read its own earlier claim in the transcript, took it as established fact, and built
+# on it with invented specifics: "aku udah mampir ke link profil Kakak … kumpulan AI prompts
+# & tools gratisnya juga menarik". A fabrication in the transcript is a fabrication the next
+# turn treats as true, so it has to be stopped before it is ever written down.
+_PROFILE_CLAIM_RE = re.compile(
+    r"(?:mampir ke|lihat|liat|cek|buka|baca|kunjungi|scroll|checked|looked at|visited)\s+"
+    r"(?:link\s+)?(?:profil|profile|bio|postingan|posting|konten|story|stori|feed)\w*"
+    r"|(?:profil|profile|bio|postingan|feed)\w*\s*(?:kakak|kamu|kk)?\s*"
+    r"(?:keren|bagus|menarik|kece|nice|cool)"
+    r"|dari\s+(?:postingan|profil|bio|story|feed)\w*\s+(?:kakak|kamu|kk)",
+    re.IGNORECASE)
+
+
+def profile_inspection_claims(reply: str) -> list[str]:
+    """Claims to have seen the lead's profile/posts/bio — always invented, never shippable."""
+    return [m.group(0).strip() for m in _PROFILE_CLAIM_RE.finditer(reply or "")]
+
+
 def quotes_price(reply: str) -> bool:
     """A concrete money figure appears in the reply — same shape the money gate already
     verifies against the KB. Used by the pitch gate as a content-based backstop: the model
