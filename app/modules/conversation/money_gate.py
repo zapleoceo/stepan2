@@ -16,6 +16,7 @@ from __future__ import annotations
 from .guard import (
     canonical_prices,
     fabricated_income_figure,
+    fabricated_result_claim,
     impossible_capability_offers,
     invented_service_offers,
     is_hedged_salary_reference,
@@ -69,7 +70,7 @@ MONEY_CORRECTION = (
 )
 
 
-def uninvited_price(reply: str, dossier: object) -> bool:
+def uninvited_price(reply: str, dossier: object, *, ad_promised_price: bool = False) -> bool:
     """A price figure in a NUDGE to someone money was never discussed with — volunteered, since
     a follow-up is never an answer to a fresh question (thread 4849). Used only by followup.py;
     live replies leave price timing to the model.
@@ -85,10 +86,22 @@ def uninvited_price(reply: str, dossier: object) -> bool:
     reads them off the bot's own reply — so one quote made every later nudge exempt for good.
     Thread 5393 is what that looks like: a spec sheet at 12:17 filled prices_quoted, and an
     hour later an unprompted Demo Event pitch with its own price sailed through to someone who
-    had not said a word. Both remaining signals come from the lead's own words (discovery.py)."""
+    had not said a word. Both remaining signals come from the lead's own words (discovery.py).
+
+    `ad_promised_price` settles the one place two measurements pulled apart. Meta's prefill
+    reads "Boleh info jadwal, durasi, dan biaya?", and leading the FIRST message with a figure
+    halves the reply rate (16.1% against 36.3% over 819 threads) — so the opener carries none.
+    But if the nudge is silenced too, that lead never gets a number at all, which is the other
+    measured loss: only 24% of 453 price-ad threads ever saw one. Thread 5293 lived it — an ad
+    that asks about cost, four of our messages, no figure in two days.
+
+    So the ad may buy a price ONCE: not in the opener, and not again once we have answered —
+    only while the question the ad put in their mouth is still hanging."""
     if not quotes_price(reply):
         return False
     if dossier.readiness == "ready":
+        return False
+    if ad_promised_price and not dossier.prices_quoted:
         return False
     return not (dossier.budget_signal or dossier.payment_preference)
 
@@ -108,6 +121,10 @@ def money_issues(reply: str, context: str) -> list[str]:
             continue
         issues.extend(_ungrounded_prices(bubble, context))
     issues.extend(fabricated_income_figure(reply))
+    # A result stated as a percentage is never in the knowledge base and never true of us.
+    # Thread 4799 produced one twice — first as an outside brand, then as "our alumni".
+    issues.extend(
+        f"an invented result percentage: {m}" for m in fabricated_result_claim(reply))
     issues.extend(
         f"service/material not in the offering (invented): {m}"
         for m in invented_service_offers(reply))

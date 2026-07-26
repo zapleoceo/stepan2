@@ -257,3 +257,52 @@ def test_a_lead_who_brought_money_up_still_gets_the_number() -> None:
     assert not uninvited_price(nudge, LeadDossier(budget_signal="tanya harga"))
     assert not uninvited_price(nudge, LeadDossier(payment_preference="cicilan"))
     assert not uninvited_price(nudge, LeadDossier(readiness="ready"))
+
+
+# ── invented result percentages (thread 4799) ────────────────────────────────
+
+def test_a_result_stated_as_a_percentage_is_blocked() -> None:
+    """The knowledge base bans these outright, and the model produced one anyway — twice in
+    one thread. First as an outside brand: "contoh nyata Design Pickle, brand asal Amerika,
+    berhasil dapat 50% pelanggan baru". Eight hours later, re-attributed to "alumni SMM
+    Intensive" — an invented outside case turned into an invented graduate of ours.
+
+    The figure came from the prohibition itself: "50%" appears exactly once in the whole
+    knowledge base, inside the sentence forbidding it. Nothing downstream caught it — no
+    price, no link, no rupiah figure, so every money check passed."""
+    assert money_issues(
+        "Ada contoh nyata Design Pickle, brand asal Amerika, berhasil dapat 50% pelanggan "
+        "baru cuma lewat retargeting Meta Ads", _KB) != []
+    assert money_issues("alumni kami dapat 50% pelanggan baru", _KB) != []
+    assert money_issues("omzetnya naik 30% dalam sebulan", _KB) != []
+    assert money_issues("engagement naik 200% lho Kak", _KB) != []
+
+
+def test_our_real_discounts_are_percentages_too_and_must_pass() -> None:
+    """Ours are carded and stated in percent — the check must not eat them."""
+    assert money_issues("Ada diskon referral 10% buat Kakak dan temannya", _KB) == []
+    assert money_issues("Buat pelajar ada potongan 10% ya Kak", _KB) == []
+    # A discount in one sentence does not excuse a result claim in the next.
+    assert money_issues(
+        "Ada diskon 10% buat pelajar. Alumni kami dapat 50% pelanggan baru.", _KB) != []
+
+
+def test_a_price_the_ad_itself_promised_may_be_given_once_in_a_nudge() -> None:
+    """Two measurements pulled apart here and this is where they meet. Meta's prefill asks
+    about cost, and leading the FIRST message with a figure halves the reply rate (16.1% vs
+    36.3%, 819 threads) — so the opener carries none. But silencing the nudge too means the
+    lead never gets a number at all: only 24% of 453 price-ad threads ever saw one. Thread
+    5293 lived it — an ad that asks about cost, four of our messages, no figure in two days.
+
+    So the ad buys a price once: not in the opener, and not again after we have answered."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import uninvited_price
+
+    nudge = "Oh iya Kak, biayanya Rp 1.882.955, bisa DP Rp 500.000 dulu."
+    fresh = LeadDossier()  # nothing quoted yet — the ad's question is still hanging
+    assert not uninvited_price(nudge, fresh, ad_promised_price=True)
+    # …but only once. Once we have answered, the ad has been honoured.
+    answered = LeadDossier(prices_quoted=["Rp 1.882.955"])
+    assert uninvited_price(nudge, answered, ad_promised_price=True)
+    # And a lead who never came from a price ad is unaffected.
+    assert uninvited_price(nudge, fresh, ad_promised_price=False)

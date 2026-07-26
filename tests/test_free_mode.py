@@ -251,3 +251,23 @@ def test_the_question_is_second_only_to_something_we_owe_them() -> None:
     them = order.index("3. Them.")
     assert owed < asked < them, "an apology outranks the question; the person is part of it"
     assert "don't change the subject" in contract
+
+
+def test_an_agreement_is_an_instruction_not_an_invitation_to_present() -> None:
+    """Three of the twenty most recent threads (2026-07-26) died at the moment of agreement,
+    each one the strongest signal in its thread:
+
+      5374  opened with "Mau daftarin" (I want to sign up) → asked "for whom?", then a demo
+            event invitation five hours later. Never opened another message.
+      4799  answered "Boleh" to "shall I schedule your visit?" → received the schedule,
+            duration, price and address. The visit was never booked.
+      2324  answered "boleh min" to "shall I show you an example project?" → received
+            "let me check with the team so the information is accurate".
+
+    A yes is an instruction. Answering it with more programme facts reads as not listening."""
+    contract = free_contract("id")
+    assert "WHEN THEY SAY YES, DO THE THING" in contract
+    said_yes = contract.index("WHEN THEY SAY YES")
+    first = contract.index("WHAT COMES FIRST IN THE MESSAGE")
+    assert said_yes < first, "it outranks the ordering rules — a yes ends the deliberation"
+    assert "one detail and nothing else" in contract

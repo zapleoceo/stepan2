@@ -278,6 +278,44 @@ def booster_wrong_duration(reply: str) -> list[str]:
         if m else []
 
 
+# A RESULT stated as a percentage — "50% more customers", "sales up 30%". The knowledge base
+# bans these outright ("ЧУЖИЕ КЕЙСЫ И ПРОЦЕНТЫ — ЗАПРЕЩЕНЫ … процент результата"), and the
+# model produced one anyway, twice in one thread (4799): first as an outside brand, "contoh
+# nyata Design Pickle, brand asal Amerika, berhasil dapat 50% pelanggan baru", then eight
+# hours later re-attributed to "alumni SMM Intensive" — an invented outside case turned into
+# an invented graduate of ours.
+#
+# The figure came from the prohibition itself: "50%" appears exactly once in the whole
+# knowledge base, inside the sentence forbidding it. A rule that names its own counter-example
+# hands the model a ready phrase, and nothing downstream caught it — there is no price, no
+# link and no rupiah figure, so every existing money check passed it.
+#
+# Discounts are excluded: ours are real, carded and stated in percent.
+_DISCOUNT_CONTEXT_RE = re.compile(
+    r"\b(diskon|discount|potongan|hemat|promo|referral|reveral|off)\w*", re.IGNORECASE)
+_RESULT_PERCENT_RE = re.compile(
+    r"\b\d{1,3}\s*%[^.!?\n]{0,40}?\b(pelanggan|klien|customer|penjualan|sales|omzet|revenue|"
+    r"pendapatan|income|follower|engagement|konversi|conversion|leads?|pertumbuhan|growth)\w*"
+    r"|\b(pelanggan|klien|customer|penjualan|sales|omzet|revenue|pendapatan|follower|"
+    r"engagement|konversi|conversion|leads?)\w*[^.!?\n]{0,40}?\b(?:naik|bertambah|meningkat|"
+    r"tumbuh|up)\w*\s*\d{1,3}\s*%",
+    re.IGNORECASE)
+
+
+def fabricated_result_claim(reply: str) -> list[str]:
+    """An outcome quoted as a percentage — always invented, never in the knowledge base.
+
+    Checked per sentence so a discount elsewhere in the message doesn't excuse a result claim
+    (and vice versa: "diskon 10%" in its own clause is never flagged)."""
+    out: list[str] = []
+    for part in re.split(r"[.!?\n]", reply or ""):
+        if _DISCOUNT_CONTEXT_RE.search(part):
+            continue
+        if m := _RESULT_PERCENT_RE.search(part):
+            out.append(m.group(0).strip())
+    return out
+
+
 _EARN_WORD_RE = re.compile(
     r"\b(dapat|dapet|penghasilan|gaji|gajih|hasilkan|menghasilkan|income|earning|raup|cuan|"
     r"freelance|proyek|fee|omzet|profit|untung)\w*", re.IGNORECASE)

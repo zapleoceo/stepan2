@@ -34,6 +34,7 @@ from .repository import (
     ThreadRepo,
 )
 from .routing import SALES, SMART
+from .signals import AD_TEMPLATE_RE
 
 if TYPE_CHECKING:
     from app.modules.knowledge.service import KnowledgeService
@@ -277,7 +278,13 @@ class FollowupService:
             capability=capability, branch_id=self.branch_id)
         if decision is None:
             return False
-        if uninvited_price(decision.reply, stored):
+        # Every one of the three ad prefills asks about cost. The opener may not answer it (a
+        # figure there halves the reply rate) — so the FIRST nudge is where that promise gets
+        # kept, and only while it is still outstanding. See uninvited_price.
+        first_in = next((m for m in ctx.dialog if m.direction == "in"), None)
+        ad_promised_price = bool(
+            first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
+        if uninvited_price(decision.reply, stored, ad_promised_price=ad_promised_price):
             # A nudge is never a reply to a fresh question — a price in one is always
             # volunteered (thread 4849). One rewrite, same as reply.py's money gate; if it
             # still quotes a figure, drop the nudge rather than send it.
@@ -287,7 +294,8 @@ class FollowupService:
             fixed, meta = await generate(
                 engine, ctx, regen_messages, thread_id, workflow="followup",
                 capability=SMART, branch_id=self.branch_id)
-            if fixed is None or uninvited_price(fixed.reply, stored):
+            if fixed is None or uninvited_price(
+                    fixed.reply, stored, ad_promised_price=ad_promised_price):
                 logger.warning("followup pitch gate unfixable branch=%d thread=%d — dropped",
                                 self.branch_id, thread_id)
                 await self._burn_dry_step(thread_id, now)
