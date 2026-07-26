@@ -39,10 +39,18 @@ def kb_all_html(docs: list) -> str:
             continue
         if multi:
             out.append(f'<div class="ch"><span class="ch-n">{_h.escape(br)}</span></div>')
-        out.extend(
-            kb_editor_html(d[0], str(d[1]), str(d[2] or d[1]), str(d[3] or ""), d[6])
-            for d in sorted(rows, key=lambda r: (r[5] or 0, str(r[1])))
-        )
+        for i, d in enumerate(sorted(rows, key=lambda r: (r[5] or 0, str(r[1])))):
+            title, slug, body = str(d[2] or d[1]), str(d[1]), str(d[3] or "")
+            chars = f"{len(body):,}".replace(",", " ")
+            editor = kb_editor_html(d[0], slug, title, body, d[6])
+            # First doc open, rest collapsed: four editors unfolded at once is a wall of text
+            # nobody reads. The summary carries the size so you can see what is in there
+            # without opening it.
+            out.append(
+                f'<details class="kb-doc"{" open" if i == 0 else ""}>'
+                f'<summary><span class="kb-doc-t">{_h.escape(title)}</span>'
+                f'<span class="kb-doc-m">{_h.escape(slug)} · {chars}</span>'
+                f'</summary>{editor}</details>')
     return "".join(out)
 
 
