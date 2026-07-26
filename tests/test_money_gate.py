@@ -167,6 +167,21 @@ def test_a_price_is_fine_once_the_lead_is_ready() -> None:
     assert not uninvited_price("Investasinya Rp 1.882.955 kak.", ready)
 
 
+def test_a_price_is_fine_for_someone_who_raised_money_themselves() -> None:
+    """Silence about money is what makes a figure uninvited, not readiness. A lead who asked
+    "berapa", got the answer and went quiet is exactly the person a payment plan is for —
+    gating on readiness alone muted the number for them."""
+    from app.modules.conversation.dossier import LeadDossier
+    from app.modules.conversation.money_gate import uninvited_price
+
+    nudge = "Cicilannya bisa dari Rp 1.670.000 per bulan lho kak."
+    assert not uninvited_price(nudge, LeadDossier(prices_quoted=["Rp 13.000.000"]))
+    assert not uninvited_price(nudge, LeadDossier(budget_signal="mahal"))
+    assert not uninvited_price(nudge, LeadDossier(payment_preference="cicilan"))
+    # …but a lead who never brought money up still gets no figure volunteered at them.
+    assert uninvited_price(nudge, LeadDossier(pains=["takut telat"]))
+
+
 # ── promises to send things (text-only channel) ───────────────────────────────
 
 def test_offering_to_send_a_video_is_blocked() -> None:

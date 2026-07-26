@@ -54,10 +54,20 @@ MONEY_CORRECTION = (
 
 
 def uninvited_price(reply: str, dossier: object) -> bool:
-    """A price figure in a NUDGE with the lead not already `ready` — always volunteered,
-    since a follow-up is never an answer to a fresh question (thread 4849). Used only by
-    followup.py; live replies leave price timing to the model."""
-    return quotes_price(reply) and dossier.readiness != "ready"
+    """A price figure in a NUDGE to someone money was never discussed with — volunteered, since
+    a follow-up is never an answer to a fresh question (thread 4849). Used only by followup.py;
+    live replies leave price timing to the model.
+
+    Silence about money is what makes a figure uninvited, not the lead's readiness. Gating on
+    `readiness != "ready"` alone muted the number for every lead who had asked "berapa", got
+    the answer, and then went quiet — the exact person for whom a payment plan is the most
+    useful thing left to say. If they raised money themselves (a quoted price, a budget signal,
+    a stated payment preference), repeating a figure is a reminder, not a new pitch."""
+    if not quotes_price(reply):
+        return False
+    if dossier.readiness == "ready":
+        return False
+    return not (dossier.prices_quoted or dossier.budget_signal or dossier.payment_preference)
 
 
 def money_issues(reply: str, context: str) -> list[str]:

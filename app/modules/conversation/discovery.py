@@ -135,7 +135,8 @@ _REFUSALS = frozenset({"none", "soft", "vague", "blunt"})
 
 def _one_of(value: object, allowed: frozenset[str]) -> str:
     """An enum the extractor may only fill with a known value — a stray label would silently
-    change routing (readiness/refusal both feed pick_capability), so drop what we don't know."""
+    change behaviour downstream (readiness gates the follow-up price rule, refusal picks the
+    nudge's framing), so drop what we don't recognise."""
     text = str(value or "").strip().lower()
     return text if text in allowed else ""
 

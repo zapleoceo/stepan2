@@ -13,13 +13,19 @@ from app.adapters.db.models import Message
 # How the lead first reached us — shapes the opener. An ad-click lead is warm and already
 # picked an offer, so re-asking "what brings you here" wastes the intent; a story-reply is
 # a lighter, more casual entry. Organic/unknown gets no hint (no assumptions).
+#
+# These blocks ride EVERY turn of the thread, not just the first, so each one must describe the
+# ENTRY — a past event — and never the present state. The ad hint used to end "…they did not
+# ask you anything, so there is nothing to answer yet": true on turn one, false and actively
+# harmful on turn ten, where it contradicted the contract's first hard rule (an unanswered
+# question outranks everything) on the model's own authority. 1010 ad threads in 30 days went
+# past the prefill into real conversation carrying that sentence on every single turn.
 _SOURCE_HINTS = {
     "ad_clicktomsg": (
-        "ENTRY: this chat opened when the lead TAPPED one of our paid ads. Their first message "
-        "is the ad's own prefilled text — they did not type it and did not ask you anything, "
-        "so there is nothing to answer yet. It tells you the topic they tapped on and NOTHING "
-        "else: no goal, no age, no background, no budget. The product they tapped is the one "
-        "thing they did show you."
+        "ENTRY: this chat opened when the lead TAPPED one of our paid ads. The FIRST message in "
+        "the transcript is the ad's own prefilled text, not their words — it tells you which "
+        "product drew them and nothing else about them. Everything they have written SINCE is "
+        "their own and is answered like any other message."
     ),
     "story": (
         "ENTRY: the lead replied to one of our Instagram stories — a light, casual opening."
@@ -44,8 +50,8 @@ AD_TYPED_ENTRY_HINT = (
 
 ORGANIC_ENTRY_HINT = (
     "ENTRY: the lead reached out to the DM on their own — no ad, no story reply, no product "
-    "signal. You know NOTHING about them or what they came for, and no product direction may "
-    "be assumed: their own words are the only source you have."
+    "signal came with them, so no product direction may be assumed from the entry. Their own "
+    "words are the only source you have about what they came for."
 )
 
 

@@ -70,3 +70,21 @@ async def test_a_thread_that_never_came_from_an_ad_flags_nothing(db_session) -> 
     assert stored[0].is_ad_referral is False
 
 
+
+
+def test_the_entry_hints_describe_the_entry_not_the_present_turn() -> None:
+    """These blocks ride every turn, so an assertion about the CURRENT turn goes stale and then
+    fights the contract. The ad hint used to end "…they did not ask you anything, so there is
+    nothing to answer yet" — true on turn one, false on turn ten, and directly contrary to the
+    first hard rule (an unanswered question outranks everything). 1010 ad threads in 30 days
+    ran past the prefill into real conversation carrying that sentence every turn."""
+    from app.modules.conversation.prompt import ORGANIC_ENTRY_HINT, source_hint
+
+    ad = source_hint("ad_clicktomsg") or ""
+    assert "nothing to answer" not in ad
+    assert "did not ask you anything" not in ad
+    # It must still say the opening line is the prefill — that part is permanently true.
+    assert "prefilled" in ad
+    assert "SINCE is their own" in ad
+
+    assert "know NOTHING about them" not in ORGANIC_ENTRY_HINT
