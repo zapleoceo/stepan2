@@ -1657,14 +1657,16 @@ def test_nav_order_matches_requested_grouping() -> None:
 
 
 def test_demo_persona_carries_the_current_sales_methodology() -> None:
-    """The site demo persona must track the selling craft the branch pipeline learned:
-    gain-pull before the pitch, soft-no easing, budget -> risk-free first step, multi-part
-    answers, no near-verbatim repeats. It is a separate hardcoded prompt, so without this
-    pin it silently falls behind every methodology upgrade."""
+    """The site demo persona must carry the selling craft the branch pipeline learned that
+    TRANSFERS to a web page: budget -> risk-free first step, full multi-part answers, no
+    near-verbatim repeats, the privacy boundary. It is a separate hardcoded prompt, so
+    without this pin it silently falls behind every methodology upgrade.
+
+    Deliberately NOT pinned here: the DM-shaped pacing rules (gain-pull before pitching,
+    easing off on a soft no). Those assume a follow-up can recover the lead later; this page
+    has none, so easing off just loses them. See tests/test_demo_prompt_closing.py."""
     from app.api._routes_demo import _SYSTEM
 
-    assert "pull the GAIN" in _SYSTEM
-    assert "SOFT no" in _SYSTEM and "ease " in _SYSTEM
     assert "free up to 10 leads a day" in _SYSTEM         # budget objection -> free tier
     assert "EVERY part answered" in _SYSTEM               # multi-part questions
     assert "near-verbatim" in _SYSTEM                     # anti-repeat
