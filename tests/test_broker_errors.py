@@ -417,7 +417,7 @@ async def test_poll_gives_up_after_too_many_transient_errors(monkeypatch) -> Non
     assert calls[-1]["ok"] is False
 
 
-# ── transcribe (voice STT — single POST /v1/transcribe, no job poll) ──────────
+# ── transcribe (voice STT — submit a job, then the shared poller) ────────────
 
 async def test_transcribe_success_returns_text_and_logs_ok(monkeypatch) -> None:
     calls = _capture_log(monkeypatch)
@@ -443,3 +443,45 @@ async def test_transcribe_5xx_raises_and_logs_failure(monkeypatch) -> None:
     with pytest.raises(httpx.HTTPStatusError):
         await _llm().transcribe(b"x", mime="audio/mp4")
     assert calls[-1]["ok"] is False and calls[-1]["cap"] == "audio"
+
+
+async def test_transcribe_submits_a_job_and_polls_it(monkeypatch) -> None:
+    """The broker's transcribe endpoint went async on 2026-07-26: POST /v1/transcribe/jobs
+    returns 202 with a job id and a poll url, and the transcript arrives from the same poller
+    chat has used since the gateway went async."""
+    calls = _capture_log(monkeypatch)
+    client = _JobClient(
+        [_FakeResp({"job_id": 123, "poll_url": "/v1/jobs/123", "poll_after_s": 0},
+                   status=202)],
+        [_FakeResp({"status": "pending"}),
+         _FakeResp({"status": "done", "text": " halo dunia ",
+                    "result_meta": {"model": "whisper", "provider": "p", "cost_usd": 0.0,
+                                    "request_id": "r"}})])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+
+    assert await _llm().transcribe(b"audiobytes", mime="audio/mp4") == "halo dunia"
+    assert calls[-1]["ok"] is True and calls[-1]["cap"] == "audio"
+    # cost/model live under result_meta on a finished job, not at the top level
+    assert calls[-1]["meta"]["model"] == "whisper"
+
+
+async def test_transcribe_falls_back_when_the_job_endpoint_is_absent(monkeypatch) -> None:
+    """Either side may deploy first — a 404/405 on the job endpoint retries the old
+    synchronous POST, so voice notes never go dark during the window."""
+    _capture_log(monkeypatch)
+    client = _JobClient([
+        _FakeResp({}, status=404),
+        _FakeResp({"text": "halo", "request_id": "r"}),
+    ])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    assert await _llm().transcribe(b"x", mime="audio/mp4") == "halo"
+
+
+async def test_a_transcribe_job_that_errors_raises(monkeypatch) -> None:
+    _capture_log(monkeypatch)
+    client = _JobClient(
+        [_FakeResp({"job_id": 9, "poll_after_s": 0}, status=202)],
+        [_FakeResp({"status": "error", "error": "no transcription key available"})])
+    monkeypatch.setattr(broker_mod.httpx, "AsyncClient", lambda **k: client)
+    with pytest.raises(RuntimeError, match="no transcription key"):
+        await _llm().transcribe(b"x", mime="audio/mp4")

@@ -9,7 +9,9 @@ queue — POST /v1/jobs?capability=X returns a job id, then we poll GET /v1/jobs
 done. A slow provider no longer holds a synchronous connection open past Cloudflare's /
 nginx's proxy timeout (the 504 class of failure). The public API is unchanged —
 chat()/chat_deep() still return (text, meta); callers don't know it polls underneath.
-embed()/transcribe() stay synchronous (fast, and the broker has no job endpoint for them)."""
+transcribe() went the same way on 2026-07-26 (POST /v1/transcribe/jobs, then the same
+poller), with the old synchronous endpoint kept as a fallback so the two sides can deploy in
+either order. embed() stays synchronous — it is fast and has no job endpoint."""
 from __future__ import annotations
 
 import asyncio
@@ -62,13 +64,13 @@ _VISION_PROMPT = (
 # Individual submit/poll HTTP calls are quick — a short timeout. The OVERALL wait for a job
 # is bounded by the per-capability poll budget below, not by one request's read timeout.
 _JOB_HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
-# Sync-only calls (embed/transcribe) still use a plain read timeout.
+# embed() is the last synchronous call — a plain read timeout.
 _SYNC_TIMEOUT = httpx.Timeout(
     connect=5.0, read=settings().llm_read_timeout_s, write=10.0, pool=5.0)
 # vision runs in the background media backfill (not a live reply), and free vision providers
 # are spiky — give it the slow budget so a slow caption isn't cut off at the fast ceiling.
 # chat:sales is the Sonnet-first free-mode chain — same long-JSON profile as chat:smart.
-_SLOW_CAPS = frozenset({"chat:smart", "chat:sales", "vision"})
+_SLOW_CAPS = frozenset({"chat:smart", "chat:sales", "vision", "audio"})
 # A transient poll failure (502/timeout) must not discard a job that's still running —
 # tolerate this many consecutive poll errors before giving up.
 _POLL_MAX_ERRORS = 5
@@ -220,20 +222,22 @@ class BrokerLLM:
         await _log_call(capability, workflow or "chat", thread_id, branch_id, meta, ok=True)
         return reply_text, meta
 
-    async def _poll_job(
+    async def _poll_job(  # noqa: PLR0913
         self, c: httpx.AsyncClient, job_id: Any, capability: str,
-        deadline: float, poll_after_s: float,
+        deadline: float, poll_after_s: float, poll_url: str | None = None,
     ) -> dict[str, Any]:
-        """Poll GET /v1/jobs/{id} until done; raise on error/timeout. Polls IMMEDIATELY
-        first (a fast job may already be done — no needless initial wait), then sleeps
-        poll_after_s between subsequent polls."""
+        """Poll the job until done; raise on error/timeout. Polls IMMEDIATELY first (a fast
+        job may already be done — no needless initial wait), then sleeps poll_after_s between
+        subsequent polls.
+
+        `poll_url` is the path the submit response handed back; when absent we build the
+        conventional /v1/jobs/{id}. Following the server's own URL means a future move of the
+        job store needs no client release."""
+        url = f"{self._url}{poll_url}" if poll_url else f"{self._url}/v1/jobs/{job_id}"
         poll_errors = 0
         while True:
             try:
-                pr = await c.get(
-                    f"{self._url}/v1/jobs/{job_id}",
-                    headers={"X-Project-Key": self._key},
-                )
+                pr = await c.get(url, headers={"X-Project-Key": self._key})
                 pr.raise_for_status()
                 d = pr.json()
             except (httpx.HTTPError, KeyError, ValueError) as exc:
@@ -266,25 +270,48 @@ class BrokerLLM:
         self, audio: bytes, *, mime: str = "audio/mp4",
         thread_id: int | None = None, branch_id: int | None = None,
     ) -> str:
-        """Speech-to-text for a voice message via the broker's /v1/transcribe. Returns the
-        transcript text ('' if the broker returns none). Raises on transport/scope errors
-        (the caller keeps the placeholder + retries) — needs the project key's llm:audio scope."""
+        """Speech-to-text for a voice message. Returns the transcript text ('' if the broker
+        returns none). Raises on transport/scope errors (the caller keeps the placeholder +
+        retries) — needs the project key's llm:audio scope.
+
+        Submits to the broker's job endpoint and polls, the same shape chat has used since the
+        gateway went async: POST /v1/transcribe/jobs → 202 {job_id, poll_url, poll_after_s},
+        then GET the poll_url until status=done. The old synchronous POST /v1/transcribe is
+        still tried if the job endpoint is absent (404/405), so the two sides can deploy in
+        either order without a window where voice notes go dark."""
         self.calls += 1
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=_SYNC_TIMEOUT) as c:
+            async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
+                files = {"file": ("voice.mp4", audio, mime)}
                 r = await c.post(
-                    f"{self._url}/v1/transcribe", params={"workflow": "voice"},
-                    headers={"X-Project-Key": self._key},
-                    files={"file": ("voice.mp4", audio, mime)},
+                    f"{self._url}/v1/transcribe/jobs", params={"workflow": "voice"},
+                    headers={"X-Project-Key": self._key}, files=files,
                 )
-            r.raise_for_status()
-            d = r.json()
+                if r.status_code in (404, 405):
+                    _log.info("broker has no /v1/transcribe/jobs — using the sync endpoint")
+                    r = await c.post(
+                        f"{self._url}/v1/transcribe", params={"workflow": "voice"},
+                        headers={"X-Project-Key": self._key}, files=files,
+                    )
+                r.raise_for_status()
+                d = r.json()
+                # A job id means the transcript comes later; without one the body IS the
+                # result — which covers the sync endpoint and a gateway that answers a short
+                # clip inline. Never poll /v1/jobs/None.
+                if (job_id := d.get("job_id")) is not None:
+                    d = await self._poll_job(
+                        c, job_id, "audio", start + _poll_budget_s("audio"),
+                        d.get("poll_after_s") or 2, poll_url=d.get("poll_url"))
+            # A finished transcription job reports its cost/model under result_meta; the sync
+            # endpoint put them at the top level. Read either.
+            rm = d.get("result_meta") if isinstance(d.get("result_meta"), dict) else {}
             meta = {
-                "model": d.get("model"), "provider": d.get("provider"),
-                "cost_usd": d.get("cost_usd") or 0,
+                "model": d.get("model") or rm.get("model"),
+                "provider": d.get("provider") or rm.get("provider"),
+                "cost_usd": d.get("cost_usd") or rm.get("cost_usd") or 0,
                 "elapsed_ms": int((time.perf_counter() - start) * 1000),
-                "request_id": d.get("request_id") or d.get("id"),
+                "request_id": d.get("request_id") or d.get("id") or rm.get("request_id"),
             }
         except Exception as exc:
             await _log_call("audio", "transcribe", thread_id, branch_id,
@@ -292,7 +319,7 @@ class BrokerLLM:
                             ok=False, error=_err_text(exc))
             raise
         await _log_call("audio", "transcribe", thread_id, branch_id, meta, ok=True)
-        return (d.get("text") or d.get("transcript") or "").strip()
+        return (d.get("text") or d.get("transcript") or rm.get("text") or "").strip()
 
     async def describe_image(
         self, image: bytes, *, mime: str = "image/jpeg", prompt: str | None = None,
