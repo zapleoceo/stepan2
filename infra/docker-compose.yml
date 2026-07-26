@@ -46,6 +46,9 @@ services:
       STEPAN2_PUBLIC_URL: ${PUBLIC_URL:-}
       STEPAN2_MCP_SECRET: ${MCP_SECRET:-}
       STEPAN2_MCP_READ_SECRET: ${MCP_READ_SECRET:-}
+      # Meta pixel on the public landing. API only — the worker renders no pages. Empty =
+      # no tracking injected, so the page stays clean when no ad is running against it.
+      STEPAN2_LANDING_PIXEL_ID: ${LANDING_PIXEL_ID:-}
     ports:
       - "127.0.0.1:8020:8000"
     # Give uvicorn its full --timeout-graceful-shutdown window to drain in-flight
