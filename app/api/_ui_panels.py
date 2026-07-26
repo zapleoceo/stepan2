@@ -1217,14 +1217,35 @@ def settings_panel_html(settings: list) -> str:
 def _fb_ad_url(ad_id: object, business_id: str = "", account_id: str = "") -> str:
     """Link to the ad in Meta's public Ad Library, which resolves ANY ad by id.
 
-    An Ads Manager deep link only works when the ad lives in the operator's configured ad
-    account — but verified live, the ad_id Instagram gives (ad_context_data.ad_id) is almost
-    never in that account: these lead-gen ads run under a different (agency) account, all
-    published from the same FB page. Ads Manager then shows 'not found'. The Ad Library keys
-    off the ad id alone, so it always opens the real, live ad (creative, copy, status,
-    advertiser) — view-only, no spend/results, but it reliably lands on the right ad.
-    business_id/account_id are kept for signature stability; the Ad Library needs neither."""
+    Used for ads we could NOT bridge to Marketing API. Their only id is the one instagrapi
+    reports (ad_context_data.ad_id), which lives in the Ad Library id space — Graph answers
+    code 100 for it and an Ads Manager deep link shows 'not found'. The Ad Library keys off
+    the id alone, so it still opens the real, live ad (creative, copy, status, advertiser) —
+    view-only, no spend or results. business_id/account_id are unused here, kept so both
+    URL builders share one signature shape."""
     return _h.escape(f"https://www.facebook.com/ads/library/?id={ad_id}")
+
+
+def _ads_manager_url(
+    ad_id: object, account_id: str = "", business_id: str = "",
+    campaign_id: object = None, adset_id: object = None,
+) -> str:
+    """Deep link straight into the ad inside Ads Manager — editable, with spend and results.
+
+    Only valid for ads resolved through the image_hash bridge (ad_creative_map.ad_id): that
+    IS a Marketing API id and it lives in the configured account, so the account-scoped view
+    finds it. Ads Manager filters its ad list by the selected_* ids; passing campaign and
+    adset alongside the ad lands on the ad's own row instead of the account's full list.
+    Without an account_id there is nothing to scope to — the caller falls back to the Ad
+    Library."""
+    qs = f"act={account_id}&selected_ad_ids={ad_id}"
+    if business_id:
+        qs += f"&business_id={business_id}"
+    if campaign_id:
+        qs += f"&selected_campaign_ids={campaign_id}"
+    if adset_id:
+        qs += f"&selected_adset_ids={adset_id}"
+    return _h.escape(f"https://adsmanager.facebook.com/adsmanager/manage/ads?{qs}")
 
 
 def admap_cell_inner(
@@ -1255,11 +1276,21 @@ def admap_cell_inner(
     return sel_html + hint
 
 
-def _ad_menu_cell(ad_id: object, ad_media_id: object, fb_url: str) -> str:
-    """Ad-id cell: a <details> menu (open this ad's chats | open in FB) + an IG-post link."""
+def _ad_menu_cell(
+    ad_id: object, ad_media_id: object, fb_url: str, manager_url: str = "",
+) -> str:
+    """Ad-id cell: a <details> menu (this ad's chats | Ads Manager | Ad Library) + IG post.
+
+    manager_url is present only for bridged ads; the Ad Library entry stays either way, since
+    it is the only view that works when the ad was published from another ad account."""
     aid = _h.escape(str(ad_id))
-    items = (
-        f'<a href="/ui/inbox?ad_id={aid}">💬 {_h.escape(t("rep.ad_open_chats"))}</a>'
+    items = f'<a href="/ui/inbox?ad_id={aid}">💬 {_h.escape(t("rep.ad_open_chats"))}</a>'
+    if manager_url:
+        items += (
+            f'<a href="{manager_url}" target="_blank" rel="noreferrer">'
+            f'📊 {_h.escape(t("rep.ad_open_manager"))}</a>'
+        )
+    items += (
         f'<a href="{fb_url}" target="_blank" rel="noreferrer">'
         f'↗ {_h.escape(t("rep.ad_open_fb"))}</a>'
     )
@@ -1471,8 +1502,15 @@ def _ad_tree_html(
                     f'<td class="rep-n">{_money(cpw)}</td>'
                 )
             fb = _fb_ad_url(mapped["ad_id"] if with_spend else ad_id, business_id, account_id)
+            # Ads Manager can only find a bridged ad (a real Marketing API id in OUR account);
+            # an unbridged row keeps the Ad Library link alone.
+            mgr = ""
+            if with_spend and account_id:
+                mgr = _ads_manager_url(
+                    mapped["ad_id"], account_id, business_id,
+                    mapped.get("campaign_id"), mapped.get("adset_id"))
             out += (
-                f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb)}</td>'
+                f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb, mgr)}</td>'
                 f'{map_cell}{spend_cells}'
                 f'{_count_cell(aid, "", total, "")}'
                 f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'

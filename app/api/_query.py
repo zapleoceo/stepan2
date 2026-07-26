@@ -134,10 +134,14 @@ async def fetch_media_to_ad(
 ) -> dict[str, dict]:
     """ad_media_id → {ad_id, campaign_name, …}. The join key is the MEDIA pk, never the
     ad_id we store from instagrapi — that one lives in a different id space and resolves to
-    code 100 against Graph (see app/modules/ads/bridge.py)."""
+    code 100 against Graph (see app/modules/ads/bridge.py).
+
+    campaign_id/adset_id ride along so the reports table can deep-link into Ads Manager: its
+    ad view is selector-scoped, and passing all three lands on the ad's own row."""
     q = select(
         AdCreativeMap.media_pk, AdCreativeMap.ad_id, AdCreativeMap.ad_name,
         AdCreativeMap.campaign_name, AdCreativeMap.objective,
+        AdCreativeMap.campaign_id, AdCreativeMap.adset_id,
     )
     if branch_ids:
         q = q.where(AdCreativeMap.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
@@ -145,6 +149,7 @@ async def fetch_media_to_ad(
         row.media_pk: {
             "ad_id": row.ad_id, "ad_name": row.ad_name,
             "campaign_name": row.campaign_name, "objective": row.objective,
+            "campaign_id": row.campaign_id, "adset_id": row.adset_id,
         }
         for row in (await session.execute(q)).all()
     }
