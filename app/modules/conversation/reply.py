@@ -32,8 +32,8 @@ from .money_gate import (
 from .opener import JUNK_OPENER, Entry
 from .opener import classify as classify_entry
 from .prompt import (
-    AD_TYPED_ENTRY_HINT,
     ORGANIC_ENTRY_HINT,
+    ad_typed_entry_hint,
     lead_name_hint,
     source_hint,
 )
@@ -90,6 +90,9 @@ class ReplyService(ReplyDelivery):
 
         outs = [(m.text or "").strip() for m in ctx.dialog if m.direction == "out"]
         is_first_reply = not outs
+        # The tapped ad's product — needed by the opener note on the first turn and by the
+        # entry hint's anchor on every turn after it, so one lookup serves both.
+        ad_product = await self._product_title(ctx.thread.product_slug)
         first_note: str | None = None
         if is_first_reply and script_lang is None:
             # Only JUNK still ships a template: an emoji or a garbled string carries nothing
@@ -112,7 +115,7 @@ class ReplyService(ReplyDelivery):
             if fc.entry is Entry.AD_SILENT or (fc.entry is Entry.STORY and not fc.typed_text):
                 # Nothing of the lead's own to answer — the note tells the model that, names
                 # the tapped product, and holds back the price until they ask.
-                first_note = ad_tap_note(await self._product_title(ctx.thread.product_slug))
+                first_note = ad_tap_note(ad_product)
         if ctx.over_budget:
             # prepare() was told to let the zero-cost template branch through; everything
             # from here on calls the broker, so the original budget gate applies now.
@@ -128,7 +131,7 @@ class ReplyService(ReplyDelivery):
         messages = build_messages_free(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
-            source_block=_entry_hint(ctx),
+            source_block=_entry_hint(ctx, ad_product),
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
             now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
@@ -237,8 +240,8 @@ class ReplyService(ReplyDelivery):
         return (row[0] or "").strip() or None if row else None
 
 
-def _entry_hint(ctx) -> str | None:  # noqa: ANN001
-    """The one entry-context hint this thread earns.
+def _entry_hint(ctx, product_title: str | None = None) -> str | None:  # noqa: ANN001
+    """The one entry-context hint this thread earns, with the tapped ad's product named.
 
     The ad-entry hint asserts "they did not type it and did not ask you anything" — true
     ONLY when the opening message really was the untouched button prefill. IG's composer is
@@ -251,8 +254,8 @@ def _entry_hint(ctx) -> str | None:  # noqa: ANN001
         first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
     src = ctx.thread.lead_source
     if src == "ad_clicktomsg" and not pure_prefill_entry:
-        return AD_TYPED_ENTRY_HINT
-    hint = source_hint(src)
+        return ad_typed_entry_hint(product_title)
+    hint = source_hint(src, product_title)
     if hint is None and not src and not ctx.thread.ad_id:
         return ORGANIC_ENTRY_HINT
     return hint

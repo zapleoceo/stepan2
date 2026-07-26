@@ -48,6 +48,13 @@ AD_TYPED_ENTRY_HINT = (
     "want that skill for, why now) instead of a generic 'what are you looking for'."
 )
 
+
+def ad_typed_entry_hint(product_title: str | None) -> str:
+    """AD_TYPED_ENTRY_HINT with the tapped product named — same anchor, typed-entry wording."""
+    if not product_title:
+        return AD_TYPED_ENTRY_HINT
+    return AD_TYPED_ENTRY_HINT + _AD_PRODUCT_ANCHOR.format(product=product_title)
+
 ORGANIC_ENTRY_HINT = (
     "ENTRY: the lead reached out to the DM on their own — no ad, no story reply, no product "
     "signal came with them, so no product direction may be assumed from the entry. Their own "
@@ -55,9 +62,26 @@ ORGANIC_ENTRY_HINT = (
 )
 
 
-def source_hint(lead_source: str | None) -> str | None:
-    """One-line entry-point instruction for the prompt, or None for organic/unknown leads."""
-    return _SOURCE_HINTS.get(lead_source or "")
+# The ad's product, restated on every turn. Both ad hints say "the ad tells you which product
+# drew them" without ever naming it: the title is passed to ad_tap_note on the FIRST turn only,
+# so from turn two the model has no idea which campaign the lead came from. Thread 5361 is what
+# that costs — a fresh graduate tapped a Vibe Coding ad, asked six turns later what web work
+# involves, and was offered Python Back-End (8 months) and Data Analyst (9 months) while the
+# 4-month course he had actually clicked went unmentioned.
+_AD_PRODUCT_ANCHOR = (
+    " The ad they tapped was for {product} — that is the one thing they chose, so it stays the "
+    "default course for this conversation unless they say otherwise; if you steer them "
+    "elsewhere, do it because THEY pointed there, not by forgetting where they came in."
+)
+
+
+def source_hint(lead_source: str | None, product_title: str | None = None) -> str | None:
+    """One-line entry-point instruction for the prompt, or None for organic/unknown leads.
+    `product_title` appends the tapped ad's product so the anchor survives past turn one."""
+    hint = _SOURCE_HINTS.get(lead_source or "")
+    if hint and product_title and lead_source == "ad_clicktomsg":
+        return hint + _AD_PRODUCT_ANCHOR.format(product=product_title)
+    return hint
 
 
 # IG display names are often the raw @handle ('vibecoding_id', 'user8842') — a digit,

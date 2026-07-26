@@ -88,3 +88,24 @@ def test_the_entry_hints_describe_the_entry_not_the_present_turn() -> None:
     assert "SINCE is their own" in ad
 
     assert "know NOTHING about them" not in ORGANIC_ENTRY_HINT
+
+
+def test_the_tapped_product_is_named_on_every_turn_not_just_the_first() -> None:
+    """The ad hints both say "the ad tells you which product drew them" and neither ever named
+    it: the title reached ad_tap_note on turn one only, so from turn two the model no longer
+    knew which campaign the lead came from. Thread 5361 — a fresh graduate tapped a Vibe Coding
+    ad, asked six turns later what web work involves, and got Python Back-End (8 months) and
+    Data Analyst (9 months) while the 4-month course he clicked went unmentioned."""
+    from app.modules.conversation.prompt import ad_typed_entry_hint, source_hint
+
+    tapped = source_hint("ad_clicktomsg", "Vibe Coding") or ""
+    assert "Vibe Coding" in tapped
+    assert "default course" in tapped
+    typed = ad_typed_entry_hint("Vibe Coding")
+    assert "Vibe Coding" in typed
+
+    # No product mapped (an ad we don't have a card for) → the plain hint, no dangling anchor.
+    assert "default course" not in (source_hint("ad_clicktomsg") or "")
+    assert "default course" not in ad_typed_entry_hint(None)
+    # A story reply never carries a product anchor, even if a slug happens to be set.
+    assert "Vibe Coding" not in (source_hint("story", "Vibe Coding") or "")
