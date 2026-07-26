@@ -27,7 +27,14 @@ def kb_all_html(docs: list) -> str:
     Replaces the sidebar picker (2026-07-25). Four documents all ride in the same prompt, so
     a lead-in index just hid what the operator came to edit. Each editor keeps its own form
     and its own POST target, so saving one never touches the others. A multi-branch view
-    still groups by branch name, since two branches can hold the same slug."""
+    still groups by branch name, since two branches can hold the same slug.
+
+    ONE .pnl-body wraps the lot, and that is load-bearing rather than tidiness: it is the
+    page's only scroller (flex:1 + overflow-y:auto as a direct flex child of #main, which is
+    itself overflow:hidden). The first version of this view left each editor carrying its own
+    .pnl-body inside its <details>, which took them all out of #main's flex chain — nothing
+    scrolled, and #main clipped everything below the first document's textarea, save button
+    included. The page looked as though it had no way to save."""
     if not docs:
         return f'<div class="emp">{_h.escape(t("know.select"))}</div>'
     branches = sorted({d[7] for d in docs if len(d) > 7})
@@ -42,7 +49,7 @@ def kb_all_html(docs: list) -> str:
         for i, d in enumerate(sorted(rows, key=lambda r: (r[5] or 0, str(r[1])))):
             title, slug, body = str(d[2] or d[1]), str(d[1]), str(d[3] or "")
             chars = f"{len(body):,}".replace(",", " ")
-            editor = kb_editor_html(d[0], slug, title, body, d[6])
+            editor = kb_editor_html(d[0], slug, title, body, d[6], nested=True)
             # First doc open, rest collapsed: four editors unfolded at once is a wall of text
             # nobody reads. The summary carries the size so you can see what is in there
             # without opening it.
@@ -51,7 +58,7 @@ def kb_all_html(docs: list) -> str:
                 f'<summary><span class="kb-doc-t">{_h.escape(title)}</span>'
                 f'<span class="kb-doc-m">{_h.escape(slug)} · {chars}</span>'
                 f'</summary>{editor}</details>')
-    return "".join(out)
+    return f'<div class="pnl-body">{"".join(out)}</div>'
 
 
 def kb_tree_html(docs: list, active_id: int | None = None) -> str:
@@ -129,10 +136,17 @@ def _doc_editor(slug: str, content: str, lang: str) -> str:
 
 
 def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
-                   updated_by: str | None = None) -> str:
+                   updated_by: str | None = None, nested: bool = False) -> str:
+    """`nested=True` drops the .pnl-body wrapper — the all-documents view supplies ONE for the
+    whole page. It has to: .pnl-body is the page's scroller only while it is a direct flex child
+    of #main (flex:1 + overflow-y:auto), and #main itself is overflow:hidden. Wrapping each
+    editor in <details> took .pnl-body out of that flex chain, so nothing scrolled and #main
+    silently clipped everything past the first textarea — the save button included."""
     lang = current_lang()
     meta = (f'<span class="kb-by">{_h.escape(t("kb.edited_by"))} {_h.escape(updated_by)}</span>'
             if updated_by else "")
+    body_open = "" if nested else '<div class="pnl-body">'
+    body_close = "" if nested else "</div>"
     return (
         f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.know"))}">'
         f'{_h.escape(title or slug)}</span>'
@@ -144,7 +158,7 @@ def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
         f'<a class="btn-sm" hx-get="/ui/knowledge/{doc_id}/history" hx-target="#main"'
         f' hx-push-url="/ui/knowledge/{doc_id}/history">🕘 {_h.escape(t("kb.history"))}</a>'
         f'</div></div>'
-        f'<div class="pnl-body">'
+        f'{body_open}'
         f'<form id="kb-form-{doc_id}" hx-post="/ui/knowledge/{doc_id}/save" hx-target="#main"'
         f' hx-swap="innerHTML">'
         f'<div class="frm-grp"><label class="frm-lbl">{_h.escape(t("know.title"))}</label>'
@@ -155,7 +169,7 @@ def kb_editor_html(doc_id: int, slug: str, title: str, content: str,
         f'<div class="kb-save-bar"><button class="btn-sm btn-p" id="kb-save-{doc_id}">'
         f'{_h.escape(t("know.save"))}</button>'
         f'<span class="kb-save-hint">{_h.escape(t("kb.save_hint"))}</span></div>'
-        f'</form></div>'
+        f'</form>{body_close}'
     )
 
 
