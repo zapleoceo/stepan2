@@ -133,7 +133,11 @@ class ReplyService(ReplyDelivery):
         messages = build_messages_free(
             context, ctx.dialog, lang, stored,
             coaching_notes=await self.coaching.active_manager_notes(),
-            source_block=_entry_hint(ctx, ad_product),
+            # On a silent tap the first-turn note already explains the prefill, names the
+            # product and says what to do about it. The entry hint says the same three things
+            # in its own words — ~560 characters of duplication in the one message that the
+            # measurement says must be SHORT. It resumes from turn two, where the note is gone.
+            source_block=None if first_note else _entry_hint(ctx, ad_product),
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
             now_block=await engine._now_block(ctx.thread),  # noqa: SLF001 — engine owns the clock

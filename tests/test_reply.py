@@ -586,3 +586,36 @@ def test_the_ad_tap_note_forbids_a_figure_and_says_why() -> None:
     assert "16%" in note and "36%" in note
     # …and it must NOT tell the model to withhold money once the lead actually speaks.
     assert "money is fair game" in note
+
+
+def test_only_one_rule_claims_the_start_of_the_message() -> None:
+    """Three rules used to each say "this goes first": the unanswered question ("the ONLY thing
+    worth writing about this turn"), owning a broken promise ("before anything else"), and
+    reacting to the person ("the thing to answer first"). A model cannot obey three firsts, so
+    it picks, and which one it picks is not something we chose. They are now one ordered list."""
+    from app.modules.conversation.free_mode import _FREE_CONTRACT
+
+    assert "WHAT COMES FIRST IN THE MESSAGE" in _FREE_CONTRACT
+    assert _FREE_CONTRACT.count("before anything else") <= 1
+    # The old phrasings that competed must be gone.
+    assert "that is the only thing worth writing about this turn" not in _FREE_CONTRACT
+    assert "that is the thing to answer\n  first" not in _FREE_CONTRACT
+    # Permissions are no longer filed under HARD RULES — a permission read as a rule is a rule
+    # the model tries to obey rather than an option it may take.
+    rules = _FREE_CONTRACT[_FREE_CONTRACT.index("HARD RULES"):]
+    allowed = rules[rules.index("ALLOWED TO DO"):]
+    assert "Slow down" in allowed and "whatever length the moment deserves" in allowed
+    assert "Slow down" not in rules[:rules.index("ALLOWED TO DO")]
+
+
+async def test_the_prefill_is_explained_once_not_twice(db_session) -> None:  # noqa: ANN001
+    """On a silent tap the first-turn note and the entry hint both explain what the prefill is,
+    name the product and say what to do — ~560 characters of duplication in the one message the
+    measurement says must be short. The hint resumes from turn two, where the note is gone."""
+    bid, tid = await _silent_tap(db_session)
+    llm = _LLM(_answer(reply="Halo Kak! Kakak pengen bikin apa?"))
+    await _service(db_session, bid, llm).decide(tid)
+
+    system = _system_of(llm)
+    assert system.count("prefill") == 1, "the prefill is explained exactly once"
+    assert "ENTRY: this chat opened when the lead TAPPED" not in system

@@ -236,10 +236,18 @@ def test_the_contract_pins_the_address_form() -> None:
     assert "kamu" in contract and "Anda" in contract
 
 
-def test_an_unanswered_question_outranks_everything() -> None:
+def test_the_question_is_second_only_to_something_we_owe_them() -> None:
     """The single largest measured loss: in 30 of 50 live threads the lead's question sat
     unanswered under later messages the bot preferred to send, and those threads died. One
-    thread waited five days for an answer while receiving six pitches."""
+    thread waited five days for an answer while receiving six pitches.
+
+    It used to be stated as outranking EVERYTHING, alongside two other rules that each also
+    claimed the opening — owning a broken promise, and reacting to the person. Three firsts is
+    no ordering at all; the model picked, and we did not choose which. Now they are ranked."""
     contract = free_contract("id")
-    assert "unanswered question outranks" in contract
+    order = contract[contract.index("WHAT COMES FIRST IN THE MESSAGE"):]
+    owed = order.index("Something you owe them")
+    asked = order.index("What they asked")
+    them = order.index("3. Them.")
+    assert owed < asked < them, "an apology outranks the question; the person is part of it"
     assert "don't change the subject" in contract
