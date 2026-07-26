@@ -271,3 +271,13 @@ def test_an_agreement_is_an_instruction_not_an_invitation_to_present() -> None:
     first = contract.index("WHAT COMES FIRST IN THE MESSAGE")
     assert said_yes < first, "it outranks the ordering rules — a yes ends the deliberation"
     assert "one detail and nothing else" in contract
+
+
+def test_a_volunteered_contact_must_be_acknowledged() -> None:
+    """Thread 5407: a sixteen-year-old typed his phone number into the middle of a
+    conversation, unasked. The next message was about Vibe Coding being technical — not one
+    word about the number. He had just handed over the one thing the whole funnel exists to
+    get, and the bot carried on presenting."""
+    contract = free_contract("id")
+    assert "hand you that detail unasked" in contract
+    assert "strongest yes there is" in contract

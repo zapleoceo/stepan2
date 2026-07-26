@@ -619,3 +619,17 @@ async def test_the_prefill_is_explained_once_not_twice(db_session) -> None:  # n
     system = _system_of(llm)
     assert system.count("prefill") == 1, "the prefill is explained exactly once"
     assert "ENTRY: this chat opened when the lead TAPPED" not in system
+
+
+def test_a_shared_phone_is_not_by_itself_a_ready_lead() -> None:
+    """Thread 5407 again, the other half. Discovery marked him `ready` because the extractor
+    was told "ready … or gave contact details to be called", and a bare number satisfied it.
+    That flowed into _stage_from → READY → a ready_deal alert → a CRM push, for a minor who
+    said one message later that he could not afford even 100 000 rupiah.
+
+    Readiness lives in the sentence around the digits, not in the digits."""
+    from app.modules.conversation.discovery import _SYSTEM
+
+    line = _SYSTEM[_SYSTEM.index("readiness:"):_SYSTEM.index("refusal:")]
+    assert "A phone number alone is NOT readiness" in line
+    assert "IN ANSWER to" in line

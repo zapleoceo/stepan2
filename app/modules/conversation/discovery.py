@@ -50,7 +50,10 @@ desired_state: the outcome they want — the goal, not the product.
 objections: a reason to hesitate (price/time/trust/parents/…), in their words. Empty if none.
 role: school|student|working|jobseeking|parent — only if they said so. Empty otherwise.
 readiness: exploring|considering|ready — how close they are to committing, from THEIR words. \
-"ready" only if they asked to enrol/pay or gave contact details to be called. Empty if unclear.
+"ready" means they asked to enrol, to pay, to reserve a seat, or handed a contact IN ANSWER to \
+an offer to be called about enrolling. A phone number alone is NOT readiness: people share one \
+mid-conversation for all sorts of reasons, and a "ready" here sends a manager to call someone \
+who never agreed to anything. Read the sentence around it, not the digits. Empty if unclear.
 refusal: none|soft|vague|blunt. soft = "nanti saya pikirkan", "belum sekarang" (a polite no \
 with a reason); vague = they closed the conversation politely with no reason; blunt = an \
 explicit "no"/"stop"/"not interested". Default none.
