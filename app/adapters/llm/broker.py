@@ -79,10 +79,13 @@ _POLL_MAX_ERRORS = 5
 def _poll_budget_s(capability: str) -> float:
     """Total time to wait for a job of this capability before giving up (TimeoutError).
     Not a single-request timeout — the overall submit+poll budget. chat:deep reasons for
-    minutes; chat:smart gets the slow budget; everything else the normal one."""
+    minutes; audio can land on a self-hosted whisper that needs ~3; chat:smart gets the slow
+    budget; everything else the normal one."""
     s = settings()
     if capability == "chat:deep":
         return s.llm_read_timeout_deep_s
+    if capability == "audio":
+        return s.transcribe_budget_s
     if capability in _SLOW_CAPS:
         return s.llm_read_timeout_slow_s
     return s.llm_read_timeout_s
@@ -366,10 +369,16 @@ class BrokerLLM:
 
     async def transcribe_result(
         self, job_id: str, *, thread_id: int | None = None, branch_id: int | None = None,
-    ) -> str | None:
-        """One poll of a queued transcription. Returns the text when it is done, None while it
-        is still running, and raises when the job failed — so the caller can tell "wait longer"
-        apart from "this will never finish"."""
+    ) -> str | float | None:
+        """One poll of a queued transcription.
+
+        Returns the transcript when done; a float — the seconds the broker asks us to wait —
+        while it is still running; None when it is running but named no interval; and raises
+        when the job failed, so the caller can tell "wait longer" from "this will never finish".
+
+        The broker never reports `running`: an in-flight job is `pending` with a `poll_after_s`
+        that grows as it ages (5 → 10 → 20). Handing that number back lets the caller schedule
+        the next look no sooner than asked."""
         start = time.perf_counter()
         try:
             async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
@@ -379,7 +388,8 @@ class BrokerLLM:
                 d = r.json()
             status = d.get("status")
             if status not in ("done", "error"):
-                return None
+                after = d.get("poll_after_s")
+                return float(after) if isinstance(after, (int, float)) else None
             if status == "error":
                 raise RuntimeError(f"transcribe job {job_id} failed: {d.get('error')}")
         except Exception as exc:

@@ -590,3 +590,58 @@ async def test_waiting_on_a_job_does_not_spend_the_retry_budget(db_session) -> N
     assert msg.media_attempts == 0, "a poll is not an attempt"
     assert msg.media_job_id == "job-77"
     assert msg.media_pending is True
+
+
+async def test_the_brokers_own_poll_interval_is_a_floor(db_session) -> None:
+    """The broker grows poll_after_s as a job ages (5 → 10 → 20). We must never look sooner
+    than it asks; when it asks for LONGER than our cron cadence, its number wins."""
+    s = db_session
+    bid, cid, mid = await _pending_voice(s)
+
+    class _SlowlyAging(_JobTranscriber):
+        async def transcribe_result(self, job_id, **kw):  # noqa: ANN001, ANN003, ANN201
+            return 600.0  # "come back in ten minutes"
+
+    await MediaService(s, bid).backfill(
+        cid, FakeDownloader(), limit=5, transcriber=_SlowlyAging())
+    msg = await s.get(Message, mid)
+    msg.media_next_try_at = None
+    await s.flush()
+    await MediaService(s, bid).backfill(
+        cid, FakeDownloader(), limit=5, transcriber=_SlowlyAging())
+    await s.flush()
+
+    msg = await s.get(Message, mid)
+    assert msg.media_next_try_at is not None
+    waited = msg.media_next_try_at - _utcnow()
+    assert waited > timedelta(minutes=5), "a 600s poll_after_s must beat the 3-minute cadence"
+
+
+async def test_a_file_the_broker_can_never_accept_is_released_at_once(db_session) -> None:
+    """400 (empty) and 413 (over 25 MB) fail identically every time. Retrying eight times
+    across six hours only holds the thread; release and let the bot ask for text."""
+    import httpx
+
+    s = db_session
+    bid, cid, mid = await _pending_voice(s)
+
+    class _Rejecting:
+        async def transcribe(self, audio, **kw):  # noqa: ANN001, ANN003, ANN201
+            raise AssertionError("submit is the path under test")
+
+        async def transcribe_submit(self, audio, **kw):  # noqa: ANN001, ANN003, ANN201
+            raise httpx.HTTPStatusError(
+                "413", request=httpx.Request("POST", "http://x"),
+                response=httpx.Response(413))
+
+        async def transcribe_result(self, job_id, **kw):  # noqa: ANN001, ANN003, ANN201
+            raise AssertionError("no job was ever queued")
+
+    await MediaService(s, bid).backfill(
+        cid, FakeDownloader(), limit=5, transcriber=_Rejecting())
+    await s.flush()
+
+    msg = await s.get(Message, mid)
+    assert msg.media_pending is False, "no point retrying a file the broker cannot accept"
+    assert msg.media_attempts == 0
+    assert "voice" in msg.text and msg.text != "🎤 voice"  # the hold was released

@@ -204,6 +204,15 @@ class Settings(BaseSettings):
         default=600.0, description="HTTP read timeout for chat:deep (full-context analysis, "
                                    "the model may think for minutes); background/batch ONLY, "
                                    "never a live reply handler")
+    transcribe_budget_s: float = Field(
+        default=300.0, description="total wait for ONE transcription job on the blocking path. "
+                                   "The broker's audio chain is groq → self-hosted whisper → "
+                                   "gemini → openai; groq answers in ~750ms but its daily quota "
+                                   "runs out, and whisper then needs 131-168s. At the 90s slow "
+                                   "budget that path could never finish — 35 timeouts against "
+                                   "23 successes in a day. The async path (media_job_id) has no "
+                                   "wall clock at all and is what live voice uses; this bounds "
+                                   "only the inline/fallback call")
     max_context_msgs: int = Field(
         default=60, description="dialog messages fed to the reply LLM. Raised from 30 on "
                                 "2026-07-26: only 1.6% of threads (63 of 3969) were long "

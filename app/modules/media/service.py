@@ -51,6 +51,20 @@ _MEDIA_POLL_EVERY = timedelta(minutes=3)
 
 logger = logging.getLogger(__name__)
 
+# Submit failures that are about the FILE, not the moment: an empty upload (400) or one past
+# the broker's 25 MB ceiling (413). Retrying either produces the same answer eight times over
+# six hours while the thread stays held, so they release immediately instead. A 403 is NOT
+# here — a missing scope is fixed by configuration and the retry should still be waiting when
+# it is, and neither is 429.
+_PERMANENT_MEDIA_STATUS = frozenset({400, 413, 415, 422})
+
+
+def _is_permanent_media_error(exc: Exception) -> bool:
+    import httpx  # noqa: PLC0415 — only needed for this check
+
+    return (isinstance(exc, httpx.HTTPStatusError)
+            and exc.response.status_code in _PERMANENT_MEDIA_STATUS)
+
 
 class MediaDownloader(Protocol):
     async def download_media(self, url: str) -> bytes: ...
@@ -133,7 +147,12 @@ class MediaService:
         The attempt counter is not advanced for a poll either, or waiting on a slow provider
         would spend the retry budget that exists for genuine failures."""
         if msg.media_job_id:
-            msg.media_next_try_at = utc_now() + _MEDIA_POLL_EVERY
+            floor = getattr(self, "_poll_floor_s", None)
+            wait = _MEDIA_POLL_EVERY
+            if floor and timedelta(seconds=floor) > wait:
+                wait = timedelta(seconds=floor)  # the broker asked for longer than our cadence
+            self._poll_floor_s = None
+            msg.media_next_try_at = utc_now() + wait
             msg.media_pending = True
             return
         msg.media_attempts = (msg.media_attempts or 0) + 1
@@ -301,21 +320,25 @@ class MediaService:
         rather than having to fit inside a single attempt."""
         if job_id := msg.media_job_id:
             try:
-                text = await transcriber.transcribe_result(
+                result = await transcriber.transcribe_result(
                     job_id, thread_id=msg.thread_id, branch_id=self.branch_id)
             except Exception as exc:  # noqa: BLE001 — the job failed; drop it and re-queue
                 logger.warning("voice job %s failed branch=%d msg=%d: %s — will re-queue",
                                job_id, self.branch_id, msg.id, exc)
                 msg.media_job_id = None
                 return False
-            if text is None:
-                logger.info("voice job %s still running branch=%d msg=%d",
-                            job_id, self.branch_id, msg.id)
+            if not isinstance(result, str):
+                # Still running. A float is the broker's own poll_after_s (it grows as the job
+                # ages) — honour it as a FLOOR so we never look sooner than asked, while the
+                # cron's own cadence sets the practical interval.
+                self._poll_floor_s = result if isinstance(result, float) else None
+                logger.info("voice job %s still running branch=%d msg=%d (poll after %s)",
+                            job_id, self.branch_id, msg.id, result)
                 return False
             msg.media_job_id = None
-            if not text:
+            if not result:
                 return False
-            msg.text = f"🎤 {text}"
+            msg.text = f"🎤 {result}"
             return True
 
         submit = getattr(transcriber, "transcribe_submit", None)
@@ -330,6 +353,15 @@ class MediaService:
                     audio, mime="audio/mp4", thread_id=msg.thread_id,
                     branch_id=self.branch_id)
         except Exception as exc:  # noqa: BLE001 — scope/transport error → defer or release
+            if _is_permanent_media_error(exc):
+                # An empty file (400) or one over the broker's 25 MB ceiling (413) will fail
+                # identically every time. Retrying it eight times across six hours just holds
+                # the thread hostage; release now and let the bot ask for text.
+                logger.warning("voice unusable branch=%d msg=%d: %s — releasing",
+                               self.branch_id, msg.id, exc)
+                self._release_media_hold(msg)
+                msg.media_pending = False
+                return True  # "handled": nothing more to try, and the hold is already gone
             logger.warning("voice transcribe submit failed branch=%d msg=%d: %s",
                            self.branch_id, msg.id, exc)
             return False
