@@ -515,8 +515,14 @@ _CSS = (
     ".ch-slug{font-family:ui-monospace,monospace;font-size:.72rem;color:#4da6ff;"
     "margin-left:.4rem}"
     ".kb-by{font-size:.7rem;color:#6b7685}"
-    ".kb-doc{border:1px solid var(--line,#2d3748);border-radius:10px;margin-bottom:.6rem;"
-    "overflow:hidden}"
+    # No overflow:hidden here, however much the rounded corners want it: it would make this
+    # <details> the containing scroll box for the sticky save bar inside, and a box that never
+    # scrolls gives sticky nothing to stick to — the button just sat at its natural offset,
+    # 1124px down, exactly as invisible as before. The corners are clipped on the summary
+    # instead, which is the only child whose background reaches the border.
+    ".kb-doc{border:1px solid var(--line,#2d3748);border-radius:10px;margin-bottom:.6rem}"
+    ".kb-doc>summary{border-radius:9px 9px 0 0}"
+    ".kb-doc:not([open])>summary{border-radius:9px}"
     ".kb-doc>summary{display:flex;align-items:center;gap:.6rem;padding:.65rem .9rem;"
     "cursor:pointer;list-style:none;background:#141922;user-select:none}"
     ".kb-doc>summary::-webkit-details-marker{display:none}"

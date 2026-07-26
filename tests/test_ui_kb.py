@@ -46,3 +46,16 @@ def test_the_single_document_view_keeps_its_own_scroller() -> None:
 
     assert 'class="pnl-body"' in kb_editor_html(1, "s", "T", "body")
     assert "pnl-body" not in kb_editor_html(1, "s", "T", "body", nested=True)
+
+
+def test_nothing_between_the_save_bar_and_the_scroller_clips_overflow() -> None:
+    """position:sticky is silently disabled by ANY overflow!=visible ancestor between the
+    element and the scroll container. .kb-doc carried overflow:hidden for its rounded corners,
+    which made the <details> itself the sticky containing box — and a box that never scrolls
+    gives sticky nothing to stick to. Measured in the live page: the bar computed to
+    position:sticky, bottom:0px, and still sat 1124px down, off screen."""
+    from app.api._ui_html import _CSS
+
+    rule = _CSS[_CSS.index(".kb-doc{"):]
+    rule = rule[:rule.index("}") + 1]
+    assert "overflow" not in rule, rule
