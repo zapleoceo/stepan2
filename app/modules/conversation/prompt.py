@@ -128,6 +128,43 @@ def manager_note_block(note: str | None) -> str | None:
     return f"{_MANAGER_NOTE_HEADER}\n{text}" if text else None
 
 
+def _spell_gap(seconds: float) -> str:
+    minutes = seconds / 60
+    if minutes < 2:
+        return "seconds"
+    if minutes < 90:
+        return f"{round(minutes)} minutes"
+    hours = minutes / 60
+    if hours < 36:
+        return f"{round(hours)} hours"
+    return f"{round(hours / 24)} days"
+
+
+def pace_hint(last_out_at: datetime | None, last_in_at: datetime | None,
+              now: datetime) -> str | None:
+    """How fast this conversation is moving — the one thing about the lead's behaviour the
+    model has never been told.
+
+    A lead who answers in twenty seconds is in the conversation right now and can be asked
+    another question; one who surfaces after four days needs re-anchoring, not "so as I was
+    saying". Both look identical in a transcript, which is all the model sees. Same for our own
+    lateness: an answer arriving forty minutes after the question reads differently, and the
+    model cannot know it is late.
+
+    Facts only — what to do with them is the model's call."""
+    if last_in_at is None:
+        return None
+    parts: list[str] = []
+    if last_out_at is not None and last_in_at > last_out_at:
+        parts.append("They took " + _spell_gap((last_in_at - last_out_at).total_seconds())
+                     + " to answer your previous message.")
+    waiting = (now - last_in_at).total_seconds()
+    if waiting > 900:  # under 15 minutes is the normal cadence, not lateness
+        parts.append("Their message has been waiting " + _spell_gap(waiting)
+                     + " for a reply.")
+    return "CONVERSATION PACE: " + " ".join(parts) if parts else None
+
+
 def now_hint(now_local: datetime) -> str:
     """A branch-local 'today is …' line injected into the prompt so the model can reason about
     what's already passed, and never offers a session date in the past."""

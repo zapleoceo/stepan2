@@ -260,7 +260,7 @@ class FollowupService:
             coaching_notes=await self.coaching.active_manager_notes(),
             source_block=await self._entry_block(product_slug),
             manager_note=ctx.lead.manager_note if ctx.lead is not None else None,
-            now_block=await engine._now_block())  # noqa: SLF001 — engine owns the branch clock
+            now_block=await engine._now_block(ctx.thread))  # noqa: SLF001 — engine owns the clock
         messages.append({"role": "user", "content": followup_framing(
             sent_so_far + 1, len(self.settings.followup_schedule_h), stored.refusal)})
         # A nudge is the hardest message in the funnel: no question to answer, a lead who

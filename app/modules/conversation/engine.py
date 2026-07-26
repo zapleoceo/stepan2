@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, Any
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, Lead
+from app.adapters.db.models import Branch, ChannelThread, Lead
 from app.modules.budget import BudgetService
 
 from .dates import annotate_dates
 from .needs import NeedsProfile, parse_needs
-from .prompt import now_hint
+from .prompt import now_hint, pace_hint
 from .repository import CoachingNoteRepo, MessageRepo, ThreadRepo
 
 if TYPE_CHECKING:
@@ -116,10 +116,21 @@ class DecisionEngine:
             self._tz_offset_h = int(branch.tz_offset_h or 0) if branch is not None else 0
         return datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=self._tz_offset_h)
 
-    async def _now_block(self) -> str:
+    async def _now_block(self, thread: ChannelThread | None = None) -> str:
         """Branch-local 'today is …' line for the prompt, so the model never offers a past
-        session date."""
-        return now_hint(await self._now_local())
+        session date — plus how fast this particular conversation is moving, when a thread is
+        given (see prompt.pace_hint: a 20-second reply and a 4-day one look identical in a
+        transcript, and the model only ever sees the transcript)."""
+        now_local = await self._now_local()
+        block = now_hint(now_local)
+        if thread is None:
+            return block
+        offset = timedelta(hours=self._tz_offset_h or 0)
+        pace = pace_hint(
+            thread.last_out_at + offset if thread.last_out_at else None,
+            thread.last_in_at + offset if thread.last_in_at else None,
+            now_local)
+        return f"{block}\n{pace}" if pace else block
 
     async def prepare(
         self, thread_id: int, workflow: str, *, allow_over_budget: bool = False,

@@ -134,7 +134,7 @@ class ReplyService(ReplyDelivery):
             source_block=_entry_hint(ctx, ad_product),
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
-            now_block=await engine._now_block(),  # noqa: SLF001 — branch-local clock, engine owns it
+            now_block=await engine._now_block(ctx.thread),  # noqa: SLF001 — engine owns the clock
             is_first_reply=is_first_reply,
             first_turn_note=first_note,
         )

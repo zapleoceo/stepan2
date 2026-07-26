@@ -388,3 +388,40 @@ def test_the_panel_still_renders_a_legacy_v2_record() -> None:
     got = parse_needs(json.dumps({"jobs": ["ganti karir"], "pains": ["takut telat"],
                                   "gains": ["kerja remote"], "objections": ["mahal"]}))
     assert got.jobs == ["ganti karir"] and got.gains == ["kerja remote"]
+
+
+def test_the_pace_of_the_conversation_reaches_the_prompt() -> None:
+    """A 20-second reply and a 4-day one look identical in a transcript, and the transcript is
+    all the model sees. One is a person sitting in the chat right now; the other has half
+    forgotten what was said. Facts only — what to do with them is the model's call."""
+    from datetime import datetime as _dt
+
+    from app.modules.conversation.prompt import pace_hint
+
+    now = _dt(2026, 7, 26, 14, 0)
+    fast = pace_hint(_dt(2026, 7, 26, 13, 59, 40), _dt(2026, 7, 26, 13, 59, 55), now)
+    assert fast is not None and "seconds" in fast
+    slow = pace_hint(_dt(2026, 7, 22, 9, 0), _dt(2026, 7, 26, 9, 0), now)
+    assert slow is not None and "4 days" in slow
+    # Our own lateness is a fact the model cannot otherwise know.
+    assert "5 hours" in slow
+
+
+def test_a_normal_cadence_says_nothing_about_lateness() -> None:
+    """Under 15 minutes is the ordinary rhythm of a chat, not a delay worth apologising for."""
+    from datetime import datetime as _dt
+
+    from app.modules.conversation.prompt import pace_hint
+
+    now = _dt(2026, 7, 26, 14, 0)
+    hint = pace_hint(_dt(2026, 7, 26, 13, 50), _dt(2026, 7, 26, 13, 58), now)
+    assert hint is not None
+    assert "waiting" not in hint
+
+
+def test_a_thread_with_no_inbound_has_no_pace() -> None:
+    from datetime import datetime as _dt
+
+    from app.modules.conversation.prompt import pace_hint
+
+    assert pace_hint(_dt(2026, 7, 26, 13, 0), None, _dt(2026, 7, 26, 14, 0)) is None

@@ -205,16 +205,20 @@ class Settings(BaseSettings):
                                    "the model may think for minutes); background/batch ONLY, "
                                    "never a live reply handler")
     max_context_msgs: int = Field(
-        default=30, description="dialog messages fed to the reply LLM — the main per-reply "
-                                "token-cost bound (was 40; a chat rarely needs more than "
-                                "~15 turns back to stay coherent, and the focus+RAG blocks "
-                                "carry the facts, not the raw history depth)")
+        default=60, description="dialog messages fed to the reply LLM. Raised from 30 on "
+                                "2026-07-26: only 1.6% of threads (63 of 3969) were long "
+                                "enough to be cut at all, but they are not random — 5.4% of "
+                                "threads that reached presenting/objection/ready were, i.e. "
+                                "the deepest conversations were the ones losing their "
+                                "beginning. 63 threads' worth of extra history is a rounding "
+                                "error against a warm prompt cache")
     dialog_char_budget: int = Field(
-        default=8000, description="char bound on the dialog history fed to the reply LLM, on "
-                                  "top of max_context_msgs — trims the oldest tail of a wordy "
-                                  "thread (the top-10 longest threads carried 5-13k chars in "
-                                  "their newest 30 messages) while the newest turns stay "
-                                  "verbatim for the dedup/don't-repeat checks")
+        default=16000, description="char bound on the dialog history fed to the reply LLM, on "
+                                   "top of max_context_msgs — trims the oldest tail of a wordy "
+                                   "thread while the newest turns stay verbatim for the "
+                                   "dedup/don't-repeat checks. Raised with max_context_msgs: "
+                                   "at 8000 the longest threads (12.8k chars in their newest "
+                                   "30 messages) still lost their opening")
     free_context_char_budget: int = Field(
         default=90000, description="char ceiling on the FULL KB surface sent in free reply "
                                    "mode (persona + all facts docs + the whole objection "
