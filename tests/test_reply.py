@@ -359,3 +359,32 @@ def test_a_reply_with_no_broker_call_is_labelled_not_blank() -> None:
 
     assert _fmt_llm_meta(TEMPLATED_META) == "templated | free"
     assert _fmt_llm_meta({}) is None
+
+
+def test_the_dossier_panel_reads_the_field_the_bot_actually_writes() -> None:
+    """DossierRepo.save has only ever written `dossier`; the chat panel read `needs`, the v2
+    column nothing has written since the cutover. So a manager opening a thread saw an empty
+    box while the data sat one column over — thread 5311 had a goal, a pain and a desired
+    state recorded and showed none of them."""
+    from app.modules.conversation.needs import parse_needs
+
+    v3 = json.dumps({
+        "job_to_be_done": "minta penjelasan program Data Analyst",
+        "pains": ["belum mengerti"], "desired_state": ["penjelasan simple"],
+        "objections": [{"text": "mahal", "status": "open"},
+                       {"text": "waktu", "status": "handled"}],
+    })
+    got = parse_needs(v3)
+    assert got.jobs == ["minta penjelasan program Data Analyst"]
+    assert got.pains == ["belum mengerti"]
+    assert got.gains == ["penjelasan simple"]
+    assert got.objections == ["mahal"]  # handled ones are not a manager's problem
+
+
+def test_the_panel_still_renders_a_legacy_v2_record() -> None:
+    """Leads last touched before the cutover keep the old shape — they must not go blank."""
+    from app.modules.conversation.needs import parse_needs
+
+    got = parse_needs(json.dumps({"jobs": ["ganti karir"], "pains": ["takut telat"],
+                                  "gains": ["kerja remote"], "objections": ["mahal"]}))
+    assert got.jobs == ["ganti karir"] and got.gains == ["kerja remote"]

@@ -68,7 +68,7 @@ costs a lead. Never "masih minat?" or "ada yang bisa dibantu?" — that is beggi
 
 Facts only from the knowledge base: never invent an alumni story, a percentage, an income \
 figure, a discount, or a deadline that is not written there. Real differentiators always beat \
-invented ones. {refusal_note}Keep it to one short message.]"""
+invented ones. {refusal_note}One message — its length is yours to judge.]"""
 
 _REFUSAL_NOTES = {
     "soft": "They already said they'd think about it — don't argue or re-pitch; one light, "

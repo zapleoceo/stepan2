@@ -54,6 +54,13 @@ class NeedsProfile:
 
 
 def parse_needs(raw: str | None) -> NeedsProfile:
+    """Reads BOTH shapes: the v2 `needs` JSON (jobs/pains/gains) and the v3 `dossier`
+    (job_to_be_done/pains/desired_state/objections).
+
+    Nothing has written `needs` since the v3 cutover — DossierRepo.save only touches
+    `dossier` — so the chat panel, which reads `needs`, showed an empty box for every lead
+    while the data sat one column over. The dossier is the live shape; the v2 keys stay
+    understood so an old lead's record still renders."""
     if not raw:
         return NeedsProfile()
     try:
@@ -62,10 +69,26 @@ def parse_needs(raw: str | None) -> NeedsProfile:
         return NeedsProfile()
     if not isinstance(d, dict):
         return NeedsProfile()
+    jobs = _clean(d.get("jobs"))
+    if not jobs and (jtbd := str(d.get("job_to_be_done") or "").strip()):
+        jobs = [jtbd]
+    gains = _clean(d.get("gains")) or _clean(d.get("desired_state"))
+    # v3 objections are objects ({text, status, …}); only the still-open ones are worth a
+    # manager's attention, and only their text. v2 stored them as plain strings.
+    raw_objections = d.get("objections")
+    if isinstance(raw_objections, list) and any(isinstance(o, dict) for o in raw_objections):
+        objections = [
+            text for o in raw_objections
+            if isinstance(o, dict) and str(o.get("status") or "open") == "open"
+            and (text := str(o.get("text") or "").strip())
+        ]
+    else:
+        objections = _clean(raw_objections)
+    pains = _clean(d.get("pains"))
     return NeedsProfile(
-        jobs=_clean(d.get("jobs")), pains=_clean(d.get("pains")),
-        gains=_clean(d.get("gains")), discovery_complete=bool(d.get("discovery_complete")),
-        objections=_clean(d.get("objections")),
+        jobs=jobs, pains=pains, gains=gains,
+        discovery_complete=bool(d.get("discovery_complete")) or bool(pains and gains),
+        objections=objections,
     )
 
 
