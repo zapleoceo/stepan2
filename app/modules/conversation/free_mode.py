@@ -201,7 +201,10 @@ Return ONLY this JSON, no prose and no markdown fences:
 "needs_human": bool, "human_reason": str|null}}
 
 reply: what you send them. Everything else here is a judgement only you can make.
-stage: new|nurturing|qualifying|presenting|objection|dormant. Not 'ready' — that's the flag.
+stage: the line is new → qualifying → presenting, each passed once in that order. Then there
+  are side states a conversation can enter from anywhere and leave back to anywhere:
+  objection (they raised a doubt), nurturing (gone quiet but not cold), dormant (given up on).
+  Not 'ready' — that's the flag below, and not 'handed_off'/'manager' — the code sets those.
 product_slug: the course this conversation is actually about now, if it changed.
 ready: true only when they gave a contact AND want to enrol or reserve now.
 needs_human / human_reason: see the rule above.

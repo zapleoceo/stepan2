@@ -425,3 +425,22 @@ def test_a_thread_with_no_inbound_has_no_pace() -> None:
     from app.modules.conversation.prompt import pace_hint
 
     assert pace_hint(_dt(2026, 7, 26, 13, 0), None, _dt(2026, 7, 26, 14, 0)) is None
+
+
+def test_the_stage_list_the_model_reads_matches_the_funnel_it_lives_in() -> None:
+    """The schema listed "new|nurturing|qualifying|presenting|objection|dormant" — nurturing
+    second, i.e. the step after new. The UI, the enum and the data all say otherwise: over 30
+    days, 2363 leads went new → qualifying, and nurturing was entered from qualifying (165),
+    new (85), presenting (57), dormant (53) and ready (24) — from everywhere, which is what a
+    side state looks like. Everything downstream was corrected on 2026-07-25; the one list the
+    model actually reads was left in the old order."""
+    from app.modules.conversation.free_mode import free_contract
+
+    schema = free_contract("id")
+    line = schema[schema.index("stage:"):]
+    assert line.index("new") < line.index("qualifying") < line.index("presenting")
+    # The side states are named as such, after the line — not spliced into it.
+    assert "side states" in line
+    assert line.index("presenting") < line.index("nurturing")
+    # ready and handed_off are not the model's to set.
+    assert "that's the flag" in line
