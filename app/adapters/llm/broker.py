@@ -321,6 +321,82 @@ class BrokerLLM:
         await _log_call("audio", "transcribe", thread_id, branch_id, meta, ok=True)
         return (d.get("text") or d.get("transcript") or rm.get("text") or "").strip()
 
+    async def transcribe_submit(
+        self, audio: bytes, *, mime: str = "audio/mp4",
+        thread_id: int | None = None, branch_id: int | None = None,
+    ) -> tuple[str | None, str]:
+        """Queue a transcription WITHOUT waiting for it. Returns (job_id, text): a job id when
+        the work was queued, or ('', text) when the broker answered inline (the sync endpoint,
+        or a clip short enough to finish during the request).
+
+        Split out from transcribe() because holding the wait inside one call is what made a
+        slow transcription unrecoverable: the budget expired, the job id was discarded, and the
+        next retry started over on a job that had never stopped running."""
+        self.calls += 1
+        start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
+                files = {"file": ("voice.mp4", audio, mime)}
+                r = await c.post(
+                    f"{self._url}/v1/transcribe/jobs", params={"workflow": "voice"},
+                    headers={"X-Project-Key": self._key}, files=files,
+                )
+                if r.status_code in (404, 405):
+                    r = await c.post(
+                        f"{self._url}/v1/transcribe", params={"workflow": "voice"},
+                        headers={"X-Project-Key": self._key}, files=files,
+                    )
+                r.raise_for_status()
+                d = r.json()
+        except Exception as exc:
+            await _log_call("audio", "transcribe", thread_id, branch_id,
+                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
+                            ok=False, error=_err_text(exc))
+            raise
+        if (job_id := d.get("job_id")) is not None:
+            return str(job_id), ""
+        # Answered inline — bill it here, since no poll will follow.
+        await _log_call("audio", "transcribe", thread_id, branch_id, {
+            "model": d.get("model"), "provider": d.get("provider"),
+            "cost_usd": d.get("cost_usd") or 0,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
+            "request_id": d.get("request_id") or d.get("id"),
+        }, ok=True)
+        return None, (d.get("text") or d.get("transcript") or "").strip()
+
+    async def transcribe_result(
+        self, job_id: str, *, thread_id: int | None = None, branch_id: int | None = None,
+    ) -> str | None:
+        """One poll of a queued transcription. Returns the text when it is done, None while it
+        is still running, and raises when the job failed — so the caller can tell "wait longer"
+        apart from "this will never finish"."""
+        start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=_JOB_HTTP_TIMEOUT) as c:
+                r = await c.get(f"{self._url}/v1/jobs/{job_id}",
+                                headers={"X-Project-Key": self._key})
+                r.raise_for_status()
+                d = r.json()
+            status = d.get("status")
+            if status not in ("done", "error"):
+                return None
+            if status == "error":
+                raise RuntimeError(f"transcribe job {job_id} failed: {d.get('error')}")
+        except Exception as exc:
+            await _log_call("audio", "transcribe", thread_id, branch_id,
+                            {"elapsed_ms": int((time.perf_counter() - start) * 1000)},
+                            ok=False, error=_err_text(exc))
+            raise
+        rm = d.get("result_meta") if isinstance(d.get("result_meta"), dict) else {}
+        await _log_call("audio", "transcribe", thread_id, branch_id, {
+            "model": d.get("model") or rm.get("model"),
+            "provider": d.get("provider") or rm.get("provider"),
+            "cost_usd": d.get("cost_usd") or rm.get("cost_usd") or 0,
+            "elapsed_ms": int((time.perf_counter() - start) * 1000),
+            "request_id": d.get("request_id") or d.get("id") or rm.get("request_id"),
+        }, ok=True)
+        return (d.get("text") or d.get("transcript") or rm.get("text") or "").strip()
+
     async def describe_image(
         self, image: bytes, *, mime: str = "image/jpeg", prompt: str | None = None,
         thread_id: int | None = None, branch_id: int | None = None,

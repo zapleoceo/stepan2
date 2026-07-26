@@ -44,6 +44,10 @@ _MEDIA_RETRY_WINDOW = timedelta(hours=6)
 # provider recovers, the next due attempt picks the media up as before.
 _MEDIA_RETRY_BASE = timedelta(minutes=5)
 _MEDIA_RETRY_MAX = timedelta(hours=1)
+# …but once a transcription job IS queued, the next attempt is a single GET, so it runs on the
+# cron's own cadence instead of the backoff curve. Nothing to storm, and a transcript that
+# lands in two minutes should not wait twenty to be read.
+_MEDIA_POLL_EVERY = timedelta(minutes=3)
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +57,22 @@ class MediaDownloader(Protocol):
 
 
 class Transcriber(Protocol):
+    """`transcribe` blocks until the transcript is ready and is the fallback path.
+
+    A transcriber that also implements the submit/result pair is driven asynchronously: the
+    job is queued once and polled on later ticks, so a transcription slower than one attempt
+    is not lost. Both are declared here, but only `transcribe` is required — the service
+    checks for the pair before using it."""
+
     async def transcribe(self, audio: bytes, *, mime: str = ...,
                          thread_id: int | None = ..., branch_id: int | None = ...) -> str: ...
+
+    async def transcribe_submit(self, audio: bytes, *, mime: str = ...,
+                                thread_id: int | None = ...,
+                                branch_id: int | None = ...) -> tuple[str | None, str]: ...
+
+    async def transcribe_result(self, job_id: str, *, thread_id: int | None = ...,
+                                branch_id: int | None = ...) -> str | None: ...
 
 
 class ImageDescriber(Protocol):
@@ -107,7 +125,17 @@ class MediaService:
 
     def _defer(self, msg: Message) -> None:
         """Transient failure: keep the item flagged, but push the next attempt out
-        exponentially (capped) so we don't stack a retry storm on the broker's own retries."""
+        exponentially (capped) so we don't stack a retry storm on the broker's own retries.
+
+        A message with a job already queued is a different case and gets a short fixed
+        interval: there is nothing to storm — the next attempt is one GET, and the exponential
+        curve would leave a transcript that finished in two minutes sitting unread for twenty.
+        The attempt counter is not advanced for a poll either, or waiting on a slow provider
+        would spend the retry budget that exists for genuine failures."""
+        if msg.media_job_id:
+            msg.media_next_try_at = utc_now() + _MEDIA_POLL_EVERY
+            msg.media_pending = True
+            return
         msg.media_attempts = (msg.media_attempts or 0) + 1
         step = _MEDIA_RETRY_BASE * (2 ** (msg.media_attempts - 1))
         msg.media_next_try_at = utc_now() + min(step, _MEDIA_RETRY_MAX)
@@ -249,6 +277,7 @@ class MediaService:
         """Media we've given up on must not keep its '🎤 voice' / '🖼 media' placeholder, or
         decide() holds the reply forever. Swap in a non-placeholder so the bot answers (asks
         the lead to type instead), and drop any stale placeholder translation."""
+        msg.media_job_id = None  # nobody will read this job's result now
         before = (msg.text or "").strip()
         if before == VOICE_PENDING_PH:
             msg.text = _VOICE_UNAVAILABLE
@@ -260,14 +289,52 @@ class MediaService:
     async def _transcribe_voice(
         self, msg: Message, audio: bytes, transcriber: Transcriber) -> bool:
         """Replace a voice message's '🎤 voice' placeholder with its transcript, so the bot
-        reads the spoken content. Returns True when text was written; False on failure/empty
-        (caller releases the hold) — never block the backfill."""
+        reads the spoken content. Returns True when text was written; False when it is still
+        running or failed (the caller defers or releases) — never block the backfill.
+
+        A queued job is REMEMBERED on the message. This used to wait for the transcript inside
+        one attempt, and a transcription slower than the poll budget was unrecoverable: the
+        budget expired, the job id was thrown away, and the next retry began waiting from
+        scratch on a job that had never stopped running (live 2026-07-26 — jobs 110920 and
+        110931 cycling for ten minutes, ~100 seconds of a worker slot burned each time). Now a
+        retry is one cheap poll, and the transcription has the whole 6h media window to finish
+        rather than having to fit inside a single attempt."""
+        if job_id := msg.media_job_id:
+            try:
+                text = await transcriber.transcribe_result(
+                    job_id, thread_id=msg.thread_id, branch_id=self.branch_id)
+            except Exception as exc:  # noqa: BLE001 — the job failed; drop it and re-queue
+                logger.warning("voice job %s failed branch=%d msg=%d: %s — will re-queue",
+                               job_id, self.branch_id, msg.id, exc)
+                msg.media_job_id = None
+                return False
+            if text is None:
+                logger.info("voice job %s still running branch=%d msg=%d",
+                            job_id, self.branch_id, msg.id)
+                return False
+            msg.media_job_id = None
+            if not text:
+                return False
+            msg.text = f"🎤 {text}"
+            return True
+
+        submit = getattr(transcriber, "transcribe_submit", None)
         try:
-            text = await transcriber.transcribe(
-                audio, mime="audio/mp4", thread_id=msg.thread_id, branch_id=self.branch_id)
-        except Exception as exc:  # noqa: BLE001 — scope/transport error → release the hold
-            logger.warning("voice transcribe failed branch=%d msg=%d: %s",
+            if submit is None:  # a transcriber that only knows how to block (older adapters)
+                text = await transcriber.transcribe(
+                    audio, mime="audio/mp4", thread_id=msg.thread_id,
+                    branch_id=self.branch_id)
+                job_id = None
+            else:
+                job_id, text = await submit(
+                    audio, mime="audio/mp4", thread_id=msg.thread_id,
+                    branch_id=self.branch_id)
+        except Exception as exc:  # noqa: BLE001 — scope/transport error → defer or release
+            logger.warning("voice transcribe submit failed branch=%d msg=%d: %s",
                            self.branch_id, msg.id, exc)
+            return False
+        if job_id:
+            msg.media_job_id = job_id  # picked up by the next tick, not waited on here
             return False
         if not text:
             return False

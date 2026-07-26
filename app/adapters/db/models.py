@@ -326,6 +326,12 @@ class Message(SQLModel, table=True):
     media_next_try_at: datetime | None = Field(
         default=None, index=True,
         description="не пробовать раньше этого времени (экспоненциальный back-off)")
+    media_job_id: str | None = Field(
+        default=None, max_length=64,
+        description="задание распознавания у брокера, уже поставленное в очередь. Хранится "
+                    "между попытками: без него каждый ретрай ждал задание с нуля и сдавался "
+                    "по бюджету, хотя оно всё это время выполнялось (26.07: задания 110920 и "
+                    "110931 крутились по кругу десять минут). С ним ретрай — это один опрос")
     link_url: str | None = Field(default=None, description="кликабельная цель (шэр поста/ссылки)")
     preview_url: str | None = Field(default=None, description="превью карточки (CDN, протухает)")
     revoked_at: datetime | None = Field(

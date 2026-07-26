@@ -516,3 +516,77 @@ async def test_success_clears_the_backoff(db_session) -> None:
     fresh = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
     assert fresh.media_pending is False and fresh.media_next_try_at is None
     assert fresh.text == "🖼 a receipt"
+
+
+# ─── a queued transcription survives between attempts ───
+
+class _JobTranscriber:
+    """Queues a job, reports it running for `pending_polls` polls, then returns the text."""
+
+    def __init__(self, text: str = "halo kak", pending_polls: int = 2) -> None:
+        self.text = text
+        self.pending_polls = pending_polls
+        self.submits = 0
+        self.polls = 0
+
+    async def transcribe(self, audio, **kw):  # noqa: ANN001, ANN003, ANN201
+        raise AssertionError("the blocking path must not be used for a queued job")
+
+    async def transcribe_submit(self, audio, **kw):  # noqa: ANN001, ANN003, ANN201
+        self.submits += 1
+        return "job-77", ""
+
+    async def transcribe_result(self, job_id, **kw):  # noqa: ANN001, ANN003, ANN201
+        assert job_id == "job-77"
+        self.polls += 1
+        return None if self.polls <= self.pending_polls else self.text
+
+
+async def _pending_voice(s) -> tuple[int, int, int]:
+    bid = await _branch(s)
+    cid = await _channel(s, bid)
+    m = await _media_msg(s, bid, cid, ext="v1", url="https://cdn/v.mp4", kind="audio")
+    return bid, cid, m.id
+
+
+async def test_a_slow_transcription_is_polled_not_restarted(db_session) -> None:
+    """The job id is remembered, so a transcription slower than one attempt still lands.
+
+    The wait used to live inside a single attempt: the poll budget expired, the job id was
+    discarded, and the next retry began waiting from scratch on a job that had never stopped
+    running — live 2026-07-26, jobs 110920 and 110931 cycling for ten minutes with ~100
+    seconds of a worker slot burned on each pass."""
+    s = db_session
+    bid, cid, mid = await _pending_voice(s)
+    tr = _JobTranscriber()
+
+    for _ in range(4):  # submit → running → running → done
+        await MediaService(s, bid).backfill(cid, FakeDownloader(), limit=5, transcriber=tr)
+        msg = await s.get(Message, mid)
+        msg.media_next_try_at = None  # the cron's wait, not this test's concern
+        await s.flush()
+
+    msg = await s.get(Message, mid)
+    assert tr.submits == 1, "the audio is submitted once, not once per attempt"
+    assert msg.text == "🎤 halo kak"
+    assert msg.media_pending is False
+    assert msg.media_job_id is None
+
+
+async def test_waiting_on_a_job_does_not_spend_the_retry_budget(db_session) -> None:
+    """A poll is not a failure. If waiting consumed attempts, a transcription that takes twenty
+    minutes would eat the retry budget that exists for genuine breakage."""
+    s = db_session
+    bid, cid, mid = await _pending_voice(s)
+    tr = _JobTranscriber(pending_polls=99)
+
+    for _ in range(3):
+        await MediaService(s, bid).backfill(cid, FakeDownloader(), limit=5, transcriber=tr)
+        msg = await s.get(Message, mid)
+        msg.media_next_try_at = None
+        await s.flush()
+
+    msg = await s.get(Message, mid)
+    assert msg.media_attempts == 0, "a poll is not an attempt"
+    assert msg.media_job_id == "job-77"
+    assert msg.media_pending is True
