@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -69,6 +69,14 @@ class CloudEntry:
     label: str
     count: int
     weight: float  # 0..1 relative to the column's top entity — drives the visual bar
+
+
+def _profile_json(lead: Lead) -> str | None:
+    """The lead's need profile — `dossier` (v3, the only column written since the cutover) with
+    `needs` (v2) as the fallback for leads last touched before it. Reading `needs` alone made
+    every column of the cloud permanently empty: nothing had written it in weeks, so no lead's
+    hash ever changed and classify_branch returned 0 every night."""
+    return lead.dossier or lead.needs
 
 
 def _needs_sha(raw: str | None) -> str:
@@ -152,9 +160,10 @@ async def classify_branch(session: AsyncSession, branch_id: int, llm: LLMPort) -
     changed: list[tuple[Lead, str]] = []
     for lead in (await session.execute(
             select(Lead).where(Lead.branch_id == branch_id,
-                               Lead.needs.is_not(None))  # type: ignore[union-attr]
+                               or_(Lead.dossier.is_not(None),  # type: ignore[union-attr]
+                                   Lead.needs.is_not(None)))   # type: ignore[union-attr]
             .order_by(Lead.created_at.desc()))).scalars():  # type: ignore[union-attr]
-        sha = _needs_sha(lead.needs)
+        sha = _needs_sha(_profile_json(lead))
         if states.get(lead.id) != sha:
             changed.append((lead, sha))
         if len(changed) >= _MAX_LEADS_PER_RUN:
@@ -163,7 +172,7 @@ async def classify_branch(session: AsyncSession, branch_id: int, llm: LLMPort) -
         return 0
 
     # Gather distinct new phrases per kind across the changed leads, classify in bulk.
-    parsed = {lead.id: parse_needs(lead.needs) for lead, _ in changed}
+    parsed = {lead.id: parse_needs(_profile_json(lead)) for lead, _ in changed}
     label_of: dict[str, dict[str, str]] = {}
     for kind in KINDS:
         phrases = sorted({p for prof in parsed.values() for p in getattr(prof, kind)})

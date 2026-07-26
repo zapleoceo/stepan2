@@ -171,3 +171,46 @@ async def test_snapshot_freezes_current_counts(db_session) -> None:
     snap = (await db_session.execute(
         select(NeedAggSnapshot).where(NeedAggSnapshot.branch_id == bid))).scalars().all()
     assert len(snap) == 1 and snap[0].lead_count == 2
+
+
+async def test_the_cloud_classifies_the_column_the_bot_actually_writes(db_session) -> None:
+    """Every other test in this file seeds the v2 `needs` column, which is why they all passed
+    while the live panel showed three empty columns for weeks: the extraction has written
+    `dossier` since the v3 cutover, classify_branch read `needs`, so no lead's hash ever
+    changed and the nightly pass returned 0 leads processed, forever."""
+    bid = await _branch(db_session)
+    db_session.add(Lead(branch_id=bid, dossier=json.dumps({
+        "job_to_be_done": "pengen jago coding", "pains": ["mahal"],
+        "desired_state": [], "objections": []})))
+    await db_session.flush()
+
+    llm = _FakeLLM(_RULES)
+    assert await classify_branch(db_session, bid, llm) == 1
+    await db_session.commit()
+
+    pains = await cloud_for(db_session, [bid], "pains", None, None)
+    jobs = await cloud_for(db_session, [bid], "jobs", None, None)
+    assert [e.label for e in pains] == ["Цена"]
+    assert [e.label for e in jobs] == ["Освоить кодинг"]
+
+
+async def test_a_dossier_edit_reclassifies_that_lead(db_session) -> None:
+    """The hash must track the column being read — otherwise a lead classified once is frozen
+    and new pains never reach the cloud."""
+    bid = await _branch(db_session)
+    lead = Lead(branch_id=bid, dossier=json.dumps({"pains": ["mahal"]}))
+    db_session.add(lead)
+    await db_session.flush()
+
+    llm = _FakeLLM(_RULES)
+    await classify_branch(db_session, bid, llm)
+    await db_session.commit()
+
+    lead.dossier = json.dumps({"pains": ["mahal", "gak ada waktu"]})
+    db_session.add(lead)
+    await db_session.flush()
+    assert await classify_branch(db_session, bid, llm) == 1
+    await db_session.commit()
+
+    assert {e.label for e in await cloud_for(db_session, [bid], "pains", None, None)} == {
+        "Цена", "Время"}

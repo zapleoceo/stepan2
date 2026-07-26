@@ -975,15 +975,16 @@ async def daily_digest_branch(ctx: dict[str, Any], branch_id: int) -> int:
 
 
 async def aggregate_needs(ctx: dict[str, Any]) -> int:
-    """Nightly (midnight Jakarta) needs-cloud pass for ALL branches: incrementally classify
-    leads whose needs changed onto the branch's stable taxonomy, then snapshot the day's
-    aggregates for history. Analytics only (no IG writes) → not kill-switch gated; each branch
-    in its own transaction so one branch's LLM/broker hiccup can't roll back another's."""
+    """Hourly needs-cloud pass for ALL branches: incrementally classify leads whose profile
+    changed onto the branch's stable taxonomy, then snapshot the day's aggregates for history
+    (the snapshot is idempotent per day, so re-running within a day just refreshes it).
+    Analytics only (no IG writes) → not kill-switch gated; each branch in its own transaction
+    so one branch's LLM/broker hiccup can't roll back another's."""
     return await _fan_out_per_branch(ctx, "aggregate_needs_branch")
 
 
 async def aggregate_needs_branch(ctx: dict[str, Any], branch_id: int) -> int:
-    """One branch's nightly needs-cloud pass: incrementally classify leads whose needs changed
+    """One branch's hourly needs-cloud pass: incrementally classify leads whose profile changed
     onto the branch's stable taxonomy, cache label translations, then snapshot the day's
     aggregates. Analytics only; its own transaction so one branch's broker hiccup is isolated."""
     from app.modules.needs_cloud import (  # noqa: PLC0415
@@ -1138,12 +1139,14 @@ class WorkerSettings:
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
         # Broker-log retention: prune old rows daily at 03:30 (broker_log_retention_days)
         cron(prune_broker_log, hour={3}, minute={30}, second=0, run_at_startup=False),
-        # Needs-cloud aggregation once a day at 17:00 UTC = 00:00 WIB (midnight Jakarta), all
-        # branches. Incremental + analytics-only, so it's cheap and safe to run platform-wide.
-        cron(aggregate_needs, hour={17}, minute={0}, second=0, run_at_startup=False),
-        # 07:00 Jakarta (WIB = UTC+7) — the owner reads it with morning coffee. Lands 7h
-        # after aggregate_needs (17:00 UTC = midnight Jakarta), so the needs cloud in the
-        # file is that same night's freshly-classified one.
+        # Needs-cloud aggregation hourly (minute={42}, offset from the other hourly jobs).
+        # It used to run once at midnight Jakarta, which made the short panel ranges (12h, 24h)
+        # structurally empty: a lead who arrived this morning had no tags until the small hours.
+        # The pass is incremental — it only calls the model for leads whose profile actually
+        # changed since last run, batched 40 phrases per call — so hourly costs little.
+        cron(aggregate_needs, minute={42}, second=0, run_at_startup=False),
+        # 07:00 Jakarta (WIB = UTC+7) — the owner reads it with morning coffee. The needs
+        # cloud in the file is at most an hour stale (aggregate_needs runs every :42).
         cron(daily_digest, hour={0}, minute={0}, second=0, run_at_startup=False),
         # Comments under our own posts: once an hour (minute={17}, offset from the other
         # hourly jobs). Opt-in per channel (comment_replies_enabled) and platform-gated —
