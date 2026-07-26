@@ -80,6 +80,20 @@ class OutboxSender:
         cfg = await get_channel_settings(self.session, self.branch_id, thread.channel_id)
         if not cfg.sending_enabled:
             return None  # connector sending paused (soft-block) — queue keeps building
+        # Last gate before the wire: the owner blocked this lead as spam or abuse. Anything
+        # still queued for them was generated before the block, and shipping it now is pure
+        # ban risk with no upside. A manager send passes — a human may be closing the thread
+        # deliberately.
+        if row.source != "manager":
+            lead = await self.session.get(Lead, thread.lead_id)
+            if lead is not None and lead.is_blocked:
+                row.status = "skipped"
+                row.error = "lead blocked"
+                self.session.add(row)
+                await self.session.flush()
+                logger.info("outbox skip branch=%d thread=%d — lead is blocked",
+                            self.branch_id, thread_id)
+                return None
         # 2026-07-22: reactivation deliberately excluded from the quiet-hour hold (Dima's call,
         # for the one-time full-history backfill) — nights have near-zero live traffic, so
         # letting reactivation send then uses otherwise-idle cap headroom instead of competing

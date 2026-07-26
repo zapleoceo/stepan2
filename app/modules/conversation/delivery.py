@@ -156,7 +156,16 @@ async def raise_manager_alert(
     manager works it and (per policy) feeds the missing fact back into the KB afterward.
     Shared by the live-reply path AND follow-up nudges: a needs_manager decision means the
     same thing regardless of which path produced it, so both must actually alert (a nudge
-    that silently sets needs_manager with no alert was the pre-2026-07-07 followup gap)."""
+    that silently sets needs_manager with no alert was the pre-2026-07-07 followup gap).
+
+    Blocked leads raise nothing: the owner has already judged that thread as spam or abuse,
+    and an alert asks a human to look again at something they closed. 22 such alerts fired in
+    7 days — each one costs attention and returns nothing."""
+    lead = await session.get(Lead, lead_id)
+    if lead is not None and lead.is_blocked:
+        logger.info("alert suppressed branch=%d thread=%d — lead is blocked",
+                    branch_id, thread_id)
+        return
     q = decision.manager_question or ""
     gap = decision.kb_gap or ""
     summary_en = q or gap or "Thread handed to a human"

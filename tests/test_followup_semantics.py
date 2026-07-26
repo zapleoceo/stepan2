@@ -619,3 +619,15 @@ async def test_the_nudge_may_choose_silence(db_session) -> None:  # noqa: ANN001
     framing = llm.messages[0][-1]["content"]
     assert "return an EMPTY reply" in framing
     assert "You decide whether to write at all" in framing
+
+
+async def test_a_blocked_lead_gets_no_nudge(db_session) -> None:  # noqa: ANN001
+    """The owner blocks a thread as spam or abuse. The reply queue and reactivation already
+    honoured that; nudges did not, so 57 messages went to blocked people in 7 days — the one
+    population where an unsolicited DM is pure ban risk with zero upside."""
+    bid, _tid, lead, _ = await _world(db_session, timer_due=True)
+    lead.is_blocked = True
+    db_session.add(lead)
+    await db_session.flush()
+
+    assert await _svc(db_session, bid, FakeLLM()).run() == 0

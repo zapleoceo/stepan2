@@ -93,6 +93,10 @@ _FOLLOWUP_Q = (  # noqa: S608
     " WHERE l.branch_id = :bid"
     "   AND l.stage IN ('qualifying', 'presenting', 'objection', 'nurturing')"
     "   AND l.agent_enabled = :on"
+    # A blocked lead is spam or abuse the owner has already judged. The reply queue and
+    # reactivation both excluded them; nudges did not, so 57 messages went to blocked people
+    # in 7 days — the one population where an unsolicited DM is pure ban risk and zero upside.
+    "   AND l.is_blocked = false"
     "   AND ct.next_followup_at IS NOT NULL"
     "   AND ct.next_followup_at <= :now"
     "   AND ct.last_out_at IS NOT NULL"
