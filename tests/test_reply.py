@@ -633,3 +633,34 @@ def test_a_shared_phone_is_not_by_itself_a_ready_lead() -> None:
     line = _SYSTEM[_SYSTEM.index("readiness:"):_SYSTEM.index("refusal:")]
     assert "A phone number alone is NOT readiness" in line
     assert "IN ANSWER to" in line
+
+
+def test_asking_us_a_question_is_not_a_life_goal() -> None:
+    """Measured 2026-07-26 across every stored dossier: 28% of job_to_be_done and 22% of
+    desired_state were the mechanics of talking to us, not a reason to buy —
+    "Berapa biayanya?", "cek harga dan lokasi kelas", "bertanya lebih lanjut", "cuma ingin
+    tahu aja", and in some rows the ad's own prefill translated word for word ("find it
+    course with schedule, duration, cost info").
+
+    That is why the needs cloud shows Цена as a GOAL and Информация as a BENEFIT. Everyone who
+    writes to us wants information; recording it distinguishes nobody."""
+    from app.modules.conversation.discovery import _SYSTEM
+
+    assert "IN THEIR LIFE" in _SYSTEM
+    assert "leave this EMPTY and wait" in _SYSTEM
+    assert "Nobody's goal is a price" in _SYSTEM
+    # A price question is still captured — as a budget signal, which is what it actually is.
+    assert 'budget_signal:"tanya harga"' in _SYSTEM
+
+
+def test_the_pain_kpi_reads_the_column_that_is_written() -> None:
+    """The reports panel showed "0% с болью до презент." — it matched on lead.needs, the v2
+    column nothing has written since the cutover. Third place the same dead column turned up
+    today, after the chat panel and the needs cloud."""
+    from pathlib import Path
+
+    sql = Path("app/api/_query.py").read_text(encoding="utf-8")
+    block = sql[sql.index("async def fetch_discovery_metrics"):]
+    block = block[:block.index("async def fetch_coach_data")]
+    assert "coalesce(l2.dossier, l2.needs)" in block
+    assert "WHERE l2.needs LIKE" not in block

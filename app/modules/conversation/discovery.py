@@ -43,10 +43,16 @@ Indonesian. A bare "iya"/"ok"/"boleh" with no content of its own reveals nothing
 invent anything they did not say. Report only what is NEW — don't repeat what is already \
 listed as known below. Nothing new: return empty values.
 
-job_to_be_done: WHY they're here now — the task they want done.
+job_to_be_done: WHY they're here now — the task they want done IN THEIR LIFE. Not the task \
+they want done in this chat. "Find out the price", "ask about the schedule", "know the \
+details", "just curious" are the mechanics of talking to us, not a goal: everyone who writes \
+wants information, so recording it says nothing about anyone. If all they have done so far is \
+ask us things, leave this EMPTY and wait — it fills the moment they say what the skill is for.
 pains: what's not working now, what worries them, what holds them back (incl. fears like \
-"takut nggak bisa coding").
-desired_state: the outcome they want — the goal, not the product.
+"takut nggak bisa coding"). Not knowing our price is not a pain; not being able to AFFORD it is.
+desired_state: the outcome they want in their life once this works — a job, an app that runs, \
+a business that stops leaking, income. Never "knows the price", "gets the brochure", "can \
+register" — those are steps toward buying, not reasons to buy.
 objections: a reason to hesitate (price/time/trust/parents/…), in their words. Empty if none.
 role: school|student|working|jobseeking|parent — only if they said so. Empty otherwise.
 readiness: exploring|considering|ready — how close they are to committing, from THEIR words. \
@@ -76,6 +82,14 @@ sampingan sambil kuliah"
 - "nanti saya pikirkan dulu ya kak" -> refusal:"soft"
 - "boleh minta nomor rekeningnya?" -> readiness:"ready"
 - "iya kak" -> nothing
+- "Berapa biayanya?" -> budget_signal:"tanya harga" and NOTHING ELSE. It is not a \
+job_to_be_done, not a desired_state, not a pain. Measured 2026-07-26: 28% of stored goals and \
+22% of stored desired states were this — "cek harga dan lokasi kelas", "bertanya lebih lanjut", \
+"cuma ingin tahu aja", even the ad's own prefill translated word for word — which is why the \
+needs cloud shows "Цена" as a GOAL and "Информация" as a BENEFIT. Nobody's goal is a price.
+- "mau tau detail programnya" -> nothing
+- "pengen bisa bikin aplikasi buat toko saya" -> job_to_be_done:"bikin aplikasi untuk toko", \
+desired_state:["punya aplikasi toko sendiri"]
 
 Return ONLY this JSON, no prose, no markdown fences:
 {"job_to_be_done": str, "pains": [str], "desired_state": [str], "objections": [str], \

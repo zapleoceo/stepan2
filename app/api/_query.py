@@ -621,8 +621,12 @@ async def fetch_discovery_metrics(
         "  JOIN message m ON m.thread_id = ct.id AND m.direction='in' AND m.occurred_at < fp.t"
         "  GROUP BY fp.lead_id)"
         " SELECT (SELECT count(*) FROM fp) AS reached,"
+        # coalesce(dossier, needs): `needs` is the v2 column and nothing has written it since
+        # the cutover, so this KPI read 0% no matter what discovery actually captured. Third
+        # place the same dead column surfaced today — after the chat panel and the needs cloud.
         "  (SELECT count(*) FROM fp JOIN lead l2 ON l2.id = fp.lead_id"
-        "     WHERE l2.needs LIKE '%\"pains\":%' AND l2.needs NOT LIKE '%\"pains\": []%')"
+        "     WHERE coalesce(l2.dossier, l2.needs) LIKE '%\"pains\":%'"
+        "       AND coalesce(l2.dossier, l2.needs) NOT LIKE '%\"pains\": []%')"
         "   AS discovered,"
         "  (SELECT avg(cnt) FROM dl) AS avg_msgs"
     )
