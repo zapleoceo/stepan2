@@ -202,6 +202,18 @@ def test_unbridged_ad_merges_its_creative_split() -> None:
     assert ">6<" in html
 
 
+def test_organic_leads_get_their_own_group_with_their_deals() -> None:
+    """Leads from no ad were absent from this whole section, so it read as the full base —
+    and the one confirmed sale we have came from no ad, making it unfindable on the page."""
+    from app.api._i18n import _lang
+    _lang.set("ru")
+    html = _ad_tree_html([], {}, {}, organic=(2145, 900, 64, 1100, 1))
+    assert "Пришли сами" in html
+    assert ">2145<" in html
+    assert "no_ad=1&grp=deal" in html      # the deal is one click away
+    assert _ad_tree_html([], {}, {}, organic=(0, 0, 0, 0, 0)) == ""
+
+
 def test_reports_panel_drops_by_stage_table_and_shows_message_stats() -> None:
     from app.api._i18n import _lang
     from app.api._ui_panels import reports_panel_html

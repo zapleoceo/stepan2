@@ -41,6 +41,7 @@ from ._query import (
     fetch_deals_count,
     fetch_discovery_metrics,
     fetch_media_to_ad,
+    fetch_organic_funnel,
     fetch_segment_dist,
     fetch_stage_flow,
     fetch_stage_reach,
@@ -357,6 +358,8 @@ async def reports_panel(
             session, branch_ids, since=since_dt, until=until_dt)
         daily_kpis = await fetch_daily_kpis(
             session, branch_ids, since=since_dt, until=until_dt)
+        organic = await fetch_organic_funnel(
+            session, branch_ids, since=since_dt, until=until_dt)
         if branch_ids and len(branch_ids) == 1:
             fb = (await session.execute(
                 text("SELECT key, value FROM app_setting WHERE branch_id=:b"
@@ -389,7 +392,7 @@ async def reports_panel(
                            segment_stages=segment_stages, stage_flow=stage_flow,
                            stage_reach=stage_reach, needs_cloud=needs_cloud,
                            closed_in_period=closed_in_period, deals=deals,
-                           daily_kpis=daily_kpis,
+                           daily_kpis=daily_kpis, organic=organic,
                            media_to_ad=media_to_ad, ad_spend=ad_spend,
                            ads_synced_at=ads_synced_at,
                            total_leads=sum(int(s[2]) for s in segments)))  # (aud, seg, total, won)

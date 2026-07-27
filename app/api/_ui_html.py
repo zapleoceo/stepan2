@@ -255,6 +255,8 @@ _CSS = (
     ".kpi{background:#141925;border:1px solid #2d3748;border-radius:6px;"
     "padding:.5rem .75rem;min-width:90px}"
     ".kpi-n{font-size:1.5rem;font-weight:800;line-height:1.15}"
+    ".kpi-lnk{display:block;text-decoration:none;cursor:pointer}"
+    ".kpi-lnk:hover{border-color:#4a5568;background:#1a212a}"
     ".kpi-l{font-size:.64rem;color:#6b7685;margin-top:.1rem}"
     # Per-day bars under the number. flex-end so bars grow upward from a shared baseline;
     # each <i> carries its own height% and a day:count tooltip.
@@ -1719,7 +1721,7 @@ def app_shell(
     lang: str, main_html: str, active_nav: str = "inbox", thr_html: str | None = None,
     stage: str = "", ad_id: str = "", grp: str = "", is_super: bool = True,
     lead_type: str = "", audience: str = "", awaiting: str = "", kind: str = "",
-    q: str = "",
+    q: str = "", no_ad: str = "",
 ) -> str:
     def _na(key: str, href: str, icon: str, nav_id: str, extra: str = "", badge: str = "") -> str:
         cls = "na on" if nav_id == active_nav else "na"
@@ -2128,20 +2130,22 @@ def app_shell(
         # everything else (notably a search term with spaces or &) is properly encoded.
         _thr_params = "&".join(
             f"{k}={quote_plus(v, safe=',')}"
-            for k, v in (("stage", stage), ("ad_id", ad_id), ("grp", grp),
+            for k, v in (("stage", stage), ("ad_id", ad_id), ("no_ad", no_ad), ("grp", grp),
                          ("lead_type", lead_type), ("audience", audience),
                          ("awaiting", awaiting), ("kind", kind), ("q", q)) if v)
         _thr_qs = f"?{_thr_params}" if _thr_params else ""
         _grp_lbl = {"pipeline": t("rep.pipeline"), "won": t("rep.won"),
-                    "dormant": t("rep.dormant")}.get(grp, "")
+                    "deal": t("rep.deal"), "dormant": t("rep.dormant")}.get(grp, "")
         _grp_html = (
             f' · <span class="ad-filter-id">{_h.escape(_grp_lbl)}</span>' if _grp_lbl else "")
+        # The organic filter reuses the ad chip — same shape, same dismiss, different label.
+        _ad_lbl = t("rep.ads_organic") if no_ad else ad_id
         _ad_chip = (
             f'<div class="ad-filter">{_h.escape(t("inbox.ad_filter"))} '
-            f'<span class="ad-filter-id">{_h.escape(ad_id)}</span>{_grp_html}'
+            f'<span class="ad-filter-id">{_h.escape(_ad_lbl)}</span>{_grp_html}'
             f'<a class="ad-filter-x" href="/ui/inbox{_qs}" title="{_h.escape(t("inbox.ad_clear"))}"'
             f'>✕</a></div>'
-        ) if ad_id else ""
+        ) if (ad_id or no_ad) else ""
         # segment chip (from a clicked segment-tree leaf) — same dismissable chip, back to all.
         # Shows the audience + intent it was opened from (e.g. "Школьники · тёплые") so the
         # filtered count matches the exact leaf that was clicked.

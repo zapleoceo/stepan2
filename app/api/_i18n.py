@@ -408,6 +408,10 @@ _TR: dict[str, dict[str, str]] = {
                           "id": "Tidak cocok dengan iklan"},
     "rep.ads_no_spend": {"ru": "расход неизвестен", "en": "spend unknown",
                          "id": "belanja tidak diketahui"},
+    # Distinct from ads_unmatched: THAT one has an ad we could not bridge to a campaign;
+    # this one never came from an ad at all.
+    "rep.ads_organic": {"ru": "Пришли сами (без рекламы)", "en": "Came direct (no ad)",
+                        "id": "Datang sendiri (tanpa iklan)"},
     "rep.ads_campaign": {"ru": "Кампания", "en": "Campaign", "id": "Kampanye"},
     "rep.ads_spend":    {"ru": "Расход", "en": "Spend", "id": "Belanja"},
     "rep.ads_started":  {"ru": "Переписок", "en": "Convos", "id": "Percakapan"},

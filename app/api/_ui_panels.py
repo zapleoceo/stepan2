@@ -1354,11 +1354,13 @@ _AD_FUNNEL_JS = (
 )
 
 
-def _count_cell(aid: str, grp: str, n: int, color: str) -> str:
+def _count_cell(aid: str, grp: str, n: int, color: str, no_ad: bool = False) -> str:
     """A funnel count that links to the matching chat list (ad + stage group). grp '' =
-    every chat of the ad; otherwise a group from AD_FUNNEL_GROUPS (pipeline|won|dormant)."""
+    every chat of the ad; otherwise a group from AD_FUNNEL_GROUPS (pipeline|won|dormant|deal).
+    `no_ad` swaps the ad filter for "came from no ad", used by the organic row."""
     style = f' style="color:{color}"' if color else ""
-    qs = f"/ui/inbox?ad_id={aid}" + (f"&grp={grp}" if grp else "")
+    base = "/ui/inbox?no_ad=1" if no_ad else f"/ui/inbox?ad_id={aid}"
+    qs = base + (f"&grp={grp}" if grp else "")
     return f'<td class="rep-n"{style}><a class="rep-lnk" href="{qs}">{n}</a></td>'
 
 
@@ -1526,6 +1528,7 @@ def _ad_tree_html(
     mappings: dict[str, str] | None = None,
     suggestions: dict[str, str] | None = None,
     products: list[tuple[str, str]] | None = None,
+    organic: tuple[int, int, int, int, int] | None = None,
 ) -> str:
     """Campaign → ad tree: Meta's spend and our funnel on the same line, grouped the way the
     money is actually budgeted (per campaign), so "what did this campaign cost and what did it
@@ -1538,7 +1541,7 @@ def _ad_tree_html(
     Ads we could not map to a campaign are NOT dropped — they get their own group at the
     bottom with their funnel and no spend. Dropping them would silently shrink the lead base
     and make the spend table look more complete than it is."""
-    if not rows:
+    if not rows and not (organic and organic[0]):
         return ""
     mappings = mappings or {}
     suggestions = suggestions or {}
@@ -1679,6 +1682,26 @@ def _ad_tree_html(
             f'{_h.escape(t("rep.ads_no_spend"))}</span></summary>'
             f'<table class="rep-tbl rep-sortable">{_head(False)}'
             f'<tbody>{_ad_rows(_orphan_items(orphans), False)}</tbody></table></details>'
+        )
+    # Leads that came from no ad at all. They were absent from this whole section, which made
+    # it read as the full base — and put the one confirmed sale somewhere no table listed.
+    if organic and organic[0]:
+        o_total, o_pipe, o_won, o_dorm, o_deals = organic
+        body += (
+            f'<details class="adt-c adt-org"><summary>'
+            f'<span class="adt-nm">{_h.escape(t("rep.ads_organic"))}</span>'
+            f'<span class="adt-m">{_h.escape(t("rep.ads_leads"))} <b>{o_total}</b> · '
+            f'{_h.escape(t("rep.deal"))} <b style="color:#ffd43b">{o_deals}</b> · '
+            f'{_h.escape(t("rep.ads_no_spend"))}</span></summary>'
+            f'<table class="rep-tbl"><tbody><tr><td>'
+            f'<a class="rep-lnk" href="/ui/inbox?no_ad=1">'
+            f'{_h.escape(t("rep.ads_organic"))}</a></td>'
+            f'{_count_cell("", "", o_total, "", no_ad=True)}'
+            f'{_count_cell("", "pipeline", o_pipe, "#9b7aff", no_ad=True)}'
+            f'{_count_cell("", "won", o_won, "#51cf66", no_ad=True)}'
+            f'{_count_cell("", "deal", o_deals, "#ffd43b", no_ad=True)}'
+            f'{_count_cell("", "dormant", o_dorm, "#868e96", no_ad=True)}'
+            f'</tr></tbody></table></details>'
         )
     if not body:
         return ""
@@ -2122,19 +2145,29 @@ def reports_panel_html(
     closed_in_period: int | None = None,
     deals: int | None = None,
     daily_kpis: dict[str, dict[str, int]] | None = None,
+    organic: tuple[int, int, int, int, int] | None = None,
     media_to_ad: dict[str, dict] | None = None,
     ad_spend: dict[str, dict] | None = None,
     ads_synced_at: object = None,
 ) -> str:
     total = sum(stage_counts.values())
 
-    def _kpi(label: str, value: str, color: str = "#e8eef4", series: str = "") -> str:
-        return (
-            f'<div class="kpi" title="{_h.escape(t(f"{label}.hint"))}">'
+    def _kpi(
+        label: str, value: str, color: str = "#e8eef4", series: str = "", href: str = "",
+    ) -> str:
+        """A tile, optionally linking to the chats behind it. Without the link a number like
+        "Сделка 1" is unanswerable: the buyer may have come from no ad at all, so no table
+        further down the page contains them."""
+        body = (
             f'<div class="kpi-n" style="color:{color}">{_h.escape(value)}</div>'
             f'<div class="kpi-l">{_h.escape(t(label))}</div>'
-            f'{_sparkline(series, color) if series else ""}</div>'
+            f'{_sparkline(series, color) if series else ""}'
         )
+        cls = "kpi kpi-lnk" if href else "kpi"
+        tip = _h.escape(t(f"{label}.hint"))
+        if href:
+            return f'<a class="{cls}" href="{_h.escape(href)}" title="{tip}">{body}</a>'
+        return f'<div class="{cls}" title="{tip}">{body}</div>'
 
     daily = daily_kpis or {}
     # Every tile below is an EVENT counted inside the window: a lead arriving, a hand-off, a
@@ -2149,8 +2182,11 @@ def reports_panel_html(
         _kpi("rep.total", str(total), series=_series(daily, "leads"))
         + _kpi("rep.closed_period", str(closed_in_period or 0), "#51cf66",
                _series(daily, "handoff"))
-        # The only tile that means money — everything else counts conversations.
-        + _kpi("rep.deal", str(deals or 0), "#ffd43b", _series(daily, "deal"))
+        # The only tile that means money — everything else counts conversations. Clickable
+        # because a buyer can come from no ad at all, in which case NO table on this page
+        # lists them: the ad tree only holds threads that carry an ad_id.
+        + _kpi("rep.deal", str(deals or 0), "#ffd43b", _series(daily, "deal"),
+               href="/ui/inbox?grp=deal")
         + _kpi("rep.dormant_period", str(sum(daily.get("dormant", {}).values())), "#868e96",
                _series(daily, "dormant"))
         + _kpi("rep.msgs_tile", f"{total_out}↑ / {total_in}↓", "#63c5ff",
@@ -2217,7 +2253,7 @@ def reports_panel_html(
         f'{_needs_cloud_html(needs_cloud)}'
         f'<div class="rep-fc-funnel">{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}</div>'  # noqa: E501
         f'</div>'
-        f'{_ad_tree_html(ad_funnel or [], media_to_ad or {}, ad_spend or {}, ads_synced_at, fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
+        f'{_ad_tree_html(ad_funnel or [], media_to_ad or {}, ad_spend or {}, ads_synced_at, fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products, organic=organic)}'  # noqa: E501
         f'</div>'
     )
 

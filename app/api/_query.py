@@ -119,6 +119,37 @@ async def fetch_ad_funnel(
     return list((await session.execute(q)).all())
 
 
+async def fetch_organic_funnel(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> tuple[int, int, int, int, int]:
+    """The same funnel for leads that came from NO ad: (total, pipeline, won, dormant, deals).
+
+    The ad tree filters on `ad_id IS NOT NULL`, so it silently omitted 2145 threads and read
+    as a complete picture of the base. It is not — and the one confirmed sale we have is in
+    that omitted half, which made "where is my deal?" unanswerable from this page."""
+    q = (
+        select(
+            func.count().label("total"),
+            func.sum(case((Lead.stage.in_(_PIPELINE_STAGES), 1), else_=0)).label("pipeline"),
+            func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0)).label("won"),
+            func.sum(case((Lead.stage == "dormant", 1), else_=0)).label("dormant"),
+            func.sum(case((deal_won_clause(), 1), else_=0)).label("deals"),
+        )
+        .select_from(ChannelThread)
+        .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
+        .where(ChannelThread.ad_id.is_(None))  # type: ignore[union-attr]
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        q = q.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    row = (await session.execute(q)).first()
+    return tuple(int(v or 0) for v in row) if row else (0, 0, 0, 0, 0)  # type: ignore[return-value]
+
+
 async def fetch_ad_spend(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,

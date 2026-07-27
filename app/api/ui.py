@@ -126,12 +126,12 @@ _THREAD_TMPL = (
 @router.get("/inbox", response_class=HTMLResponse)
 async def inbox(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "", awaiting: str = "", kind: str = "", q: str = "",
+    audience: str = "", awaiting: str = "", kind: str = "", q: str = "", no_ad: str = "",
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
     return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
-                                  ad_id=ad_id.strip(), grp=grp.strip(),
+                                  ad_id=ad_id.strip(), grp=grp.strip(), no_ad=no_ad.strip(),
                                   lead_type=lead_type.strip(), audience=audience.strip(),
                                   awaiting=awaiting.strip(), kind=kind.strip(), q=q.strip(),
                                   is_super=is_super_admin(request)))
@@ -191,7 +191,7 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
-    audience: str = "", awaiting: str = "", kind: str = "", q: str = "",
+    audience: str = "", awaiting: str = "", kind: str = "", q: str = "", no_ad: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
     branch_ids = branch_ids_from_request(request)
@@ -242,7 +242,9 @@ async def threads_partial(
     # A reports row can cover several Instagram ad ids that resolve to one Meta ad, so the
     # link carries them comma-joined — one id is just the single-element case.
     ads = [a for a in (p.strip() for p in ad_id.split(",")) if a]
-    if ads:  # "open this ad's chats" from the reports ad-funnel table
+    if no_ad.strip():  # the organic row — leads that came from no ad at all
+        conditions.append("ct.ad_id IS NULL")
+    elif ads:  # "open this ad's chats" from the reports ad-funnel table
         names = [f":ad{i}" for i in range(len(ads))]
         conditions.append(f"ct.ad_id IN ({', '.join(names)})")
         params.update({f"ad{i}": a for i, a in enumerate(ads)})
@@ -284,7 +286,8 @@ async def threads_partial(
         kind_qs = ",".join(_sel) if (0 < len(_sel) < len(_CHANNEL_KINDS)) else ""
     filter_qs = urlencode({k: v for k, v in
                            (("stage", s), ("lead_type", lt), ("audience", aud),
-                            ("ad_id", ",".join(ads)), ("grp", grp.strip()), ("awaiting", aw),
+                            ("ad_id", ",".join(ads)), ("no_ad", no_ad.strip()),
+                            ("grp", grp.strip()), ("awaiting", aw),
                             ("kind", kind_qs), ("q", needle)) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))
