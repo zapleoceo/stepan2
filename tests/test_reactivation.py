@@ -169,8 +169,8 @@ async def test_an_empty_goal_string_does_not_count(db_session) -> None:
 
 
 def test_the_daily_ceiling_is_a_hundred() -> None:
-    """25 per pass × 4 passes. The old 40 was set the week of the soft-block and never
+    """34 per pass × 3 passes. The old 40 was set the week of the soft-block and never
     re-derived; the branch sends 334-960 a day and averages about one block signature."""
     from app.modules.conversation.reactivation import BATCH_PER_RUN
 
-    assert BATCH_PER_RUN == 25
+    assert BATCH_PER_RUN == 34

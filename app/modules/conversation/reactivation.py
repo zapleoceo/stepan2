@@ -53,15 +53,15 @@ MIN_DORMANT_DAYS = 3
 MAX_DORMANT_DAYS = 550
 REACTIVATION_GAP_DAYS = 14
 REACTIVATION_CAP = 2
-# 25 per run × 4 runs = 100/day, up from 20 × 2. The old 40 was set the week of the 2026-07-22
+# 34 per run × 3 runs = ~100/day, up from 20 × 2. The old 40 was set the week of the 2026-07-22
 # soft-block and never re-derived from data. Measured 2026-07-27 over the preceding 20 days:
 # the branch sends 334-960 messages a day, almost all of them replies and follow-ups, while
 # reactivation contributes 3-76. Actual soft-block signatures across those 20 days — 16
 # `item_ack` plus two 403/1404006 — average about one a day, and the incident itself happened
 # on a 951-message day. Adding ~60 touches to a ~500 baseline lands near 560, far below that.
-# The run count went up rather than the batch size on purpose: four small passes spread across
-# the day look less like a burst than two large ones, and bursts are what IG scores.
-BATCH_PER_RUN = 25
+# Passes are spread across the working day rather than fired as one burst: three small passes
+# look less like a burst than one large pass, and bursts are what IG scores.
+BATCH_PER_RUN = 34
 _REASON = "reactivation"
 
 # Stalled leads with a real dialog, quiet for [MIN, MAX] days, not reactivated recently or too
