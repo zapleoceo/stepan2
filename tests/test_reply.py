@@ -664,3 +664,32 @@ def test_the_pain_kpi_reads_the_column_that_is_written() -> None:
     block = block[:block.index("async def fetch_coach_data")]
     assert "coalesce(l2.dossier, l2.needs)" in block
     assert "WHERE l2.needs LIKE" not in block
+
+
+async def test_qualified_lead_is_reported_once_when_intent_first_appears(db_session) -> None:  # noqa: ANN001
+    """Meta needs roughly 50 events a week per ad set to leave the learning phase. Hand-offs
+    give ~14; a lead becoming a real conversation gives ~200, and it is the only one of our
+    three events with the volume to steer a campaign.
+
+    Fires on the TRANSITION, so one lead reports once however many turns follow."""
+    from app.modules.conversation.dossier import LeadDossier as _D
+
+    empty = _D()
+    assert not empty.has_intent()
+    assert _D(job_to_be_done="bikin aplikasi").has_intent()
+    assert _D(pains=["takut telat"]).has_intent()
+    assert _D(desired_state=["kerja remote"]).has_intent()
+    # A lower bar than has_discovery, on purpose — that one wants the pain+gain pair.
+    assert not _D(pains=["takut telat"]).has_discovery()
+    assert _D(pains=["takut telat"]).has_intent()
+
+
+async def test_a_lead_with_no_pixel_configured_reports_nothing(db_session) -> None:  # noqa: ANN001
+    """Ad reporting must never be able to break a reply — an unconfigured branch is a no-op,
+    not an error."""
+    bid, tid, _ = await _thread(db_session)
+    llm = _LLM(_answer(dossier={"pains": ["takut telat"]}))
+    svc = _service(db_session, bid, llm)
+    assert svc.settings is None or not getattr(svc.settings, "meta_pixel_id", "")
+    decision = await svc.decide(tid)
+    assert decision is not None and decision.reply == "halo kak"

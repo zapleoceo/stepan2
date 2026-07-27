@@ -93,6 +93,16 @@ class LeadDossier:
         return frozenset(o.category for o in self.objections
                          if o.status == "open" and o.category)
 
+    def has_intent(self) -> bool:
+        """The lead said something about themselves that a seller can work with.
+
+        A lower bar than has_discovery(): one of a goal, a worry or a desired outcome, rather
+        than the pain+gain pair. It marks the moment a button-press becomes a conversation,
+        which is what the ad platform should be optimising towards — that happens for roughly
+        200 leads a week, against 14 hand-offs, and Meta needs about 50 events a week per ad
+        set to leave the learning phase. Hand-offs alone can never get there."""
+        return bool(self.job_to_be_done or self.pains or self.desired_state)
+
     def has_discovery(self) -> bool:
         """A pain AND a desired state — the emotional layer, not just a surface goal. Same bar
         v2 gated presentation on, kept because live chats showed a single shallow item let the

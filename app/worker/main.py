@@ -725,6 +725,16 @@ async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
             await CrmPullService(session, branch_id, reader).sync_active()
     except Exception:
         logger.exception("crm pull failed branch=%d", branch_id)
+    # …and the opposite population: leads that already left to a human, read for the outcome
+    # rather than for a gate. Its own try so a failure here cannot cost the stand-down sync,
+    # which is the one with a live effect on what the bot does next.
+    try:
+        async with session_scope() as session:
+            cfg = await get_settings(session, branch_id)
+            reader = build_crm_reader(cfg)
+            await CrmPullService(session, branch_id, reader).sync_outcomes()
+    except Exception:
+        logger.exception("crm outcomes failed branch=%d", branch_id)
     return synced
 
 

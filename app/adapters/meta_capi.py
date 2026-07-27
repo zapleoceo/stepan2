@@ -83,6 +83,20 @@ class MetaCapi:
         phone: str | None = None,
         event_name: str = "Lead",
     ) -> bool:
+        """One event. `event_id` is the dedup key, so a resend of the same fact is free.
+
+        Three names are sent by this app, and the split matters because Meta needs roughly 50
+        events a week per ad set to leave the learning phase:
+
+          QualifiedLead  a lead wrote in their own words and the extractor got an intent out
+                         of it — ~200/week, which is the only one of the three with enough
+                         volume to actually optimise a campaign on
+          Lead           handed to a manager — ~14/week, too sparse to optimise on alone
+          Purchase       the CRM reports deal_won — units per week, useful for Lookalike
+                         audiences and for a revenue report, not for bidding
+
+        Until this month none of them arrived at all: the send used a legacy token field
+        holding an eight-character placeholder and every call 401'd (see capi_token)."""
         if not pixel_id or not token:
             return False
         payload = {"data": [build_event(event_name=event_name, event_id=event_id, phone=phone)]}

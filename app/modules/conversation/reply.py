@@ -16,6 +16,8 @@ import logging
 from dataclasses import replace
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
+from app.adapters.db.models import Lead
+from app.adapters.meta_capi import MetaCapi, capi_token
 from app.domain.enums import Stage
 
 from .decision import Decision, TurnDecision, generate
@@ -165,6 +167,8 @@ class ReplyService(ReplyDelivery):
             self.llm, ctx.dialog, merged, lang, self.branch_id, thread_id, budget=ctx.budget,
             product_slugs=await self._product_slugs())
         merged = merge_dossier(merged, extra)
+        if lead is not None and not stored.has_intent() and merged.has_intent():
+            await self._report_qualified(lead)
         decision = await self._vet(
             engine, ctx, messages, thread_id, decision, workflow=workflow, context=context)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
@@ -264,6 +268,29 @@ class ReplyService(ReplyDelivery):
                          self.branch_id, thread_id)
             return _escalate(fixed or decision, MONEY_ESCALATION_REASON)
         return fixed
+
+    async def _report_qualified(self, lead: Lead) -> None:
+        """Fire QualifiedLead the first turn this lead becomes one — a button-press has turned
+        into a conversation with an intent behind it.
+
+        This is the only one of our three Meta events with the volume to steer a campaign:
+        ~200 a week against ~14 hand-offs, where Meta wants ~50 a week per ad set to leave the
+        learning phase. Idempotent by event_id, and guarded by the has_intent() transition so
+        one lead reports once however many turns follow.
+
+        Never allowed to affect the reply: a failure is swallowed and logged by the adapter."""
+        cfg = self.settings
+        if cfg is None or not cfg.meta_pixel_id:
+            return
+        token = capi_token(cfg)
+        if not token:
+            return
+        await MetaCapi().send_lead(
+            cfg.meta_pixel_id, token,
+            event_id=f"qualified-{self.branch_id}-{lead.id}",
+            phone=lead.phone_e164,
+            event_name="QualifiedLead",
+        )
 
     async def _product_slugs(self) -> list[str]:
         """The branch's active course slugs — the closed set the extractor may pick from, so a

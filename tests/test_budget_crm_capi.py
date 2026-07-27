@@ -199,3 +199,47 @@ def test_a_handoff_sends_with_the_system_user_token(monkeypatch) -> None:
     })
     assert cfg.meta_pixel_id and capi_token(cfg)
     assert capi_token(cfg) != cfg.meta_capi_token
+
+
+def test_the_crm_state_carries_the_answer_to_did_they_buy() -> None:
+    """The CRM's MCP has always returned deal_won; nothing parsed it off the state, so the one
+    question the business asks had no answer in our data — which is different from zero."""
+    from app.modules.crm.gate import _parse
+
+    won = _parse({"exists": True, "crm_id": 217233, "deal_won": True,
+                  "manager_called": True, "last_manager_call_at": "2026-07-20T10:00:00"})
+    assert won.deal_won is True
+    assert won.manager_called is True
+    # Not in the contract yet — accepted under either name for the day it is added.
+    assert won.won_at is None
+    assert _parse({"exists": True, "deal_won_at": "2026-07-20"}).won_at == "2026-07-20"
+    assert _parse({"exists": True}).deal_won is False
+
+
+async def test_outcomes_polls_the_leads_the_gate_deliberately_skips(db_session) -> None:
+    """The gate asks "should the bot keep talking?", so it filters to active stages and
+    agent_enabled — and a hand-off sets the stage to ready/handed_off/manager AND mutes the
+    bot. Between them those filters hid every lead that could have bought: 53 of them, none
+    ever polled. The one won deal we knew about surfaced only because that lead happened to be
+    checked earlier, while it was still in the funnel."""
+    from app.adapters.db.models import Branch, Lead
+    from app.domain.enums import Stage
+    from app.modules.crm.pull import CrmPullService
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    handed = Lead(branch_id=b.id, stage=Stage.HANDED_OFF, phone_e164="+628111",
+                  agent_enabled=False)  # exactly what a hand-off leaves behind
+    active = Lead(branch_id=b.id, stage=Stage.QUALIFYING, phone_e164="+628222",
+                  agent_enabled=True)
+    no_phone = Lead(branch_id=b.id, stage=Stage.READY, phone_e164=None, agent_enabled=False)
+    db_session.add_all([handed, active, no_phone])
+    await db_session.flush()
+
+    svc = CrmPullService(db_session, b.id, reader=None)
+    exited = await svc._stale_exited(limit=10)  # noqa: SLF001
+    ids = {lead.id for lead in exited}
+    assert handed.id in ids, "a muted, handed-off lead is the whole point"
+    assert active.id not in ids, "still in the funnel — that is the gate's job"
+    assert no_phone.id not in ids, "no phone means no CRM lookup key"

@@ -36,6 +36,13 @@ class CrmState:
     status: str | None
     owner: str | None
     raw: dict
+    # The CRM has always sent these; nothing read them off the parsed state, so the one
+    # question the business actually asks — did this lead buy? — had no answer in our data.
+    # `won_at` is not in the contract yet (the MCP returns a bare boolean), so a deal cannot
+    # yet be tied to the moment our conversation started; see the note in pull.sync_outcomes.
+    deal_won: bool = False
+    manager_called: bool = False
+    won_at: str | None = None
 
 
 class CrmReaderPort:
@@ -90,6 +97,10 @@ def _parse(raw: dict) -> CrmState:
         exists=bool(raw.get("exists", True)),
         verdict=verdict, reason=reason,
         status=raw.get("status"), owner=raw.get("owner"), raw=raw,
+        deal_won=bool(raw.get("deal_won", False)),
+        manager_called=bool(raw.get("manager_called", False)),
+        # Accepted under either name so the day the CRM adds it, nothing here has to change.
+        won_at=raw.get("deal_won_at") or raw.get("won_at"),
     )
 
 
