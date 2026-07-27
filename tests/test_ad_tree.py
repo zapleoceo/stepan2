@@ -9,10 +9,10 @@ from __future__ import annotations
 from app.api._i18n import _lang
 from app.api._ui_panels import _ad_tree_html
 
-# (ad_id, ad_media_id, total, pipeline, won, dormant) — the fetch_ad_funnel row shape.
-ROW_A = ("igad-1", "3931661706982573994", 100, 60, 10, 30)
-ROW_B = ("igad-2", "3932264179182956279", 50, 20, 5, 25)
-ROW_ORPHAN = ("igad-9", "3902640133392596802", 40, 10, 1, 29)
+# (ad_id, ad_media_id, total, pipeline, won, dormant, deals) — the fetch_ad_funnel row shape.
+ROW_A = ("igad-1", "3931661706982573994", 100, 60, 10, 30, 2)
+ROW_B = ("igad-2", "3932264179182956279", 50, 20, 5, 25, 1)
+ROW_ORPHAN = ("igad-9", "3902640133392596802", 40, 10, 1, 29, 0)
 
 MAP = {
     "3931661706982573994": {"ad_id": "ad1", "ad_name": "Ad 1",
@@ -47,7 +47,7 @@ def test_campaign_summary_shows_cost_per_our_lead_not_per_conversation() -> None
 
 
 def test_spend_counted_once_when_two_media_map_to_the_same_ad() -> None:
-    second_medium = ("igad-1b", "3932267938260790752", 20, 5, 2, 13)
+    second_medium = ("igad-1b", "3932267938260790752", 20, 5, 2, 13, 0)
     mapping = dict(MAP)
     mapping["3932267938260790752"] = MAP["3931661706982573994"]  # same ad1
     html = _ad_tree_html([ROW_A, second_medium], mapping, SPEND)

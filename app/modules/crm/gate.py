@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -89,6 +89,20 @@ def compute_verdict(raw: dict) -> tuple[str, str]:
         reasons.append("manager owns")
     reasons += [label for key, label in _HOLD_FLAGS.items() if raw.get(key)]
     return ("hold", "; ".join(reasons)) if reasons else ("proceed", "")
+
+
+def parse_won_at(value: object) -> datetime | None:
+    """CRM close timestamp → aware datetime, or None when absent/unparseable.
+
+    The CRM does not guarantee this field, so an unusable value must degrade to "no date"
+    rather than raise — a sale with no timestamp is still a sale."""
+    if not value:
+        return None
+    try:
+        at = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
 
 
 def _parse(raw: dict) -> CrmState:
@@ -185,6 +199,8 @@ class CrmGate:
         row.status, row.owner = state.status, state.owner
         row.verdict, row.reason = state.verdict, state.reason
         row.raw = json.dumps(state.raw, ensure_ascii=False)
+        row.deal_won = state.deal_won
+        row.deal_won_at = parse_won_at(state.won_at)
         row.fetched_at = utc_now()
         self.session.add(row)
         await self.session.flush()

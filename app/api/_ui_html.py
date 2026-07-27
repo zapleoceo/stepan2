@@ -256,6 +256,10 @@ _CSS = (
     "padding:.5rem .75rem;min-width:90px}"
     ".kpi-n{font-size:1.5rem;font-weight:800;line-height:1.15}"
     ".kpi-l{font-size:.64rem;color:#6b7685;margin-top:.1rem}"
+    # Per-day bars under the number. flex-end so bars grow upward from a shared baseline;
+    # each <i> carries its own height% and a day:count tooltip.
+    ".kpi-spark{display:flex;align-items:flex-end;gap:1px;height:18px;margin-top:.3rem}"
+    ".kpi-spark i{flex:1 1 0;min-width:1px;border-radius:1px}"
     ".rep-tbl{width:auto;border-collapse:collapse;font-size:.77rem;margin-bottom:.7rem}"
     ".rep-tbl th{text-align:left;color:#6b7685;font-weight:600;font-size:.65rem;"
     "padding:.25rem .55rem;border-bottom:1px solid #2d3748;white-space:nowrap}"
@@ -320,6 +324,12 @@ _CSS = (
     ".ncl-n{position:relative;z-index:1;font-size:.62rem;color:#8899aa;font-weight:600}"
     ".ncl-empty{font-size:.62rem;color:#6b7685;padding:.2rem .3rem}"
     # compact mini variant of the activity chart (placed high in the reports panel)
+    # Date filter left, hour histogram right; the histogram keeps its own max-width and
+    # drops under the dates on a narrow screen rather than squeezing them.
+    ".rep-top{display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap;"
+    "justify-content:space-between}"
+    ".rep-top-dates{flex:1 1 340px;min-width:0}"
+    ".rep-top .mini-act{flex:1 1 420px;margin:0}"
     ".mini-act{margin:.55rem 0 .3rem;max-width:520px}"
     ".mini-act-hd{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;"
     "flex-wrap:wrap;margin-bottom:.25rem}"

@@ -21,13 +21,13 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import CrmLeadState, Lead
-from app.modules.crm.gate import CrmGate, CrmReaderPort
+from app.modules.crm.gate import CrmGate, CrmReaderPort, parse_won_at
 from app.modules.settings.service import get_settings
 
 logger = logging.getLogger(__name__)
@@ -50,15 +50,9 @@ def _ours(state, lead: Lead) -> bool:  # noqa: ANN001
     An unknown date counts as ours. The alternative is discarding a real sale because the CRM
     happened not to timestamp it, and under-reporting revenue is the more expensive mistake
     here: it is the number the whole channel is judged on."""
-    won_at = getattr(state, "won_at", None)
-    if not won_at or lead.created_at is None:
+    at = parse_won_at(getattr(state, "won_at", None))
+    if at is None or lead.created_at is None:
         return True
-    try:
-        at = datetime.fromisoformat(str(won_at))
-    except ValueError:
-        return True
-    if at.tzinfo is None:
-        at = at.replace(tzinfo=UTC)
     started = lead.created_at
     if started.tzinfo is None:
         started = started.replace(tzinfo=UTC)

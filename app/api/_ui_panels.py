@@ -1,6 +1,7 @@
 """HTML generators for data panels: coach chat, knowledge, products, members, settings."""
 from __future__ import annotations
 
+import datetime as _dt
 import html as _h
 import json as _json
 from datetime import UTC, datetime, timedelta
@@ -1433,6 +1434,55 @@ _AD_TREE_CSS = (
 )
 
 
+def _series(daily: dict, metric: str) -> str:
+    """A metric's per-day counts as 'YYYY-MM-DD:n,…', oldest first — the sparkline's input.
+
+    Days with no events are absent from the query result and are NOT filled in here: the gap
+    is filled by _sparkline, which needs the calendar span anyway to size its bars."""
+    return ",".join(f"{d}:{n}" for d, n in sorted(daily.get(metric, {}).items()))
+
+
+def _sparkline(series: str, color: str) -> str:
+    """Per-day bars inside a KPI card: does this number come from a steady trickle or from
+    one spike? A total alone cannot say, and on this panel that difference is the whole
+    story — 138 hand-offs is a healthy week or a single batch depending on the shape.
+
+    Missing days are rendered as zero-height bars so the x-axis stays calendar-true; a gap
+    drawn as "no bar" would silently compress a quiet stretch and flatter the trend."""
+    points = []
+    for chunk in series.split(","):
+        day, _, n = chunk.partition(":")
+        if n.isdigit():
+            points.append((day, int(n)))
+    if len(points) < 2:  # one bar is not a trend, it is a rectangle
+        return ""
+    days = {d: n for d, n in points}
+    span = _day_span(points[0][0], points[-1][0])
+    bars = ""
+    peak = max(days.values()) or 1
+    for day in span:
+        n = days.get(day, 0)
+        h = round(n / peak * 100)
+        bars += (
+            f'<i style="height:{max(h, 2) if n else 1}%;background:{color};'
+            f'opacity:{1 if n else .18}" title="{_h.escape(day)}: {n}"></i>'
+        )
+    return f'<div class="kpi-spark">{bars}</div>'
+
+
+def _day_span(first: str, last: str) -> list[str]:
+    """Every calendar day from first to last inclusive. Capped so an all-time range cannot
+    render a thousand one-pixel bars nobody can read — the tail is the part anyone looks at,
+    so the cap keeps the MOST RECENT days."""
+    try:
+        start = _dt.date.fromisoformat(first)
+        end = _dt.date.fromisoformat(last)
+    except ValueError:
+        return []
+    days = [start + _dt.timedelta(days=i) for i in range((end - start).days + 1)]
+    return [d.isoformat() for d in days[-90:]]
+
+
 def _money(value: float) -> str:
     return f"${value:,.2f}" if value else "—"
 
@@ -1452,23 +1502,21 @@ def _merge_ad_rows(rows: list, keys: list) -> list:
     IG-post icons still reach every underlying id."""
     merged: dict[object, list] = {}
     for row, key in zip(rows, keys, strict=True):
-        ad_id, media_id, total, pipeline, won, dormant = row
+        ad_id, media_id, *counts = row
         cur = merged.get(key)
         if cur is None:
-            merged[key] = [
-                [str(ad_id)], [str(media_id)] if media_id else [],
-                int(total or 0), int(pipeline or 0), int(won or 0), int(dormant or 0),
-            ]
+            merged[key] = [[str(ad_id)], [str(media_id)] if media_id else [],
+                           *(int(c or 0) for c in counts)]
             continue
         if str(ad_id) not in cur[0]:
             cur[0].append(str(ad_id))
         if media_id and str(media_id) not in cur[1]:
             cur[1].append(str(media_id))
-        for i, val in enumerate((total, pipeline, won, dormant), start=2):
+        for i, val in enumerate(counts, start=2):
             cur[i] += int(val or 0)
     out = [
-        (key, (ids, ",".join(medias), total, pipeline, won, dormant))
-        for key, (ids, medias, total, pipeline, won, dormant) in merged.items()
+        (key, (ids, ",".join(medias), *counts))
+        for key, (ids, medias, *counts) in merged.items()
     ]
     return sorted(out, key=lambda kr: -kr[1][2])
 
@@ -1505,13 +1553,14 @@ def _ad_tree_html(
             continue
         key = mapped.get("campaign_name") or "—"
         grp = groups.setdefault(key, {"rows": [], "keys": [], "by_ad": {}, "spend": 0.0,
-                                      "leads": 0, "won": 0, "started": 0, "d5": 0,
-                                      "blocks": 0, "seen": set()})
+                                      "leads": 0, "won": 0, "deals": 0, "started": 0,
+                                      "d5": 0, "blocks": 0, "seen": set()})
         grp["rows"].append(row)
         grp["keys"].append(mapped["ad_id"])
         grp["by_ad"][mapped["ad_id"]] = mapped
         grp["leads"] += int(row[2] or 0)
         grp["won"] += int(row[4] or 0)
+        grp["deals"] += int(row[6] or 0)
         # Several media can resolve to ONE ad — count its spend once, not per medium.
         ad_id = mapped["ad_id"]
         if ad_id not in grp["seen"]:
@@ -1536,8 +1585,8 @@ def _ad_tree_html(
     def _ad_rows(items: list, with_spend: bool) -> str:
         out = ""
         for row, mapped in items:
-            ad_ids, ad_media_id, total, pipeline, won, dormant = row
-            total, won = int(total or 0), int(won or 0)
+            ad_ids, ad_media_id, total, pipeline, won, dormant, deals = row
+            total, won, deals = int(total or 0), int(won or 0), int(deals or 0)
             conv = round(won / total * 100, 1) if total else 0.0
             ad_id = ",".join(ad_ids)
             aid = _h.escape(ad_id)
@@ -1552,7 +1601,9 @@ def _ad_tree_html(
                 m = ad_spend.get(mapped["ad_id"]) or {}
                 spend = float(m.get("spend") or 0.0)
                 cpl = spend / total if total else 0.0
-                cpw = spend / won if won else 0.0
+                # Cost per SALE, from the CRM — not per hand-off. Those differ by however
+                # many managers' conversations end without money.
+                cpw = spend / deals if deals else 0.0
                 spend_cells = (
                     f'<td class="rep-n">{_money(spend)}</td>'
                     f'<td class="rep-n">{int(m.get("conv_started") or 0) or "—"}</td>'
@@ -1575,6 +1626,7 @@ def _ad_tree_html(
                 f'{_count_cell(aid, "", total, "")}'
                 f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'
                 f'{_count_cell(aid, "won", won, "#51cf66")}'
+                f'{_count_cell(aid, "deal", deals, "#ffd43b")}'
                 f'{_count_cell(aid, "dormant", int(dormant or 0), "#868e96")}'
                 f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
             )
@@ -1595,7 +1647,8 @@ def _ad_tree_html(
             ]
         cols += [
             ("rep.total", True, "min", True), ("rep.pipeline", True, "min", True),
-            ("rep.won", True, "min", True), ("rep.dormant", True, "min", True),
+            ("rep.won", True, "min", True), ("rep.deal", True, "min", True),
+            ("rep.dormant", True, "min", True),
             ("rep.conv", True, "min", True),
         ]
         return _ad_funnel_header(cols, products or [])
@@ -1612,6 +1665,8 @@ def _ad_tree_html(
             f'<b>{_money(grp["spend"])}</b> · '
             f'{_h.escape(t("rep.ads_leads"))} <b>{grp["leads"]}</b> · '
             f'{_h.escape(t("rep.ads_won"))} <b>{grp["won"]}</b> · '
+            f'{_h.escape(t("rep.deal"))} '
+            f'<b style="color:#ffd43b">{grp["deals"]}</b> · '
             f'{_h.escape(t("rep.ads_cpl"))} <b>{_money(cpl)}</b>{blocks}</span>'
             f'</summary><table class="rep-tbl rep-sortable">{_head(True)}'
             f'<tbody>{_ad_rows(_grp_items(grp), True)}</tbody></table></details>'
@@ -1998,10 +2053,9 @@ def _segment_tree_html(segments: list, seg_stage_by_aud: dict | None = None) -> 
                                    seg_stage_map=(seg_stage_by_aud or {}).get(aud, {}))
         if not svg:
             continue
-        cap = "" if single else (
-            f'<div style="font-size:.72rem;color:#8899aa;margin:.6rem 0 .1rem;'
-            f'font-weight:600">{_h.escape(t(f"aud.{aud}"))}</div>')
-        blocks += f'{cap}<div class="seg-tree">{svg}</div>'
+        # No caption above the block: the root card already carries the audience name, and
+        # printing it twice made three headings compete with three identical-looking cards.
+        blocks += f'<div class="seg-tree">{svg}</div>'
     if not blocks:
         return ""
     return (
@@ -2069,53 +2123,47 @@ def reports_panel_html(
     total_leads: int = 0,
     needs_cloud: dict | None = None,
     closed_in_period: int | None = None,
+    deals: int | None = None,
+    daily_kpis: dict[str, dict[str, int]] | None = None,
     media_to_ad: dict[str, dict] | None = None,
     ad_spend: dict[str, dict] | None = None,
     ads_synced_at: object = None,
 ) -> str:
-    _pipeline = ("new", "nurturing", "qualifying", "presenting", "objection")
-    _won = ("ready", "handed_off")
     total = sum(stage_counts.values())
-    pipeline = sum(stage_counts.get(s, 0) for s in _pipeline)
-    won = sum(stage_counts.get(s, 0) for s in _won)
-    dormant = stage_counts.get("dormant", 0)
 
-    def _kpi(label: str, value: str, color: str = "#e8eef4") -> str:
+    def _kpi(label: str, value: str, color: str = "#e8eef4", series: str = "") -> str:
         return (
-            f'<div class="kpi">'
+            f'<div class="kpi" title="{_h.escape(t(f"{label}.hint"))}">'
             f'<div class="kpi-n" style="color:{color}">{_h.escape(value)}</div>'
-            f'<div class="kpi-l">{_h.escape(t(label))}</div></div>'
+            f'<div class="kpi-l">{_h.escape(t(label))}</div>'
+            f'{_sparkline(series, color) if series else ""}</div>'
         )
 
+    daily = daily_kpis or {}
+    # Every tile below is an EVENT counted inside the window: a lead arriving, a hand-off, a
+    # CRM close, a lead going quiet, a message. The old panel mixed those with cohort reads
+    # ("of the leads that arrived, how many are NOW in stage X"), so two tiles could both be
+    # right and still disagree — "Продано из пришедших 53" next to "Продано за период 138".
+    # The current-stage snapshot did not disappear: it is the funnel line further down, which
+    # is the honest place for it. Reworked 2026-07-27.
+    total_in = sum(hour_in.values())
+    total_out = sum(hour_out.values())
     kpis = (
-        _kpi("rep.total", str(total))
-        + _kpi("rep.pipeline", str(pipeline), "#9b7aff")
-        + _kpi("rep.won", str(won), "#51cf66")
-        + _kpi("rep.dormant", str(dormant), "#868e96")
+        _kpi("rep.total", str(total), series=_series(daily, "leads"))
+        + _kpi("rep.closed_period", str(closed_in_period or 0), "#51cf66",
+               _series(daily, "handoff"))
+        # The only tile that means money — everything else counts conversations.
+        + _kpi("rep.deal", str(deals or 0), "#ffd43b", _series(daily, "deal"))
+        + _kpi("rep.dormant_period", str(sum(daily.get("dormant", {}).values())), "#868e96",
+               _series(daily, "dormant"))
+        + _kpi("rep.msgs_tile", f"{total_out}↑ / {total_in}↓", "#63c5ff",
+               _series(daily, "messages"))
     )
-    # 'Won' above counts the CHOSEN COHORT's current stage (leads that started in the window).
-    # This one counts deals actually closed INSIDE the window whenever the lead first wrote —
-    # over 3 days the cohort read 2 while 11 really closed (2026-07-15). Both are true; showing
-    # them side by side stops "sales this period" from being read off the cohort number.
-    # The old "Конверсия" tile sat between them and was neither: won ÷ total, a third number
-    # derived from two already on screen, and on a 24h window it is mostly noise (1.3% off a
-    # single sale). Dropped 2026-07-26.
-    if closed_in_period is not None:
-        kpis += _kpi("rep.closed_period", str(closed_in_period), "#51cf66")
-    if discovery is not None:
+    if discovery is not None:  # rates, not events — a daily series of a ratio is noise
         kpis += (
             _kpi("rep.discovered", f"{discovery.get('pct', 0):g}%", "#4da6ff")
             + _kpi("rep.disc_len", f"{discovery.get('avg_msgs', 0):g}", "#4da6ff")
         )
-
-    # message totals for the period (drives the "N messages" headline over the chart)
-    total_in = sum(hour_in.values())
-    total_out = sum(hour_out.values())
-    kpis += _kpi(
-        "rep.msgs_tile",
-        f"{total_out}↑ / {total_in}↓",
-        "#63c5ff",
-    )
 
     # compact hourly-activity mini-chart placed high in the panel — grouped in/out bars per
     # hour-of-day, scaled to the busiest in/out count so the two directions compare directly;
@@ -2158,14 +2206,20 @@ def reports_panel_html(
         f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.reports"))}">'
         f'{title_lbl}</span></div>'
         f'<div class="pnl-body">'
-        f'{_date_range_form_html(date_from, date_to, active_range)}'
+        # Date controls and the hour histogram sit side by side: both answer "which slice am
+        # I looking at", and the histogram was previously stranded below the funnel, far from
+        # the filter that scopes it.
+        f'<div class="rep-top">'
+        f'<div class="rep-top-dates">'
+        f'{_date_range_form_html(date_from, date_to, active_range)}</div>'
+        f'{mini_act}'
+        f'</div>'
         f'<div class="kpi-row">{kpis}</div>'
         f'{_segment_tree_html(segments or [], segment_stages)}'
         f'<div class="rep-fc">'
-        f'<div class="rep-fc-funnel">{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}</div>'  # noqa: E501
         f'{_needs_cloud_html(needs_cloud)}'
+        f'<div class="rep-fc-funnel">{_funnel_flow_html(stage_flow or [], stage_reach, total_leads) or _funnel_line_html(stage_counts)}</div>'  # noqa: E501
         f'</div>'
-        f'{mini_act}'
         f'{_ad_tree_html(ad_funnel or [], media_to_ad or {}, ad_spend or {}, ads_synced_at, fb_business_id, fb_account_id, mappings=ad_mappings, suggestions=ad_suggestions, products=products)}'  # noqa: E501
         f'</div>'
     )

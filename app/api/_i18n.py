@@ -463,30 +463,60 @@ _TR: dict[str, dict[str, str]] = {
               "cost-per-conversation hides.",
         "id": "Belanja ÷ lead kami. Biaya per lead sebenarnya."},
     "rep.ads_cpw.hint": {
-        "ru": "Расход ÷ выигранные лиды. Во сколько обошёлся лид, дошедший до передачи.",
-        "en": "Spend ÷ won leads. What a lead that reached hand-off actually cost.",
-        "id": "Belanja ÷ lead menang."},
+        "ru": "Расход ÷ сделки из CRM. Сколько реклама стоила за одну реальную продажу. "
+              "Прочерк — продаж по этому объявлению CRM пока не показывает.",
+        "en": "Spend ÷ CRM deals. What the ads cost per actual sale. A dash means the CRM "
+              "shows no sale from this ad yet.",
+        "id": "Belanja ÷ deal di CRM. Biaya iklan per penjualan nyata."},
     "rep.total.hint": {
-        "ru": "Всего наших лидов с этого объявления за период.",
-        "en": "All our leads from this ad in the period.",
-        "id": "Semua lead kami dari iklan ini."},
+        "ru": "Наши лиды, чей разговор начался внутри окна. Столбики — по дням.",
+        "en": "Our leads whose conversation started inside the window. Bars are per day.",
+        "id": "Lead kami yang percakapannya dimulai dalam periode ini."},
     "rep.pipeline.hint": {
         "ru": "Лиды в работе: nurturing, qualifying, presenting, objection.",
         "en": "Leads in play: nurturing, qualifying, presenting, objection.",
         "id": "Lead dalam proses."},
     "rep.won.hint": {
-        "ru": "Из тех, чей разговор НАЧАЛСЯ в этом окне, сколько сейчас в ready/handed_off. "
-              "Когорта: продажа лиду, пришедшему раньше, сюда не попадёт — она в «Продано "
-              "за период».",
-        "en": "Of the leads whose conversation STARTED in this window, how many are now "
-              "ready/handed_off. A sale to an older lead lands in 'Closed in period'.",
-        "id": "Dari lead yang mulai di periode ini, berapa yang sekarang ready/handed_off."},
+        "ru": "Разговор дошёл до человека: лид в ready/handed_off. Это НЕ продажа — деньги "
+              "показывает колонка «Сделка».",
+        "en": "The conversation reached a human: ready/handed_off. NOT a sale — money is "
+              "the 'Deal' column.",
+        "id": "Percakapan sampai ke manusia (ready/handed_off), bukan penjualan."},
+    "rep.deal.hint": {
+        "ru": "Продажа по данным CRM: карточка закрыта как выигранная, ПОСЛЕ начала нашего "
+              "диалога, и дата закрытия попадает в окно. Сделка без даты закрытия видна "
+              "только на «всё время» — внутри окна её честно разместить не на чем.",
+        "en": "A sale per the CRM: the card is won, closed AFTER our conversation began, "
+              "and the close date falls inside the window. An untimed close shows only on "
+              "the all-time range — there is no honest way to place it in a window.",
+        "id": "Penjualan menurut CRM, ditutup setelah percakapan kami dimulai."},
     "rep.closed_period.hint": {
-        "ru": "Сколько сделок закрылось ВНУТРИ окна, независимо от того, когда лид написал "
-              "впервые. Это ответ на «сколько продали за период».",
-        "en": "Deals that closed INSIDE the window, whenever the lead first wrote. This is "
-              "the 'how much did we sell' number.",
-        "id": "Deal yang ditutup dalam periode ini, kapan pun lead pertama menulis."},
+        "ru": "Сколько лидов ВНУТРИ окна дошли до человека (ready/handed_off), независимо "
+              "от того, когда лид написал впервые. Это не продажа — продажу показывает "
+              "«Сделка».",
+        "en": "Leads that reached a human (ready/handed_off) INSIDE the window, whenever "
+              "they first wrote. Not a sale — that is 'Deal'.",
+        "id": "Lead yang sampai ke manusia dalam periode ini. Bukan penjualan."},
+    "rep.dormant_period.hint": {
+        "ru": "Сколько лидов замолчали ВНУТРИ окна. Событие, а не срез: считается переход "
+              "в dormant, а не то, сколько их сейчас всего.",
+        "en": "Leads that went quiet INSIDE the window. An event, not a snapshot: the "
+              "transition into dormant, not how many sit there now.",
+        "id": "Lead yang berhenti merespons dalam periode ini."},
+    "rep.msgs_tile.hint": {
+        "ru": "Сообщения, отправленные и полученные ВНУТРИ окна. Столбики — по дням.",
+        "en": "Messages sent and received INSIDE the window. Bars are per day.",
+        "id": "Pesan keluar dan masuk dalam periode ini."},
+    "rep.discovered.hint": {
+        "ru": "Доля лидов с реально зафиксированной болью — не просто прошедших стадию "
+              "qualifying.",
+        "en": "Share of leads with a real captured pain, not merely a pass through the "
+              "qualifying stage.",
+        "id": "Porsi lead dengan pain yang benar-benar tergali."},
+    "rep.disc_len.hint": {
+        "ru": "Сколько сообщений в среднем уходит на выявление боли.",
+        "en": "How many messages it takes on average to capture a pain.",
+        "id": "Rata-rata pesan untuk menggali pain."},
     "rep.dormant.hint": {
         "ru": "Замолчали и не отвечают. Обычно это те самые односложные «Hi».",
         "en": "Went silent. Usually the one-word 'Hi' crowd.",
@@ -506,7 +536,7 @@ _TR: dict[str, dict[str, str]] = {
     "rep.ads_leads":    {"ru": "Наших лидов", "en": "Our leads", "id": "Lead kami"},
     "rep.ads_won":      {"ru": "Выиграно", "en": "Won", "id": "Menang"},
     "rep.ads_cpl":      {"ru": "Цена лида", "en": "Cost / lead", "id": "Biaya / lead"},
-    "rep.ads_cpw":      {"ru": "Цена выигр.", "en": "Cost / won", "id": "Biaya / menang"},
+    "rep.ads_cpw":      {"ru": "Цена сделки", "en": "Cost / deal", "id": "Biaya / deal"},
     "rep.ads_blocks":   {"ru": "Блокировок", "en": "Blocks", "id": "Blokir"},
     "rep.ads_total":    {"ru": "Итого", "en": "Total", "id": "Total"},
     "rep.ads_coverage": {"ru": "Связано с рекламой", "en": "Matched to ads",
@@ -1152,10 +1182,19 @@ _TR: dict[str, dict[str, str]] = {
     "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
     "rep.total":   {"ru": "Всего лидов",    "en": "Total leads",  "id": "Total lead"},
     "rep.pipeline":{"ru": "В работе",       "en": "Pipeline",     "id": "Pipeline"},
-    "rep.won":     {"ru": "Продано из пришедших", "en": "Won (cohort)",
-                    "id": "Berhasil (kohort)"},
-    "rep.closed_period": {"ru": "Продано за период", "en": "Closed in period",
-                          "id": "Ditutup periode ini"},
+    # NOT a sale: ready/handed_off means a human took the thread over. The sale is rep.deal,
+    # which comes from the CRM. Calling this one "Продано" credited the bot with every
+    # hand-off, whether or not anybody ever paid.
+    "rep.won":     {"ru": "Передано менеджеру", "en": "Handed to a human",
+                    "id": "Diserahkan ke manusia"},
+    "rep.deal":    {"ru": "Сделка",          "en": "Deal",         "id": "Deal"},
+    # Renamed 2026-07-27: it counts leads that reached a human inside the window, which is
+    # not a sale. The sale is rep.deal, and calling both "продано" is what let the panel
+    # show two different "sales" numbers at once.
+    "rep.closed_period": {"ru": "Передано менеджеру", "en": "Handed over",
+                          "id": "Diserahkan"},
+    "rep.dormant_period": {"ru": "Уснули за период", "en": "Went quiet",
+                           "id": "Jadi diam"},
     "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},
     "rep.dormant": {"ru": "Спящие",         "en": "Dormant",      "id": "Tidak aktif"},
     # Counts a real captured PAIN, not a pass through the 'qualifying' stage (every lead

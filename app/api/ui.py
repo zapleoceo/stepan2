@@ -26,6 +26,7 @@ from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     AD_FUNNEL_GROUPS,
     AWAITING_BASE,
+    DEAL_WON,
     IN_QUEUE_EXTRA,
     _branch_where,
     awaiting_cutoff,
@@ -245,6 +246,8 @@ async def threads_partial(
         names = [f":ad{i}" for i in range(len(ads))]
         conditions.append(f"ct.ad_id IN ({', '.join(names)})")
         params.update({f"ad{i}": a for i, a in enumerate(ads)})
+    if grp.strip() == "deal":  # the Сделка column — a CRM outcome, not a stage
+        conditions.append(DEAL_WON)
     grp_stages = AD_FUNNEL_GROUPS.get(grp.strip())
     if grp_stages:  # a funnel count column (В работе / Закрытые / Спящие) was clicked
         names = [f":g{i}" for i in range(len(grp_stages))]

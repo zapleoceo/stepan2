@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import case, func, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import (
@@ -11,14 +11,30 @@ from app.adapters.db.models import (
     AdInsightDaily,
     Branch,
     ChannelThread,
+    CrmLeadState,
     Lead,
+    Message,
     StageEvent,
 )
 from app.config import settings
 from app.domain.clock import utc_now
 
 _PIPELINE_STAGES = ("qualifying", "presenting", "objection", "nurturing")
+# NOT a sale — these two stages mean "a human took over". The sale itself is DEAL_WON below,
+# and the two must never be conflated: every lead that reaches a manager lands here, whether
+# or not it ever pays.
 _WON_STAGES = ("ready", "handed_off")
+
+# The real outcome, from the CRM. `deal_won_at` is null-tolerant on purpose: the CRM does not
+# always timestamp a close, and dropping an untimed sale under-reports the number the whole
+# channel is judged on. When it IS timestamped, a close that predates our first message is
+# somebody else's sale — a walk-in or last year's enquiry attached to a phone we happen to
+# hold — and crediting it here would teach Meta to buy an audience that already converts.
+DEAL_WON = (
+    "EXISTS (SELECT 1 FROM crm_lead_state cs WHERE cs.lead_id = l.id"
+    " AND cs.deal_won = true"
+    " AND (cs.deal_won_at IS NULL OR cs.deal_won_at >= l.created_at))"
+)
 
 # Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked,
 # on a WORKING connector (Meta Business is excluded until its connector is finished — those
@@ -46,6 +62,20 @@ def awaiting_cutoff() -> datetime:
 
 # Ad-funnel count columns → the exact stage set each number counts, so the chat-list
 # links behind those numbers match the counts shown (see _ad_funnel_html / threads_partial).
+def deal_won_clause():  # noqa: ANN201 - SQLAlchemy expression
+    """ORM twin of DEAL_WON, for the queries that must also run on SQLite (tests)."""
+    return (
+        select(CrmLeadState.id)
+        .where(
+            CrmLeadState.lead_id == Lead.id,  # type: ignore[arg-type]
+            CrmLeadState.deal_won.is_(True),  # type: ignore[union-attr]
+            or_(CrmLeadState.deal_won_at.is_(None),  # type: ignore[union-attr]
+                CrmLeadState.deal_won_at >= Lead.created_at),  # type: ignore[operator]
+        )
+        .exists()
+    )
+
+
 AD_FUNNEL_GROUPS: dict[str, tuple[str, ...]] = {
     "pipeline": _PIPELINE_STAGES,
     "won": _WON_STAGES,
@@ -57,10 +87,11 @@ async def fetch_ad_funnel(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
 ) -> list:
-    """Per-ad funnel: leads from each ad, counted by pipeline / won / dormant.
+    """Per-ad funnel: leads from each ad, counted by pipeline / handed-off / dormant / sold.
 
     ORM (not raw ANY) so it runs on SQLite too. Rows: (ad_id, ad_media_id, total,
-    pipeline, won, dormant), busiest ad first. since/until scope by the lead's
+    pipeline, won, dormant, deals), busiest ad first. `deals` is the CRM's closed sale —
+    the only column here that means money changed hands. since/until scope by the lead's
     conversation-start date — the same window as the rest of the reports panel, so
     picking a date range affects this table too, not just the KPIs above it."""
     won = func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0))
@@ -72,6 +103,7 @@ async def fetch_ad_funnel(
             func.sum(case((Lead.stage.in_(_PIPELINE_STAGES), 1), else_=0)).label("pipeline"),
             won.label("won"),
             func.sum(case((Lead.stage == "dormant", 1), else_=0)).label("dormant"),
+            func.sum(case((deal_won_clause(), 1), else_=0)).label("deals"),
         )
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
         .where(ChannelThread.ad_id.is_not(None))  # type: ignore[union-attr]
@@ -585,6 +617,111 @@ async def fetch_closed_in_period(
     if until is not None:
         q = q.where(StageEvent.created_at < until)  # type: ignore[attr-defined]
     return int((await session.execute(q)).scalar_one() or 0)
+
+
+async def fetch_deals_count(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> int:
+    """Real sales in the window, from the CRM — the only number here that means money.
+
+    Dated by the CLOSE, not by when the lead first wrote. "How much did we sell this week"
+    must not depend on how old the buyer's conversation is; a cohort read answers a different
+    question and, on a short window, answers it as a much smaller number.
+
+    An undated win is counted only when no window is set: without a date there is no honest
+    way to say it happened inside one."""
+    q = (
+        select(func.count())
+        .select_from(CrmLeadState)
+        .join(Lead, Lead.id == CrmLeadState.lead_id)  # type: ignore[arg-type]
+        .where(
+            CrmLeadState.deal_won.is_(True),  # type: ignore[union-attr]
+            # Same ownership rule as deal_won_clause: a card closed before our first message
+            # is somebody else's sale.
+            or_(CrmLeadState.deal_won_at.is_(None),  # type: ignore[union-attr]
+                CrmLeadState.deal_won_at >= Lead.created_at),  # type: ignore[operator]
+        )
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    if since is not None:
+        q = q.where(CrmLeadState.deal_won_at >= since)  # type: ignore[operator]
+    if until is not None:
+        q = q.where(CrmLeadState.deal_won_at < until)  # type: ignore[operator]
+    return int((await session.execute(q)).scalar_one() or 0)
+
+
+_KPI_METRICS = ("leads", "handoff", "deal", "dormant", "messages")
+
+
+async def fetch_daily_kpis(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> dict[str, dict[str, int]]:
+    """Per-day counts for every headline KPI: {metric: {'YYYY-MM-DD': n}}.
+
+    Every metric here is an EVENT dated inside the window — a lead arriving, a hand-off, a
+    CRM close, a lead going quiet, a message. None of them is a cohort read ("of the leads
+    that arrived, how many are now in X"), which is what made two tiles on this panel
+    disagree while both were technically true.
+
+    Days are UTC. A branch-local bucket would shift roughly a third of a Jakarta evening into
+    the next day, but the series exists to show shape and trend, and re-bucketing it per
+    branch would make a cross-branch view meaningless anyway.
+
+    A won deal with no close date cannot be placed on a day, so it is absent here while still
+    counting in the total — see fetch_deals_count."""
+    out: dict[str, dict[str, int]] = {m: {} for m in _KPI_METRICS}
+
+    async def _run(metric: str, col, q, distinct_lead: bool = False) -> None:  # noqa: ANN001
+        # Stage events double-count: one lead can cross into `ready` and then `handed_off`
+        # on the same day. Counting distinct leads keeps the series comparable to the tile.
+        n_expr = func.count(func.distinct(Lead.id)) if distinct_lead else func.count()
+        day = func.date(col).label("d")
+        q = q.add_columns(day, n_expr.label("n")).group_by(day)
+        if since is not None:
+            q = q.where(col >= since)
+        if until is not None:
+            q = q.where(col < until)
+        for d, n in (await session.execute(q)).all():
+            out[metric][str(d)[:10]] = int(n or 0)
+
+    lead_q = select().select_from(Lead)
+    if branch_ids:
+        lead_q = lead_q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    await _run("leads", Lead.created_at, lead_q)
+
+    def _events(stages: tuple[str, ...]):  # noqa: ANN202
+        q = (
+            select()
+            .select_from(StageEvent)
+            .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
+            .where(StageEvent.to_stage.in_(stages))  # type: ignore[attr-defined]
+        )
+        return q.where(Lead.branch_id.in_(branch_ids)) if branch_ids else q  # type: ignore[attr-defined]
+
+    await _run("handoff", StageEvent.created_at, _events(_WON_STAGES), distinct_lead=True)
+    await _run("dormant", StageEvent.created_at, _events(("dormant",)), distinct_lead=True)
+
+    deal_q = (
+        select()
+        .select_from(CrmLeadState)
+        .join(Lead, Lead.id == CrmLeadState.lead_id)  # type: ignore[arg-type]
+        .where(
+            CrmLeadState.deal_won.is_(True),  # type: ignore[union-attr]
+            CrmLeadState.deal_won_at >= Lead.created_at,  # type: ignore[operator]
+        )
+    )
+    if branch_ids:
+        deal_q = deal_q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    await _run("deal", CrmLeadState.deal_won_at, deal_q)
+
+    msg_q = select().select_from(Message)
+    if branch_ids:
+        msg_q = msg_q.where(Message.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    await _run("messages", Message.occurred_at, msg_q)
+    return out
 
 
 async def fetch_discovery_metrics(

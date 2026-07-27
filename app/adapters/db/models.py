@@ -468,6 +468,10 @@ class CrmLeadState(SQLModel, table=True):
     verdict: str = Field(default="proceed", description="proceed|hold")
     reason: str | None = Field(default=None)
     raw: str | None = Field(default=None, description="verbatim CRM JSON for display/debug")
+    # Columns, not just fields inside `raw`: this is the one outcome the whole channel is
+    # judged on, and a report cannot count a JSON blob.
+    deal_won: bool = Field(default=False, index=True)
+    deal_won_at: datetime | None = Field(default=None)
     fetched_at: datetime = Field(default_factory=_utcnow, index=True)
 
 

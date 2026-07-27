@@ -11,7 +11,7 @@ from __future__ import annotations
 from app.api._i18n import _lang, t
 from app.api._ui_panels import _ad_tree_html, _col_hint
 
-ROW = ("igad-1", "3931661706982573994", 100, 60, 10, 30)
+ROW = ("igad-1", "3931661706982573994", 100, 60, 10, 30, 2)
 MAP = {"3931661706982573994": {"ad_id": "ad1", "ad_name": "Ad 1",
                                "campaign_name": "Vibe Coding", "objective": "OUTCOME_ENGAGEMENT"}}
 SPEND = {"ad1": {"spend": 300.0, "conv_started": 600, "conv_depth_5": 40, "blocks": 12}}

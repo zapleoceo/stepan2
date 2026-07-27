@@ -16,7 +16,7 @@ from app.api._ui_panels import _ad_tree_html, admap_cell_inner  # noqa: E402
 from app.api.main import app  # noqa: E402
 
 _PRODUCTS = [("vibe_coding", "Vibe Coding"), ("smm_intensive", "SMM Intensive")]
-_ROWS = [("AD1", "3932267938260790752", 10, 4, 3, 3), ("AD2", None, 5, 2, 1, 2)]
+_ROWS = [("AD1", "3932267938260790752", 10, 4, 3, 3, 1), ("AD2", None, 5, 2, 1, 2, 0)]
 
 
 def _set_lang(code: str = "en") -> None:
@@ -82,7 +82,7 @@ def test_ad_funnel_empty_rows_render_nothing() -> None:
 def test_ad_funnel_counts_link_to_filtered_chats() -> None:
     _set_lang()
     # row AD1: total=10, pipeline=4, won=3, dormant=3
-    html = _ad_tree_html([("AD1", None, 10, 4, 3, 3)], {}, {}, products=_PRODUCTS)
+    html = _ad_tree_html([("AD1", None, 10, 4, 3, 3, 1)], {}, {}, products=_PRODUCTS)
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1">10</a>' in html   # total → all chats
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=pipeline">4</a>' in html
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=won">3</a>' in html

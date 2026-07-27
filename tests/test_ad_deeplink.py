@@ -10,8 +10,8 @@ from __future__ import annotations
 from app.api._i18n import _lang
 from app.api._ui_panels import _ad_tree_html, _ads_manager_url
 
-ROW = ("igad-1", "3931661706982573994", 100, 60, 10, 30)
-ORPHAN = ("igad-9", "3902640133392596802", 40, 10, 1, 29)
+ROW = ("igad-1", "3931661706982573994", 100, 60, 10, 30, 2)
+ORPHAN = ("igad-9", "3902640133392596802", 40, 10, 1, 29, 0)
 MAP = {
     "3931661706982573994": {
         "ad_id": "120251248019540560", "ad_name": "Ad 1", "campaign_name": "Vibe Coding",
