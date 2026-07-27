@@ -238,10 +238,13 @@ async def threads_partial(
     elif aud:  # "open this audience's chats" — pairs with lead_type for a warm+student link
         conditions.append("l.audience = :audience")
         params["audience"] = aud
-    ad = ad_id.strip()
-    if ad:  # "open this ad's chats" from the reports ad-funnel table
-        conditions.append("ct.ad_id = :ad_id")
-        params["ad_id"] = ad
+    # A reports row can cover several Instagram ad ids that resolve to one Meta ad, so the
+    # link carries them comma-joined — one id is just the single-element case.
+    ads = [a for a in (p.strip() for p in ad_id.split(",")) if a]
+    if ads:  # "open this ad's chats" from the reports ad-funnel table
+        names = [f":ad{i}" for i in range(len(ads))]
+        conditions.append(f"ct.ad_id IN ({', '.join(names)})")
+        params.update({f"ad{i}": a for i, a in enumerate(ads)})
     grp_stages = AD_FUNNEL_GROUPS.get(grp.strip())
     if grp_stages:  # a funnel count column (В работе / Закрытые / Спящие) was clicked
         names = [f":g{i}" for i in range(len(grp_stages))]
@@ -278,7 +281,7 @@ async def threads_partial(
         kind_qs = ",".join(_sel) if (0 < len(_sel) < len(_CHANNEL_KINDS)) else ""
     filter_qs = urlencode({k: v for k, v in
                            (("stage", s), ("lead_type", lt), ("audience", aud),
-                            ("ad_id", ad), ("grp", grp.strip()), ("awaiting", aw),
+                            ("ad_id", ",".join(ads)), ("grp", grp.strip()), ("awaiting", aw),
                             ("kind", kind_qs), ("q", needle)) if v})
     return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
                                          filter_qs=filter_qs))

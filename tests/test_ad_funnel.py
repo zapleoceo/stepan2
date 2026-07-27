@@ -111,6 +111,33 @@ def test_ad_link_opens_the_ad_library_by_id() -> None:
     assert "selected_ad_ids" not in html
 
 
+def test_bridged_ads_merge_into_one_row_and_charge_spend_once() -> None:
+    """Instagram hands out several ad_context ids for ONE Meta ad. Split across rows, each
+    row was charged the ad's full spend, so every per-row cost-per-lead was wrong."""
+    from app.api._i18n import _lang
+    _lang.set("en")
+    mapped = {"ad_id": "meta1", "campaign_name": "Camp", "campaign_id": "c1", "adset_id": "s1"}
+    html = _ad_tree_html(
+        [("ig_a", "m1", 11, 5, 0, 6), ("ig_b", "m1", 2, 1, 0, 1)],
+        {"m1": mapped}, {"meta1": {"spend": 9.31}},
+        None, "biz", "act1",
+    )
+    assert html.count("<tr><td>") == 1              # one ad, one row
+    assert "$0.72" in html                          # 9.31 / 13 leads, not /11 or /2
+    assert "$4.66" not in html and "$0.85" not in html   # the per-split costs are gone
+    assert "ad_id=ig_a,ig_b" in html                # chats link reaches both ids
+    assert ">13<" in html
+
+
+def test_unbridged_ad_merges_its_creative_split() -> None:
+    """Without a creative bridge the split is per ad_media_id, still one real ad."""
+    from app.api._i18n import _lang
+    _lang.set("en")
+    html = _ad_tree_html([("ig_a", "m1", 4, 1, 0, 3), ("ig_a", None, 2, 0, 0, 2)], {}, {})
+    assert html.count("<tr><td>") == 1
+    assert ">6<" in html
+
+
 def test_reports_panel_drops_by_stage_table_and_shows_message_stats() -> None:
     from app.api._i18n import _lang
     from app.api._ui_panels import reports_panel_html

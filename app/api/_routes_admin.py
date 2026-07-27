@@ -226,16 +226,23 @@ async def ad_product_map(
     if is_branch_write_forbidden(branch_id, writable_branch_ids(request)):  # WRITE role required
         return HTMLResponse('<span class="emp">—</span>', status_code=403)
     slug = product.strip()
+    # One reports row can cover several Instagram ad ids bridged to the same Meta ad; the
+    # map is keyed per Instagram id, so the edit has to land on every one of them.
+    ad_ids = [a for a in (p.strip() for p in ad_id.split(",")) if a]
+    if not ad_ids:
+        return HTMLResponse('<span class="emp">—</span>', status_code=400)
     async with session_scope() as session:
         products = [(p.slug, p.title) for p in await ProductRepo(session, branch_id).active()]
         valid = {s for s, _ in products}
         svc = AdMappingService(session, branch_id)
-        if slug and slug in valid:
-            await svc.upsert(ad_id, slug, actor=_actor_name(request))
-        elif not slug:
-            await svc.clear(ad_id)
-        mapped = await svc.product_for_ad(ad_id)
-        suggested = (await svc.suggest_from_history()).get(ad_id)
+        for one in ad_ids:
+            if slug and slug in valid:
+                await svc.upsert(one, slug, actor=_actor_name(request))
+            elif not slug:
+                await svc.clear(one)
+        mapped = await svc.product_for_ad(ad_ids[0])
+        hist = await svc.suggest_from_history()
+        suggested = next((hist.get(a) for a in ad_ids if hist.get(a)), None)
     return HTMLResponse(admap_cell_inner(ad_id, mapped, suggested, products))
 
 

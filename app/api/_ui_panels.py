@@ -1278,12 +1278,17 @@ def admap_cell_inner(
 
 def _ad_menu_cell(
     ad_id: object, ad_media_id: object, fb_url: str, manager_url: str = "",
+    extra_ids: int = 0,
 ) -> str:
     """Ad-id cell: a <details> menu (this ad's chats | Ads Manager | Ad Library) + IG post.
 
     manager_url is present only for bridged ads; the Ad Library entry stays either way, since
-    it is the only view that works when the ad was published from another ad account."""
+    it is the only view that works when the ad was published from another ad account.
+
+    ad_id may be a comma-joined list when several Instagram ad ids resolve to one Meta ad;
+    extra_ids is how many are hidden behind the first one in the summary label."""
     aid = _h.escape(str(ad_id))
+    head = aid.split(",")[0] + (f' <span class="ad-more">+{extra_ids}</span>' if extra_ids else "")
     items = f'<a href="/ui/inbox?ad_id={aid}">💬 {_h.escape(t("rep.ad_open_chats"))}</a>'
     if manager_url:
         items += (
@@ -1295,15 +1300,15 @@ def _ad_menu_cell(
         f'↗ {_h.escape(t("rep.ad_open_fb"))}</a>'
     )
     cell = (
-        f'<details class="admenu"><summary>{aid}</summary>'
+        f'<details class="admenu"><summary title="{aid}">{head}</summary>'
         f'<div class="admenu-pop">{items}</div></details>'
     )
-    if ad_media_id:
-        post = ig_post_url(str(ad_media_id))
+    for media in str(ad_media_id or "").split(",") if ad_media_id else []:
+        post = ig_post_url(media)
         if post:
             cell += (
                 f' <a class="ad-ig" href="{_h.escape(post)}" target="_blank" rel="noreferrer"'
-                f' data-ig="{_h.escape(str(ad_media_id))}" title="IG post">📷</a>'
+                f' data-ig="{_h.escape(media)}" title="IG post">📷</a>'
             )
     return cell
 
@@ -1417,6 +1422,7 @@ _AD_TREE_CSS = (
     ".adt-m b{color:#e8eef4;font-weight:600}"
     ".adt-c table{margin:0;border-top:1px solid #232b36}"
     ".adt-orph{border-color:#3a2f22}"
+    ".ad-more{color:#8899aa;font-size:.62rem}"
     # A dotted underline is the only affordance a title= tooltip has — without it nobody
     # discovers the hints, and these columns are the ones that most need explaining.
     ".help{text-decoration:underline dotted #5c6b7d 1px;text-underline-offset:3px;"
@@ -1429,6 +1435,42 @@ _AD_TREE_CSS = (
 
 def _money(value: float) -> str:
     return f"${value:,.2f}" if value else "—"
+
+
+def _merge_ad_rows(rows: list, keys: list) -> list:
+    """Collapse funnel rows that describe ONE real ad into a single row.
+
+    fetch_ad_funnel groups by (ad_id, ad_media_id) because SQL cannot see the creative
+    bridge. Instagram hands out several ad_context ids for the same Meta ad, and one ad can
+    carry several creatives, so that grouping splits one ad across rows — each of which
+    would then be charged the ad's FULL spend, making every per-row cost-per-lead wrong.
+    Merging by `keys[i]` (the bridged Meta ad id, or the Instagram ad id when unbridged)
+    fixes both: counts add up, spend is applied once.
+
+    Returns (key, row) pairs, busiest first; row[0] is the list of Instagram ad ids and
+    row[1] their comma-joined media ids, so the chats link, the product upsert and the
+    IG-post icons still reach every underlying id."""
+    merged: dict[object, list] = {}
+    for row, key in zip(rows, keys, strict=True):
+        ad_id, media_id, total, pipeline, won, dormant = row
+        cur = merged.get(key)
+        if cur is None:
+            merged[key] = [
+                [str(ad_id)], [str(media_id)] if media_id else [],
+                int(total or 0), int(pipeline or 0), int(won or 0), int(dormant or 0),
+            ]
+            continue
+        if str(ad_id) not in cur[0]:
+            cur[0].append(str(ad_id))
+        if media_id and str(media_id) not in cur[1]:
+            cur[1].append(str(media_id))
+        for i, val in enumerate((total, pipeline, won, dormant), start=2):
+            cur[i] += int(val or 0)
+    out = [
+        (key, (ids, ",".join(medias), total, pipeline, won, dormant))
+        for key, (ids, medias, total, pipeline, won, dormant) in merged.items()
+    ]
+    return sorted(out, key=lambda kr: -kr[1][2])
 
 
 def _ad_tree_html(
@@ -1462,9 +1504,12 @@ def _ad_tree_html(
             orphans.append(row)
             continue
         key = mapped.get("campaign_name") or "—"
-        grp = groups.setdefault(key, {"ads": [], "spend": 0.0, "leads": 0, "won": 0,
-                                      "started": 0, "d5": 0, "blocks": 0, "seen": set()})
-        grp["ads"].append((row, mapped))
+        grp = groups.setdefault(key, {"rows": [], "keys": [], "by_ad": {}, "spend": 0.0,
+                                      "leads": 0, "won": 0, "started": 0, "d5": 0,
+                                      "blocks": 0, "seen": set()})
+        grp["rows"].append(row)
+        grp["keys"].append(mapped["ad_id"])
+        grp["by_ad"][mapped["ad_id"]] = mapped
         grp["leads"] += int(row[2] or 0)
         grp["won"] += int(row[4] or 0)
         # Several media can resolve to ONE ad — count its spend once, not per medium.
@@ -1477,15 +1522,30 @@ def _ad_tree_html(
             grp["d5"] += int(m.get("conv_depth_5") or 0)
             grp["blocks"] += int(m.get("blocks") or 0)
 
+    def _grp_items(grp: dict) -> list:
+        """Merged rows of a campaign, each paired with its bridged-ad record."""
+        return [
+            (row, grp["by_ad"][key])
+            for key, row in _merge_ad_rows(grp["rows"], grp["keys"])
+        ]
+
+    def _orphan_items(rows: list) -> list:
+        """Unbridged ads merge by their Instagram ad id — the split there is per creative."""
+        return [(row, {}) for _, row in _merge_ad_rows(rows, [str(r[0]) for r in rows])]
+
     def _ad_rows(items: list, with_spend: bool) -> str:
         out = ""
         for row, mapped in items:
-            ad_id, ad_media_id, total, pipeline, won, dormant = row
+            ad_ids, ad_media_id, total, pipeline, won, dormant = row
             total, won = int(total or 0), int(won or 0)
             conv = round(won / total * 100, 1) if total else 0.0
-            aid = _h.escape(str(ad_id))
-            cell = admap_cell_inner(
-                ad_id, mappings.get(str(ad_id)), suggestions.get(str(ad_id)), products or [])
+            ad_id = ",".join(ad_ids)
+            aid = _h.escape(ad_id)
+            # A merged row carries several Instagram ad ids; the product map is keyed by each
+            # of them, so show the first one that is mapped and write back to all of them.
+            cur = next((mappings.get(a) for a in ad_ids if mappings.get(a)), None)
+            sug = next((suggestions.get(a) for a in ad_ids if suggestions.get(a)), None)
+            cell = admap_cell_inner(ad_id, cur, sug, products or [])
             map_cell = f'<td class="admap" id="admap-{aid}">{cell}</td>' if show_map else ""
             spend_cells = ""
             if with_spend:
@@ -1510,7 +1570,7 @@ def _ad_tree_html(
                     mapped["ad_id"], account_id, business_id,
                     mapped.get("campaign_id"), mapped.get("adset_id"))
             out += (
-                f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb, mgr)}</td>'
+                f'<tr><td>{_ad_menu_cell(ad_id, ad_media_id, fb, mgr, len(ad_ids) - 1)}</td>'
                 f'{map_cell}{spend_cells}'
                 f'{_count_cell(aid, "", total, "")}'
                 f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'
@@ -1554,7 +1614,7 @@ def _ad_tree_html(
             f'{_h.escape(t("rep.ads_won"))} <b>{grp["won"]}</b> · '
             f'{_h.escape(t("rep.ads_cpl"))} <b>{_money(cpl)}</b>{blocks}</span>'
             f'</summary><table class="rep-tbl rep-sortable">{_head(True)}'
-            f'<tbody>{_ad_rows(grp["ads"], True)}</tbody></table></details>'
+            f'<tbody>{_ad_rows(_grp_items(grp), True)}</tbody></table></details>'
         )
     if orphans:
         n = sum(int(r[2] or 0) for r in orphans)
@@ -1564,7 +1624,7 @@ def _ad_tree_html(
             f'<span class="adt-m">{_h.escape(t("rep.ads_leads"))} <b>{n}</b> · '
             f'{_h.escape(t("rep.ads_no_spend"))}</span></summary>'
             f'<table class="rep-tbl rep-sortable">{_head(False)}'
-            f'<tbody>{_ad_rows([(r, {}) for r in orphans], False)}</tbody></table></details>'
+            f'<tbody>{_ad_rows(_orphan_items(orphans), False)}</tbody></table></details>'
         )
     if not body:
         return ""
