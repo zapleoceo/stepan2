@@ -367,6 +367,43 @@ def _is_closing_only(text: str, extra: frozenset[str] = frozenset()) -> bool:
     return all(w in _CLOSING_WORDS or w in extra for w in words)
 
 
+def _repeats(a: str, b: str, threshold: float = 0.55) -> bool:
+    """Two messages saying substantially the same thing.
+
+    Overlap is measured against the SHORTER message, not against the union: farewells vary in
+    padding more than in content, and Jaccard punishes that padding twice. "Udah ah Kak,
+    makasih. Nanti gue WA aja kalo perlu" and "Iya Kak, makasih. Nanti gue tunggu WA nya ya"
+    share six words of ten — obviously the same message — but score only 0.40 by union.
+
+    The three-word floor keeps "oke" from matching "oke"; two bare acknowledgements are not
+    evidence of anything, and the pleasantry check below is what handles those."""
+    wa = {w.lower() for w in _WORD_RE.findall(a or "")}
+    wb = {w.lower() for w in _WORD_RE.findall(b or "")}
+    if len(wa) < 3 or len(wb) < 3:
+        return False
+    return len(wa & wb) / min(len(wa), len(wb)) >= threshold
+
+
+def _both_looping(dialog: list) -> bool:
+    """Neither side has said anything new for two exchanges.
+
+    The vocabulary approach below catches a farewell made of pleasantries, and it kept missing
+    by one word — "Udah ah Kak, makasih. Nanti gue WA aja kalo perlu. Bye!" is unmistakably a
+    goodbye, but `ah`, `kalo` and `perlu` are not on any list, and no list will ever be
+    finished. Three rounds of widening it is the definition of a patch.
+
+    So this looks at shape instead of words: when the lead's last two messages are near
+    duplicates of each other AND ours are too, the conversation is idling regardless of what
+    language it idles in. A lead who introduces anything — a question, a number, a new
+    objection — breaks the similarity immediately, which is exactly the property a word list
+    cannot have."""
+    ins = [m.text or "" for m in dialog if m.direction == "in"]
+    outs = [m.text or "" for m in dialog if m.direction != "in"]
+    if len(ins) < 2 or len(outs) < 2:
+        return False
+    return _repeats(ins[-1], ins[-2]) and _repeats(outs[-1], outs[-2])
+
+
 def _goodbye_loop(dialog: list, lead_name: str | None = None) -> bool:
     """The conversation is over and both sides know it — the lead's last message carries no
     content and our previous message was already a farewell.
@@ -384,6 +421,8 @@ def _goodbye_loop(dialog: list, lead_name: str | None = None) -> bool:
     outs = [m for m in dialog if m.direction != "in"]
     if not ins or not outs:
         return False
+    if _both_looping(dialog):
+        return True
     extra = frozenset(w.lower() for w in _WORD_RE.findall(lead_name or ""))
     if not _is_closing_only(ins[-1].text, extra):
         return False
