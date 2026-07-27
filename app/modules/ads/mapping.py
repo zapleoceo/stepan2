@@ -29,6 +29,32 @@ class AdMappingService:
         )).first()
         return row[0] if row else None
 
+    async def product_for_creative(self, media_pk: str | None) -> str | None:
+        """Product for an ad whose creative we know but whose ad_id Instagram withheld.
+
+        The map is keyed by the ad_context ad_id, and Instagram does not always send one —
+        18 threads arrived with a creative and no ad_id, so the ad anchor was silently
+        skipped and Stepan opened those conversations with no product at all (thread 5036).
+        The same creative almost always arrived WITH an ad_id on other threads, and that one
+        is mapped, so the creative is enough to recover the answer.
+
+        Most common wins: one creative can be reused across ads sold as different products,
+        and the majority is a better guess than an arbitrary row."""
+        if not media_pk:
+            return None
+        row = (await self.session.execute(
+            select(AdProductMap.product_slug, func.count().label("n"))
+            .join(ChannelThread, ChannelThread.ad_id == AdProductMap.ad_id)  # type: ignore[arg-type]
+            .where(
+                AdProductMap.branch_id == self.branch_id,
+                ChannelThread.ad_media_id == media_pk,  # type: ignore[arg-type]
+            )
+            .group_by(AdProductMap.product_slug)
+            .order_by(func.count().desc())
+            .limit(1)
+        )).first()
+        return row[0] if row else None
+
     async def all_mappings(self) -> dict[str, str]:
         rows = (await self.session.execute(
             select(AdProductMap.ad_id, AdProductMap.product_slug).where(

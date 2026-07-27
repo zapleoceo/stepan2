@@ -37,10 +37,12 @@ async def _branch_channel(s) -> tuple[int, int]:  # noqa: ANN001
     return branch.id, ch.id
 
 
-def _inbound(ext: str = "ig-1", *, ad_id: str | None = None) -> InboundMessage:
+def _inbound(
+    ext: str = "ig-1", *, ad_id: str | None = None, ad_media_id: str | None = None,
+) -> InboundMessage:
     return InboundMessage(
         external_thread_id=ext, sender_id="u1", text="halo", occurred_at=_NOW,
-        ad_id=ad_id, external_id=f"m-{ext}",
+        ad_id=ad_id, ad_media_id=ad_media_id, external_id=f"m-{ext}",
     )
 
 
@@ -70,6 +72,58 @@ async def test_clear_removes_mapping(db_session) -> None:
     await svc.upsert("AD1", "vibe_coding", actor=None)
     await svc.clear("AD1")
     assert await svc.product_for_ad("AD1") is None
+
+
+async def test_creative_recovers_the_product_when_instagram_sends_no_ad_id(db_session) -> None:
+    """18 live threads arrived with a creative and no ad_id (thread 5036). The ad_id-only
+    lookup skipped them, so Stepan opened those chats with no product anchor at all — while
+    the very same creative was mapped through its other threads."""
+    bid, ch = await _branch_channel(db_session)
+    lead = Lead(branch_id=bid, stage=Stage.QUALIFYING)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch, external_thread_id="with-id",
+                                 ad_id="AD1", ad_media_id="MEDIA1"))
+    await db_session.flush()
+    svc = AdMappingService(db_session, bid)
+    await svc.upsert("AD1", "vibe_coding", actor="owner")
+
+    assert await svc.product_for_creative("MEDIA1") == "vibe_coding"
+    assert await svc.product_for_creative("UNKNOWN") is None
+    assert await svc.product_for_creative(None) is None
+
+
+async def test_creative_lookup_takes_the_majority_product(db_session) -> None:
+    """One creative can be reused by ads sold as different products; the majority is a
+    better guess than whichever row the database returns first."""
+    bid, ch = await _branch_channel(db_session)
+    lead = Lead(branch_id=bid, stage=Stage.QUALIFYING)
+    db_session.add(lead)
+    await db_session.flush()
+    for i, ad in enumerate(("AD1", "AD1", "AD2")):
+        db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch,
+                                     external_thread_id=f"t{i}", ad_id=ad,
+                                     ad_media_id="MEDIA1"))
+    await db_session.flush()
+    svc = AdMappingService(db_session, bid)
+    await svc.upsert("AD1", "vibe_coding", actor=None)
+    await svc.upsert("AD2", "smm_intensive", actor=None)
+
+    assert await svc.product_for_creative("MEDIA1") == "vibe_coding"
+
+
+async def test_creative_lookup_is_branch_scoped(db_session) -> None:
+    bid1, ch1 = await _branch_channel(db_session)
+    bid2, _ = await _branch_channel(db_session)
+    lead = Lead(branch_id=bid1, stage=Stage.QUALIFYING)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch1,
+                                 external_thread_id="t1", ad_id="AD1", ad_media_id="MEDIA1"))
+    await db_session.flush()
+    await AdMappingService(db_session, bid1).upsert("AD1", "vibe_coding", actor=None)
+
+    assert await AdMappingService(db_session, bid2).product_for_creative("MEDIA1") is None
 
 
 async def test_suggest_from_history_takes_majority(db_session) -> None:
@@ -121,6 +175,28 @@ async def test_ingest_leaves_lead_source_none_without_ad_id(db_session) -> None:
     await IngestService(db_session, bid).ingest(ch, [_inbound(ad_id=None)])
     thread = (await db_session.exec(select(ChannelThread))).first()
     assert thread.lead_source is None
+
+
+async def test_ingest_binds_product_from_the_creative_when_ad_id_is_missing(db_session) -> None:
+    """Thread 5036: Instagram sent the creative and no ad_id, so the ad_id-only lookup
+    skipped the binding entirely and Stepan opened with no product anchor."""
+    bid, ch = await _branch_channel(db_session)
+    lead = Lead(branch_id=bid, stage=Stage.QUALIFYING)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch,
+                                 external_thread_id="earlier", ad_id="AD1",
+                                 ad_media_id="MEDIA1"))
+    await db_session.flush()
+    await AdMappingService(db_session, bid).upsert("AD1", "vibe_coding", actor="owner")
+
+    await IngestService(db_session, bid).ingest(
+        ch, [_inbound("ig-noadid", ad_id=None, ad_media_id="MEDIA1")])
+    thread = (await db_session.exec(
+        select(ChannelThread).where(ChannelThread.external_thread_id == "ig-noadid"))).first()
+    assert thread.ad_id is None
+    assert thread.product_slug == "vibe_coding"
+    assert thread.product_source == "ad"
 
 
 async def test_ingest_leaves_product_none_when_ad_unmapped(db_session) -> None:

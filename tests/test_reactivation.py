@@ -114,3 +114,63 @@ def test_the_framing_bans_the_two_wasted_shapes() -> None:
 
     assert "masih tertarik" in _REACTIVATION_FRAMING
     assert "remind you who they are" in _REACTIVATION_FRAMING
+
+
+# ── the queue drains best-first, not newest-first ─────────────────────────────
+
+async def _lead_with(s, bid, chid, *, days_ago: float, phone=None, dossier=None):
+    lead = Lead(branch_id=bid, stage=Stage.DORMANT, agent_enabled=False,
+                phone_e164=phone, dossier=dossier)
+    s.add(lead)
+    await s.flush()
+    now = _now()
+    t = ChannelThread(lead_id=lead.id, channel_id=chid, external_thread_id=f"t{lead.id}",
+                      last_in_at=now - timedelta(days=days_ago),
+                      last_out_at=now - timedelta(days=days_ago + 0.1))
+    s.add(t)
+    await s.flush()
+    return t.id
+
+
+async def test_a_lead_who_named_a_goal_outranks_a_newer_silent_one(db_session) -> None:
+    """The backlog is ~2700 threads draining slowly, and 2747 of 4052 leads never wrote two
+    sentences of their own. Ordering by recency alone parked the people who described a real
+    project — an app for migrant workers, a donor database — behind hundreds of one-word ad
+    taps that merely happened later."""
+    bid, chid = await _setup(db_session)
+    silent_new = await _lead_with(db_session, bid, chid, days_ago=4)
+    with_goal_old = await _lead_with(
+        db_session, bid, chid, days_ago=40,
+        dossier='{"job_to_be_done": "bikin aplikasi buat toko", "pains": []}')
+    due = await _svc(db_session, bid).due(_now())
+    order = [tid for tid, _slug, _lid in due]
+    assert order.index(with_goal_old) < order.index(silent_new)
+
+
+async def test_a_phone_on_file_outranks_a_goal(db_session) -> None:
+    """A number means a human can act on the answer, which is worth more than a good opening."""
+    bid, chid = await _setup(db_session)
+    goal_only = await _lead_with(db_session, bid, chid, days_ago=4,
+                                 dossier='{"job_to_be_done": "belajar coding"}')
+    with_phone = await _lead_with(db_session, bid, chid, days_ago=40, phone="+628123456789")
+    order = [tid for tid, _s, _l in await _svc(db_session, bid).due(_now())]
+    assert order.index(with_phone) < order.index(goal_only)
+
+
+async def test_an_empty_goal_string_does_not_count(db_session) -> None:
+    """Discovery writes job_to_be_done="" when it learned nothing — that must not score."""
+    bid, chid = await _setup(db_session)
+    empty = await _lead_with(db_session, bid, chid, days_ago=4,
+                             dossier='{"job_to_be_done": "", "pains": []}')
+    real = await _lead_with(db_session, bid, chid, days_ago=40,
+                            dossier='{"job_to_be_done": "bikin dashboard", "pains": []}')
+    order = [tid for tid, _s, _l in await _svc(db_session, bid).due(_now())]
+    assert order.index(real) < order.index(empty)
+
+
+def test_the_daily_ceiling_is_a_hundred() -> None:
+    """25 per pass × 4 passes. The old 40 was set the week of the soft-block and never
+    re-derived; the branch sends 334-960 a day and averages about one block signature."""
+    from app.modules.conversation.reactivation import BATCH_PER_RUN
+
+    assert BATCH_PER_RUN == 25

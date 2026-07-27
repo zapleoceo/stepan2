@@ -258,9 +258,14 @@ class IngestService:
             thread.ad_media_id = inbound.ad_media_id
         if inbound.ad_preview_url:
             thread.ad_preview_url = inbound.ad_preview_url  # always refresh (CDN URL)
-        if thread.product_slug is None and thread.ad_id:
-            mapped = await AdMappingService(
-                self.session, self.branch_id).product_for_ad(thread.ad_id)
+        if thread.product_slug is None and (thread.ad_id or thread.ad_media_id):
+            svc = AdMappingService(self.session, self.branch_id)
+            # ad_id first — it is the key the operator actually edits. The creative is the
+            # fallback for the threads Instagram sends with a creative and no ad_id at all,
+            # which the ad_id-only lookup skipped entirely.
+            mapped = await svc.product_for_ad(thread.ad_id)
+            if not mapped:
+                mapped = await svc.product_for_creative(thread.ad_media_id)
             if mapped:
                 thread.product_slug = mapped
                 thread.product_source = "ad"
@@ -274,9 +279,9 @@ class IngestService:
                 # the time anyone notices — ping ops on the FIRST inbound instead, same turn
                 # the gap appears, so the ad can be mapped before Stepan replies at all.
                 logger.warning(
-                    "ingest: branch=%d thread=%d ad_id=%s has no AdProductMap entry — "
-                    "product will be inferred by the model with no ad anchor",
-                    self.branch_id, thread.id, thread.ad_id)
+                    "ingest: branch=%d thread=%d ad_id=%s media=%s has no AdProductMap "
+                    "entry — product will be inferred by the model with no ad anchor",
+                    self.branch_id, thread.id, thread.ad_id, thread.ad_media_id)
                 if is_ad_referral:  # once per thread — not on every later inbound while unmapped
                     await self._notify_unmapped_ad(lead, thread)
         return msg

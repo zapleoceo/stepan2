@@ -1145,7 +1145,12 @@ class WorkerSettings:
         # Dormant reactivation: opt-in (reactivation_enabled), twice a day at Jakarta midday
         # (UTC+7: 04:00 UTC = 11:00 WIB, 08:00 UTC = 15:00 WIB) so a cold touch lands in
         # business hours; small batch, quiet hours still held by the outbox send layer.
-        cron(reactivate_dormant, hour={4, 8}, minute={20}, second=30, run_at_startup=False),
+        # Four passes across Jakarta's working day (UTC+7: 02:00→09:00, 04:00→11:00,
+        # 07:00→14:00, 10:00→17:00) instead of two. 25 per pass = 100/day. Spreading rather
+        # than enlarging the batch is deliberate — see BATCH_PER_RUN for the volume measurement
+        # that says there is headroom, and why bursts are the shape that gets scored.
+        cron(reactivate_dormant, hour={2, 4, 7, 10}, minute={20}, second=30,
+             run_at_startup=False),
         # CRM write-back: hourly drain of not-yet-synced warm leads into the CRM funnel. Opt-in
         # (crm_writeback_enabled) + fail-open, so while the CRM's /lead/add-contact is down it
         # just logs 404s and retries; it auto-drains the moment the endpoint is fixed.

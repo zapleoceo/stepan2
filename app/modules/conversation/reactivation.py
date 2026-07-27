@@ -53,7 +53,15 @@ MIN_DORMANT_DAYS = 3
 MAX_DORMANT_DAYS = 550
 REACTIVATION_GAP_DAYS = 14
 REACTIVATION_CAP = 2
-BATCH_PER_RUN = 20
+# 25 per run × 4 runs = 100/day, up from 20 × 2. The old 40 was set the week of the 2026-07-22
+# soft-block and never re-derived from data. Measured 2026-07-27 over the preceding 20 days:
+# the branch sends 334-960 messages a day, almost all of them replies and follow-ups, while
+# reactivation contributes 3-76. Actual soft-block signatures across those 20 days — 16
+# `item_ack` plus two 403/1404006 — average about one a day, and the incident itself happened
+# on a 951-message day. Adding ~60 touches to a ~500 baseline lands near 560, far below that.
+# The run count went up rather than the batch size on purpose: four small passes spread across
+# the day look less like a burst than two large ones, and bursts are what IG scores.
+BATCH_PER_RUN = 25
 _REASON = "reactivation"
 
 # Stalled leads with a real dialog, quiet for [MIN, MAX] days, not reactivated recently or too
@@ -87,7 +95,27 @@ _DUE_Q = (  # noqa: S608
     "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"
     "        AND se.reason = :reason AND se.created_at > :gap_cutoff)"
     "   AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.thread_id = ct.id AND o.status = 'pending')"
-    " ORDER BY ct.last_in_at DESC LIMIT :batch"
+    # Best first, not newest first. Recency was the only ordering, and with a backlog of ~2700
+    # threads draining at a small daily rate that meant the leads worth writing to sat behind
+    # hundreds of one-word ad taps purely because those taps happened later. Read across the
+    # queue on 2026-07-27: 2747 of 4052 leads never wrote two sentences of their own, while the
+    # ones who described a project — an app for migrant workers, a donor database, a deploy they
+    # got stuck on — were scattered anywhere in the order.
+    # Two things predict a touch being worth sending: a phone already on file (a manager can act
+    # on the answer) and a goal the lead stated in their own words (there is something concrete
+    # to open with). Everything else falls back to recency as before.
+    # The empty-string tests are not decoration: discovery writes job_to_be_done="" whenever it
+    # learned nothing, and `LIKE '..."_%'` matches that happily because `_` also matches the
+    # closing quote. So each field is matched for presence and then excluded when empty.
+    " ORDER BY ("
+    "     CASE WHEN l.phone_e164 IS NOT NULL THEN 3 ELSE 0 END"
+    "   + CASE WHEN coalesce(l.dossier, '') LIKE '%\"job_to_be_done\":%'"
+    "         AND coalesce(l.dossier, '') NOT LIKE '%\"job_to_be_done\": \"\"%'"
+    "        THEN 2 ELSE 0 END"
+    "   + CASE WHEN coalesce(l.dossier, '') LIKE '%\"pains\":%'"
+    "         AND coalesce(l.dossier, '') NOT LIKE '%\"pains\": []%'"
+    "        THEN 1 ELSE 0 END"
+    " ) DESC, ct.last_in_at DESC LIMIT :batch"
 )
 
 # Same principle as the follow-up framing (2026-07-25): state the situation, hand over the
