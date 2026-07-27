@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent, ThreadLog
-from app.adapters.meta_capi import MetaCapi
+from app.adapters.meta_capi import MetaCapi, capi_token
 from app.config import settings
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.knowledge.service import KnowledgeService
@@ -629,9 +629,9 @@ class ReplyDelivery:
         except Exception:
             logger.warning("handoff alert failed lead=%s", lead.id, exc_info=True)
         cfg = self.settings
-        if cfg is not None and cfg.meta_pixel_id and cfg.meta_capi_token:
+        if cfg is not None and cfg.meta_pixel_id and (token := capi_token(cfg)):
             await MetaCapi().send_lead(
-                cfg.meta_pixel_id, cfg.meta_capi_token,
+                cfg.meta_pixel_id, token,
                 event_id=f"handoff-{self.branch_id}-{lead.id}",
                 phone=lead.phone_e164,
             )

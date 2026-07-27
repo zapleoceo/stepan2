@@ -22,6 +22,25 @@ def _graph_base() -> str:
     return f"https://graph.facebook.com/{settings().meta_graph_version}"
 
 
+def capi_token(cfg: Any) -> str:
+    """The token to send events with — the System User one, falling back to the legacy field.
+
+    `meta_capi_token` was superseded by `meta_system_user_token` (the settings schema marks it
+    "legacy — use the System User token above" and hides it), but the send path kept reading
+    the old field. On this branch it held `1q2w#E$R` — eight characters, a keyboard walk left
+    behind when someone filled the form.
+
+    Eight characters is truthy, so the guard passed and every hand-off posted to Meta and got
+    back `401 Unauthorized`. All 76 of them, silently: the adapter logs a warning and returns
+    False by design, so ad tracking can never break a hand-off, and Docker log rotation carried
+    the warnings away. Meta received nothing, and the campaigns optimised on the only signal
+    they had — a message being started, which is what we have far too many of.
+
+    The System User token is valid, carries ads_management, and does not expire."""
+    return (getattr(cfg, "meta_system_user_token", "") or "").strip() \
+        or (getattr(cfg, "meta_capi_token", "") or "").strip()
+
+
 def hash_phone(phone: str | None) -> str | None:
     """CAPI user_data.ph — sha256 of the digits-only international number."""
     if not phone:

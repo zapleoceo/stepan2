@@ -155,3 +155,47 @@ async def test_capi_posts_and_survives_failure(monkeypatch) -> None:
     ok = await MetaCapi().send_lead("pix", "tok", event_id="a-1", phone="+6281234567890")
     assert ok is True
     assert sent[0]["data"][0]["event_id"] == "a-1"
+
+
+def test_the_send_token_is_the_system_user_one_not_the_legacy_field() -> None:
+    """`meta_capi_token` was superseded by `meta_system_user_token` — the settings schema
+    marks it "legacy, use the System User token above" and hides it — but the send path kept
+    reading the old field. On branch 1 it held `1q2w#E$R`: eight characters, a keyboard walk
+    left behind when someone filled the form.
+
+    Eight characters is truthy, so the guard passed and every hand-off posted to Meta and got
+    back 401 Unauthorized. All 76 of them, silently — the adapter logs a warning and returns
+    False by design so ad tracking can never break a hand-off, and log rotation carried the
+    warnings away. Meta received nothing, and the campaigns optimised on the only signal they
+    had: a message being started."""
+    from types import SimpleNamespace
+
+    from app.adapters.meta_capi import capi_token
+
+    both = SimpleNamespace(**{"meta_system_user_token": "EAAP-real-one",
+                              "meta_capi_token": "1q2w#E$R"})
+    assert capi_token(both) == "EAAP-real-one"
+
+    # A branch that only ever had the legacy field keeps working.
+    legacy_only = SimpleNamespace(**{"meta_system_user_token": "", "meta_capi_token": "EAAB-old"})
+    assert capi_token(legacy_only) == "EAAB-old"
+
+    # Whitespace is not a token — a field someone cleared by typing a space stays empty.
+    blank = SimpleNamespace(**{"meta_system_user_token": "  ", "meta_capi_token": ""})
+    assert capi_token(blank) == ""
+
+
+def test_a_handoff_sends_with_the_system_user_token(monkeypatch) -> None:
+    """End to end through the guard in delivery._handoff: the placeholder must not be what
+    reaches Meta."""
+    from types import SimpleNamespace
+
+    from app.adapters.meta_capi import capi_token
+
+    cfg = SimpleNamespace(**{
+        "meta_pixel_id": "2085648545498314",
+        "meta_capi_token": "1q2w#E$R",
+        "meta_system_user_token": "EAAPvalid",
+    })
+    assert cfg.meta_pixel_id and capi_token(cfg)
+    assert capi_token(cfg) != cfg.meta_capi_token
