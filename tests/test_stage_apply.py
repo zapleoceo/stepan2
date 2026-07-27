@@ -259,7 +259,14 @@ async def test_ready_with_phone_hands_off(db_session, monkeypatch) -> None:
     assert alert is not None and alert.kind == "ready_deal"
     assert alert.lead_phone == "+6281234567890"
     assert len(notifier.sends) == 1  # one group ping for the hand-off
+    # The conversion event is QUEUED by the hand-off, not sent from inside it: the outbox
+    # sender cannot see the queued reply until this transaction commits, so a round-trip to
+    # Facebook here would be time the lead spends waiting. The worker drains it after commit.
+    assert capi_calls == []
+    assert svc.pending_capi == [(f"handoff-{bid}-{lead.id}", "+6281234567890", "Lead")]
+    await svc.run_after_commit()
     assert capi_calls == [f"handoff-{bid}-{lead.id}"]
+    assert svc.pending_capi == []  # drained once, never twice
 
 
 async def test_ready_without_phone_keeps_selling(db_session) -> None:

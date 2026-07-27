@@ -321,6 +321,12 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                 branch_settings=cfg, notifier=_build_notifier(cfg),
                 broker_budget_s=settings().reply_broker_budget_s,
             )
+            # Read before decide(): enqueue_reply moves last_out_at, never last_in_at, but the
+            # value is wanted for the log line either way and one read is cheaper than caring.
+            _thread = await reply.threads.by_id(thread_id)
+            lead_wait_s = (
+                (datetime.now(UTC).replace(tzinfo=None) - _thread.last_in_at).total_seconds()
+                if _thread is not None and _thread.last_in_at is not None else 0.0)
             started = time.time()
             decision = await reply.decide(thread_id)
             if getattr(llm, "calls", 0) > 0:
@@ -334,14 +340,23 @@ async def generate_one_reply(ctx: dict[str, Any], branch_id: int, thread_id: int
                     branch_id, thread_id, time.time() - started, getattr(llm, "calls", 0))
                 return False
             queued = await reply.enqueue_reply(thread_id, decision) is not None
+            # `waited` is the half of the latency nothing used to record. The job's own duration
+            # was always logged, but the lead's message had already been sitting through an
+            # ingest tick and a reply tick before this job existed — and reconstructing that
+            # afterwards meant joining outbox timestamps against broker logs by hand. Measured
+            # 2026-07-27 over 1296 replies: p50 145s lead→sent, of which the model was 9-15s.
+            # Logging both halves together is what makes the next regression visible in a grep.
             logger.info(
-                "reply branch=%d thread=%d %s in %.1fs (%d broker calls incl. retries)",
+                "reply branch=%d thread=%d %s in %.1fs (waited %.0fs before this job, "
+                "%d broker calls incl. retries)",
                 branch_id, thread_id, "queued" if queued else "skipped",
-                time.time() - started, getattr(llm, "calls", 0))
-        # Outside session_scope on purpose: the hand-off is committed, the thread's advisory
-        # lock is released, and only now does the CRM push (LLM summary + MCP round-trips)
-        # run — see ReplyDelivery.push_crm_after_commit for the failure-mode analysis.
-        await reply.push_crm_after_commit()
+                time.time() - started, lead_wait_s, getattr(llm, "calls", 0))
+        # Outside session_scope on purpose: the reply is committed and visible to the outbox
+        # sender, the thread's advisory lock is released, and only now do the deferred side
+        # effects run — the CRM push (LLM summary + MCP round-trips) and the Meta conversion
+        # events. See ReplyDelivery.run_after_commit for the rule that decides what belongs
+        # here rather than on the lead's clock.
+        await reply.run_after_commit()
         return queued
     except BrokerUnavailable as exc:
         # The gateway is down, not this thread's fault — trip the guard so the next tick sends
@@ -1116,7 +1131,12 @@ class WorkerSettings:
         # send_outbox stays every 20s: it's cheap (one due row per call) and never overlaps a
         # reply for the same thread (its own advisory lock), so latency there is worth keeping.
         cron(reply_pending, second={45}, run_at_startup=False),
-        cron(send_outbox, second={10, 30, 50}, run_at_startup=False),
+        # send_outbox every 10s. It polls our OWN queue and ships only rows already due, so a
+        # faster tick adds no Instagram traffic whatsoever — the anti-ban caps and quiet-hours
+        # windows live inside the sender and are unchanged. It is pure waiting removed: at a
+        # 20s cadence a finished reply sat an average 10s (measured p50 15s over 1296 replies)
+        # doing nothing. One due row per call, its own advisory lock, never overlaps a reply.
+        cron(send_outbox, second={0, 10, 20, 30, 40, 50}, run_at_startup=False),
         # Unsend requests every minute (second=30; independent of the reply/send phase)
         cron(process_deletions, second=30, run_at_startup=False),
         # Follow-ups run every 10 minutes (minute divisible by 10, second=50)

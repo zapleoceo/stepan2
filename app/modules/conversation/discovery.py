@@ -17,6 +17,7 @@ never the lead's answer.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -32,6 +33,22 @@ from .signals import AD_TEMPLATE_RE
 logger = logging.getLogger(__name__)
 
 _DIALOG_BUDGET = 20  # last N turns — discovery lives in recent talk, not the whole history
+
+# This call sits on the lead's clock: it runs before the reply's transaction commits, and the
+# outbox sender cannot see the queued reply until it does. Measured on the broker over 24h —
+# p50 0.68s, p90 55.8s, max 59s: the free chain answers instantly or hangs to its ceiling, and
+# on one turn in ten a finished reply waited most of a minute for a dossier field.
+#
+# So it is bounded. Nothing here changes WHAT we say — the reply is already written — or WHEN
+# we may say it; it only records what the lead revealed, and it is read by the NEXT turn.
+# Losing one turn's extraction costs a field that the following turn re-derives from the same
+# transcript. Making the lead wait a minute for it costs the conversation.
+#
+# Concurrency was the other option and it is not available: budget.record() writes through the
+# shared AsyncSession, and two coroutines on one session raise outright. At a 0.68s median,
+# parallelism would buy under a second anyway — the tail is the whole problem, and a ceiling
+# is what removes a tail.
+_TIMEOUT_S = 12.0
 
 _SYSTEM = """\
 You read one Instagram DM conversation between a lead and a sales rep at an IT school. Your \
@@ -144,13 +161,21 @@ async def extract_discovery(  # noqa: PLR0913
              + ", ".join(product_slugs) + "\n\n") if product_slugs else ""
     user = f"{slugs}{_known_block(dossier)}\n\nCONVERSATION (lang: {lang}):\n{transcript}"
     try:
-        raw, meta = await llm.chat(
-            [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
-            capability=FAST, require_json_schema=True,
-            workflow="discovery", thread_id=thread_id, branch_id=branch_id)
+        raw, meta = await asyncio.wait_for(
+            llm.chat(
+                [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
+                capability=FAST, require_json_schema=True,
+                workflow="discovery", thread_id=thread_id, branch_id=branch_id),
+            timeout=_TIMEOUT_S)
         if budget is not None:
             await budget.record(float(meta.get("cost_usd") or 0.0))
         return _parse(raw, frozenset(product_slugs) if product_slugs else None)
+    except TimeoutError:
+        # Logged apart from a real failure: this one is a deliberate trade, and if it starts
+        # firing on most turns the free chain has degraded and the ceiling is hiding it.
+        logger.warning("discovery over %.0fs branch=%d thread=%d — dropped so the reply ships",
+                       _TIMEOUT_S, branch_id, thread_id)
+        return LeadDossier()
     except Exception as exc:  # noqa: BLE001 — an unreachable extractor must not cost the reply
         logger.warning("discovery unavailable branch=%d thread=%d: %s — skipped",
                        branch_id, thread_id, exc)

@@ -227,6 +227,13 @@ class ReplyDelivery:
         # thread's advisory lock through an LLM summary + two MCP round-trips, and a rollback
         # after a successful push left a duplicate event in the CRM (side effect pre-commit).
         self.pending_crm_push: tuple[int, int, str] | None = None
+        # Meta CAPI events (event_id, phone, event_name) queued for the same post-commit drain,
+        # for the same reason generalised: the outbox sender cannot see a queued reply until
+        # this transaction commits, so every await before the commit is time the lead spends
+        # looking at a screen with nothing on it. Reporting a conversion to Facebook changes
+        # neither what we say nor whether we may say it, so it has no business being there —
+        # the same test the CRM push was moved out on.
+        self.pending_capi: list[tuple[str, str | None, str]] = []
 
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.
@@ -628,13 +635,7 @@ class ReplyDelivery:
             )
         except Exception:
             logger.warning("handoff alert failed lead=%s", lead.id, exc_info=True)
-        cfg = self.settings
-        if cfg is not None and cfg.meta_pixel_id and (token := capi_token(cfg)):
-            await MetaCapi().send_lead(
-                cfg.meta_pixel_id, token,
-                event_id=f"handoff-{self.branch_id}-{lead.id}",
-                phone=lead.phone_e164,
-            )
+        self.queue_capi(f"handoff-{self.branch_id}-{lead.id}", lead.phone_e164, "Lead")
         self._queue_crm_push(
             lead, thread, f"Lead ready to enrol ({lead.ready_subtype or 'deal'})")
 
@@ -651,6 +652,42 @@ class ReplyDelivery:
         if cfg is None or not cfg.crm_writeback_enabled or not cfg.crm_mcp_url:
             return
         self.pending_crm_push = (lead.id, thread.id, reason)
+
+    def queue_capi(self, event_id: str, phone: str | None, event_name: str) -> None:
+        """Hold a Meta conversion event until the reply has committed. Silent when the branch
+        has no pixel configured, so callers need no guard of their own."""
+        cfg = self.settings
+        if cfg is None or not cfg.meta_pixel_id or not capi_token(cfg):
+            return
+        self.pending_capi.append((event_id, phone, event_name))
+
+    async def _send_capi_after_commit(self) -> None:
+        """Drain the queued conversion events. Each is idempotent by event_id, so a failure
+        here is a missing event and never a double-counted one — and the adapter swallows its
+        own errors, so one bad event cannot stop the rest."""
+        pending, self.pending_capi = self.pending_capi, []
+        cfg = self.settings
+        if not pending or cfg is None:
+            return
+        token = capi_token(cfg)
+        if not token:
+            return
+        for event_id, phone, event_name in pending:
+            await MetaCapi().send_lead(
+                cfg.meta_pixel_id, token, event_id=event_id, phone=phone,
+                event_name=event_name)
+
+    async def run_after_commit(self) -> None:
+        """Every side effect the reply deliberately does NOT wait for, drained once the reply
+        transaction has committed and the thread's advisory lock is released.
+
+        The rule this enforces: work belongs inside the reply's transaction only if it changes
+        WHAT we say or WHETHER we may say it. Everything else — telling Facebook a conversion
+        happened, writing the hand-off into the CRM — is bookkeeping about a message that has
+        already been decided, and holding the send behind it puts a third party's latency on
+        the lead's clock."""
+        await self._send_capi_after_commit()
+        await self.push_crm_after_commit()
 
     async def push_crm_after_commit(self) -> None:
         """Run the queued CRM push in its OWN session, after the reply transaction committed.
