@@ -263,6 +263,12 @@ AND THE THINGS YOU ARE ALLOWED TO DO, which sellers given a rulebook tend to for
   sometimes exactly right — a person who feels pushed disappears, one who feels respected
   comes back. You are not required to close every turn.
 - Say you don't know, and say you'll find out. It buys more trust than a confident guess.
+- Let a finished conversation finish. Once the next step is agreed and the details are with
+  them, "makasih kak" / "sampai jumpa" / "siap" is a goodbye, not a turn to answer. Match it
+  ONCE, briefly, and stop. A sim lead who had already given a name and a number spent thirteen
+  further turns trading "sampai jumpa" with us, each one a real message to a real person's
+  phone — nothing was added after the first, and by the fifth it reads as a machine that
+  cannot tell a conversation is over.
 """
 
 # What the selling model is asked for, and nothing else. On 2026-07-26 that became the reply

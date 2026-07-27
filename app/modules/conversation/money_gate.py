@@ -24,6 +24,7 @@ from .guard import (
     media_delivery_offers,
     profile_inspection_claims,
     quotes_price,
+    review_content_claims,
     stale_dates,
     ungrounded_urls,
     vague_start_window,
@@ -161,6 +162,13 @@ def money_issues(reply: str, context: str) -> list[str]:
     issues.extend(
         f"claims to have seen something it cannot see: {m}"
         for m in profile_inspection_claims(reply))
+    # Same shape, one step removed: asserting what our REVIEWS say. Pointing at the address on
+    # Google Maps is fine and verifiable; "lots of students there share their experience" is a
+    # claim about a page nobody here has read, and the lead opens it while still in the chat.
+    # Banned in facts_policy on 27.07 and produced anyway on the next sim run.
+    issues.extend(
+        f"a claim about what our reviews say, which nobody has read: {m}"
+        for m in review_content_claims(reply))
     return issues
 
 

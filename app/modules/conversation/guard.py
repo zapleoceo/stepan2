@@ -158,6 +158,24 @@ def fabricated_alumni_claim(reply: str, context: str) -> list[str]:
     return out
 
 
+# A claim about what OTHER people wrote about us. The address on Google Maps is verifiable and
+# inviting someone to look is fine; asserting what the reviews SAY is not — nobody here has read
+# them. Banned in facts_policy since 27.07 and produced anyway on the very next sim run ("di
+# sana banyak review dari siswa dari berbagai program"), which is what moved it into the gate.
+# The lead opens the map while still in the chat, and an empty or unrelated review page lands
+# at the exact moment they were deciding whether we are real.
+_REVIEW_CONTENT_RE = re.compile(
+    r"\b(review|ulasan|testimoni|rating|komentar)\w*\b[^.!?\n]{0,40}?"
+    r"\b(banyak|bagus|positif|puas|memuaskan|ratusan|banyak banget|tinggi)\b"
+    r"|\b(banyak|ratusan|puluhan)\b[^.!?\n]{0,25}?\b(review|ulasan|testimoni)\w*",
+    re.IGNORECASE)
+
+
+def review_content_claims(reply: str) -> list[str]:
+    """Claims about what our reviews contain — as opposed to where to find them."""
+    return [m.group(0).strip() for m in _REVIEW_CONTENT_RE.finditer(reply or "")]
+
+
 def quotes_price(reply: str) -> bool:
     """A concrete money figure appears in the reply — same shape the money gate already
     verifies against the KB. Used by the pitch gate as a content-based backstop: the model
