@@ -6,6 +6,7 @@ answer in `lang`; nothing here is tied to a specific language."""
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime
 
 from app.adapters.db.models import Message
@@ -88,6 +89,19 @@ def source_hint(lead_source: str | None, product_title: str | None = None) -> st
 # underscore, dot or @ is the tell. Greeting a lead by a handle reads as a bot.
 _HANDLE_TELL = re.compile(r"[0-9_@.]")
 
+# …but a handle needs none of those characters to be obviously not a name. Two shapes got
+# through the digit/underscore test and went out live: a non-Latin script ("Halo Kak 福安祥!",
+# 27.07) and a run-together English phrase ("Kak YourFriends", "Kak PusatSkincareLG"). Both
+# are `.isalpha()` and neither is anyone's given name.
+_CAMEL_RUN = re.compile(r"[a-z][A-Z]")
+
+
+def _is_latin_word(word: str) -> bool:
+    """Every letter drawn from the Latin script — the only alphabet an Indonesian given name
+    is written in here. Accented forms (José, Nurhasanah) pass; CJK, Cyrillic, Arabic and
+    emoji-as-name do not."""
+    return all("LATIN" in unicodedata.name(ch, "") for ch in word)
+
 
 def clean_first_name(display_name: str | None) -> str | None:
     """A clean given name to address the lead by, or None for a handle/garbage."""
@@ -96,6 +110,8 @@ def clean_first_name(display_name: str | None) -> str | None:
         return None
     first = name.split()[0]
     if not (2 <= len(first) <= 20) or not first.isalpha():
+        return None
+    if not _is_latin_word(first) or _CAMEL_RUN.search(first):
         return None
     return first
 

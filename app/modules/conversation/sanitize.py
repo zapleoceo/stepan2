@@ -14,6 +14,14 @@ _ZW = dict.fromkeys(map(ord, "​‌‍﻿⁠"), None)
 # Em/en dash (—, –, ―) → short dash with spaces — IM users don't type these
 _DASH = re.compile(r"\s*[—–―]\s*")
 
+# A literal backslash-n that survived JSON parsing: the model double-escaped its own reply
+# ("…banget!\\n\\nTapi jujur ya Kak"), json.loads unescaped one level, and the second reached
+# the lead as two visible characters. Live and current — 5 such messages went out on 27.07
+# alone, all of them long money-answers, which is exactly where it looks worst.
+# Converted to a real newline rather than deleted: the model put a paragraph break there and
+# meant it, and the line filter below has to see it as a line break to do its own job.
+_LITERAL_NEWLINE = re.compile(r"\\(?:r\\)?n")
+
 # Other AI punctuation → human equivalents (curly quotes, ellipsis)
 _HUMANIZE: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r'[""«»]'), '"'),
@@ -61,6 +69,7 @@ _URL_TRAILING_DOT = re.compile(r"(https?://[^\s]*[a-zA-Z0-9/=_-])\.(?=\s|$)")
 def clean_reply(text: str) -> str:
     """Strip zero-width chars, AI punctuation, and fabricated Indonesian phone lines."""
     s = (text or "").translate(_ZW)
+    s = _LITERAL_NEWLINE.sub("\n", s)
     s = _strip_markdown(s)
     s = _DASH.sub(" - ", s)
     s = _URL_TRAILING_DOT.sub(r"\1", s)
