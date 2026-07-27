@@ -82,7 +82,7 @@ class ReplyService(ReplyDelivery):
         ctx = await engine.prepare(thread_id, workflow=workflow, allow_over_budget=True)
         if ctx is None or _awaiting_media(ctx.dialog):
             return None
-        if _goodbye_loop(ctx.dialog):
+        if _goodbye_loop(ctx.dialog, ctx.lead.display_name if ctx.lead is not None else None):
             logger.info("reply branch=%d thread=%d: both sides have said goodbye — staying quiet",
                         self.branch_id, thread_id)
             return None
@@ -350,19 +350,24 @@ _CLOSING_WORDS = frozenset("""
 _WORD_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
 
 
-def _is_closing_only(text: str) -> bool:
+def _is_closing_only(text: str, extra: frozenset[str] = frozenset()) -> bool:
     """True when the message carries no content beyond pleasantries — including one that is
-    only emoji or punctuation, which is how the loop ends up looking after a few rounds."""
+    only emoji or punctuation, which is how the loop ends up looking after a few rounds.
+
+    `extra` carries the lead's own name. Without it the check fails on exactly the farewells we
+    write: "Sampai besok, Kak Rani" is a goodbye, but "Rani" is not a pleasantry, so the guard
+    saw content and answered again — which is how a sim conversation still reached seventeen
+    turns after the guard was in place."""
     stripped = (text or "").strip()
     if not stripped:
         return False
     words = [w.lower() for w in _WORD_RE.findall(stripped)]
     if not words:                       # a lone 🙏 or "..." — nothing said at all
         return True
-    return all(w in _CLOSING_WORDS for w in words)
+    return all(w in _CLOSING_WORDS or w in extra for w in words)
 
 
-def _goodbye_loop(dialog: list) -> bool:
+def _goodbye_loop(dialog: list, lead_name: str | None = None) -> bool:
     """The conversation is over and both sides know it — the lead's last message carries no
     content and our previous message was already a farewell.
 
@@ -379,9 +384,10 @@ def _goodbye_loop(dialog: list) -> bool:
     outs = [m for m in dialog if m.direction != "in"]
     if not ins or not outs:
         return False
-    if not _is_closing_only(ins[-1].text):
+    extra = frozenset(w.lower() for w in _WORD_RE.findall(lead_name or ""))
+    if not _is_closing_only(ins[-1].text, extra):
         return False
-    return _is_closing_only(outs[-1].text)
+    return _is_closing_only(outs[-1].text, extra)
 
 
 def _awaiting_media(dialog: list) -> bool:

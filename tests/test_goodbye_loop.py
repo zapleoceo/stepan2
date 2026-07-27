@@ -62,3 +62,25 @@ def test_a_bare_ok_after_a_real_answer_is_still_answered() -> None:
 def test_an_opening_message_is_never_a_goodbye() -> None:
     assert not _goodbye_loop([_msg("in", "halo")])
     assert not _goodbye_loop([])
+
+
+def test_our_farewell_carrying_the_lead_s_name_still_counts() -> None:
+    """"Sampai besok, Kak Rani" is a goodbye, but "Rani" is not a pleasantry — without the
+    name the guard saw content in our own message and answered again, which is how a sim
+    conversation still reached seventeen turns with the guard in place."""
+    dialog = [
+        _msg("in", "makasih kak"),
+        _msg("out", "Sampai besok, Kak Rani. 😊"),
+        _msg("in", "Siap kak, sampai besok! 😊"),
+    ]
+    assert not _goodbye_loop(dialog)                      # без имени — не срабатывает
+    assert _goodbye_loop(dialog, "Rani Putri")            # с именем — срабатывает
+
+
+def test_a_name_does_not_make_a_real_question_look_like_a_goodbye() -> None:
+    dialog = [
+        _msg("in", "halo"),
+        _msg("out", "Sampai jumpa, Kak Rani!"),
+        _msg("in", "Kak Rani mau tanya harganya berapa"),
+    ]
+    assert not _goodbye_loop(dialog, "Rani")

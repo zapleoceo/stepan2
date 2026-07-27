@@ -270,7 +270,10 @@ def test_an_agreement_is_an_instruction_not_an_invitation_to_present() -> None:
     said_yes = contract.index("WHEN THEY SAY YES")
     first = contract.index("WHAT COMES FIRST IN THE MESSAGE")
     assert said_yes < first, "it outranks the ordering rules — a yes ends the deliberation"
-    assert "one detail and nothing else" in contract
+    # The one-question rule used to be restated inside this paragraph and in three other
+    # places; it now lives once, under THE NEXT STEP, above this one.
+    assert "ONE QUESTION, NOT A LIST" in contract
+    assert contract.index("ONE QUESTION, NOT A LIST") < said_yes
 
 
 def test_a_volunteered_contact_must_be_acknowledged() -> None:
@@ -279,5 +282,5 @@ def test_a_volunteered_contact_must_be_acknowledged() -> None:
     word about the number. He had just handed over the one thing the whole funnel exists to
     get, and the bot carried on presenting."""
     contract = free_contract("id")
-    assert "hand you that detail unasked" in contract
+    assert "hand you the number unasked" in contract
     assert "strongest yes there is" in contract
