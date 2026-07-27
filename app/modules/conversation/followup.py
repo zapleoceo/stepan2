@@ -48,6 +48,15 @@ logger = logging.getLogger(__name__)
 # sustained outage doesn't get re-billed every 10-min cron tick.
 _FAILURE_BACKOFF_MIN = 30
 
+# Every alert kind that means "a human should look at this lead now" — see
+# _already_alerted_since_lead. `bot_off_message` is deliberately absent: it reports that a muted
+# thread received a message, not that the lead needs handling, so it must never suppress a real
+# escalation. Bound one placeholder per kind (:k0..:k2) rather than expanded into the SQL — a
+# bound list isn't portable between Postgres and the SQLite test DB, and interpolating the tuple
+# would make a parameterised query look like a built one. Adding a kind means adding a
+# placeholder in _already_alerted_since_lead; the test parametrises over this tuple.
+_ESCALATION_KINDS = ("needs_manager", "ready_deal", "ready_openhouse")
+
 # The nudge used to be a scripted ladder: touch 1 gives a hook, touch 2 invites to the Demo
 # Event, touch 3 names a deadline — the model executed a prescribed sequence regardless of who
 # the lead was or what they came for (a lead who tapped an SMM ad got two Vibe Coding pitches).
@@ -324,11 +333,20 @@ class FollowupService:
             # anyway (the exact pre-2026-07-07 gap raise_manager_alert's docstring warns both
             # paths must cover). Alert the manager and drop the nudge: needs_human means the
             # bot should not keep talking.
-            from .delivery import raise_manager_alert  # noqa: PLC0415
-            await raise_manager_alert(
-                self.session, self.branch_id, self.notifier, self.llm,
-                thread_id, lead_id, decision.to_legacy(stored),
-                ctx.lead.phone_e164 if ctx.lead is not None else None)
+            #
+            # The nudge is dropped either way. Only the alert is deduped: a lead who has been
+            # escalated once and has said nothing since is the same lead, and re-raising him on
+            # a later follow-up cycle tells the manager nothing he wasn't told the first time.
+            if await self._already_alerted_since_lead(thread_id):
+                logger.info("followup: branch=%d thread=%d needs_human already escalated "
+                            "since last inbound — nudge dropped, no new alert",
+                            self.branch_id, thread_id)
+            else:
+                from .delivery import raise_manager_alert  # noqa: PLC0415
+                await raise_manager_alert(
+                    self.session, self.branch_id, self.notifier, self.llm,
+                    thread_id, lead_id, decision.to_legacy(stored),
+                    ctx.lead.phone_e164 if ctx.lead is not None else None)
             await self._burn_dry_step(thread_id, now)
             return False
 
@@ -393,18 +411,27 @@ class FollowupService:
         await self.session.flush()
 
     async def _already_alerted_since_lead(self, thread_id: int) -> bool:
-        """True when a needs_manager alert already went out for this same silence — re-raising
-        the same gap on every follow-up cycle just buries the owner in duplicates."""
+        """True when this lead was already escalated for this same silence — re-raising the same
+        gap on every follow-up cycle just buries the owner in duplicates.
+
+        Restricting this to kind='needs_manager' let the duplicate through anyway, which is what
+        thread 4044 is: `ready_openhouse` fired 15.07 17:19, two minutes after the lead
+        volunteered his phone — correct and on time — and then the FIFTH follow-up cycle raised
+        `needs_manager` for the same twelve-day-old phone at 04:51 on 27.07, five seconds before
+        the thread wound down to dormant. Same lead, same silence, nothing new to tell anyone.
+        What matters is whether a human was already pointed at this thread, not which door the
+        alert came through."""
         row = (
             await self.session.execute(
                 text(
                     "SELECT 1 FROM manager_alert ma"
                     " JOIN channel_thread ct ON ct.id = ma.thread_id"
-                    " WHERE ma.thread_id = :t AND ma.kind = 'needs_manager'"
+                    " WHERE ma.thread_id = :t AND ma.kind IN (:k0, :k1, :k2)"
                     "   AND (ct.last_in_at IS NULL OR ma.created_at > ct.last_in_at)"
                     " LIMIT 1"
                 ),
-                {"t": thread_id},
+                {"t": thread_id,
+                 **{f"k{i}": k for i, k in enumerate(_ESCALATION_KINDS)}},
             )
         ).first()
         return row is not None
