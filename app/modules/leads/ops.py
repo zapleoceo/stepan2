@@ -26,7 +26,12 @@ logger = logging.getLogger(__name__)
 _CALL_FAILED_NUDGE = (
     "[System: a teammate just tried to reach this lead by phone and could not get"
     " through — that is the one fact you have that they don't. Write to them in {lang};"
-    " what to say about it is yours to judge. Return the JSON as usual.]"
+    " what to say about it is yours to judge, with one thing this message must do: find out"
+    " WHEN and HOW it suits them to be contacted — a time of day that works, and whether they"
+    " would rather be called, sent a WhatsApp message, or just carry on here in the chat. A"
+    " missed call is not a refusal; it is usually bad timing, and nobody has asked them about"
+    " the timing yet. Ask it as a courtesy, not as a demand, and make it easy to answer."
+    " Return the JSON as usual.]"
 )
 
 
