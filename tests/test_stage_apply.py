@@ -646,3 +646,41 @@ def test_the_closing_is_a_safety_net_not_a_habit() -> None:
         "Vibe Coding itu 4 bulan, 37 sesi, malam hari",
     ):
         assert not _says_what_happens_next(silent_on_next_step), silent_on_next_step
+
+
+# ── the alert card must carry something to dial ───────────────────────────────
+
+async def test_the_alert_falls_back_to_the_lead_s_own_phone(db_session) -> None:
+    """29 live alerts carried an empty phone for a lead who had one. Every caller passes the
+    number it happens to have in scope; the lead row is the one place it is always current."""
+    from app.modules.notifications.alerts import AlertService
+
+    bid, tid, lead = await _world(db_session, phone="+6281234567890")
+    alert = await AlertService(db_session, bid, None).raise_alert(
+        lead_id=lead.id, kind="needs_manager", summary_en="x", summary_ru="x", thread_id=tid)
+    assert alert.lead_phone == "+6281234567890"
+
+
+async def test_an_explicit_phone_still_wins(db_session) -> None:
+    from app.modules.notifications.alerts import AlertService
+
+    bid, tid, lead = await _world(db_session, phone="+6281234567890")
+    alert = await AlertService(db_session, bid, None).raise_alert(
+        lead_id=lead.id, kind="needs_manager", summary_en="x", summary_ru="x",
+        thread_id=tid, lead_phone="+6280000000000")
+    assert alert.lead_phone == "+6280000000000"
+
+
+def test_the_reason_is_not_printed_twice() -> None:
+    """to_legacy filled manager_question AND kb_gap from the same human_reason, so every alert
+    repeated its sentence under "Пробел в KB" — a label claiming the knowledge base was missing
+    something nobody said was missing (live: alert 513, thread 5430)."""
+    from app.modules.conversation.decision import TurnDecision
+    from app.modules.conversation.dossier import LeadDossier
+
+    legacy = TurnDecision(
+        reply="x", move="handoff", stage=Stage.MANAGER,
+        needs_human=True, human_reason="ready to enrol",
+    ).to_legacy(LeadDossier())
+    assert legacy.manager_question == "ready to enrol"
+    assert legacy.kb_gap is None

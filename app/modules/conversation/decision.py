@@ -193,7 +193,12 @@ class TurnDecision:
             ready=ready or self.ready,
             needs_manager=self.needs_human,
             manager_question=self.human_reason,
-            kb_gap=self.human_reason,
+            # NOT human_reason again. The free schema reports one reason; putting it in both
+            # fields made every alert print the same sentence twice, the second time under
+            # "Пробел в KB" — a label that claims the knowledge base is missing something
+            # nobody said was missing (live: alert 513, thread 5430). A KB gap is a separate
+            # finding and there is no longer a field where the model reports one.
+            kb_gap=None,
             ready_subtype="deal" if (ready or self.ready) else None,
             lead_type=_lead_type_of(merged),
             audience=_audience_of(merged),

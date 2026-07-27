@@ -58,6 +58,13 @@ class AlertService:
     ) -> ManagerAlert:
         """Write the branch-scoped alert row, then ping the lead's topic. summary_en /
         summary_ru are the REASON (why the bot escalated); the chat summary is generated."""
+        if lead_phone is None:
+            # Fall back to what the lead record holds. 29 live alerts carried an empty phone
+            # for a lead who had one — every caller passes the number it happens to have in
+            # scope, and a path that reached here without one handed the manager a card with
+            # nothing to dial. The lead row is the one place the number is always current.
+            lead = await self.session.get(Lead, lead_id)
+            lead_phone = lead.phone_e164 if lead is not None else None
         alert = await self._alerts.add(
             ManagerAlert(
                 branch_id=self.branch_id,
