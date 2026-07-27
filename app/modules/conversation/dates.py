@@ -44,6 +44,11 @@ EXPIRED_NOTE = "SUDAH LEWAT — jangan tawarkan"
 _ANNOTATED = re.compile(r"\s*\[(?:" + re.escape(EXPIRED_NOTE) + r"|[^\]]*hari[^\]]*)\]")
 
 
+def strip_date_annotations(text: str) -> str:
+    """Remove the markers this module adds — for outgoing text, which must never carry them."""
+    return _ANNOTATED.sub("", text or "")
+
+
 def annotate_dates(text: str, today: date) -> str:
     """Every date in `text` followed by what day it falls on and how far off it is.
 

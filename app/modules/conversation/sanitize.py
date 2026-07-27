@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from .dates import strip_date_annotations
+
 # Zero-width + word-joiner control chars that reasoning models inject silently
 _ZW = dict.fromkeys(map(ord, "​‌‍﻿⁠"), None)
 
@@ -21,6 +23,14 @@ _DASH = re.compile(r"\s*[—–―]\s*")
 # Converted to a real newline rather than deleted: the model put a paragraph break there and
 # meant it, and the line filter below has to see it as a line break to do its own job.
 _LITERAL_NEWLINE = re.compile(r"\\(?:r\\)?n")
+
+# Our own date annotation, copied into the reply. dates.py marks every date in the knowledge
+# base with the weekday it falls on and how far off it is — "1 September 2026 [hari Selasa, 36
+# hari lagi]" — precisely so the model repeats arithmetic instead of doing it. It works, and
+# the model duly repeats it: brackets and all, to the lead (sim, 27.07). Stripping it here is
+# the same trade the annotation itself makes — the model cannot be relied on to leave a marker
+# out, and it does not have to be, because the marker has already done its job by the time the
+# text reaches this function.
 
 # Other AI punctuation → human equivalents (curly quotes, ellipsis)
 _HUMANIZE: list[tuple[re.Pattern[str], str]] = [
@@ -70,6 +80,7 @@ def clean_reply(text: str) -> str:
     """Strip zero-width chars, AI punctuation, and fabricated Indonesian phone lines."""
     s = (text or "").translate(_ZW)
     s = _LITERAL_NEWLINE.sub("\n", s)
+    s = strip_date_annotations(s)
     s = _strip_markdown(s)
     s = _DASH.sub(" - ", s)
     s = _URL_TRAILING_DOT.sub(r"\1", s)

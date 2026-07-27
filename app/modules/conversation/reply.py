@@ -13,6 +13,7 @@ delivery.py: this module decides WHAT to say; ReplyDelivery owns getting it to t
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import replace
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
@@ -80,6 +81,10 @@ class ReplyService(ReplyDelivery):
                                 broker_budget_s=self._broker_budget_s)
         ctx = await engine.prepare(thread_id, workflow=workflow, allow_over_budget=True)
         if ctx is None or _awaiting_media(ctx.dialog):
+            return None
+        if _goodbye_loop(ctx.dialog):
+            logger.info("reply branch=%d thread=%d: both sides have said goodbye — staying quiet",
+                        self.branch_id, thread_id)
             return None
 
         lead = ctx.lead
@@ -328,6 +333,55 @@ def _entry_hint(ctx, product_title: str | None = None) -> str | None:  # noqa: A
     if hint is None and not src and not ctx.thread.ad_id:
         return ORGANIC_ENTRY_HINT
     return hint
+
+
+# A closing with nothing in it: thanks, ok, see you, a lone emoji. Built as an allow-list
+# rather than a pattern of whole messages, because real farewells carry filler — "Oke sip, udah
+# clear. Makasih Min, saya tunggu besok pagi ya" is a goodbye, and matching only bare words
+# missed every live example. A message counts as empty when NOTHING is left after removing
+# pleasantries, forms of address and filler; anything substantive that survives ("harganya",
+# "daftarin", a phone number) keeps the turn alive.
+_CLOSING_WORDS = frozenset("""
+    oke ok oke oke okey okay okeh sip siap baik iya ya yaa yaudah udah sudah clear jelas
+    makasih makasi thanks thank you terima kasih sama samasama dadah bye semangat noted
+    mantap aamiin amin sampai jumpa ketemu besok pagi nanti tunggu ditunggu menunggu saya aku
+    gue min mimin kak kakak ya deh dong nya lah kok aja juga banyak sekali
+""".split())
+_WORD_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
+
+
+def _is_closing_only(text: str) -> bool:
+    """True when the message carries no content beyond pleasantries — including one that is
+    only emoji or punctuation, which is how the loop ends up looking after a few rounds."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    words = [w.lower() for w in _WORD_RE.findall(stripped)]
+    if not words:                       # a lone 🙏 or "..." — nothing said at all
+        return True
+    return all(w in _CLOSING_WORDS for w in words)
+
+
+def _goodbye_loop(dialog: list) -> bool:
+    """The conversation is over and both sides know it — the lead's last message carries no
+    content and our previous message was already a farewell.
+
+    The contract asks the model to let a finished conversation finish, and the model does not:
+    each turn looks new to it, so it answers "one last short time" again and again. Two sim
+    runs ended this way — thirteen turns of "sampai jumpa" in one, seventeen in another, the
+    bot eventually reduced to sending a lone 🙏 over and over. In production every one of those
+    is a real message against the account's send budget, to someone who said goodbye long ago.
+
+    Silence is the correct answer here, and it is the one thing a prompt cannot reliably
+    produce. Requires BOTH sides to be closing: a bare "oke" after a real answer of ours is a
+    lead still listening, and that turn is not dropped."""
+    ins = [m for m in dialog if m.direction == "in"]
+    outs = [m for m in dialog if m.direction != "in"]
+    if not ins or not outs:
+        return False
+    if not _is_closing_only(ins[-1].text):
+        return False
+    return _is_closing_only(outs[-1].text)
 
 
 def _awaiting_media(dialog: list) -> bool:
