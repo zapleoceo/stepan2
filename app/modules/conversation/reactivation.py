@@ -32,6 +32,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import money_issues
+from .prompt import lead_name_hint
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import SALES
 
@@ -98,7 +99,16 @@ _REACTIVATION_FRAMING = (
     "attempt to earn a single reply, not to close. You decide whether it is worth writing at "
     "all and what would make THIS person answer; the dossier above is everything you know "
     "about them. If nothing you could say is genuinely worth their attention, return an empty "
-    "reply — a stale echo costs more than staying quiet.]"
+    "reply — a stale echo costs more than staying quiet.\n"
+    "Two things this touch must not be. It must not ask them to remind you who they are: "
+    "'kemarin sempat nanya-nanya soal kursus (Vibe Coding kah, atau yang lain?)' puts the work "
+    "of remembering on the person who already stopped answering. If the dossier does not tell "
+    "you what they came for, that is a reason to write about something you know is true and "
+    "useful, not to ask them to fill in the blank. And it must not be 'masih tertarik?' with "
+    "nothing attached — a question that costs them effort and offers them nothing is the "
+    "commonest way this touch is wasted. Bring one concrete thing: something that changed, "
+    "something you owe them from the old conversation, or one fact that answers what they were "
+    "actually worried about.]"
 )
 
 
@@ -165,8 +175,20 @@ class ReactivationService:
         branch = await self.session.get(Branch, self.branch_id)
         lang = branch.lang if branch is not None else "id"
         context = await engine.free_kb_context()
-        messages = build_messages_free(context, ctx.dialog, lang, stored,
-                                       now_block=await engine._now_block())  # noqa: SLF001
+        # The entry block is not optional here, though this path shipped without it for weeks.
+        # Both other proactive paths pass it; reactivation did not, so the model met the ad's
+        # prefill as the lead's own opening line and answered it as a question. Four of the six
+        # touches sent on 26-27.07 were built on that mistake — "Kakak tanya soal jadwal,
+        # durasi, sama biaya kursus" is Meta's button text, quoted back to someone who never
+        # typed it. The name block goes in for the same reason: a touch that greets by name
+        # reads as a person, and the handle guard already decides when there is no name to use.
+        lead_row = await self.session.get(Lead, lead_id)
+        messages = build_messages_free(
+            context, ctx.dialog, lang, stored,
+            source_block=await self._entry_block(ctx.thread.product_slug),
+            name_block=lead_name_hint(lead_row.display_name if lead_row else None),
+            manager_note=lead_row.manager_note if lead_row is not None else None,
+            now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": _REACTIVATION_FRAMING})
         # "Lowest-stakes, so draft cheap" had it backwards. This is at most two messages ever,
         # to someone who already stopped answering, with no question to lean on — the hardest
@@ -216,6 +238,25 @@ class ReactivationService:
         await self.session.flush()
         logger.info("reactivation queued branch=%d thread=%d", self.branch_id, thread_id)
         return True
+
+    async def _entry_block(self, product_slug: str | None) -> str | None:
+        """Which product this lead actually came for — same block the follow-up path passes,
+        and for the same reason: without it the ad's prefill is the only thing in the prompt
+        that looks like a stated interest, and it isn't one."""
+        if not product_slug:
+            return None
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.adapters.db.models import Product  # noqa: PLC0415
+        row = (await self.session.execute(
+            select(Product.title).where(
+                Product.branch_id == self.branch_id, Product.slug == product_slug,
+                Product.is_active == True))).first()  # noqa: E712 — SQLAlchemy needs the comparison
+        title = (row[0] or "").strip() if row else ""
+        return (f"WHAT THEY CAME FOR: this lead arrived asking about {title}. Stay on it "
+                "unless they themselves moved the conversation elsewhere — pitching a "
+                "different course to someone who never showed interest in it reads as spam."
+                ) if title else None
 
     async def _suppress(self, thread_id: int, lead_id: int, now: datetime) -> None:
         """Record a reactivation touch WITHOUT sending, so a declined/annoyed lead isn't

@@ -76,3 +76,41 @@ async def test_gap_and_cap(db_session) -> None:
                         last_react_days=40)
     due = await _svc(db_session, bid).due(_now())
     assert [t for t, _s, _l in due] == [fresh], due
+
+
+# ── the touch must know which ad the lead came from ───────────────────────────
+
+async def test_entry_block_names_the_product_the_lead_came_for(db_session) -> None:
+    """Reactivation shipped for weeks without passing an entry block, and the reply and
+    follow-up paths both pass one. Without it the ad's prefill is the only thing in the prompt
+    that looks like a stated interest — and four of the six touches sent on 26-27.07 quoted it
+    back: "Kakak tanya soal jadwal, durasi, sama biaya kursus" is Meta's button text, put in
+    the mouth of someone who never typed it."""
+    from app.adapters.db.models import Product
+
+    bid, _chid = await _setup(db_session)
+    db_session.add(Product(branch_id=bid, slug="vibe_coding", title="Vibe Coding",
+                           content="x", is_active=True))
+    await db_session.flush()
+
+    block = await _svc(db_session, bid)._entry_block("vibe_coding")
+    assert block is not None
+    assert "Vibe Coding" in block
+    assert "WHAT THEY CAME FOR" in block
+
+
+async def test_no_product_means_no_entry_block(db_session) -> None:
+    """A lead with no mapped product gets nothing rather than an empty claim about what they
+    wanted — inventing an interest is worse than admitting there is none on file."""
+    bid, _chid = await _setup(db_session)
+    assert await _svc(db_session, bid)._entry_block(None) is None
+    assert await _svc(db_session, bid)._entry_block("no_such_course") is None
+
+
+def test_the_framing_bans_the_two_wasted_shapes() -> None:
+    """'Remind me who you are' and a bare 'still interested?' are the two ways this touch is
+    spent for nothing — both were live on 27.07."""
+    from app.modules.conversation.reactivation import _REACTIVATION_FRAMING
+
+    assert "masih tertarik" in _REACTIVATION_FRAMING
+    assert "remind you who they are" in _REACTIVATION_FRAMING
