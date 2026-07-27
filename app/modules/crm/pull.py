@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -36,6 +37,32 @@ _ACTIVE = ("new", "qualifying", "presenting", "objection", "nurturing")
 # …and the stages it has left. A lead only reaches these by being handed to a human, which is
 # the one route to a sale, so this is where `deal_won` lives.
 _EXITED = ("ready", "handed_off", "manager")
+
+
+def _ours(state, lead: Lead) -> bool:  # noqa: ANN001
+    """Did this deal close AFTER we started talking to them?
+
+    A phone number can be in the CRM long before Stepan ever writes: a walk-in, a call, last
+    year's enquiry. Counting every won card attached to a number we happen to hold would
+    credit the bot with other people's sales, and — worse — teach Meta to buy more of an
+    audience that was already converting without it.
+
+    An unknown date counts as ours. The alternative is discarding a real sale because the CRM
+    happened not to timestamp it, and under-reporting revenue is the more expensive mistake
+    here: it is the number the whole channel is judged on."""
+    won_at = getattr(state, "won_at", None)
+    if not won_at or lead.created_at is None:
+        return True
+    try:
+        at = datetime.fromisoformat(str(won_at))
+    except ValueError:
+        return True
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    started = lead.created_at
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=UTC)
+    return at >= started
 
 
 class CrmPullService:
@@ -97,7 +124,7 @@ class CrmPullService:
                 logger.exception(
                     "crm outcomes failed branch=%d lead=%d", self.branch_id, lead.id)
                 continue
-            if state is not None and state.deal_won:
+            if state is not None and state.deal_won and _ours(state, lead):
                 won += 1
                 await self._report_purchase(lead, cfg)
         if leads:

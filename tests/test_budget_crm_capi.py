@@ -243,3 +243,40 @@ async def test_outcomes_polls_the_leads_the_gate_deliberately_skips(db_session) 
     assert handed.id in ids, "a muted, handed-off lead is the whole point"
     assert active.id not in ids, "still in the funnel — that is the gate's job"
     assert no_phone.id not in ids, "no phone means no CRM lookup key"
+
+
+def test_the_contract_date_was_there_all_along() -> None:
+    """deal_won is derived by us — `any(row.typeName == "contract")` over the CRM history — and
+    that collapse threw the date away. Every history row carries `date_time`; _last_answered_call
+    has always read it off out-call rows. So nothing had to be added on the CRM side."""
+    from app.adapters.crm_mcp import CrmMcpReader
+
+    rows = [
+        {"typeName": "out-call", "no_answer": "0", "date_time": "2026-07-18T09:00:00"},
+        {"typeName": "contract", "date_time": "2026-07-20T14:30:00"},
+        {"typeName": "contract", "date_time": "2026-07-02T11:00:00"},
+    ]
+    out = CrmMcpReader("jakarta")._derive(217233, rows)  # noqa: SLF001
+    assert out["deal_won"] is True
+    assert out["deal_won_at"].startswith("2026-07-20"), "the NEWEST contract wins"
+    assert CrmMcpReader("jakarta")._derive(1, [])["deal_won_at"] is None  # noqa: SLF001
+
+
+def test_a_deal_that_predates_our_first_message_is_not_ours() -> None:
+    """A phone can sit in the CRM long before Stepan writes — a walk-in, a call, last year's
+    enquiry. Counting those would credit the bot with other people's sales and teach Meta to
+    buy more of an audience that was already converting without it."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from app.modules.crm.pull import _ours
+
+    lead = SimpleNamespace(created_at=datetime(2026, 7, 15, tzinfo=UTC))
+    after = SimpleNamespace(won_at="2026-07-20T14:30:00+00:00")
+    before = SimpleNamespace(won_at="2026-05-01T10:00:00+00:00")
+    assert _ours(after, lead) is True
+    assert _ours(before, lead) is False
+    # An unknown or unparseable date counts as ours — under-reporting revenue is the more
+    # expensive mistake, since it is the number the whole channel is judged on.
+    assert _ours(SimpleNamespace(won_at=None), lead) is True
+    assert _ours(SimpleNamespace(won_at="whenever"), lead) is True

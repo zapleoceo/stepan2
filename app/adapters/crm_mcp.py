@@ -122,7 +122,8 @@ class CrmMcpReader:
         return data if isinstance(data, dict) else None
 
     def _derive(self, crm_id: int, rows: list[dict]) -> dict:
-        deal_won = any(r.get("typeName") == "contract" for r in rows)
+        contract_at = self._latest_event_at(rows, "contract")
+        deal_won = contract_at is not None
         last_ok_call = self._last_answered_call(rows)
         hold_window = timedelta(hours=settings().crm_manager_call_hold_h)
         recently_called = (
@@ -133,11 +134,33 @@ class CrmMcpReader:
             "exists": True,
             "crm_id": crm_id,
             "deal_won": deal_won,
+            # WHEN it closed, so a sale can be tied to our conversation instead of counted
+            # blind. The CRM already sends it — every history row carries `date_time`, which
+            # `_last_answered_call` has always read off out-call rows; deal_won just collapsed
+            # the contract rows to a bare boolean and threw the date away.
+            "deal_won_at": contract_at.isoformat() if contract_at else None,
             "manager_called": recently_called,
             "last_manager_call_at": last_ok_call.isoformat() if last_ok_call else None,
             "events_seen": len(rows),
             "source": "mcp",
         }
+
+    @staticmethod
+    def _latest_event_at(rows: list[dict], type_name: str) -> datetime | None:
+        """When the newest event of this type happened, or None if there is none."""
+        latest: datetime | None = None
+        for r in rows:
+            if r.get("typeName") != type_name:
+                continue
+            try:
+                at = datetime.fromisoformat(str(r.get("date_time")))
+            except ValueError:
+                continue
+            if at.tzinfo is None:
+                at = at.replace(tzinfo=UTC)
+            if latest is None or at > latest:
+                latest = at
+        return latest
 
     @staticmethod
     def _last_answered_call(rows: list[dict]) -> datetime | None:
