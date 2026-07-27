@@ -123,7 +123,9 @@ def _section_block(pid: int, title: str, slug: str, body: str, add: str, can_wri
 
 
 def _fmt_day(dt: object) -> str:
-    return dt.strftime("%d %b %Y") if hasattr(dt, "strftime") else ""
+    from ._ui_html import fmt_dt  # noqa: PLC0415 — avoids an import cycle at module load
+
+    return fmt_dt(dt, "%d %b %Y")  # type: ignore[arg-type] — fmt_dt coerces via _as_dt
 
 
 def _history_html(history: list[Persona]) -> str:

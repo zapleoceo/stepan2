@@ -812,6 +812,24 @@ def _as_dt(v: object) -> datetime | None:
         return None
 
 
+def viewer_local(dt: datetime | None) -> datetime | None:
+    """A stored (UTC) timestamp moved into the viewing admin's own zone.
+
+    Every timestamp on /ui goes through here. Formatting a raw value with .strftime prints
+    server time, which is UTC and therefore wrong for everyone — and wrong in a way nobody
+    notices, because 09:26 is a perfectly plausible time of day. Three panels were doing it
+    (MCP tokens, the ads-synced stamp, the persona edit date) while everything around them was
+    already local, so the same page showed two different clocks."""
+    return None if dt is None else dt + timedelta(hours=_render_tz_h.get())
+
+
+def fmt_dt(dt: datetime | None, pattern: str, empty: str = "") -> str:
+    """Viewer-local timestamp in an arbitrary pattern — the only sanctioned way for a UI module
+    outside this file to format one. A test pins that rule (test_ui_time.py)."""
+    local = viewer_local(_as_dt(dt))
+    return local.strftime(pattern) if local is not None else empty
+
+
 def _fmt_time(dt: datetime | None) -> str:
     """Viewer-local DD.MM HH:MM:SS — always includes the date, not just time-of-day, so a
     message/event timestamp is never ambiguous about which day it happened."""

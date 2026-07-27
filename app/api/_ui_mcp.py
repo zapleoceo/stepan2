@@ -49,7 +49,9 @@ def _scope_badge(scope: str) -> str:
 
 
 def _fmt_dt(dt: datetime | None) -> str:
-    return dt.strftime("%Y-%m-%d %H:%M") if isinstance(dt, datetime) else "—"
+    from ._ui_html import fmt_dt  # noqa: PLC0415 — avoids an import cycle at module load
+
+    return fmt_dt(dt, "%Y-%m-%d %H:%M", empty="—")
 
 
 def _branch_badge(name: str) -> str:

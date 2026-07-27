@@ -7,7 +7,14 @@ import json as _json
 from datetime import UTC, datetime, timedelta
 
 from ._i18n import current_lang, t
-from ._ui_html import _STAGE_COLOR, _STAGE_ICON, _ago, _as_dt, _render_tz_h, ig_post_url
+from ._ui_html import (
+    _STAGE_COLOR,
+    _STAGE_ICON,
+    _ago,
+    _as_dt,
+    fmt_dt,
+    ig_post_url,
+)
 
 _ST_ECSS: dict[str, str] = {
     "proposed": "es-p", "applied": "es-a",
@@ -54,12 +61,8 @@ def leads_panel_html(rows: list, tz_by_branch: dict[int, int] | None = None) -> 
     created_h = _h.escape(t("lead.created"))
     hint = _h.escape(t("help.leads"))
 
-    def _created(v: object, branch_id: object) -> str:
-        dt = _as_dt(v)
-        if dt is None:
-            return "—"
-        dt += timedelta(hours=_render_tz_h.get())
-        return dt.strftime("%Y-%m-%d")
+    def _created(v: object, branch_id: object) -> str:  # noqa: ARG001 (viewer tz, not branch)
+        return fmt_dt(v, "%Y-%m-%d", empty="—")
 
     trows = "".join(
         f'<tr>'
@@ -141,11 +144,7 @@ def outbox_panel_html(
         )
 
     def _ts(v: object, branch_id: object) -> str:  # noqa: ARG001 (branch_id unused: viewer tz)
-        dt = _as_dt(v)
-        if dt is None:
-            return "—"
-        dt += timedelta(hours=_render_tz_h.get())
-        return dt.strftime("%H:%M:%S")
+        return fmt_dt(v, "%H:%M:%S", empty="—")
 
     now = datetime.now(UTC).replace(tzinfo=None)
 
@@ -1687,10 +1686,8 @@ def _ad_tree_html(
     tot_spend = sum(g["spend"] for g in groups.values())
     seen_leads = tot_leads + sum(int(r[2] or 0) for r in orphans)
     covered = tot_leads / seen_leads * 100 if seen_leads else 0.0
-    stamp = (
-        f' · {_h.escape(t("rep.ads_synced"))} {synced_at:%d.%m %H:%M}'
-        if hasattr(synced_at, "strftime") else ""
-    )
+    when = fmt_dt(synced_at, "%d.%m %H:%M")
+    stamp = f' · {_h.escape(t("rep.ads_synced"))} {when}' if when else ""
     # Coverage on the face of the panel, not in a tooltip: a spend view that silently omits
     # part of the leads reads as complete and would be trusted as such.
     note = (
@@ -2298,10 +2295,7 @@ def _log_row(r: object, tz_by_branch: dict[int, int], grouped: bool = False) -> 
     req, tid, kind, cap = r.request_id, r.thread_id, r.kind, r.capability
     model, ti, to, cost = r.model, r.tokens_in, r.tokens_out, r.cost_usd
     lat, ok, err, created = r.latency_ms, r.ok, r.error, r.created_at
-    dt = _as_dt(created)
-    if dt is not None:
-        dt += timedelta(hours=_render_tz_h.get())
-    when = dt.strftime("%m-%d %H:%M:%S") if dt else "—"  # MM-DD HH:MM:SS, viewer-local
+    when = fmt_dt(created, "%m-%d %H:%M:%S", empty="—")  # MM-DD HH:MM:SS, viewer-local
     rid = f'#{_h.escape(str(req))}' if req else "—"
     chat = (f'<a class="oq-chat" hx-get="/ui/chat/{tid}" hx-target="#main"'
             f' hx-push-url="true" href="/ui/inbox" onclick="setOpenThread({tid})">#{tid}</a>'
