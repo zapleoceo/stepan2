@@ -116,6 +116,48 @@ def profile_inspection_claims(reply: str) -> list[str]:
     return [m.group(0).strip() for m in _PROFILE_CLAIM_RE.finditer(reply or "")]
 
 
+# "Our alumnus, <Name>" — a named person presented as ours. facts_market already forbids this
+# twice in prose ("НИКОГДА не говорить 'один из наших выпускников…' без реального связанного
+# кейса"; a public figure must be labelled external) and the rule was broken anyway: thread
+# 2367 was told "Contoh alumni kami, Pieter Levels" — a well-known indie hacker with no
+# connection to the school, checkable in one search. A rule stated only in prose is a rule the
+# gate cannot keep.
+#
+# The name is what makes it unshippable. "Banyak alumni kami mulai freelance" is a claim about
+# a group and lands under the honest-archetype line the KB does allow; a person's name is a
+# verifiable assertion about a specific human being, and inventing one costs everything the
+# transcript said before it.
+#
+# Case matters here and the flags are scoped accordingly: the keywords are matched
+# case-insensitively, the NAME is not. A blanket re.IGNORECASE turns [A-Z][a-z]+ into "any
+# word", and "alumni kami yang mulai freelance" reads as a person called Yang Mulai.
+_OURS = r"(?i:alumni|alumnus|lulusan|peserta|murid|siswa|student)"
+_NAME = r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+"
+_ALUMNI_NAME_RE = re.compile(
+    rf"\b{_OURS}\s+(?i:kami|kita)\b[^.!?\n]{{0,20}}?\b({_NAME})"
+    rf"|\b({_NAME})\b[^.!?\n]{{0,20}}?\b{_OURS}\s+(?i:kami|kita)\b",
+    re.UNICODE)
+# …but the same sentence with an explicit "not ours / from our international network" label is
+# exactly what facts_market asks for, so it must not trip.
+_EXTERNAL_LABEL_RE = re.compile(
+    r"\b(bukan\s+alumni|jaringan\s+internasional|luar\s+negeri|bukan\s+dari\s+jakarta|"
+    r"contoh\s+dari\s+luar|external|bukan\s+murid\s+kami)\b", re.IGNORECASE)
+
+
+def fabricated_alumni_claim(reply: str, context: str) -> list[str]:
+    """A NAMED person presented as our alumnus/student, whose name is not in the knowledge
+    base. Checked per sentence, and skipped where the text labels the example as external."""
+    out: list[str] = []
+    for part in re.split(r"[.!?\n]|\|\|\|", reply or ""):
+        if _EXTERNAL_LABEL_RE.search(part):
+            continue
+        for m in _ALUMNI_NAME_RE.finditer(part):
+            name = (m.group(1) or m.group(2) or "").strip()
+            if name and name.lower() not in (context or "").lower():
+                out.append(name)
+    return out
+
+
 def quotes_price(reply: str) -> bool:
     """A concrete money figure appears in the reply — same shape the money gate already
     verifies against the KB. Used by the pitch gate as a content-based backstop: the model

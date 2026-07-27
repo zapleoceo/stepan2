@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from .guard import (
     canonical_prices,
+    fabricated_alumni_claim,
     fabricated_income_figure,
     fabricated_result_claim,
     impossible_capability_offers,
@@ -126,6 +127,12 @@ def money_issues(reply: str, context: str) -> list[str]:
     # Thread 4799 produced one twice — first as an outside brand, then as "our alumni".
     issues.extend(
         f"an invented result percentage: {m}" for m in fabricated_result_claim(reply))
+    # …and a named person claimed as ours. Thread 2367 was told "Contoh alumni kami, Pieter
+    # Levels" — someone with no connection to the school, and checkable in one search. The KB
+    # forbids this in prose twice; only the gate can actually stop it.
+    issues.extend(
+        f"a named person claimed as our alumnus, not in the knowledge base: {m}"
+        for m in fabricated_alumni_claim(reply, context))
     issues.extend(
         f"service/material not in the offering (invented): {m}"
         for m in invented_service_offers(reply))
