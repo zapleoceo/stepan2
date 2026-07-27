@@ -25,6 +25,7 @@ from .guard import (
     quotes_price,
     stale_dates,
     ungrounded_urls,
+    vague_start_window,
 )
 
 # The correction handed to the model when the gate trips. It names the offence and demands a
@@ -133,6 +134,10 @@ def money_issues(reply: str, context: str) -> list[str]:
     # reach one, but a card left un-updated is a standing trap (live: "batch berikutnya 19
     # Juli" offered on 25 July), so the send is blocked too.
     issues.extend(stale_dates(reply))
+    # …and a start given as a month rather than a date, which stale_dates cannot see because
+    # there is no day in it to expire. Two threads on two products lost to this wording.
+    issues.extend(
+        f"a course start given as a window, not a date: {m}" for m in vague_start_window(reply))
     # Offering to send a video/file/module the bot cannot send: the lead says yes and gets a
     # refusal one turn later (live, 25 July — 6 such offers in 24h). An offer we retract is
     # worse than no offer, so it never ships.

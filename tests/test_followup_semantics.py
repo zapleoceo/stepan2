@@ -432,7 +432,12 @@ class _CapturingLLM(FakeLLM):
         return await super().chat(messages, **kw)
 
 
-def _v3(reply: str = "Eh iya kak, btw batch berikutnya mulai bulan depan", **over) -> str:  # noqa: ANN003
+# The old default was "batch berikutnya mulai bulan depan" — a start promised as a month.
+# money_issues now blocks that (guard.vague_start_window), so the fixture was modelling a
+# message the pipeline correctly refuses to send, and every test using it silently measured
+# the drop instead of the behaviour it named. See thread 5431.
+def _v3(reply: str = "Eh iya kak, btw kelasnya 2x seminggu malam, bisa disambi kerja",
+        **over) -> str:  # noqa: ANN003
     payload = {"reply": reply, "move": "give_value", "stage": "qualifying"}
     payload.update(over)
     return json.dumps(payload)

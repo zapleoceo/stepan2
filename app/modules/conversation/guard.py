@@ -302,6 +302,33 @@ _RESULT_PERCENT_RE = re.compile(
     re.IGNORECASE)
 
 
+# A start date given as a WINDOW instead of a date — "kelas mulai akhir Juli", "batch bulan
+# depan", "start awal Agustus". stale_dates catches an explicit day that has passed; this
+# catches the vaguer promise that never had a day to begin with, and it has now cost two
+# threads on two different products: 5366 (SMM Intensive, "kelas mulai akhir Juli ini" on
+# 26 July) and 5431 (Vibe Coding, the same words on 27 July). Both times the card carried the
+# window and the model repeated it faithfully.
+#
+# A start date must be a DATE. If the knowledge base has no day, the honest answer is that the
+# group is being scheduled — never a month the lead will count the days against.
+#
+# Scoped to a start/class word within the same clause, so ordinary payment language survives:
+# "bayar sisanya sebelum kelas mulai" has no window, "cicilan tiap akhir bulan" has no start.
+_VAGUE_START_RE = re.compile(
+    r"\b(kelas|batch|angkatan|program|grup|group|start|mulai)\w*\b[^.!?\n]{0,40}?"
+    r"\b(akhir|awal|pertengahan|end of|early|mid)\b\s*"
+    r"(bulan ini|bulan depan|minggu ini|minggu depan|januari|februari|maret|april|mei|juni|"
+    r"juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|jun|jul|aug|agt|sep|"
+    r"okt|oct|nov|des|dec)"
+    r"|\b(kelas|batch|angkatan|grup|group)\w*\b[^.!?\n]{0,25}?\b(bulan depan|minggu depan)\b",
+    re.IGNORECASE)
+
+
+def vague_start_window(reply: str) -> list[str]:
+    """A course start promised as a month or a week rather than a date — never grounded."""
+    return [m.group(0).strip() for m in _VAGUE_START_RE.finditer(reply or "")]
+
+
 def fabricated_result_claim(reply: str) -> list[str]:
     """An outcome quoted as a percentage — always invented, never in the knowledge base.
 

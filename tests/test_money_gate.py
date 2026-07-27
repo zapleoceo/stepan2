@@ -306,3 +306,33 @@ def test_a_price_the_ad_itself_promised_may_be_given_once_in_a_nudge() -> None:
     assert uninvited_price(nudge, answered, ad_promised_price=True)
     # And a lead who never came from a price ad is unaffected.
     assert uninvited_price(nudge, fresh, ad_promised_price=False)
+
+
+# ── a start given as a window, not a date ────────────────────────────────────
+
+def test_a_start_promised_as_a_month_is_blocked() -> None:
+    """stale_dates catches an explicit day that has passed. This catches the vaguer promise
+    that never had a day in it, and it has cost two threads on two products with the same
+    six words: 5366 (SMM Intensive, "kelas mulai akhir Juli ini", 26 July) and 5431 (Vibe
+    Coding, same wording, 27 July). Both times the card carried the window and the model
+    repeated it faithfully. A start date must be a DATE."""
+    assert money_issues("Kelas berikutnya start akhir Juli ini lho", _KB) != []
+    assert money_issues("Batch berikutnya mulai awal Agustus ya Kak", _KB) != []
+    assert money_issues("Grup baru bulan depan Kak", _KB) != []
+    assert money_issues("Program ini mulai pertengahan September", _KB) != []
+
+
+def test_ordinary_payment_and_schedule_talk_is_not_a_start_promise() -> None:
+    """The window words appear in perfectly good sentences. A payment term is not a start
+    date, and neither is a class that simply has not been given one."""
+    assert money_issues("Sisanya dibayar sebelum kelas mulai ya Kak", _KB) == []
+    assert money_issues("Cicilannya tiap akhir bulan Kak", _KB) == []
+    assert money_issues(
+        "Tanggal mulainya masih disusun tim, nanti dikonfirmasi ya", _KB) == []
+    assert money_issues("Kelasnya 2x seminggu di malam hari", _KB) == []
+
+
+def test_a_real_date_still_passes() -> None:
+    """The fix is not 'never mention a start' — a day from the knowledge base is the point."""
+    assert money_issues("Skill Booster Python hari Minggu, 2 Agustus 2026, jam 09:00-14:00",
+                        _KB) == []
