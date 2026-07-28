@@ -7,6 +7,26 @@ it to reach one.
 """
 from __future__ import annotations
 
+
+def _icons_only_sidebar(sel: str) -> str:
+    """The icons-only sidebar, written once for the two ways it is reached.
+
+    A person collapses it by hand (`.sid.collapsed`); below ~1150px the layout collapses it for
+    them. Same appearance both times, so the declarations are generated rather than typed
+    twice — a second copy is how the manual and the automatic version drift apart, and nothing
+    would notice until one of them looked wrong."""
+    return (
+        f"{sel}{{width:48px!important;min-width:48px!important}}"
+        f"{sel} .logo,{sel} .na-lbl,{sel} .nav-sep,{sel} .sid-ft,"
+        f"{sel} .na-badge,{sel} .na-badge2{{display:none}}"
+        f"{sel} .na{{justify-content:center;padding:.4rem 0;margin:.05rem .2rem}}"
+        f"{sel} .sid-top{{justify-content:center;padding:.7rem .3rem .45rem}}"
+    )
+
+
+_SIDEBAR_BY_HAND = _icons_only_sidebar(".sid.collapsed")
+_SIDEBAR_BY_WIDTH = _icons_only_sidebar(".sid")
+
 _CSS = (
     "*{box-sizing:border-box;margin:0;padding:0}"
     # Firefox scrollbar styling (Chromium/Safari use ::-webkit-scrollbar below); keeps every
@@ -58,7 +78,6 @@ _CSS = (
     "cursor:pointer}"
     ".iaw-q{background:#e8590c}"    # in generation queue — Stepan will reply
     ".iaw-off{background:#6b7685}"  # bot off / silent / too old / already queued — won't reply
-    ".sid.collapsed .na-badge,.sid.collapsed .na-badge2{display:none}"
     ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
     ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
     ".lrow{display:flex;gap:.22rem;margin-top:.3rem}"
@@ -73,12 +92,7 @@ _CSS = (
     ".sb-col{background:none;border:none;color:#4a5568;cursor:pointer;font-size:.9rem;"
     "padding:.1rem .25rem;line-height:1;flex-shrink:0}"
     ".sb-col:hover{color:#d0d7de}"
-    ".sid.collapsed{width:48px!important;min-width:48px!important}"
-    ".sid.collapsed .logo{display:none}"
-    ".sid.collapsed .na-lbl{display:none}"
-    ".sid.collapsed .nav-sep,.sid.collapsed .sid-ft{display:none}"
-    ".sid.collapsed .na{justify-content:center;padding:.4rem 0;margin:.05rem .2rem}"
-    ".sid.collapsed .sid-top{justify-content:center;padding:.7rem .3rem .45rem}"
+    f"{_SIDEBAR_BY_HAND}"
     # sidebar + thread resize handles
     ".sbrz,.thrz{width:4px;flex-shrink:0;background:#1e2636;cursor:col-resize;"
     "transition:background .15s;z-index:10}"
@@ -608,6 +622,18 @@ _CSS = (
     "box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer}"
     ".mnav{left:.5rem}.mback{left:.5rem;display:none}"
     # ── responsive: phones/tablets (all desktop CSS above is untouched) ──
+    # ── the gap between the phone layout and a comfortable desktop ──────────────
+    # Above 760px the three columns return at full width and none of them can shrink:
+    # sidebar 210 + thread list 305 + two 4px resize handles = 523px of fixed chrome.
+    # Measured on the live page 2026-07-28 — that leaves the chat 245px on a 768px tablet and
+    # 501px at 1024. Both ends of the range work, which is why the middle went unnoticed: the
+    # layout there is technically desktop and practically unusable.
+    # The sidebar drops to icons (exactly what the manual collapse does) and the thread list
+    # narrows: 523px of chrome becomes 296, and the chat gets 472px at 768.
+    "@media (min-width:761px) and (max-width:1150px){"
+    f"{_SIDEBAR_BY_WIDTH}"
+    ".thr{width:248px}"
+    "}"
     "@media (max-width:760px){"
     "body{padding-top:0}"
     ".mbar{display:block}"
