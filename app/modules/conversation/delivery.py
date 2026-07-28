@@ -158,14 +158,9 @@ async def raise_manager_alert(
     same thing regardless of which path produced it, so both must actually alert (a nudge
     that silently sets needs_manager with no alert was the pre-2026-07-07 followup gap).
 
-    Blocked leads raise nothing: the owner has already judged that thread as spam or abuse,
-    and an alert asks a human to look again at something they closed. 22 such alerts fired in
-    7 days — each one costs attention and returns nothing."""
-    lead = await session.get(Lead, lead_id)
-    if lead is not None and lead.is_blocked:
-        logger.info("alert suppressed branch=%d thread=%d — lead is blocked",
-                    branch_id, thread_id)
-        return
+    Blocked leads raise nothing — enforced in AlertService.raise_alert, which every alert in
+    the system goes through. It used to be enforced HERE, and only here, while six other call
+    sites reached the service directly; a blocked lead writing again still pinged Telegram."""
     q = decision.manager_question or ""
     gap = decision.kb_gap or ""
     summary_en = q or gap or "Thread handed to a human"

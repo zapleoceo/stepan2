@@ -63,6 +63,9 @@ class EscalationService:
             "SELECT a.id, a.thread_id, a.lead_id, a.kind, a.created_at, l.notify_topic_id "
             "FROM manager_alert a JOIN lead l ON l.id = a.lead_id "
             "WHERE a.branch_id = :bid AND a.reping_at IS NULL "
+            # A lead blocked after the alert fired must not be chased. The alert row is
+            # history; the re-ping is a fresh demand on someone's attention.
+            "  AND l.is_blocked = false "
             "  AND a.created_at <= :cutoff AND a.created_at >= :floor "
             "  AND (a.kind IN ('ready_deal','ready_openhouse') "
             "       OR (a.kind = 'needs_manager' AND l.phone_e164 IS NOT NULL)) "

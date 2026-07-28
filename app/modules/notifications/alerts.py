@@ -55,16 +55,27 @@ class AlertService:
         summary_ru: str,
         thread_id: int | None = None,
         lead_phone: str | None = None,
-    ) -> ManagerAlert:
+    ) -> ManagerAlert | None:
         """Write the branch-scoped alert row, then ping the lead's topic. summary_en /
-        summary_ru are the REASON (why the bot escalated); the chat summary is generated."""
-        if lead_phone is None:
+        summary_ru are the REASON (why the bot escalated); the chat summary is generated.
+
+        A blocked lead produces nothing at all — no row, no ping. Blocking is the owner saying
+        this thread is spam or abuse and is closed; every alert after that asks a human to look
+        again at something they already judged. The check used to live in ONE caller
+        (delivery.raise_manager_alert) while six others went straight past it, so a blocked lead
+        writing again still pinged Telegram through `bot_off_message` — the loudest of the lot,
+        because it fires on every single inbound."""
+        lead = await self.session.get(Lead, lead_id)
+        if lead is not None and lead.is_blocked:
+            logger.info("alert %s suppressed branch=%d lead=%d — lead is blocked",
+                        kind, self.branch_id, lead_id)
+            return None
+        if lead_phone is None and lead is not None:
             # Fall back to what the lead record holds. 29 live alerts carried an empty phone
             # for a lead who had one — every caller passes the number it happens to have in
             # scope, and a path that reached here without one handed the manager a card with
             # nothing to dial. The lead row is the one place the number is always current.
-            lead = await self.session.get(Lead, lead_id)
-            lead_phone = lead.phone_e164 if lead is not None else None
+            lead_phone = lead.phone_e164
         alert = await self._alerts.add(
             ManagerAlert(
                 branch_id=self.branch_id,
