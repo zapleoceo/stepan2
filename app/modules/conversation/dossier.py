@@ -10,14 +10,14 @@ The dossier fixes each: it is written on every workflow, objections accumulate w
 no grounding filter runs, and `spent` records what has been used so the model can simply be
 told what not to repeat.
 
-Stored on `lead.dossier`; a lead still carrying only the legacy `lead.needs` is converted on
-read, so no thread loses context when v3 goes live."""
+Stored on `lead.dossier`, which since migration dossbf00001 (2026-07-28) is the only place
+this lives — the v2 `lead.needs` column was backfilled across and is read by nothing."""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 
-from .needs import NeedsProfile, dedup_phrases, parse_needs
+from .needs import dedup_phrases
 
 _MAX_PER_LIST = 6
 _MAX_OBJECTIONS = 8
@@ -129,27 +129,15 @@ class LeadDossier:
         }, ensure_ascii=False)
 
 
-def parse_dossier(raw: str | None, legacy_needs: str | None = None) -> LeadDossier:
-    """The stored dossier, or one reconstructed from the legacy needs JSON when absent.
+def parse_dossier(raw: str | None) -> LeadDossier:
+    """The stored dossier, or an empty one.
 
-    Both may be present during the v2→v3 window; the dossier wins, since it is the one being
-    kept current."""
-    parsed = _from_json(raw)
-    if parsed is not None:
-        return parsed
-    return from_needs(parse_needs(legacy_needs)) if legacy_needs else LeadDossier()
-
-
-def from_needs(needs: NeedsProfile) -> LeadDossier:
-    """Legacy NeedsProfile → dossier. jobs[0] becomes the job-to-be-done and any further jobs
-    join the desired state; every stored objection was by definition still open."""
-    jobs = list(needs.jobs)
-    return LeadDossier(
-        job_to_be_done=jobs[0] if jobs else "",
-        pains=list(needs.pains),
-        desired_state=dedup_phrases(list(needs.gains) + jobs[1:]),
-        objections=[Objection(text=t) for t in needs.objections][:_MAX_OBJECTIONS],
-    )
+    It used to take the legacy v2 `needs` JSON as a fallback, because the two columns held the
+    same fact and either might carry it. Migration dossbf00001 (2026-07-28) copied every v2
+    record across, so `dossier` is now the only place the answer lives — and the fallback had
+    to go with it, since a second source is exactly what made this expensive: two readers
+    forgot to ask for both and silently showed nothing (the chat panel and the needs cloud)."""
+    return _from_json(raw) or LeadDossier()
 
 
 def merge_dossier(stored: LeadDossier, delta: LeadDossier) -> LeadDossier:

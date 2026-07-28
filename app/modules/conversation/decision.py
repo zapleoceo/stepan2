@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass, field
 
 from app.domain.enums import Stage
@@ -27,17 +26,6 @@ _LEAD_TYPES = frozenset(
     {"hot", "warm", "cold", "no_budget", "non_target", "unclear"})
 # Audience axis — WHO the lead is, independent of how ready they are to buy.
 _AUDIENCES = frozenset({"adult", "student"})
-
-
-def _coerce_stage(value: object) -> Stage:
-    """Model's stage → Stage. An LLM can emit anything ('greeting', a typo, nothing);
-    an off-contract stage must NOT abort the reply — fall back to QUALIFYING (an active,
-    non-silent stage) so the bot keeps talking. The reply itself is what matters."""
-    try:
-        return Stage(str(value).lower().strip())
-    except ValueError:
-        logger.warning("decision: unknown stage %r → QUALIFYING", value)
-        return Stage.QUALIFYING
 
 
 @dataclass(frozen=True)
@@ -90,55 +78,6 @@ def _strip_fences(raw: str) -> str:
     return body.rsplit("```", 1)[0].strip()
 
 
-def parse_decision(raw_json: str) -> Decision:
-    """Parse the model's JSON into a Decision; raises ValueError on a broken contract."""
-    try:
-        data = json.loads(_strip_fences(raw_json))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"decision is not valid JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("decision JSON must be an object")
-
-    stage = _coerce_stage(data.get("stage"))
-
-    try:
-        reply = data["reply"]
-    except KeyError as exc:
-        raise ValueError("decision missing 'reply'") from exc
-    if not isinstance(reply, str):
-        raise ValueError("'reply' must be a string")
-
-    subtype = str(data.get("ready_subtype") or "").lower().strip()
-    lang = str(data.get("reply_language") or "").lower().strip()
-    ltype = str(data.get("lead_type") or "").lower().strip()
-    aud = str(data.get("audience") or "").lower().strip()
-    if ltype == "student":  # legacy/cached contract emitted student as a segment — remap it
-        aud = aud or "student"
-        ltype = ""
-    return Decision(
-        reply=clean_reply(reply),
-        stage=stage,
-        stage_reason=(str(data.get("stage_reason")).strip()[:300] or None)
-        if data.get("stage_reason") else None,
-        product_slug=data.get("product_slug") or None,
-        ready=bool(data.get("ready", False)),
-        needs_manager=bool(data.get("needs_manager", False)),
-        manager_question=data.get("manager_question") or None,
-        kb_gap=data.get("kb_gap") or None,
-        ready_subtype=subtype if subtype in ("deal", "openhouse") else None,
-        lead_type=ltype if ltype in _LEAD_TYPES else None,
-        audience=aud if aud in _AUDIENCES else None,
-        reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
-        phone=(str(data.get("phone")).strip() or None) if data.get("phone") else None,
-        jobs=_str_list(data.get("jobs")),
-        pains=_str_list(data.get("pains")),
-        gains=_str_list(data.get("gains")),
-        discovery_complete=bool(data.get("discovery_complete", False)),
-        open_objections=_str_list(data.get("open_objections")),
-        hard_stop=bool(data.get("hard_stop", False)),
-    )
-
-
 # Public aliases — the v3 parser needs exactly these semantics (fence tolerance, list
 # cleaning, never-abort stage coercion); it imports them rather than reimplementing them.
 strip_fences = _strip_fences
@@ -169,8 +108,6 @@ class TurnDecision:
     """What the model decided this turn."""
 
     reply: str
-    move: str
-    stage: Stage
     dossier: LeadDossier = field(default_factory=LeadDossier)
     product_slug: str | None = None
     ready: bool = False
@@ -284,8 +221,6 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
     # nothing — but nothing asks for them any more, and to_legacy prefers the dossier's answer.
     return TurnDecision(
         reply=text,
-        move=_free_move(data.get("move")),
-        stage=_coerce_stage(data.get("stage")) if data.get("stage") else Stage.QUALIFYING,
         # Reading the lead is discovery.py's job now; the prices are read off the reply itself
         # (guard.canonical_prices), so the author no longer has to list what it just wrote.
         # Both a full `dossier` and an explicit `prices_quoted` are still accepted, so a reply
@@ -330,16 +265,6 @@ def _unwrap_tool_envelope(data: dict) -> dict:
             logger.info("decision: unwrapped %r tool envelope", key)
             return inner
     return data
-
-
-_FREE_MOVE_RE = re.compile(r"[^a-z0-9_]+")
-
-
-def _free_move(value: object) -> str:
-    """Free mode keeps whatever label the model chose (sanitized to a short snake_case slug);
-    the gates that read the enumerated moves are off there, so this is telemetry only."""
-    move = _FREE_MOVE_RE.sub("_", str(value or "").strip().lower()).strip("_")[:40]
-    return move or "free_move"
 
 
 def _dossier(value: object, prices: list[str] | None = None) -> LeadDossier:

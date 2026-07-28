@@ -15,13 +15,13 @@ from typing import TYPE_CHECKING
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
-from app.domain.enums import Stage
+from app.adapters.db.models import Branch, Lead, Outbox
 from app.modules.settings.service import BranchSettings, get_channel_settings
 
 from .decision import generate
 from .delivery import _BUBBLE_GAP_S, _reply_bubble_cap, _split_bubbles
 from .discovery import extract_discovery
+from .dormancy import park_dormant
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
@@ -398,15 +398,10 @@ class FollowupService:
         else:
             thread.next_followup_at = None
             lead = await self.session.get(Lead, thread.lead_id)
-            if lead is not None and lead.stage != Stage.DORMANT:
-                self.session.add(StageEvent(
-                    branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
-                    from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
-                    actor="system", reason="followup schedule exhausted (dry)",
-                ))
-                lead.stage = Stage.DORMANT
-                lead.agent_enabled = False
-                self.session.add(lead)
+            await park_dormant(self.session, self.branch_id, lead, thread.id,
+                               actor="system",
+                               reason="followup schedule exhausted (dry)",
+                               respect_human_led=False)
         self.session.add(thread)
         await self.session.flush()
 

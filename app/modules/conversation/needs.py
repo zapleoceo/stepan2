@@ -1,8 +1,9 @@
 """Customer-needs profile (Value Proposition Canvas) — parse, merge, render, gate.
 
-The lead's discovered jobs/pains/gains accumulate across turns on `lead.needs` (JSON).
-Each turn the model returns its current understanding; we union it with what's stored so
-nothing is lost, feed it back into the next prompt, and gate presentation on it."""
+The display shape: jobs/pains/gains as the admin panels, the needs cloud and the daily digest
+want to read them. The store behind it is `lead.dossier` — parse_needs projects that into this
+shape. The v2 `lead.needs` column it was originally named after is no longer read anywhere
+(migration dossbf00001, 2026-07-28)."""
 from __future__ import annotations
 
 import json
@@ -54,13 +55,12 @@ class NeedsProfile:
 
 
 def parse_needs(raw: str | None) -> NeedsProfile:
-    """Reads BOTH shapes: the v2 `needs` JSON (jobs/pains/gains) and the v3 `dossier`
-    (job_to_be_done/pains/desired_state/objections).
+    """A dossier JSON projected into the jobs/pains/gains shape the panels render.
 
-    Nothing has written `needs` since the v3 cutover — DossierRepo.save only touches
-    `dossier` — so the chat panel, which reads `needs`, showed an empty box for every lead
-    while the data sat one column over. The dossier is the live shape; the v2 keys stay
-    understood so an old lead's record still renders."""
+    Reads both key sets. The v3 one (job_to_be_done/pains/desired_state/objection objects) is
+    what everything writes; the v2 one (jobs/pains/gains/objection strings) is still understood
+    because a hand-edited record or an old export can still arrive in that shape, and silently
+    rendering nothing is the failure mode this whole seam already caused twice."""
     if not raw:
         return NeedsProfile()
     try:

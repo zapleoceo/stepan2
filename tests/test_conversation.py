@@ -476,44 +476,6 @@ def test_clean_reply_replaces_em_dash():
     assert clean_reply("Vibe Coding—kursus") == "Vibe Coding - kursus"
 
 
-# ── decision: manager_question + kb_gap ──────────────────────────────────────
-
-def test_parse_decision_extracts_manager_question():
-    from app.modules.conversation.decision import parse_decision
-    raw = json.dumps({
-        "reply": "Aku sambungkan ke tim.",
-        "stage": "manager",
-        "product_slug": None,
-        "ready": False,
-        "needs_manager": True,
-        "manager_question": "Lead minta cicilan khusus untuk bulan Juli.",
-        "kb_gap": "Promo July tidak ada di KB.",
-    })
-    d = parse_decision(raw)
-    assert d.needs_manager is True
-    assert d.manager_question == "Lead minta cicilan khusus untuk bulan Juli."
-    assert d.kb_gap == "Promo July tidak ada di KB."
-
-
-def test_parse_decision_manager_question_defaults_to_none():
-    from app.modules.conversation.decision import parse_decision
-    d = parse_decision(json.dumps({
-        "reply": "ok", "stage": "qualifying",
-        "product_slug": None, "ready": False, "needs_manager": False,
-    }))
-    assert d.manager_question is None
-    assert d.kb_gap is None
-
-
-def test_parse_decision_hard_stop():
-    from app.modules.conversation.decision import parse_decision
-    on = parse_decision(json.dumps({"reply": "Maaf, aku berhenti.", "stage": "dormant",
-                                    "hard_stop": True}))
-    assert on.hard_stop is True
-    off = parse_decision(json.dumps({"reply": "ok", "stage": "qualifying"}))
-    assert off.hard_stop is False  # absent → not a hard stop
-
-
 # ── manager alert ─────────────────────────────────────────────────────────────
 
 class FakeNotifier:

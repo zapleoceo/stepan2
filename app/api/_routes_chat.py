@@ -144,7 +144,7 @@ async def _build_chat_panel(
                 " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                 " l.agent_enabled, l.is_blocked,"
                 " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                " b.tz_offset_h, coalesce(l.dossier, l.needs) AS needs, l.id, l.needs_tr,"
+                " b.tz_offset_h, l.dossier AS needs, l.id, l.needs_tr,"
                 " l.manager_note,"
                 " ch.kind AS channel_kind"
                 " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
@@ -236,7 +236,7 @@ async def chat_needs_lazy(thread_id: int, request: Request) -> HTMLResponse:
         row = (
             await session.execute(
                 text(
-                    "SELECT l.branch_id, coalesce(l.dossier, l.needs), l.needs_tr, l.id"
+                    "SELECT l.branch_id, l.dossier, l.needs_tr, l.id"
                     " FROM channel_thread ct"
                     " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
                 ),
@@ -518,7 +518,7 @@ async def chat_stage(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " coalesce(l.dossier, l.needs) AS needs, l.needs_tr, l.manager_note,"
+                    " l.dossier AS needs, l.needs_tr, l.manager_note,"
                     " ch.kind AS channel_kind"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"
@@ -608,7 +608,7 @@ async def chat_product(
                     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
                     " l.agent_enabled, l.is_blocked,"
                     " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " coalesce(l.dossier, l.needs) AS needs, l.id, l.needs_tr, l.manager_note,"
+                    " l.dossier AS needs, l.id, l.needs_tr, l.manager_note,"
                     " ch.kind AS channel_kind"
                     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
                     " JOIN branch b ON b.id = l.branch_id"

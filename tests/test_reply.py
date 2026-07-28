@@ -171,11 +171,12 @@ async def test_the_dossier_reaches_the_prompt_so_nothing_is_re_asked(db_session)
     assert "prices you already gave them" in system and "Rp 13.000.000" in system
 
 
-async def test_a_lead_with_only_legacy_needs_still_gets_its_context(db_session) -> None:  # noqa: ANN001
-    """The switchover case — a v2 conversation continuing under v3 loses nothing."""
-    from app.modules.conversation.needs import NeedsProfile
+async def test_what_the_lead_already_revealed_rides_into_every_turn(db_session) -> None:  # noqa: ANN001
+    """A pain and a live objection must reach the prompt, or the bot re-asks and pitches over
+    a doubt the lead already voiced."""
     bid, tid, _ = await _thread(
-        db_session, needs=NeedsProfile(pains=["takut telat"], objections=["mahal"]).to_json())
+        db_session, dossier=LeadDossier(pains=["takut telat"],
+                                        objections=[Objection("mahal")]).to_json())
     llm = _LLM()
     await _service(db_session, bid, llm).decide(tid)
 
@@ -261,14 +262,6 @@ async def test_a_foreign_thread_is_invisible(db_session) -> None:  # noqa: ANN00
     llm = _LLM()
     assert await _service(db_session, other.id, llm).decide(tid) is None
     assert llm.capabilities == []
-
-
-async def test_the_chosen_move_is_kept_for_logging(db_session) -> None:  # noqa: ANN001
-    bid, tid, _ = await _thread(db_session)
-    service = _service(db_session, bid, _LLM(_answer(move="Warm Then Close")))
-    await service.decide(tid)
-    assert service.last_decision is not None
-    assert service.last_decision.move == "warm_then_close"
 
 
 # ── the money gate: the one check that fails closed ──────────────────────────
@@ -662,8 +655,10 @@ def test_the_pain_kpi_reads_the_column_that_is_written() -> None:
     sql = Path("app/api/_query.py").read_text(encoding="utf-8")
     block = sql[sql.index("async def fetch_discovery_metrics"):]
     block = block[:block.index("async def fetch_coach_data")]
-    assert "coalesce(l2.dossier, l2.needs)" in block
-    assert "WHERE l2.needs LIKE" not in block
+    assert "l2.dossier" in block
+    # Not `needs`, and no longer coalesce over both either: migration dossbf00001 moved every
+    # v2 record across, so a second source can only reintroduce the original bug.
+    assert "l2.needs" not in block
 
 
 async def test_qualified_lead_is_reported_once_when_intent_first_appears(db_session) -> None:  # noqa: ANN001

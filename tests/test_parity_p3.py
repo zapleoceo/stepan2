@@ -17,7 +17,7 @@ from app.adapters.db.models import (
 )
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
-from app.modules.conversation.decision import Decision, parse_decision
+from app.modules.conversation.decision import Decision
 from app.modules.conversation.repository import _MAX_CONTEXT_MSGS, MessageRepo, OutboxRepo
 from app.modules.conversation.sanitize import clean_reply
 from app.modules.knowledge.service import KnowledgeService
@@ -43,14 +43,17 @@ def test_clean_reply_keeps_prices_and_single_star() -> None:
 
 # ─── ready_subtype parsing ────────────────────────────────────────────────────
 
-def test_parse_decision_ready_subtype() -> None:
-    import json
-    base = {"reply": "ok", "stage": "ready", "ready": True}
-    assert parse_decision(json.dumps({**base, "ready_subtype": "openhouse"})).ready_subtype \
-        == "openhouse"
-    assert parse_decision(json.dumps({**base, "ready_subtype": "DEAL"})).ready_subtype == "deal"
-    assert parse_decision(json.dumps({**base, "ready_subtype": "bogus"})).ready_subtype is None
-    assert parse_decision(json.dumps(base)).ready_subtype is None
+def test_ready_subtype_is_derived_from_the_dossier() -> None:
+    """It used to be parsed off the model's own JSON. Since 2026-07-26 the selling model is not
+    asked whether the lead is ready — discovery reports readiness from the lead's own words and
+    to_legacy stamps the subtype from that."""
+    from app.modules.conversation.decision import TurnDecision
+    from app.modules.conversation.dossier import LeadDossier
+
+    ready = TurnDecision(reply="ok").to_legacy(LeadDossier(readiness="ready"))
+    assert ready.ready is True and ready.ready_subtype == "deal"
+    exploring = TurnDecision(reply="ok").to_legacy(LeadDossier(readiness="exploring"))
+    assert exploring.ready is False and exploring.ready_subtype is None
 
 
 def test_source_hint_only_for_known_entry_points() -> None:
@@ -102,17 +105,26 @@ def test_fmt_llm_meta_free_time_and_id() -> None:
     assert "$0.0021" in paid and "450ms" in paid  # ms when < 1s
 
 
-def test_parse_decision_tolerates_off_contract_stage() -> None:
+def test_the_stage_comes_from_the_dossier_not_from_the_model() -> None:
+    """The old test pinned a fallback for an off-contract stage label. There is no label any
+    more: the schema stopped asking, the field came off TurnDecision on 2026-07-28, and the
+    stage is read from what the lead actually revealed."""
     import json
 
     from app.domain.enums import Stage
-    # an LLM stage the enum doesn't know must NOT crash the reply — fall back, keep talking
-    assert parse_decision(json.dumps(
-        {"reply": "hi", "stage": "greeting"})).stage == Stage.QUALIFYING
-    assert parse_decision(json.dumps(
-        {"reply": "hi"})).stage == Stage.QUALIFYING  # missing stage too
-    assert parse_decision(json.dumps(
-        {"reply": "hi", "stage": "PRESENTING"})).stage == Stage.PRESENTING  # case-insensitive
+    from app.modules.conversation.decision import TurnDecision, parse_turn_decision
+    from app.modules.conversation.dossier import LeadDossier, Objection
+
+    # A volunteered stage is ignored rather than trusted or rejected.
+    d = parse_turn_decision(json.dumps({"reply": "hi", "stage": "greeting"}))
+    assert not hasattr(d, "stage")
+
+    assert TurnDecision(reply="hi").to_legacy(LeadDossier()).stage == Stage.QUALIFYING
+    assert TurnDecision(reply="hi").to_legacy(
+        LeadDossier(pains=["takut telat"], desired_state=["kerja remote"])).stage \
+        == Stage.PRESENTING
+    assert TurnDecision(reply="hi").to_legacy(
+        LeadDossier(objections=[Objection("mahal")])).stage == Stage.OBJECTION
 
 
 # ─── context cap ──────────────────────────────────────────────────────────────

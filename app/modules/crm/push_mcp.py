@@ -193,7 +193,7 @@ async def fetch_leads_with_phone(
     rows = (await session.execute(text(
         "SELECT l.id, l.phone_e164,"  # noqa: S608 — not_pushed is a fixed fragment, values bound
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
-        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.needs,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, NULL,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
@@ -215,7 +215,7 @@ async def fetch_leads_with_phone(
         cands = [x for x in (created, last_active) if x is not None]
         recency = max(cands) if cands else now
         days_idle = max(0, (now - recency).days)
-        dossier = parse_dossier(r[7], legacy_needs=r[8])
+        dossier = parse_dossier(r[7])
         out.append(LeadToPush(
             lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
             product=r[4], days_idle=days_idle, last_msg=r[9] or "",
@@ -291,7 +291,7 @@ async def fetch_unpushed_handoffs(
     rows = (await session.execute(text(
         "SELECT l.id, l.phone_e164,"
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
-        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.needs,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, NULL,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
@@ -310,7 +310,7 @@ async def fetch_unpushed_handoffs(
         if r[0] in seen:
             continue
         seen.add(r[0])
-        dossier = parse_dossier(r[7], legacy_needs=r[8])
+        dossier = parse_dossier(r[7])
         out.append(LeadToPush(
             lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
             product=r[4], days_idle=0, last_msg=r[9] or "",

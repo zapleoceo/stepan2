@@ -72,11 +72,9 @@ class CloudEntry:
 
 
 def _profile_json(lead: Lead) -> str | None:
-    """The lead's need profile — `dossier` (v3, the only column written since the cutover) with
-    `needs` (v2) as the fallback for leads last touched before it. Reading `needs` alone made
-    every column of the cloud permanently empty: nothing had written it in weeks, so no lead's
-    hash ever changed and classify_branch returned 0 every night."""
-    return lead.dossier or lead.needs
+    """The lead's need profile. Was `dossier or needs` while both columns held the same fact;
+    migration dossbf00001 copied every v2 record across, so there is one source again."""
+    return lead.dossier
 
 
 def _needs_sha(raw: str | None) -> str:

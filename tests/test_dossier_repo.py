@@ -38,17 +38,16 @@ async def test_saves_and_loads_a_dossier(db_session) -> None:  # noqa: ANN001
     assert await repo.load(lid) == d
 
 
-async def test_a_lead_with_only_legacy_needs_loads_as_a_dossier(db_session) -> None:  # noqa: ANN001
-    """The switchover case: nothing was backfilled, yet no fact is lost."""
+async def test_the_repo_reads_the_dossier_column_and_only_that(db_session) -> None:  # noqa: ANN001
+    """It used to fall back to the v2 `needs` column when `dossier` was empty. Migration
+    dossbf00001 moved every v2 record across, and the fallback went with it: two columns
+    holding one fact is what let the chat panel and the needs cloud each read the dead one and
+    render an empty box, for weeks, without looking broken."""
     bid = await _branch(db_session)
-    legacy = NeedsProfile(jobs=["pindah karier"], pains=["takut telat"],
-                          gains=["kerja remote"], objections=["mahal"]).to_json()
-    lid = await _lead(db_session, bid, needs=legacy)
+    stale = NeedsProfile(jobs=["pindah karier"], pains=["takut telat"]).to_json()
+    lid = await _lead(db_session, bid, needs=stale)
 
-    d = await DossierRepo(db_session, bid).load(lid)
-    assert d.job_to_be_done == "pindah karier"
-    assert d.pains == ["takut telat"]
-    assert d.open_objections() == ["mahal"]
+    assert await DossierRepo(db_session, bid).load(lid) == LeadDossier()
 
 
 async def test_saving_never_touches_the_legacy_needs_column(db_session) -> None:  # noqa: ANN001

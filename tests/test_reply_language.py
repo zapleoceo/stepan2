@@ -11,19 +11,23 @@ from sqlmodel import select
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation import ReplyService
-from app.modules.conversation.decision import parse_decision
+from app.modules.conversation.decision import parse_turn_decision
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import _parse
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 
 
-def test_parse_decision_reads_reply_language() -> None:
-    base = {"reply": "hi", "stage": "qualifying"}
-    assert parse_decision(json.dumps({**base, "reply_language": "EN"})).reply_language == "en"
-    assert parse_decision(json.dumps({**base, "reply_language": "русский"})).reply_language \
+def test_the_parser_reads_reply_language() -> None:
+    """Ported from the v2 parser, deleted 2026-07-28 — nothing in app/ had called it for
+    weeks, only its own tests. The live parser applies the same rule."""
+    base = {"reply": "hi"}
+    assert parse_turn_decision(json.dumps({**base, "reply_language": "EN"})).reply_language \
+        == "en"
+    assert parse_turn_decision(
+        json.dumps({**base, "reply_language": "русский"})).reply_language \
         is None  # non-ascii / too long → ignored
-    assert parse_decision(json.dumps(base)).reply_language is None
+    assert parse_turn_decision(json.dumps(base)).reply_language is None
 
 
 class _LangLLM:
