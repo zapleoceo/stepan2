@@ -26,6 +26,12 @@ from app.modules.auth.service import AuthService
 router = APIRouter()
 log = logging.getLogger(__name__)
 
+# Breadcrumb dropped alongside the session cookie so a login that succeeds and then fails to
+# stick can be told apart from never having logged in at all. Deliberately short: it describes
+# ONE attempt, and must not still be around to misdiagnose the next one.
+LOGIN_PROBE_COOKIE = "stepan2_login_probe"
+LOGIN_PROBE_MAX_AGE_S = 120
+
 
 def _safe_next(dest: str) -> str:
     """A post-login destination is only honoured if it's a same-site absolute PATH — never an
@@ -38,10 +44,20 @@ def _safe_next(dest: str) -> str:
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def login_page(next: str = "") -> HTMLResponse:  # noqa: A002 — matches the ?next= param
+async def login_page(request: Request, next: str = "") -> HTMLResponse:  # noqa: A002 — ?next=
     if not settings().auth_enabled:
         return HTMLResponse("", status_code=302, headers={"Location": "/ui/inbox"})
-    return HTMLResponse(_login_html(settings().tg_login_bot_username, _safe_next(next)))
+    # Arriving here with the breadcrumb still set means the last login DID succeed — the
+    # server minted a session and sent it — and the browser did not send it back. Without
+    # this, that is an infinite bounce indistinguishable from "you are not signed in", which
+    # is exactly how it was reported: "I am logged in and it keeps asking me to log in."
+    looped = request.cookies.get(LOGIN_PROBE_COOKIE) == "1"
+    resp = HTMLResponse(
+        _cookie_blocked_html() if looped
+        else _login_html(settings().tg_login_bot_username, _safe_next(next)))
+    if looped:
+        resp.delete_cookie(LOGIN_PROBE_COOKIE)  # one diagnosis, then a clean retry
+    return resp
 
 
 @router.get("/api/tg_login")
@@ -97,6 +113,14 @@ async def tg_login(request: Request):  # noqa: ANN201 (HTMLResponse | RedirectRe
     resp.set_cookie(
         SESSION_COOKIE, token, max_age=SESSION_MAX_AGE_S,
         httponly=True, samesite="lax", secure=True,
+    )
+    # A breadcrumb next to the session, with the SAME attributes minus HttpOnly, so it lives
+    # or dies with it. If the next request bounces back to /login still carrying this, the
+    # session cookie was issued and dropped — a browser problem we can name instead of
+    # bouncing the person forever. Short-lived: it must not outlast the attempt it describes.
+    resp.set_cookie(
+        LOGIN_PROBE_COOKIE, "1", max_age=LOGIN_PROBE_MAX_AGE_S,
+        httponly=False, samesite="lax", secure=True,
     )
     return resp
 
@@ -154,6 +178,38 @@ def _post_login_html(dest: str) -> str:
         'a{color:#4da6ff}</style></head><body>'
         f'<p>Signing in… <a href="{d}">continue</a></p>'
         f'<script>location.replace({d!r})</script></body></html>'
+    )
+
+
+def _cookie_blocked_html() -> str:
+    """Shown instead of the login widget when a completed login did not stick.
+
+    Names the one thing that is actually wrong — the browser is not keeping our cookie — and
+    lists what fixes it, in the order most likely to work. Reported live on 2026-07-28: Opera
+    134 on Linux looped, while Chrome on the same machine stayed signed in."""
+    return (
+        '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'{_FAVICON}'
+        '<title>Stepan 2 — Login</title><style>'
+        'body{background:#0f1117;color:#e8eef4;font-family:system-ui,sans-serif;margin:0;'
+        'min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}'
+        '.card{max-width:34rem}h1{font-weight:600;letter-spacing:.02em;font-size:1.3rem}'
+        'p,li{color:#9aa7b4;line-height:1.5}a{color:#4da6ff}'
+        'code{background:#1a1f2e;padding:.1rem .3rem;border-radius:3px;color:#e8eef4}'
+        '</style></head><body><div class="card">'
+        '<h1>Sign-in worked — your browser did not keep the session</h1>'
+        '<p>Telegram confirmed who you are and we issued a session, but the next request '
+        'came back without it. That is why this page keeps reappearing. Nothing is wrong '
+        'with your account.</p>'
+        '<p>What usually fixes it:</p><ul>'
+        '<li>Allow cookies for <code>stepan2.zapleo.com</code> — check any tracker or '
+        'ad blocker, and any "block third-party cookies" setting.</li>'
+        '<li>Turn off private/incognito mode for this tab.</li>'
+        '<li>Try another browser. If it works there, the setting above is the cause.</li>'
+        '</ul>'
+        '<p><a href="/login">← Try signing in again</a></p>'
+        '</div></body></html>'
     )
 
 
