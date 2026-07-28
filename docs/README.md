@@ -19,6 +19,7 @@ Stepan-1.
 | [deploy.md](deploy.md) | Деплой: изолированный стек на Hetzner, nginx/Cloudflare, auth (Telegram Login), cutover со Stepan-1, CI/CD |
 | [worker.md](worker.md) | ARQ-воркер: cron-задачи, капы/тихие часы outbox, заморозка сессии при challenge, advisory-lock |
 | [chat-panel-perf.md](chat-panel-perf.md) | Открытие чата: запросы панели, фоновая (lazy) загрузка перевода needs, оптимизация медиа-превью сообщений |
+| [tech-debt.md](tech-debt.md) | **Отложенные работы**: что решили не делать сейчас и почему. Сейчас в списке — официальный вебхук Meta вместо опроса приватным API |
 
 ## Конвенции
 
