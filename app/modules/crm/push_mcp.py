@@ -149,6 +149,15 @@ def _coerce_dt(v: Any) -> datetime | None:
         return None
 
 
+async def _newest_thread(session: AsyncSession, lead_id: int) -> int | None:
+    """The lead's most recently active thread — where a chat-log line about the push belongs.
+    Both CRM sweeps write a StageEvent with no thread_id (they work from a lead query, not a
+    conversation), which is why the chat needs the lookup rather than the marker."""
+    return (await session.execute(text(
+        "SELECT id FROM channel_thread WHERE lead_id = :l"
+        " ORDER BY last_in_at DESC NULLS LAST, id DESC LIMIT 1"), {"l": lead_id})).scalar()
+
+
 def _comment_for(lead: LeadToPush) -> str:
     """SPIN-shaped summary for managerComment — job_to_be_done/pains/desired_state straight
     from the dossier, so a manager reads why the lead is here before ever opening the chat.
@@ -238,7 +247,7 @@ async def drain_writeback(
     """One background pass: push a batch of not-yet-pushed warm leads to the CRM, marking each
     SUCCESS with a PUSHED_REASON StageEvent so it's never re-pushed. A FAILURE is left unmarked
     → retried next run, so a broken CRM endpoint (404) just logs and auto-drains once fixed."""
-    from app.adapters.db.models import StageEvent  # noqa: PLC0415
+    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
 
     leads = await fetch_leads_with_phone(session, branch_id, limit=limit, exclude_pushed=True)
     pushed, failed = 0, 0
@@ -251,6 +260,14 @@ async def drain_writeback(
                 branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
                 from_stage=lead.stage, to_stage=lead.stage,
                 actor="system", reason=PUSHED_REASON))
+            # …and into the chat, where the person working the thread is looking. This sweep
+            # is the majority of all pushes (74 of 82 live), and its StageEvent carries no
+            # thread_id, so until now the overwhelming case left no trace in any conversation.
+            thread_id = await _newest_thread(session, lead.lead_id)
+            if thread_id is not None:
+                session.add(ThreadLog(
+                    branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
+                    detail=lead.phone, actor="system"))
         else:
             failed += 1
             logger.warning("crm writeback failed lead=%d: %s", lead.lead_id, detail)
@@ -308,7 +325,7 @@ async def drain_handoffs(
 ) -> dict[str, Any]:
     """Sweep un-pushed hand-offs into the CRM (see fetch_unpushed_handoffs). Same
     marker-on-success / retry-on-failure contract as drain_writeback."""
-    from app.adapters.db.models import StageEvent  # noqa: PLC0415
+    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
 
     leads = await fetch_unpushed_handoffs(session, branch_id, limit=limit)
     pushed, failed = 0, 0
@@ -324,6 +341,11 @@ async def drain_handoffs(
                 branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
                 from_stage=lead.stage, to_stage=lead.stage,
                 actor="system", reason=PUSHED_HANDOFF_REASON))
+            thread_id = await _newest_thread(session, lead.lead_id)
+            if thread_id is not None:
+                session.add(ThreadLog(
+                    branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
+                    detail=lead.phone, actor="system"))
         else:
             failed += 1
             logger.warning("crm handoff sweep failed lead=%d: %s", lead.lead_id, detail)
