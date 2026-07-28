@@ -74,3 +74,25 @@ def test_fmt_dt_survives_the_shapes_a_panel_actually_receives() -> None:
     assert fmt_dt(None, "%H:%M") == ""
     assert fmt_dt(None, "%H:%M", empty="—") == "—"
     assert fmt_dt("not a date", "%H:%M", empty="—") == "—"
+
+
+def test_the_reports_bridge_survives_the_linter() -> None:
+    """_ui_panels re-exports the reports names so the 2026-07-28 move changed no call site.
+    Those imports look unused to a linter, and `ruff --fix` deleted them once already — which
+    broke 21 test files at collection time. The noqa is load-bearing; this is what says so."""
+    from app.api import _ui_panels
+
+    for name in ("reports_panel_html", "admap_cell_inner", "broker_log_panel_html",
+                 "_ad_tree_html", "_funnel_flow_html", "_date_range_form_html"):
+        assert hasattr(_ui_panels, name), name
+
+
+def test_the_stage_order_is_defined_once() -> None:
+    """_ui_panels carried its own copy of the funnel order, identical to _ui_html's and
+    required to stay that way — two tuples that must agree is one tuple with extra steps, and
+    on 2026-07-25 both had to be edited by hand for the same change."""
+    from app.api import _ui_panels
+    from app.api._ui_html import _STAGES
+
+    assert not hasattr(_ui_panels, "_ALL_STAGES")
+    assert _STAGES[0] == "new" and _STAGES[4] == "handed_off"
