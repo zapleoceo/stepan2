@@ -798,8 +798,8 @@ async def fetch_discovery_metrics(
         # the cutover, so this KPI read 0% no matter what discovery actually captured. Third
         # place the same dead column surfaced today — after the chat panel and the needs cloud.
         "  (SELECT count(*) FROM fp JOIN lead l2 ON l2.id = fp.lead_id"
-        "     WHERE coalesce(l2.dossier, l2.needs) LIKE '%\"pains\":%'"
-        "       AND coalesce(l2.dossier, l2.needs) NOT LIKE '%\"pains\": []%')"
+        "     WHERE l2.dossier LIKE '%\"pains\":%'"
+        "       AND l2.dossier NOT LIKE '%\"pains\": []%')"
         "   AS discovered,"
         "  (SELECT avg(cnt) FROM dl) AS avg_msgs"
     )

@@ -86,7 +86,7 @@ async def _threads(session: AsyncSession, branch_id: int, limit: int):  # noqa: 
         # coalesce: `needs` is the v2 column and nothing has written it since the cutover, so
         # the digest's "с болью" line and every "что бот понял" read empty. Fourth place the
         # same dead column turned up (chat panel, needs cloud, reports KPI, here).
-        "SELECT ct.id, l.stage, coalesce(l.dossier, l.needs), ct.product_slug"
+        "SELECT ct.id, l.stage, l.dossier, ct.product_slug"
         " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
         " WHERE l.branch_id = :b AND ct.last_out_at IS NOT NULL"
         " ORDER BY ct.last_out_at DESC LIMIT :n"), {"b": branch_id, "n": limit})).all()

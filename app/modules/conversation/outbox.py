@@ -14,13 +14,14 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Lead, Message, Outbox, StageEvent
+from app.adapters.db.models import Lead, Message, Outbox
 from app.config import settings
 from app.domain.clock import branch_day_start_utc
 from app.domain.enums import ChannelKind, Stage
 from app.modules.settings.service import get_channel_settings
 from app.ports.channel import ChannelPort
 
+from .dormancy import park_dormant
 from .repository import MessageRepo, OutboxRepo, ThreadRepo
 
 logger = logging.getLogger(__name__)
@@ -240,19 +241,11 @@ class OutboxSender:
         fresh inbound revives it (ingest._revive_bot → qualifying) and, for Meta, re-opens the
         window so the next send goes through. A human-led / already-silent stage is left
         alone — a delivery hiccup must not yank a lead a manager owns."""
-        from app.domain.enums import HUMAN_LED_STAGES  # noqa: PLC0415
         lead = await self.session.get(Lead, thread.lead_id)
-        if lead is None or lead.stage == Stage.DORMANT or lead.stage in HUMAN_LED_STAGES:
+        if not await park_dormant(self.session, self.branch_id, lead, thread.id,
+                                  actor="system", reason=reason):
             return
-        self.session.add(StageEvent(
-            branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
-            from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
-            actor="system", reason=reason,
-        ))
-        lead.stage = Stage.DORMANT
-        lead.agent_enabled = False  # keep the bot-on/off flag consistent with the dormant stage
         thread.next_followup_at = None
-        self.session.add(lead)
         self.session.add(thread)
         logger.info("branch=%d thread=%d → dormant (undeliverable): %s",
                     self.branch_id, thread.id, reason)
@@ -301,16 +294,10 @@ class OutboxSender:
     async def _to_dormant(self, thread, now: datetime) -> None:
         """Schedule exhausted, lead still silent → dormant (+ journal entry)."""
         lead = await self.session.get(Lead, thread.lead_id)
-        if lead is None or lead.stage == Stage.DORMANT:
+        if not await park_dormant(self.session, self.branch_id, lead, thread.id,
+                                  actor="system", reason="followup schedule exhausted",
+                                  created_at=now, respect_human_led=False):
             return
-        self.session.add(StageEvent(
-            branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
-            from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
-            actor="system", reason="followup schedule exhausted", created_at=now,
-        ))
-        lead.stage = Stage.DORMANT
-        lead.agent_enabled = False  # keep the bot-on/off flag consistent with the dormant stage
-        self.session.add(lead)
         logger.info("branch=%d lead=%d → dormant (followups exhausted)",
                     self.branch_id, lead.id)
 

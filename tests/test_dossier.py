@@ -11,7 +11,6 @@ import json
 from app.modules.conversation.dossier import (
     LeadDossier,
     Objection,
-    from_needs,
     merge_dossier,
     parse_dossier,
 )
@@ -123,29 +122,53 @@ def test_discovery_needs_both_a_pain_and_a_desired_state() -> None:
     assert LeadDossier(pains=["takut telat"], desired_state=["kerja di IT"]).has_discovery()
 
 
-# ── legacy compatibility: no thread loses context at the switchover ───────────
+# ── the v2 seam, closed by migration rather than by a runtime fallback ────────
 
-def test_legacy_needs_are_converted_when_no_dossier_exists_yet() -> None:
+def _migration():  # noqa: ANN202
+    """The backfill migration, loaded by path — it deliberately imports no app code, so its
+    conversion has to be exercised where it lives."""
+    import importlib.util
+    from pathlib import Path
+
+    path = (Path(__file__).resolve().parent.parent / "migrations" / "versions"
+            / "20260728_1700_dossbf00001_backfill_dossier_from_needs.py")
+    spec = importlib.util.spec_from_file_location("_dossbf", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def test_the_backfill_converts_a_v2_record_into_the_v3_shape() -> None:
+    """parse_dossier no longer falls back to `needs`; the migration moved every record across
+    instead. The fallback existed because two columns held one fact — which is precisely what
+    let the chat panel and the needs cloud each read the dead one and show an empty box."""
     legacy = NeedsProfile(
         jobs=["pindah karier", "nambah skill"], pains=["takut telat"],
         gains=["dapat kerja remote"], objections=["mahal"]).to_json()
-    d = parse_dossier(None, legacy_needs=legacy)
+    d = parse_dossier(_migration()._to_dossier(legacy))
     assert d.job_to_be_done == "pindah karier"
     assert d.pains == ["takut telat"]
     assert "dapat kerja remote" in d.desired_state
-    assert "nambah skill" in d.desired_state
+    assert "nambah skill" in d.desired_state  # further jobs join the desired state
     assert d.open_objections() == ["mahal"]
 
 
-def test_a_stored_dossier_wins_over_legacy_needs() -> None:
-    """During the v2→v3 window both columns exist; the dossier is the one kept current."""
-    legacy = NeedsProfile(pains=["stale"]).to_json()
-    current = LeadDossier(pains=["fresh"]).to_json()
-    assert parse_dossier(current, legacy_needs=legacy).pains == ["fresh"]
+def test_the_backfill_skips_records_that_carry_nothing() -> None:
+    """An empty or unreadable v2 row leaves `dossier` NULL rather than writing a hollow object:
+    downstream, an empty dossier and a missing one read alike, and only the second can later be
+    filled in without looking as though it already had been."""
+    mod = _migration()
+    assert mod._to_dossier(NeedsProfile().to_json()) is None
+    assert mod._to_dossier("not json") is None
+    assert mod._to_dossier("[]") is None
 
 
-def test_converting_an_empty_legacy_profile_is_harmless() -> None:
-    assert from_needs(NeedsProfile()) == LeadDossier()
+def test_parse_dossier_no_longer_takes_a_legacy_fallback() -> None:
+    """The signature is the guarantee: with one parameter, a second source of truth cannot be
+    reintroduced by accident."""
+    import inspect
+
+    assert list(inspect.signature(parse_dossier).parameters) == ["raw"]
 
 
 def test_objections_stored_as_plain_strings_still_load() -> None:

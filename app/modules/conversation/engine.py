@@ -153,7 +153,7 @@ class DecisionEngine:
                 "branch=%d over daily LLM budget — %s skipped", self.branch_id, workflow)
             return None
         lead = await self.session.get(Lead, thread.lead_id)
-        stored_needs = parse_needs(lead.needs if lead is not None else None)
+        stored_needs = parse_needs(lead.dossier if lead is not None else None)
         return DecisionContext(thread, dialog, lead, stored_needs, budget, over_budget=over)
 
     async def free_kb_context(self) -> str:

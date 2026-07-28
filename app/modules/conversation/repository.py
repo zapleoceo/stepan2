@@ -99,7 +99,7 @@ class DossierRepo:
         lead = await self._lead(lead_id)
         if lead is None:
             return LeadDossier()
-        return parse_dossier(lead.dossier, legacy_needs=lead.needs)
+        return parse_dossier(lead.dossier)
 
     async def save(self, lead_id: int | None, dossier: LeadDossier) -> None:
         lead = await self._lead(lead_id)

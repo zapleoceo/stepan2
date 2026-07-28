@@ -18,7 +18,6 @@ from dataclasses import replace
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.adapters.db.models import Lead
-from app.domain.enums import Stage
 
 from .decision import Decision, TurnDecision, generate
 from .delivery import ReplyDelivery, _script_lang
@@ -113,8 +112,7 @@ class ReplyService(ReplyDelivery):
             # Bahasa-only, so a Cyrillic first contact goes straight to the model.
             fc = classify_entry(ctx.dialog, ctx.thread.lead_source, ctx.thread.ad_id)
             if fc.entry is Entry.JUNK:
-                decision = TurnDecision(
-                    reply=JUNK_OPENER, move="discover_motive", stage=Stage.QUALIFYING)
+                decision = TurnDecision(reply=JUNK_OPENER)
                 self.last_decision = decision
                 self._last_llm_meta = TEMPLATED_META
                 logger.info("reply branch=%d thread=%d tier=templated first=True",
@@ -177,8 +175,8 @@ class ReplyService(ReplyDelivery):
             engine, ctx, messages, thread_id, decision, workflow=workflow, context=context)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
         self.last_decision = decision
-        logger.info("reply branch=%d thread=%d move=%s tier=%s first=%s",
-                    self.branch_id, thread_id, decision.move, capability, is_first_reply)
+        logger.info("reply branch=%d thread=%d tier=%s first=%s",
+                    self.branch_id, thread_id, capability, is_first_reply)
         return decision.to_legacy(merged)
 
     async def _generate(  # noqa: PLR0913

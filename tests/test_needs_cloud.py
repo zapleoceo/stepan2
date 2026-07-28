@@ -52,10 +52,10 @@ _RULES = {"mahal": "Цена", "terlalu mahal": "Цена", "gak ada budget": "�
 
 async def test_classify_groups_synonyms_and_counts_with_weights(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal", "gak ada waktu"],
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal", "gak ada waktu"],
                                                     gains=["pengen jago coding"])))
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["terlalu mahal"])))
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["gak ada budget"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["terlalu mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["gak ada budget"])))
     await db_session.flush()
 
     n = await classify_branch(db_session, bid, _FakeLLM(_RULES))
@@ -71,11 +71,11 @@ async def test_classify_groups_synonyms_and_counts_with_weights(db_session) -> N
 
 async def test_taxonomy_is_reused_not_duplicated(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal"])))
     await db_session.flush()
     await classify_branch(db_session, bid, _FakeLLM(_RULES))
     # a second lead voicing a synonym maps onto the SAME entity, not a new row
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["terlalu mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["terlalu mahal"])))
     await db_session.flush()
     await classify_branch(db_session, bid, _FakeLLM(_RULES))
     entities = (await db_session.execute(
@@ -86,7 +86,7 @@ async def test_taxonomy_is_reused_not_duplicated(db_session) -> None:
 
 async def test_unchanged_leads_are_not_reclassified(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal"])))
     await db_session.flush()
     llm = _FakeLLM(_RULES)
     assert await classify_branch(db_session, bid, llm) == 1
@@ -98,7 +98,7 @@ async def test_unchanged_leads_are_not_reclassified(db_session) -> None:
 
 async def test_garbage_script_label_is_rejected(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal", "aneh"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal", "aneh"])))
     await db_session.flush()
     # the model drifts to Arabic for one phrase — that label must be dropped, not made a category
     rules = {"mahal": "Цена", "aneh": "برمجة"}
@@ -131,7 +131,7 @@ class _I18nLLM:
 
 async def test_translate_labels_caches_en_id_and_localizes(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal"])))
     await db_session.flush()
     await classify_branch(db_session, bid, _FakeLLM(_RULES))  # → entity "Цена"
     n = await translate_labels(db_session, bid,
@@ -148,7 +148,7 @@ async def test_translate_labels_caches_en_id_and_localizes(db_session) -> None:
 
 async def test_translate_labels_rejects_wrong_script_drift(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal"])))
     await db_session.flush()
     await classify_branch(db_session, bid, _FakeLLM(_RULES))
     assert await translate_labels(db_session, bid, _I18nLLM({}, drift=True)) == 0
@@ -162,8 +162,8 @@ async def test_translate_labels_rejects_wrong_script_drift(db_session) -> None:
 
 async def test_snapshot_freezes_current_counts(db_session) -> None:
     bid = await _branch(db_session)
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["mahal"])))
-    db_session.add(Lead(branch_id=bid, needs=_needs(pains=["terlalu mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["mahal"])))
+    db_session.add(Lead(branch_id=bid, dossier=_needs(pains=["terlalu mahal"])))
     await db_session.flush()
     await classify_branch(db_session, bid, _FakeLLM(_RULES))
     written = await write_snapshot(db_session, bid)

@@ -152,13 +152,15 @@ async def test_tool_envelope_wrapped_decision_is_unwrapped(db_session) -> None: 
 
 # ── freedom ───────────────────────────────────────────────────────────────────
 
-async def test_model_keeps_its_own_move_label(db_session) -> None:  # noqa: ANN001
-    """Free mode never coerces the move to the scripted enum — it's telemetry there."""
+async def test_a_volunteered_move_label_does_not_break_the_turn(db_session) -> None:  # noqa: ANN001
+    """`move` was telemetry the schema stopped asking for; the field was dropped on
+    2026-07-28 once its only reader turned out to be a log line. A model that still emits
+    one must simply be ignored."""
     bid, tid, _ = await _thread(db_session, dossier=_HOT)
-    llm = _LLM(_answer(move="Comfort Then Close!"))
-    svc = _service(db_session, bid, llm)
+    svc = _service(db_session, bid, _LLM(_answer(move="Comfort Then Close!")))
     assert await svc.decide(tid) is not None
-    assert svc.last_decision.move == "comfort_then_close"
+    assert svc.last_decision is not None
+    assert not hasattr(svc.last_decision, "move")
 
 
 async def test_pitch_with_empty_dossier_ships(db_session) -> None:  # noqa: ANN001

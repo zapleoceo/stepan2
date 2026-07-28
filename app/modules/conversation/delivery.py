@@ -25,6 +25,7 @@ from app.ports.notify import NotifierPort
 
 from . import guard
 from .decision import Decision
+from .dormancy import park_dormant
 from .engine import _fmt_llm_meta  # noqa: F401 — re-exported for tests/legacy imports
 from .money_gate import MONEY_ESCALATION_REASON
 from .needs import parse_needs
@@ -500,14 +501,10 @@ class ReplyDelivery:
         explicit stop turns an annoyed lead into a spam report against the IG account."""
         thread.next_followup_at = None
         self.session.add(thread)
-        if lead.stage != Stage.DORMANT:
-            self.session.add(StageEvent(
-                branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
-                from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
-                actor="bot", reason="hard_stop",
-            ))
-            lead.stage = Stage.DORMANT
-        lead.agent_enabled = False
+        # respect_human_led=False on purpose: "stop contacting me" outranks whose lead it is.
+        await park_dormant(self.session, self.branch_id, lead, thread.id,
+                           actor="bot", reason="hard_stop", respect_human_led=False)
+        lead.agent_enabled = False  # also for a lead already dormant — the flag must hold
         self.session.add(lead)
         logger.info("branch=%d lead=%d hard-stop → dormant, bot off", self.branch_id, lead.id)
 
@@ -523,13 +520,8 @@ class ReplyDelivery:
         days because nobody ever saw them; the owner decided: alert + go silent."""
         thread.next_followup_at = None
         self.session.add(thread)
-        if lead.stage != Stage.DORMANT:
-            self.session.add(StageEvent(
-                branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
-                from_stage=str(lead.stage), to_stage=str(Stage.DORMANT),
-                actor="bot", reason="non_target",
-            ))
-            lead.stage = Stage.DORMANT
+        if await park_dormant(self.session, self.branch_id, lead, thread.id,
+                              actor="bot", reason="non_target", respect_human_led=False):
             try:
                 await AlertService(
                     self.session, self.branch_id, self._notifier, llm=self.llm,
@@ -601,7 +593,7 @@ class ReplyDelivery:
         # flag prematurely with pains=[] (thread 1081), which skips warm-up and leaves needs
         # uncollected. Require the pain here so the bot keeps discovering until it has one.
         this_turn = decision.has_needs() or (decision.discovery_complete and bool(decision.pains))
-        return this_turn or parse_needs(lead.needs).captured()
+        return this_turn or parse_needs(lead.dossier).captured()
 
     async def _handoff(self, lead: Lead, thread, subtype: str | None) -> None:
         """Lead is ready with a contact: bot off, stamp, manager card, CAPI Lead event.

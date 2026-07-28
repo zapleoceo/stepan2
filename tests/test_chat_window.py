@@ -692,8 +692,8 @@ async def test_needs_panel_load_never_calls_broker(db_session) -> None:
 
     b = Branch(id=1, name="B", lang="id", tz_offset_h=7, is_active=True)
     lead = Lead(id=1, branch_id=1, display_name="Alice", agent_enabled=True,
-                needs='{"jobs":["belajar coding"],"pains":[],"gains":[],'
-                     '"discovery_complete":false}')
+                dossier='{"job_to_be_done":"belajar coding","pains":[],'
+                        '"desired_state":[],"objections":[]}')
     db_session.add_all([b, lead, ChannelThread(id=1, lead_id=1, channel_id=1,
                                                 external_thread_id="x1")])
     await db_session.commit()
@@ -723,8 +723,8 @@ async def test_needs_lazy_endpoint_translates_and_caches(db_session) -> None:
 
     b = Branch(id=1, name="B", lang="id", tz_offset_h=7, is_active=True)
     lead = Lead(id=1, branch_id=1, display_name="Alice", agent_enabled=True,
-                needs='{"jobs":["belajar coding"],"pains":[],"gains":[],'
-                     '"discovery_complete":false}')
+                dossier='{"job_to_be_done":"belajar coding","pains":[],'
+                        '"desired_state":[],"objections":[]}')
     db_session.add_all([b, lead, ChannelThread(id=1, lead_id=1, channel_id=1,
                                                 external_thread_id="x1")])
     await db_session.commit()

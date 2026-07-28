@@ -679,7 +679,7 @@ def test_the_reason_is_not_printed_twice() -> None:
     from app.modules.conversation.dossier import LeadDossier
 
     legacy = TurnDecision(
-        reply="x", move="handoff", stage=Stage.MANAGER,
+        reply="x",
         needs_human=True, human_reason="ready to enrol",
     ).to_legacy(LeadDossier())
     assert legacy.manager_question == "ready to enrol"
