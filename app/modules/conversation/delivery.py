@@ -729,7 +729,14 @@ class ReplyDelivery:
                 phone, EVENT_WAIT_CALL, comment=body.summary_branch or reason,
                 name=name or "Stepan")
             if not ok:
+                # Logged into the chat as well as the file: a manager reading the thread has no
+                # other way to learn the CRM never got this lead, and "it's in the CRM" is
+                # exactly the assumption a silent failure produces. The sweep still retries.
                 logger.warning("crm handoff-push failed lead=%d: %s", lead_id, detail)
+                async with session_scope() as session:
+                    session.add(ThreadLog(
+                        branch_id=self.branch_id, thread_id=thread_id, kind="crm_push_failed",
+                        detail=str(detail)[:300], actor="system"))
                 return  # unmarked → the drain_handoffs sweep retries it next cron run
             async with session_scope() as session:
                 # Success marker in its own tx — keeps drain_handoffs (the phone-arrived-later
@@ -738,6 +745,12 @@ class ReplyDelivery:
                     branch_id=self.branch_id, lead_id=lead_id, thread_id=thread_id,
                     from_stage=stage, to_stage=stage,
                     actor="system", reason=PUSHED_HANDOFF_REASON))
+                # And into the chat chronology. StageEvent is the funnel journal; the chat
+                # window renders ThreadLog, so until now a hand-off reached the CRM without
+                # leaving a single trace where the person handling the conversation is looking.
+                session.add(ThreadLog(
+                    branch_id=self.branch_id, thread_id=thread_id, kind="crm_pushed",
+                    detail=phone, actor="system"))
         except Exception:
             logger.warning("crm handoff-push errored lead=%d", lead_id, exc_info=True)
 

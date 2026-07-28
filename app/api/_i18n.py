@@ -687,6 +687,12 @@ _TR: dict[str, dict[str, str]] = {
     "chat.stage_reason": {"ru": "Причина смены стадии (бот)",
                           "en": "Stage change reason (bot)",
                           "id": "Alasan perubahan tahap (bot)"},
+    "chat.crm_pushed": {"ru": "Передан в CRM",
+                        "en": "Pushed to CRM",
+                        "id": "Dikirim ke CRM"},
+    "chat.crm_push_failed": {"ru": "В CRM не передан — ошибка",
+                             "en": "CRM push failed",
+                             "id": "Gagal dikirim ke CRM"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

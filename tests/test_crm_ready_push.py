@@ -156,3 +156,15 @@ async def test_push_after_commit_sends_and_marks(db_session, monkeypatch) -> Non
     marks = (await db_session.exec(select(StageEvent).where(
         StageEvent.reason == PUSHED_HANDOFF_REASON))).all()
     assert len(marks) == 1  # success marker — drain_handoffs won't re-announce this hand-off
+
+
+async def test_a_successful_push_is_written_into_the_chat_log(db_session, monkeypatch) -> None:
+    """StageEvent is the funnel journal; the chat window renders ThreadLog. Until now a
+    hand-off reached the CRM without leaving a single trace where the person handling the
+    conversation is actually looking, so "is he in the CRM?" had no answer in the thread."""
+    from app.adapters.db.models import ThreadLog
+    from app.api._ui_html import _LOG_KIND_KEY
+
+    assert _LOG_KIND_KEY["crm_pushed"] == "chat.crm_pushed"
+    assert _LOG_KIND_KEY["crm_push_failed"] == "chat.crm_push_failed"
+    assert ThreadLog.model_fields["kind"].description is not None

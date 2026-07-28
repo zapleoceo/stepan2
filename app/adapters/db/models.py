@@ -533,7 +533,8 @@ class ThreadLog(SQLModel, table=True):
     branch_id: int = Field(foreign_key="branch.id", index=True)
     thread_id: int = Field(foreign_key="channel_thread.id", index=True)
     kind: str = Field(description="context_cleared|context_loaded|product_changed|"
-                       "manager_note_set|manager_note_cleared|stage_reason")
+                       "manager_note_set|manager_note_cleared|stage_reason|"
+                       "crm_pushed|crm_push_failed")
     detail: str | None = Field(default=None)
     actor: str = Field(default="manager")
     created_at: datetime = Field(default_factory=_utcnow)
