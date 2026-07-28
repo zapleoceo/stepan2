@@ -1182,6 +1182,11 @@ def landing_html() -> str:
         f"<a href=\"{_DEMO_TG}\" target=\"_blank\" rel=\"noopener\">Telegram</a> · "
         f"<a href=\"{_DEMO_FB}\" target=\"_blank\" rel=\"noopener\">Facebook</a> · "
         "<a href=\"/whats-new\">What's new</a> · "
+        # Meta App Review requires the policy to be reachable from the product page itself,
+        # not only by direct URL.
+        "<a href=\"/privacy\">Privacy</a> · "
+        "<a href=\"/terms\">Terms</a> · "
+        "<a href=\"/data-deletion\">Data deletion</a> · "
         "<a href=\"/login\">Log in</a></div>"
         "</div></footer>"
         # live demo chat widget — Stepan sells itself (POST /demo/chat)
