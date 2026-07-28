@@ -88,17 +88,62 @@ def test_a_name_does_not_make_a_real_question_look_like_a_goodbye() -> None:
 
 # ── the vocabulary-free half: nobody is saying anything new ───────────────────
 
-def test_the_live_loop_the_word_list_kept_missing() -> None:
-    """Round 4, seventeen turns. Every one of these is unmistakably a goodbye, and every one
-    carries a word no list had — `ah`, `kalo`, `perlu`, `selamat`, `malam`. Widening the list
-    a third time is a patch; this is the shape instead."""
+def test_an_unusual_farewell_gets_one_more_reply_then_is_caught() -> None:
+    """Deliberate, and a change of behaviour on 28.07.2026.
+
+    Shape-based repetition used to fire on its own here, catching this farewell despite `wa`
+    not being a pleasantry. It also fired on thread 5540, where the lead was still asking
+    questions, and left it silent for five hours. Repetition is now a corroborator behind the
+    pleasantries test, so this farewell is NOT caught on this turn.
+
+    The cost is one message, not seventeen: the lead's next turn degrades to "siap makasih",
+    which is pleasantries-only, and the guard closes it there. Paying one extra message to
+    remove any path to silencing a live lead is the right side of that trade.
+
+    The second assertion only holds with the lead's name, which is also the only way production
+    calls this — our own farewell reads "Siap Kak Bagus, selamat malam...", and without
+    `lead_name` the name is content, so OUR side never registers as closed either."""
     dialog = [
         _msg("in", "Udah ah Kak, makasih. Nanti gue WA aja kalo perlu. Bye! 😊"),
         _msg("out", "Sama-sama Kak Bagus. Selamat malam, sampai nanti ya 😊"),
         _msg("in", "Iya Kak, makasih. Nanti gue tunggu WA nya ya! Bye."),
         _msg("out", "Siap Kak Bagus, selamat malam dan sampai jumpa nanti ya 😊"),
     ]
-    assert _goodbye_loop(dialog)
+    assert not _goodbye_loop(dialog, "Bagus")
+    assert _goodbye_loop([*dialog, _msg("in", "siap kak, makasih ya 😊")], "Bagus")
+
+
+def test_thread_5540_a_short_follow_up_question_is_not_a_goodbye() -> None:
+    """The live regression, verbatim from production on 28.07.2026.
+
+    "belajar kursus it gitu ka" shares four of its five words with the lead's own previous,
+    much longer message, which scored 0.80 as "repetition" — while our two sales replies about
+    the same course naturally shared vocabulary too. Both sides looked idle; neither was. The
+    lead had just asked whether the course can be taken online from Jogja."""
+    dialog = [
+        _msg("in", "Apakah dapat menghasilkan uang?"),
+        _msg("out", "Soal SMM Intensive yang kakak lihat di iklan tadi ya - jawabannya bisa, "
+                    "tapi biar jujur: kerja atau freelance sama-sama butuh portfolio dulu."),
+        _msg("out", "Kalau boleh tau, Kakak tertariknya buat kerja di perusahaan, atau mau "
+                    "jadi freelancer/pegang klien sendiri?"),
+        _msg("in", "freelancer?"),
+        _msg("in", "Ka btw memang bisa sambil online ? Soalnya saya di jogja sambil belajar "
+                   "kursus skill IT juga"),
+        _msg("out", "Oke, freelancer cocok banget sama SMM Intensive ini Kak ✨ karena setelah "
+                    "2 minggu itu Kakak bisa langsung pegang klien sendiri."),
+        _msg("in", "belajar kursus it gitu ka"),
+    ]
+    assert not _goodbye_loop(dialog)
+
+
+def test_a_short_message_inside_a_long_one_is_not_repetition() -> None:
+    """The metric bug underneath 5540, isolated: containment is not similarity."""
+    from app.modules.conversation.reply import _repeats
+    assert not _repeats("belajar kursus it gitu ka",
+                        "Ka btw memang bisa sambil online Soalnya saya di jogja sambil "
+                        "belajar kursus skill IT juga")
+    assert _repeats("Udah ah Kak, makasih. Nanti gue WA aja kalo perlu",
+                    "Iya Kak, makasih. Nanti gue tunggu WA nya ya")
 
 
 def test_a_new_question_breaks_the_loop_immediately() -> None:

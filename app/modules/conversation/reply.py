@@ -346,6 +346,7 @@ _CLOSING_WORDS = frozenset("""
     makasih makasi thanks thank you terima kasih sama samasama dadah bye semangat noted
     mantap aamiin amin sampai jumpa ketemu besok pagi nanti tunggu ditunggu menunggu saya aku
     gue min mimin kak kakak ya deh dong nya lah kok aja juga banyak sekali
+    selamat malam siang sore dan hari
 """.split())
 _WORD_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
 
@@ -376,16 +377,34 @@ def _repeats(a: str, b: str, threshold: float = 0.55) -> bool:
     share six words of ten — obviously the same message — but score only 0.40 by union.
 
     The three-word floor keeps "oke" from matching "oke"; two bare acknowledgements are not
-    evidence of anything, and the pleasantry check below is what handles those."""
+    evidence of anything, and the pleasantry check below is what handles those.
+
+    Measuring against the shorter message has one failure mode, and it silenced a live thread
+    on 28.07.2026: a SHORT new message whose words happen to sit inside a LONG previous one
+    scores near 1.0 while saying something entirely new. Thread 5540 asked "belajar kursus it
+    gitu ka" (5 words) right after "Ka btw memang bisa sambil online? Soalnya saya di jogja
+    sambil belajar kursus skill IT juga" (15) — four words of five, 0.80, and the bot went
+    quiet for five hours on a lead who was still asking questions.
+
+    Two messages that say the same thing are also of comparable size. Requiring that first
+    costs nothing on real repetition (the farewell pair above is 10 words against 11) and
+    removes the whole containment artefact."""
     wa = {w.lower() for w in _WORD_RE.findall(a or "")}
     wb = {w.lower() for w in _WORD_RE.findall(b or "")}
     if len(wa) < 3 or len(wb) < 3:
+        return False
+    if min(len(wa), len(wb)) / max(len(wa), len(wb)) < 0.5:
         return False
     return len(wa & wb) / min(len(wa), len(wb)) >= threshold
 
 
 def _both_looping(dialog: list) -> bool:
     """Neither side has said anything new for two exchanges.
+
+    CORROBORATOR, never a trigger — `_goodbye_loop` calls this only after establishing that the
+    lead's last message is pleasantries and nothing else. It was a standalone condition for one
+    day and silenced a live thread; shape is good evidence about OUR side idling and bad
+    evidence about whether the lead is done.
 
     The vocabulary approach below catches a farewell made of pleasantries, and it kept missing
     by one word — "Udah ah Kak, makasih. Nanti gue WA aja kalo perlu. Bye!" is unmistakably a
@@ -421,12 +440,15 @@ def _goodbye_loop(dialog: list, lead_name: str | None = None) -> bool:
     outs = [m for m in dialog if m.direction != "in"]
     if not ins or not outs:
         return False
-    if _both_looping(dialog):
-        return True
     extra = frozenset(w.lower() for w in _WORD_RE.findall(lead_name or ""))
+    # The veto, and it comes first: if the lead said anything at all, we answer. Shape-based
+    # repetition used to short-circuit this check and decide on its own — that is what silenced
+    # thread 5540 for five hours while the lead kept asking questions. The two errors are not
+    # symmetric. Answering one turn too many after a goodbye costs one message; going quiet on
+    # a live lead is unrecoverable and raises no alert, so nothing may outrank this test.
     if not _is_closing_only(ins[-1].text, extra):
         return False
-    return _is_closing_only(outs[-1].text, extra)
+    return _is_closing_only(outs[-1].text, extra) or _both_looping(dialog)
 
 
 def _awaiting_media(dialog: list) -> bool:
