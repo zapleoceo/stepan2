@@ -1,9 +1,14 @@
 name: CI
 
+# Pull requests only. A push to main is already gated: deploy.yml runs ruff + pytest in its
+# own `test` job and the deploy job declares `needs: test`, so nothing ships on red. Running
+# the identical suite here as well meant two full runs per push AND two statuses that could
+# disagree — which is exactly what happened on 2026-07-28, when a leaking ContextVar made one
+# test order-dependent: CI went red, deploy went green, and the split reads as "the deploy
+# ignores CI" when in fact both gates work and only one of them lost the coin toss.
 on:
-  push:
-    branches: [master, main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:

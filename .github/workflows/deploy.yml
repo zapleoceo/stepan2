@@ -21,6 +21,9 @@ env:
   REMOTE_DIR: /var/www/stepan2
 
 jobs:
+  # The gate for main. ci.yml covers pull requests; this is the same suite and the deploy job
+  # below declares `needs: test`, so a red run stops the release rather than merely reporting
+  # it. Keep the two in step if either is edited.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
