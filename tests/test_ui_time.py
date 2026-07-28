@@ -17,10 +17,12 @@ from datetime import datetime
 from pathlib import Path
 
 _UI_DIR = Path(__file__).resolve().parent.parent / "app" / "api"
-# _ui_html.py owns the formatters themselves. _ui_panels.py keeps ONE deliberate exception:
-# the Reports "activity by hour" histogram is labelled in BRANCH-local time on purpose — the
-# question it answers is "when do leads in Jakarta write", which is not about the viewer.
-_ALLOWED = {"_ui_html.py"}
+# _ui_fmt.py owns the formatters themselves (it was _ui_html.py until 2026-07-28, when the
+# time machinery moved out of the module that draws the page). _ui_reports.py keeps ONE
+# deliberate exception: the "activity by hour" histogram is labelled in BRANCH-local time on
+# purpose — the question it answers is "when do leads in Jakarta write", not "what time is it
+# where the reader is sitting".
+_ALLOWED = {"_ui_fmt.py"}
 _BRANCH_LOCAL_MARKER = "start_dt + tz"
 
 # A .strftime() call on a value, or an f-string interpolating one ({x:%d.%m}). Both print

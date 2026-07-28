@@ -8,11 +8,27 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.modules.conversation.needs import NeedsProfile
-from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 
 from ._i18n import t
+
+# Viewer-local time moved to _ui_fmt on 2026-07-28. Imported back so every existing
+# `from ._ui_html import fmt_dt` keeps working: the move changed no call site, which is
+# what keeps it a relocation rather than a rewrite. The noqa is load-bearing — without it
+# the linter reads these as unused and deletes the bridge.
+from ._ui_fmt import (  # noqa: F401,E402 — re-export, see above
+    VIEWER_TZ_COOKIE,
+    _ago,
+    _as_dt,
+    _fmt_dt_short,
+    _fmt_time,
+    _render_tz_h,
+    fmt_dt,
+    set_render_tz,
+    viewer_local,
+    viewer_tz_offset,
+)
 
 
 def _js_str(s: str) -> str:
@@ -24,32 +40,6 @@ def _js_str(s: str) -> str:
 # render. Fed the VIEWER's own tz (from the browser, via the `tzoff` cookie) so every admin
 # sees times in their own zone — NOT the branch's. The one deliberate exception is the Reports
 # "activity by hour" histogram, which stays branch-local (see _HOUR_Q) on purpose.
-_render_tz_h: ContextVar[float] = ContextVar("render_tz_h", default=0.0)
-
-# Cookie the shell's inline JS writes with the browser's UTC offset in hours (e.g. "7", "5.5").
-VIEWER_TZ_COOKIE = "tzoff"
-
-
-def set_render_tz(offset_h: float) -> None:
-    """Set the tz offset (hours) for timestamp rendering in this request/task."""
-    try:
-        _render_tz_h.set(float(offset_h or 0))
-    except (TypeError, ValueError):
-        _render_tz_h.set(0.0)
-
-
-def viewer_tz_offset(request: object) -> float:
-    """The viewing admin's own UTC offset in hours, from the `tzoff` cookie the shell sets;
-    0 (UTC) until the browser has reported it. Bounded to a sane [-14, +14] range."""
-    raw = ""
-    cookies = getattr(request, "cookies", None)
-    if isinstance(cookies, dict):
-        raw = cookies.get(VIEWER_TZ_COOKIE, "") or ""
-    try:
-        return max(-14.0, min(14.0, float(raw)))
-    except (TypeError, ValueError):
-        return 0.0
-
 _HTMX = "https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"
 _FA = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"
 
@@ -170,63 +160,6 @@ _HELP_KEYS: dict[str, str] = {
 # Section-level help texts (help.*) now ride on the nav links as data-help tips —
 # see _na in app_shell. No out-of-band machinery needed: the tips live in the shell
 # markup itself and the delegated hover handler reads them straight off the DOM.
-
-
-def _ago(dt: datetime | None) -> str:
-    if dt is None:
-        return ""
-    secs = max(0, int((datetime.now(UTC).replace(tzinfo=None) - dt).total_seconds()))
-    if secs < 3600:
-        return f"{secs // 60}{t('time.m')}"
-    if secs < 86400:
-        return f"{secs // 3600}{t('time.h')}"
-    return f"{secs // 86400}{t('time.d')}"
-
-
-def _as_dt(v: object) -> datetime | None:
-    """Coerce a raw SQL value (datetime on Postgres, ISO str on SQLite) to naive datetime."""
-    if v is None or isinstance(v, datetime):
-        return v  # type: ignore[return-value]
-    try:
-        return datetime.fromisoformat(str(v).replace("Z", "")).replace(tzinfo=None)
-    except ValueError:
-        return None
-
-
-def viewer_local(dt: datetime | None) -> datetime | None:
-    """A stored (UTC) timestamp moved into the viewing admin's own zone.
-
-    Every timestamp on /ui goes through here. Formatting a raw value with .strftime prints
-    server time, which is UTC and therefore wrong for everyone — and wrong in a way nobody
-    notices, because 09:26 is a perfectly plausible time of day. Three panels were doing it
-    (MCP tokens, the ads-synced stamp, the persona edit date) while everything around them was
-    already local, so the same page showed two different clocks."""
-    return None if dt is None else dt + timedelta(hours=_render_tz_h.get())
-
-
-def fmt_dt(dt: datetime | None, pattern: str, empty: str = "") -> str:
-    """Viewer-local timestamp in an arbitrary pattern — the only sanctioned way for a UI module
-    outside this file to format one. A test pins that rule (test_ui_time.py)."""
-    local = viewer_local(_as_dt(dt))
-    return local.strftime(pattern) if local is not None else empty
-
-
-def _fmt_time(dt: datetime | None) -> str:
-    """Viewer-local DD.MM HH:MM:SS — always includes the date, not just time-of-day, so a
-    message/event timestamp is never ambiguous about which day it happened."""
-    if dt is None:
-        return ""
-    local = dt + timedelta(hours=_render_tz_h.get())
-    return local.strftime("%d.%m %H:%M:%S")
-
-
-def _fmt_dt_short(dt: datetime | None) -> str:
-    """Viewer-local DD.MM HH:MM (no seconds) — for the compact sidebar thread list, where
-    an explicit last-message date/time replaces the old vague '2h ago' style label."""
-    if dt is None:
-        return ""
-    local = dt + timedelta(hours=_render_tz_h.get())
-    return local.strftime("%d.%m %H:%M")
 
 
 def _badge(stage: str) -> str:
@@ -867,10 +800,10 @@ def chat_header_html(
         meta_parts.append(presence)
     if phone:
         meta_parts.append(f'<a href="tel:{_h.escape(phone)}">📞 {_h.escape(phone)}</a>')
-    created_dt = _as_dt(created_at)  # raw text() SQL returns a str on sqlite, datetime on pg
-    if created_dt:
-        created_local = created_dt + timedelta(hours=_render_tz_h.get())
-        meta_parts.append(f'<span>📅 с {created_local.strftime("%d %b %Y")}</span>')
+    # fmt_dt coerces the shape raw text() SQL returns (str on sqlite, datetime on pg) and
+    # applies the viewer's offset — the last hand-rolled copy of those two steps.
+    if created := fmt_dt(created_at, "%d %b %Y"):
+        meta_parts.append(f"<span>📅 с {created}</span>")
     if last_in_at:
         meta_parts.append(f'<span>⬇ {_fmt_time(last_in_at)}</span>')
     meta_row = (
