@@ -34,6 +34,25 @@ def _clear_settings_cache():
     _global_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_render_context():
+    """Reset the render ContextVars between tests — same class of leak as the settings cache
+    above, and it took CI down twice today.
+
+    test_broker_log sets the viewer's timezone to UTC+3 to check that timestamps follow the
+    ADMIN's clock, and never puts it back. Any later test asserting a literal time then reads
+    it three hours out: test_pending_bubble_queue_time_buttons_and_oob expects "08:15:30" and
+    sees "11:15:30". It passes alone and fails in a full run, which under pytest-randomly's
+    shuffle means it fails on some commits and not others — the worst kind of red, because a
+    red that comes and goes gets ignored, and an ignored CI is how a real failure ships."""
+    from app.api import _i18n, _ui_html
+    _ui_html._render_tz_h.set(0.0)  # noqa: SLF001 — the reset belongs to the fixture
+    _i18n._lang.set(_i18n.DEFAULT_LANG)  # noqa: SLF001
+    yield
+    _ui_html._render_tz_h.set(0.0)  # noqa: SLF001
+    _i18n._lang.set(_i18n.DEFAULT_LANG)  # noqa: SLF001
+
+
 @pytest_asyncio.fixture
 async def db_session():
     # StaticPool pins the engine to ONE in-memory connection. Without it the pool can hand
