@@ -128,11 +128,22 @@ def create_app() -> FastAPI:
         from app.api._landing import landing_html  # noqa: PLC0415
         return HTMLResponse(landing_html())
 
+    # Public legal pages. Meta App Review fetches all three anonymously, so they stay outside
+    # auth and outside the DB — see app/api/_legal.py.
     @app.get("/privacy", include_in_schema=False, response_class=HTMLResponse)
     async def privacy() -> HTMLResponse:
-        # Public privacy policy (required by Meta App Review; must be reachable without auth).
-        from app.api._privacy import privacy_html  # noqa: PLC0415
+        from app.api._legal import privacy_html  # noqa: PLC0415
         return HTMLResponse(privacy_html())
+
+    @app.get("/terms", include_in_schema=False, response_class=HTMLResponse)
+    async def terms() -> HTMLResponse:
+        from app.api._legal import terms_html  # noqa: PLC0415
+        return HTMLResponse(terms_html())
+
+    @app.get("/data-deletion", include_in_schema=False, response_class=HTMLResponse)
+    async def data_deletion() -> HTMLResponse:
+        from app.api._legal import data_deletion_html  # noqa: PLC0415
+        return HTMLResponse(data_deletion_html())
 
     @app.get("/llms.txt", include_in_schema=False, response_class=PlainTextResponse)
     async def llms_txt_route() -> PlainTextResponse:
