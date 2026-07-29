@@ -32,6 +32,7 @@ from app.adapters.db.models import (
 )
 from app.config import settings
 from app.domain.enums import BOT_SILENT_STAGES, ChannelKind, SessionStatus
+from app.modules.settings.service import get_channel_settings
 from app.ports.channel import ChannelPort
 
 
@@ -242,18 +243,26 @@ async def build_channel_port(session: AsyncSession, channel: Channel) -> Channel
             lang=branch.lang if branch else "", tz_offset_h=branch.tz_offset_h if branch else None)
         return InstagramAdapter(transport, handle=channel.handle or "")
     if channel.kind == ChannelKind.META_BUSINESS:
-        dump = await _active_session_settings(session, channel.id or 0)
-        if dump is None:
+        # The token comes from the per-channel SETTING the connector editor writes
+        # (app_setting meta_system_user_token). It used to be read from ChannelSession only —
+        # but nothing in the codebase ever writes a ChannelSession for this kind, so an
+        # operator could paste a valid token, see it saved, and still get
+        # "no active token" forever. ChannelSession stays as a fallback for anything that
+        # populates it later.
+        dump = await _active_session_settings(session, channel.id or 0) or {}
+        cfg = await get_channel_settings(session, channel.branch_id, channel.id or 0)
+        token = dump.get("token") or cfg.meta_system_user_token
+        if not token:
             raise RuntimeError(f"no active token for Meta Business channel {channel.id}")
+        account_id = (dump.get("account_id") or cfg.meta_page_id
+                      or channel.account_id or "")
         transport = GraphTransportHTTP(
             base_url=dump.get("base_url",
-                              f"https://graph.instagram.com/{settings().ig_graph_version}"),
-            account_id=dump.get("account_id") or channel.account_id or "",
-            token=dump["token"],
+                              f"https://graph.facebook.com/{settings().ig_graph_version}"),
+            account_id=account_id,
+            token=token,
         )
-        return MetaBusinessAdapter(
-            transport, account_id=dump.get("account_id") or channel.account_id or ""
-        )
+        return MetaBusinessAdapter(transport, account_id=account_id)
     if channel.kind == ChannelKind.WHATSAPP:
         dump = await _active_session_settings(session, channel.id or 0)
         if dump is None:
