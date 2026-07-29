@@ -25,6 +25,16 @@ _PIPELINE_STAGES = ("qualifying", "presenting", "objection", "nurturing")
 # or not it ever pays.
 _WON_STAGES = ("ready", "handed_off")
 
+# A hand-off is a lead CHANGING stage. Bookkeeping rows in the same journal carry
+# from_stage == to_stage — the CRM push markers do, and so does the reconciliation stamp —
+# and counting them made the panel report work that never happened: on 29.07.2026 a 4-hour
+# window showed "5 leads / 23 handed over" because 23 reconciliation stamps had just been
+# written. Of 258 ready/handed_off rows in the journal, 45 are bookkeeping.
+_REAL_TRANSITION = StageEvent.from_stage != StageEvent.to_stage
+
+# Markers written by the CRM sweeps on a SUCCESSFUL push (see modules/crm/push_mcp.py).
+_CRM_PUSH_REASONS = ("crm_pushed", "crm_pushed_handoff")
+
 # The real outcome, from the CRM. `deal_won_at` is null-tolerant on purpose: the CRM does not
 # always timestamp a close, and dropping an untimed sale under-reports the number the whole
 # channel is judged on. When it IS timestamped, a close that predates our first message is
@@ -640,6 +650,7 @@ async def fetch_closed_in_period(
         select(func.count(func.distinct(StageEvent.lead_id)))
         .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
         .where(StageEvent.to_stage.in_(("ready", "handed_off")))  # type: ignore[attr-defined]
+        .where(_REAL_TRANSITION)
     )
     if branch_ids:
         q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
@@ -648,6 +659,61 @@ async def fetch_closed_in_period(
     if until is not None:
         q = q.where(StageEvent.created_at < until)  # type: ignore[attr-defined]
     return int((await session.execute(q)).scalar_one() or 0)
+
+
+async def _distinct_leads(session: AsyncSession, q) -> int:  # noqa: ANN001
+    return int((await session.execute(q)).scalar_one() or 0)
+
+
+async def fetch_handover_totals(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> tuple[int, int]:
+    """(всего накопительно, из числа лидов за период) для плитки «Передано менеджеру».
+
+    Two numbers because either alone misleads. The running total never moves with the window,
+    so it cannot answer "how did this week go"; the cohort read hides every hand-off whose
+    conversation started before the window — over 3 days that showed 2 while 11 leads really
+    closed. Left is the pipeline the branch has built, right is what THIS traffic produced."""
+    base = (
+        select(func.count(func.distinct(StageEvent.lead_id)))
+        .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
+        .where(StageEvent.to_stage.in_(_WON_STAGES))  # type: ignore[attr-defined]
+        .where(_REAL_TRANSITION)
+    )
+    if branch_ids:
+        base = base.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    cohort = base
+    if since is not None:
+        cohort = cohort.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        cohort = cohort.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    return await _distinct_leads(session, base), await _distinct_leads(session, cohort)
+
+
+async def fetch_crm_pushed_totals(
+    session: AsyncSession, branch_ids: list[int] | None,
+    since: datetime | None = None, until: datetime | None = None,
+) -> tuple[int, int]:
+    """(всего накопительно, из числа лидов за период) для плитки «Передан в CRM».
+
+    Counts leads the sweeps actually delivered — a card with a phone and the chat context,
+    sitting where managers work. Deliberately NOT the same as "handed over": the bot stops
+    replying the moment a thread goes to a human, phone or not, so a hand-off can be a lead
+    nobody can call. This tile is the subset somebody can actually pick up."""
+    base = (
+        select(func.count(func.distinct(StageEvent.lead_id)))
+        .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
+        .where(StageEvent.reason.in_(_CRM_PUSH_REASONS))  # type: ignore[attr-defined]
+    )
+    if branch_ids:
+        base = base.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    cohort = base
+    if since is not None:
+        cohort = cohort.where(Lead.created_at >= since)  # type: ignore[attr-defined]
+    if until is not None:
+        cohort = cohort.where(Lead.created_at < until)  # type: ignore[attr-defined]
+    return await _distinct_leads(session, base), await _distinct_leads(session, cohort)
 
 
 async def fetch_deals_count(
@@ -729,6 +795,7 @@ async def fetch_daily_kpis(
             .select_from(StageEvent)
             .join(Lead, Lead.id == StageEvent.lead_id)  # type: ignore[arg-type]
             .where(StageEvent.to_stage.in_(stages))  # type: ignore[attr-defined]
+            .where(_REAL_TRANSITION)  # bookkeeping rows are not events — see _REAL_TRANSITION
         )
         return q.where(Lead.branch_id.in_(branch_ids)) if branch_ids else q  # type: ignore[attr-defined]
 

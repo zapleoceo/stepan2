@@ -495,12 +495,15 @@ _TR: dict[str, dict[str, str]] = {
               "the all-time range — there is no honest way to place it in a window.",
         "id": "Penjualan menurut CRM, ditutup setelah percakapan kami dimulai."},
     "rep.closed_period.hint": {
-        "ru": "Сколько лидов ВНУТРИ окна дошли до человека (ready/handed_off), независимо "
-              "от того, когда лид написал впервые. Это не продажа — продажу показывает "
-              "«Сделка».",
-        "en": "Leads that reached a human (ready/handed_off) INSIDE the window, whenever "
-              "they first wrote. Not a sale — that is 'Deal'.",
-        "id": "Lead yang sampai ke manusia dalam periode ini. Bukan penjualan."},
+        "ru": "Слева — всего дошло до человека (ready/handed_off) за всё время. Справа — "
+              "сколько из лидов, ПРИШЕДШИХ за выбранный период, до человека дошли. Это не "
+              "продажа — продажу показывает «Сделка», и не факт, что лида есть кому звонить: "
+              "для этого смотри «Передан в CRM».",
+        "en": "Left: leads that ever reached a human (ready/handed_off), all time. Right: how "
+              "many of the leads that ARRIVED in this window got there. Not a sale — that is "
+              "'Deal' — and not proof anyone can call them: see 'Pushed to CRM'.",
+        "id": "Kiri: total sampai ke manusia. Kanan: dari lead yang masuk di periode ini. "
+              "Bukan penjualan."},
     "rep.dormant_period.hint": {
         "ru": "Сколько лидов замолчали ВНУТРИ окна. Событие, а не срез: считается переход "
               "в dormant, а не то, сколько их сейчас всего.",
@@ -1203,6 +1206,21 @@ _TR: dict[str, dict[str, str]] = {
     # show two different "sales" numbers at once.
     "rep.closed_period": {"ru": "Передано менеджеру", "en": "Handed over",
                           "id": "Diserahkan"},
+    # Two numbers, "всего / из новых": the running total on the left, and how many of the
+    # leads that ARRIVED in this window have reached a human on the right. One alone always
+    # misleads — the cumulative figure never moves with the window, and the cohort one hides
+    # every hand-off whose conversation started earlier.
+    "rep.crm":     {"ru": "Передан в CRM",   "en": "Pushed to CRM", "id": "Terkirim ke CRM"},
+    "rep.crm.hint": {
+        "ru": "Лид уехал в CRM карточкой с телефоном и контекстом переписки — менеджер видит "
+              "его у себя. Слева всего накопительно, справа из числа лидов, пришедших за "
+              "выбранный период. Отличается от «Передано менеджеру»: там бот просто снял с "
+              "себя тред, в том числе без телефона.",
+        "en": "The lead reached the CRM as a card with a phone and the chat context. Left: "
+              "running total; right: of the leads that arrived in this window. Differs from "
+              "'Handed over', which only means the bot stopped replying — phone or not.",
+        "id": "Lead masuk CRM lengkap dengan nomor dan konteks chat. Kiri: total; kanan: dari "
+              "lead yang masuk di periode ini."},
     "rep.dormant_period": {"ru": "Уснули за период", "en": "Went quiet",
                            "id": "Jadi diam"},
     "rep.conv":    {"ru": "Конверсия",      "en": "Conversion",   "id": "Konversi"},

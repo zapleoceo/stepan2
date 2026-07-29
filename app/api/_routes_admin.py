@@ -37,6 +37,8 @@ from ._query import (
     fetch_branch_tz,
     fetch_broker_log,
     fetch_closed_in_period,
+    fetch_crm_pushed_totals,
+    fetch_handover_totals,
     fetch_daily_kpis,
     fetch_deals_count,
     fetch_discovery_metrics,
@@ -354,6 +356,10 @@ async def reports_panel(
             session, branch_ids, since=since_dt, until=until_dt)
         closed_in_period = await fetch_closed_in_period(
             session, branch_ids, since=since_dt, until=until_dt)
+        handover_totals = await fetch_handover_totals(
+            session, branch_ids, since=since_dt, until=until_dt)
+        crm_totals = await fetch_crm_pushed_totals(
+            session, branch_ids, since=since_dt, until=until_dt)
         deals = await fetch_deals_count(
             session, branch_ids, since=since_dt, until=until_dt)
         daily_kpis = await fetch_daily_kpis(
@@ -391,7 +397,9 @@ async def reports_panel(
                            products=products, segments=segments,
                            segment_stages=segment_stages, stage_flow=stage_flow,
                            stage_reach=stage_reach, needs_cloud=needs_cloud,
-                           closed_in_period=closed_in_period, deals=deals,
+                           closed_in_period=closed_in_period,
+                           handover_totals=handover_totals, crm_totals=crm_totals,
+                           deals=deals,
                            daily_kpis=daily_kpis, organic=organic,
                            media_to_ad=media_to_ad, ad_spend=ad_spend,
                            ads_synced_at=ads_synced_at,

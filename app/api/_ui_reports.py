@@ -953,6 +953,8 @@ def reports_panel_html(
     total_leads: int = 0,
     needs_cloud: dict | None = None,
     closed_in_period: int | None = None,
+    handover_totals: tuple[int, int] | None = None,
+    crm_totals: tuple[int, int] | None = None,
     deals: int | None = None,
     daily_kpis: dict[str, dict[str, int]] | None = None,
     organic: tuple[int, int, int, int, int] | None = None,
@@ -979,6 +981,13 @@ def reports_panel_html(
             return f'<a class="{cls}" href="{_h.escape(href)}" title="{tip}">{body}</a>'
         return f'<div class="{cls}" title="{tip}">{body}</div>'
 
+    def _pair(totals: tuple[int, int] | None, fallback: int | None) -> str:
+        """«всего / из новых». Falls back to the single old number when the pair is absent,
+        so an older caller (or a test) still renders something truthful rather than 0/0."""
+        if not totals:
+            return str(fallback or 0)
+        return f"{totals[0]} / {totals[1]}"
+
     daily = daily_kpis or {}
     # Every tile below is an EVENT counted inside the window: a lead arriving, a hand-off, a
     # CRM close, a lead going quiet, a message. The old panel mixed those with cohort reads
@@ -990,8 +999,13 @@ def reports_panel_html(
     total_out = sum(hour_out.values())
     kpis = (
         _kpi("rep.total", str(total), series=_series(daily, "leads"))
-        + _kpi("rep.closed_period", str(closed_in_period or 0), "#51cf66",
+        # "всего / из новых": the running total, then how many of the leads that ARRIVED in
+        # this window got there. One number alone always misleads — see fetch_handover_totals.
+        + _kpi("rep.closed_period", _pair(handover_totals, closed_in_period), "#51cf66",
                _series(daily, "handoff"))
+        # The subset a manager can actually work: a CRM card with a phone and the chat
+        # context. A hand-off without one is a thread the bot dropped and nobody can call.
+        + _kpi("rep.crm", _pair(crm_totals, None), "#4dabf7")
         # The only tile that means money — everything else counts conversations. Clickable
         # because a buyer can come from no ad at all, in which case NO table on this page
         # lists them: the ad tree only holds threads that carry an ad_id.
