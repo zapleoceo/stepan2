@@ -34,6 +34,9 @@ PUSHED_REASON = "crm_pushed"
 # re-push of the same state), so hand-off idempotency needs its own key.
 PUSHED_HANDOFF_REASON = "crm_pushed_handoff"
 DRAIN_BATCH = 25
+# How far back the hand-off sweep looks. Anything older is deliberately left alone (managers
+# have worked it by hand by then) — but _log_window_drops counts what that costs each run.
+HANDOFF_WINDOW_DAYS = 7
 
 
 class CrmPusherPort(Protocol):
@@ -70,8 +73,13 @@ class CrmMcpPusher:
         from mcp import ClientSession  # noqa: PLC0415
         from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
 
+        from app.adapters.mcp_auth import connect_args  # noqa: PLC0415
+
+        target, headers = connect_args(self.url)
         try:
-            async with streamablehttp_client(self.url, timeout=self.timeout_s) as (r, w, _):
+            async with streamablehttp_client(
+                target, headers=headers, timeout=self.timeout_s,
+            ) as (r, w, _):
                 async with ClientSession(r, w) as s:
                     await s.initialize()
                     # crm_lead_add_event assumes the phone is ALREADY a CRM contact — for an
@@ -240,40 +248,58 @@ async def push_leads(
     return {"pushed": pushed, "failed": failed, "errors": errors}
 
 
+_HANDOFF_TAIL = "Lead SUDAH diserahkan ke tim (hand-off) - hubungi segera."
+
+
+async def _drain(
+    session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
+    leads: list[LeadToPush], *, marker: str, event_type: str, label: str,
+    comment_fn: Any = _comment_for,
+) -> dict[str, Any]:
+    """Push a batch and record what landed. The two sweeps differed only in which leads they
+    select, which marker they stamp and how the comment reads — everything after the push was
+    duplicated line for line, which is how the chat-log line came to exist in one of them for
+    a while and not the other.
+
+    Contract, unchanged: a SUCCESS is stamped with `marker` so it is never re-pushed; a
+    FAILURE is left unmarked and retried next run, so a broken CRM endpoint just logs and
+    auto-drains once fixed."""
+    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
+
+    pushed, failed = 0, 0
+    for lead in leads:
+        ok, detail = await pusher.add_lead_event(
+            lead.phone, event_type, comment=comment_fn(lead), name=lead.name)
+        if not ok:
+            failed += 1
+            logger.warning("crm %s failed lead=%d: %s", label, lead.lead_id, detail)
+            continue
+        pushed += 1
+        session.add(StageEvent(
+            branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
+            from_stage=lead.stage, to_stage=lead.stage,
+            actor="system", reason=marker))
+        # …and into the chat, where the person working the thread is looking. A sweep's
+        # StageEvent carries no thread_id (it works from a lead query, not a conversation),
+        # so without this the majority of pushes left no trace in any conversation.
+        thread_id = await _newest_thread(session, lead.lead_id)
+        if thread_id is not None:
+            session.add(ThreadLog(
+                branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
+                detail=lead.phone, actor="system"))
+    if pushed:
+        await session.flush()
+    return {"eligible": len(leads), "pushed": pushed, "failed": failed}
+
+
 async def drain_writeback(
     session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
     event_type: str = EVENT_WAIT_CALL, limit: int = DRAIN_BATCH,
 ) -> dict[str, Any]:
-    """One background pass: push a batch of not-yet-pushed warm leads to the CRM, marking each
-    SUCCESS with a PUSHED_REASON StageEvent so it's never re-pushed. A FAILURE is left unmarked
-    → retried next run, so a broken CRM endpoint (404) just logs and auto-drains once fixed."""
-    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
-
+    """One background pass over warm-but-stalled leads (see fetch_leads_with_phone)."""
     leads = await fetch_leads_with_phone(session, branch_id, limit=limit, exclude_pushed=True)
-    pushed, failed = 0, 0
-    for lead in leads:
-        ok, detail = await pusher.add_lead_event(
-            lead.phone, event_type, comment=_comment_for(lead), name=lead.name)
-        if ok:
-            pushed += 1
-            session.add(StageEvent(
-                branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
-                from_stage=lead.stage, to_stage=lead.stage,
-                actor="system", reason=PUSHED_REASON))
-            # …and into the chat, where the person working the thread is looking. This sweep
-            # is the majority of all pushes (74 of 82 live), and its StageEvent carries no
-            # thread_id, so until now the overwhelming case left no trace in any conversation.
-            thread_id = await _newest_thread(session, lead.lead_id)
-            if thread_id is not None:
-                session.add(ThreadLog(
-                    branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
-                    detail=lead.phone, actor="system"))
-        else:
-            failed += 1
-            logger.warning("crm writeback failed lead=%d: %s", lead.lead_id, detail)
-    if pushed:
-        await session.flush()
-    return {"eligible": len(leads), "pushed": pushed, "failed": failed}
+    return await _drain(session, branch_id, pusher, leads,
+                        marker=PUSHED_REASON, event_type=event_type, label="writeback")
 
 
 async def fetch_unpushed_handoffs(
@@ -285,8 +311,14 @@ async def fetch_unpushed_handoffs(
     RSVP escalated at 01:09 with no contact, the number landed 03:41 via ingest's miner, and
     nothing ever told the CRM). The flip-time push (delivery.push_crm_after_commit) covers the
     phone-first case and writes PUSHED_HANDOFF_REASON; this sweep catches the phone-later and
-    push-failed leftovers. Windowed to hand-offs from the last 7 days so history that managers
-    already worked by hand isn't re-announced."""
+    push-failed leftovers.
+
+    Windowed to HANDOFF_WINDOW_DAYS so history managers already worked by hand isn't
+    re-announced — and what the window drops is COUNTED and logged, never silently applied.
+    On 29.07.2026 three leads (3085, 2524, 2676) sat in ready/manager with a phone since 13-16
+    July, outside the window and with no push marker of any kind: nothing would ever pick them
+    up and nothing said so. A bound that drops work has to be visible, or an empty queue reads
+    as "everything is handled"."""
     now = now or datetime.now(UTC).replace(tzinfo=None)
     rows = (await session.execute(text(
         "SELECT l.id, l.phone_e164,"
@@ -303,7 +335,8 @@ async def fetch_unpushed_handoffs(
         "     AND se.reason=:pushed)"
         " ORDER BY l.last_active_at DESC NULLS LAST LIMIT :lim"),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_HANDOFF_REASON,
-         "since": now - timedelta(days=7)})).all()
+         "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).all()
+    await _log_window_drops(session, branch_id, now)
     out = []
     seen: set[int] = set()
     for r in rows:
@@ -319,36 +352,40 @@ async def fetch_unpushed_handoffs(
     return out
 
 
+async def _log_window_drops(
+    session: AsyncSession, branch_id: int, now: datetime,
+) -> int:
+    """How many hand-offs the window silently excluded — same predicate as the sweep, minus
+    the date bound. Logged at WARNING because each one is a lead with a phone that no sweep
+    will ever pick up; the number should normally be flat, and a growing one means hand-offs
+    are ageing out unpushed faster than the cron drains them."""
+    n = (await session.execute(text(
+        "SELECT count(DISTINCT l.id) FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
+        " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
+        "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
+        "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
+        "     AND se.reason=:pushed)"
+        "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
+        "     AND se.to_stage IN ('ready','manager','handed_off') AND se.created_at >= :since)"),
+        {"bid": branch_id, "pushed": PUSHED_HANDOFF_REASON,
+         "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).scalar() or 0
+    if n:
+        logger.warning(
+            "crm handoff sweep branch=%d: %d lead(s) with a phone are older than the %d-day "
+            "window and will never be pushed automatically", branch_id, n, HANDOFF_WINDOW_DAYS)
+    return int(n)
+
+
+def _handoff_comment(lead: LeadToPush) -> str:
+    return _comment_for(lead).replace("Perlu di-follow up (telepon/WA).", _HANDOFF_TAIL)
+
+
 async def drain_handoffs(
     session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
     limit: int = DRAIN_BATCH,
 ) -> dict[str, Any]:
-    """Sweep un-pushed hand-offs into the CRM (see fetch_unpushed_handoffs). Same
-    marker-on-success / retry-on-failure contract as drain_writeback."""
-    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
-
+    """Sweep un-pushed hand-offs into the CRM (see fetch_unpushed_handoffs)."""
     leads = await fetch_unpushed_handoffs(session, branch_id, limit=limit)
-    pushed, failed = 0, 0
-    for lead in leads:
-        comment = _comment_for(lead).replace(
-            "Perlu di-follow up (telepon/WA).",
-            "Lead SUDAH diserahkan ke tim (hand-off) - hubungi segera.")
-        ok, detail = await pusher.add_lead_event(
-            lead.phone, EVENT_WAIT_CALL, comment=comment, name=lead.name)
-        if ok:
-            pushed += 1
-            session.add(StageEvent(
-                branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
-                from_stage=lead.stage, to_stage=lead.stage,
-                actor="system", reason=PUSHED_HANDOFF_REASON))
-            thread_id = await _newest_thread(session, lead.lead_id)
-            if thread_id is not None:
-                session.add(ThreadLog(
-                    branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
-                    detail=lead.phone, actor="system"))
-        else:
-            failed += 1
-            logger.warning("crm handoff sweep failed lead=%d: %s", lead.lead_id, detail)
-    if pushed:
-        await session.flush()
-    return {"eligible": len(leads), "pushed": pushed, "failed": failed}
+    return await _drain(session, branch_id, pusher, leads,
+                        marker=PUSHED_HANDOFF_REASON, event_type=EVENT_WAIT_CALL,
+                        label="handoff sweep", comment_fn=_handoff_comment)

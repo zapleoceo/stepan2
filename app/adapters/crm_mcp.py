@@ -19,6 +19,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 
+from app.adapters.mcp_auth import connect_args
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,8 @@ class CrmMcpReader:
         from mcp.client.session import ClientSession  # noqa: PLC0415
         from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
 
-        async with streamablehttp_client(url) as (read, write, _):
+        target, headers = connect_args(url)
+        async with streamablehttp_client(target, headers=headers) as (read, write, _):
             async with ClientSession(read, write) as s:
                 await s.initialize()
                 found = await self._call(s, "crm_client_search",
@@ -86,7 +88,8 @@ class CrmMcpReader:
         }
         answered: set[str] = set()
         missed: dict[str, str] = {}
-        async with streamablehttp_client(url) as (read, write, _):
+        target, headers = connect_args(url)
+        async with streamablehttp_client(target, headers=headers) as (read, write, _):
             async with ClientSession(read, write) as s:
                 await s.initialize()
                 for page in range(1, max_pages + 1):
