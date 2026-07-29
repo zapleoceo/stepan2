@@ -40,13 +40,24 @@ def _wire(monkeypatch, payload: str) -> None:
     monkeypatch.setattr(dl, "TelegramNotifier", _Notifier)
 
 
-def test_has_contactish_matches_email_phone_handle_only_from_user() -> None:
-    assert dl._has_contactish([{"role": "user", "content": "reach me at a@b.com"}])
-    assert dl._has_contactish([{"role": "user", "content": "+380 99 481 1889"}])
-    assert dl._has_contactish([{"role": "user", "content": "im @my_handle on tg"}])
-    assert not dl._has_contactish([{"role": "user", "content": "how much does it cost?"}])
+def test_found_contact_matches_email_phone_handle_only_from_user() -> None:
+    assert dl._found_contact([{"role": "user", "content": "reach me at a@b.com"}]) == (
+        "a@b.com", "email")
+    assert dl._found_contact([{"role": "user", "content": "+380 99 481 1889"}])[1] == "phone"
+    assert dl._found_contact([{"role": "user", "content": "im @my_handle on tg"}]) == (
+        "@my_handle", "telegram")
+    assert dl._found_contact([{"role": "user", "content": "how much does it cost?"}]) == ("", "")
     # a contact only in Stepan's own message must not trip the gate
-    assert not dl._has_contactish([{"role": "assistant", "content": "email me a@b.com"}])
+    assert dl._found_contact([{"role": "assistant", "content": "email me a@b.com"}]) == ("", "")
+
+
+def test_a_corrected_contact_supersedes_the_earlier_typo() -> None:
+    """Newest wins: someone who mistypes and re-sends must be reachable at the second one."""
+    assert dl._found_contact([
+        {"role": "user", "content": "a@b.com"},
+        {"role": "assistant", "content": "got it"},
+        {"role": "user", "content": "sorry, actually correct@b.com"},
+    ]) == ("correct@b.com", "email")
 
 
 def test_parse_json_tolerates_fences_and_junk() -> None:
@@ -69,10 +80,55 @@ async def test_notifies_once_and_dedups_same_contact(monkeypatch) -> None:
     assert len(_Notifier.sent) == 1
 
 
-async def test_no_notify_when_not_ready(monkeypatch) -> None:
+async def test_a_contact_is_forwarded_even_when_the_model_says_not_ready(monkeypatch) -> None:
+    """Changed 28.07.2026, and the reason is a lead we actually lost.
+
+    The alert used to hang on the model's ready verdict. It came back false (or unparsable —
+    the code logged neither), so nobody was told a business owner had left their address, while
+    the visitor had been promised an email this system cannot send. Readiness is a LABEL on the
+    card now. A human decides whether a contact is worth calling; a classifier does not get to
+    decide whether the human ever sees it."""
     _wire(monkeypatch, '{"ready":false,"contact":"a@b.com"}')
     await dl.maybe_notify([{"role": "user", "content": "just curious, a@b.com"}])
-    assert _Notifier.sent == []
+    assert len(_Notifier.sent) == 1
+    assert "a@b.com" in _Notifier.sent[0]
+    assert "готовность неясна" in _Notifier.sent[0]
+
+
+async def test_a_contact_survives_a_broken_extraction(monkeypatch) -> None:
+    """The enrichment call is best-effort; the contact is not."""
+    class _Exploding:
+        def __call__(self):
+            return self
+
+        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
+            raise TimeoutError("broker down")
+
+    dl._notified.clear()
+    _Notifier.sent = []
+    monkeypatch.setattr(dl, "settings", lambda: _FakeSettings())
+    monkeypatch.setattr(dl, "BrokerLLM", _Exploding())
+    monkeypatch.setattr(dl, "TelegramNotifier", _Notifier)
+    await dl.maybe_notify([{"role": "user", "content": "call me +380994811889"}])
+    assert len(_Notifier.sent) == 1
+    assert "+380994811889" in _Notifier.sent[0]
+
+
+async def test_a_failed_send_is_retried_next_turn_not_swallowed(monkeypatch) -> None:
+    """A contact dropped by a Telegram hiccup is a contact lost forever — it must not be
+    marked as delivered."""
+    class _Failing(_Notifier):
+        async def send(self, *, text: str, topic_id=None):  # noqa: ANN001
+            _Notifier.sent.append(text)
+            return "error"
+
+    _wire(monkeypatch, '{"ready":true,"contact":"a@b.com"}')
+    monkeypatch.setattr(dl, "TelegramNotifier", _Failing)
+    history = [{"role": "user", "content": "a@b.com"}]
+    await dl.maybe_notify(history)
+    assert dl._notified == set()      # not remembered → the next turn tries again
+    await dl.maybe_notify(history)
+    assert len(_Notifier.sent) == 2
 
 
 async def test_skips_broker_when_no_contact_in_history(monkeypatch) -> None:

@@ -1,6 +1,14 @@
-"""Landing demo lead capture: when a demo-chat visitor shows real buy intent AND leaves a
-contact, DM the owner once on Telegram. No DB (product owner's choice) — in-process dedup by
-contact; a duplicate ping after a worker restart is acceptable for a landing gimmick."""
+"""Landing demo lead capture: when a demo-chat visitor leaves a contact, DM the owner once on
+Telegram. No DB (product owner's choice) — in-process dedup by contact; a duplicate ping after
+a worker restart is acceptable, a MISSED ping is not.
+
+The contact is found by regex and the alert is sent on that alone. Buy-intent and a summary
+are added by a model afterwards, purely as labels on the card. It used to be the other way
+round — the model decided whether the owner heard about the lead at all — and on 28.07.2026
+that cost a real one: the verdict came back not-ready (or unparsable; the code logged neither),
+the owner was never told, and the visitor had meanwhile been promised an email that no part of
+this system is able to send. A contact typed on the landing page is the only thing this page
+produces. It gets forwarded, always, and every failure to do so is logged at ERROR."""
 from __future__ import annotations
 
 import html as _h
@@ -41,13 +49,21 @@ _EXTRACT_SYS = (
 )
 
 
-def _has_contactish(history: list[dict]) -> bool:
-    for m in history:
-        if m.get("role") == "user":
-            t = str(m.get("content", ""))
-            if _EMAIL.search(t) or _HANDLE.search(t) or _PHONE.search(t):
-                return True
-    return False
+def _found_contact(history: list[dict]) -> tuple[str, str]:
+    """The newest contact the VISITOR typed, as (contact, type). Empty when there is none.
+
+    Regex, not the model: this is what decides whether the owner hears about the lead at all,
+    and it must not depend on a broker call that can time out or answer badly. The model only
+    enriches the card afterwards. Newest-first because a corrected number supersedes a typo."""
+    for m in reversed(history):
+        if m.get("role") != "user":
+            continue
+        t = str(m.get("content", ""))
+        for rx, kind in ((_EMAIL, "email"), (_HANDLE, "telegram"), (_PHONE, "phone")):
+            hit = rx.search(t)
+            if hit:
+                return hit.group(0).strip(), kind
+    return "", ""
 
 
 def _parse_json(text: str) -> dict | None:
@@ -77,41 +93,54 @@ async def maybe_notify(history: list[dict]) -> None:
     """Fire-and-forget after a demo reply: if the visitor is ready-to-buy with a contact,
     DM the owner once. Never raises — a missed capture must not affect the chat response."""
     try:
-        if not _has_contactish(history):
-            return
-        target = settings().demo_notify_tg_id or settings().bootstrap_super_admin
-        token = settings().tg_bot_token
-        if not target or not token:
-            _log.warning("demo lead: contact seen but no TG target/token configured — skipped")
-            return
-        convo = _transcript(history)
-        try:
-            text, _meta = await BrokerLLM().chat(
-                [{"role": "system", "content": _EXTRACT_SYS},
-                 {"role": "user", "content": convo[:6000]}],
-                capability="chat:fast", max_tokens=300, temperature=0.0,
-                workflow="landing_demo_capture", read_timeout_s=30.0,
-            )
-        except Exception as exc:  # noqa: BLE001 — extraction is best-effort
-            _log.warning("demo lead extraction failed: %s", type(exc).__name__)
-            return
-        data = _parse_json(text or "")
-        if not data or not data.get("ready"):
-            return
-        contact = str(data.get("contact", "")).strip()
+        contact, kind = _found_contact(history)
         if not contact:
             return
         key = contact.lower()
         if key in _notified:
             return
-        label = _CHANNEL_LABEL.get(str(data.get("contact_type", "")).lower(), "контакт")
-        wants = str(data.get("wants", "")).strip() or "—"
-        summary = str(data.get("summary", "")).strip() or "—"
+        target = settings().demo_notify_tg_id or settings().bootstrap_super_admin
+        token = settings().tg_bot_token
+        if not target or not token:
+            _log.error("DEMO LEAD LOST: contact %s seen but no TG target/token configured",
+                       contact)
+            return
+
+        # Enrichment is optional and must never gate the alert. A contact typed into the demo
+        # is the only artefact this page produces; on 28.07.2026 one was lost because the whole
+        # notification hung off an LLM verdict that returned quietly — the visitor was told
+        # (falsely) that material had been emailed, and nobody was told anything at all.
+        convo = _transcript(history)
+        wants = summary = ""
+        ready = None
+        try:
+            raw, _meta = await BrokerLLM().chat(
+                [{"role": "system", "content": _EXTRACT_SYS},
+                 {"role": "user", "content": convo[:6000]}],
+                capability="chat:fast", max_tokens=300, temperature=0.0,
+                workflow="landing_demo_capture", read_timeout_s=30.0,
+            )
+            data = _parse_json(raw or "")
+            if data:
+                ready = bool(data.get("ready"))
+                wants = str(data.get("wants", "")).strip()
+                summary = str(data.get("summary", "")).strip()
+                kind = str(data.get("contact_type", "")).strip() or kind
+            else:
+                _log.warning("demo lead: extraction returned unparsable JSON, sending raw card")
+        except Exception as exc:  # noqa: BLE001 — enrichment is best-effort, the card still goes
+            _log.warning("demo lead: extraction failed (%s), sending raw card",
+                         type(exc).__name__)
+
+        label = _CHANNEL_LABEL.get(kind.lower(), "контакт")
+        heat = {True: "🟢 горячий", False: "🟡 контакт есть, готовность неясна",
+                None: "🟡 контакт есть, распознать не удалось"}[ready]
         msg = (
-            "🟢 <b>Новый лид с демо-чата на лендинге</b>\n\n"
+            "<b>Новый лид с демо-чата на лендинге</b>\n\n"
+            f"<b>Статус:</b> {heat}\n"
             f"<b>Контакт:</b> {_h.escape(contact)} ({_h.escape(label)})\n"
-            f"<b>Хочет:</b> {_h.escape(wants)}\n\n"
-            f"<b>Кратко:</b> {_h.escape(summary)}\n\n"
+            f"<b>Хочет:</b> {_h.escape(wants or '—')}\n\n"
+            f"<b>Кратко:</b> {_h.escape(summary or '—')}\n\n"
             f"<b>— Переписка —</b>\n<pre>{_h.escape(convo[:3500])}</pre>"
         )
         status = await TelegramNotifier(bot_token=token, group_chat_id=int(target)).send(text=msg)
@@ -119,8 +148,10 @@ async def maybe_notify(history: list[dict]) -> None:
             _notified.add(key)
             if len(_notified) > _MAX_NOTIFIED:
                 _notified.clear()
-            _log.info("demo lead notified owner (contact_type=%s)", data.get("contact_type"))
+            _log.info("demo lead notified owner: %s (%s, ready=%s)", contact, kind, ready)
         else:
-            _log.warning("demo lead: telegram send returned %s", status)
+            # Not added to _notified on purpose: the next turn retries instead of losing it.
+            _log.error("DEMO LEAD LOST: telegram send returned %s for contact %s",
+                       status, contact)
     except Exception:  # noqa: BLE001 — background task: log and swallow, never crash the loop
-        _log.warning("demo lead notify errored", exc_info=True)
+        _log.exception("DEMO LEAD LOST: notify errored")

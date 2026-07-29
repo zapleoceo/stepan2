@@ -17,7 +17,38 @@ _S = _SYSTEM.lower()
 
 def test_the_stated_goal_is_getting_a_contact_in_this_conversation() -> None:
     assert "one goal" in _S
-    assert "no second touch" in _S
+    assert "gone forever" in _S
+
+
+def test_the_prompt_forbids_claiming_anything_was_sent() -> None:
+    """The live failure of 28.07.2026: a visitor asked for material by email and was told
+    "готово, скинул на почту". Nothing was sent — there is no email code anywhere in this
+    application, and the demo chat has no outbound channel at all. The visitor went to check
+    an empty inbox, and no notification reached the owner either.
+
+    The prompt caused it. It said in one breath that the page has no way back to the visitor,
+    and in the next to ask them "where should I send the specifics" — the model resolved the
+    contradiction by pretending to deliver."""
+    assert "you cannot send them anything" in _S
+    assert "never say you sent something" in _S
+    assert "where should i send it" in _S          # named explicitly as the banned close
+    assert "everything you want them to have, you give them here" in _S
+
+
+def test_the_close_hands_over_to_a_human_rather_than_promising_delivery() -> None:
+    assert "reaches a human on the team" in _S
+    assert "leave the best way to reach you" in _S
+
+
+def test_an_unsupported_channel_is_disclosed_before_pitching() -> None:
+    """A visitor said they sell on TikTok and was told "great channel" and pitched to.
+    TikTok is not connected — only Instagram, WhatsApp and Messenger are."""
+    assert "channel honesty" in _S
+    assert "tiktok is on the roadmap and not connected yet" in _S
+
+
+def test_the_contact_is_asked_for_alone() -> None:
+    assert "one question, not a list" in _S
 
 
 def test_contact_is_asked_early_not_only_at_the_end() -> None:
@@ -72,6 +103,11 @@ def test_persona_snapshot_tracks_the_runtime_prompt() -> None:
     """The library entry is a browsable copy of the live prompt; a stale copy misleads."""
     demo = next(p for p in SEED_PERSONAS if p["slug"] == "website-demo")
     body = demo["content"].lower()
-    assert demo["version"] == "1.1"
+    assert demo["version"] == "1.2"
     assert "no follow-up on this page" in body
     assert "never ask a third time" in body
+    # 1.2: the library copy carried the same "ask where to send it" close that produced the
+    # fabricated email, so it had to move with the runtime prompt rather than sit stale.
+    assert "you cannot send anything" in body
+    assert "never say you sent something" in body
+    assert "tiktok is planned and not connected" in body
