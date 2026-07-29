@@ -1146,7 +1146,10 @@ def test_demo_chat_returns_stepan_reply(monkeypatch) -> None:
     sysp = captured["system"]
     assert "sell YOURSELF" in sysp                   # demo persona: Stepan sells itself
     assert "MCP connector" in sysp                   # answer bank covers CRM sync
-    assert "TikTok is coming soon" in sysp           # channels incl. coming-soon
+    # Channels, and the duty to say so BEFORE pitching: a visitor who opened with "I sell via
+    # TikTok" was told "great channel" and pitched to, though TikTok isn't connected.
+    assert "TikTok is on the roadmap and NOT connected yet" in sysp
+    assert "CHANNEL HONESTY" in sysp
     assert "re-qualify a lead mid-chat" in sysp      # in-conversation re-qualification
     low = sysp.lower()
     assert "it step" not in low and "itstep" not in low  # never reveals the real client
