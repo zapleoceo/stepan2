@@ -9,12 +9,16 @@ from __future__ import annotations
 
 
 def _icons_only_sidebar(sel: str) -> str:
-    """The icons-only sidebar, written once for the two ways it is reached.
+    """The icons-only sidebar — reached ONLY by the collapse button, never by viewport width.
 
-    A person collapses it by hand (`.sid.collapsed`); below ~1150px the layout collapses it for
-    them. Same appearance both times, so the declarations are generated rather than typed
-    twice — a second copy is how the manual and the automatic version drift apart, and nothing
-    would notice until one of them looked wrong."""
+    It hides .sid-ft, and that is where the branch picker, the bot/sending/comment switches and
+    the language buttons live. Hiding them is acceptable when a person pressed the button that
+    does it and can press it again; it is not acceptable as something a window size decides. A
+    width-driven version shipped on 2026-07-28 and was reverted the same day, because the first
+    person to open the panel on a phone could not find the switches.
+
+    Kept as a function so the selector is stated once — the parameter is what keeps this honest
+    about having exactly one caller."""
     return (
         f"{sel}{{width:48px!important;min-width:48px!important}}"
         f"{sel} .logo,{sel} .na-lbl,{sel} .nav-sep,{sel} .sid-ft,"
@@ -25,7 +29,6 @@ def _icons_only_sidebar(sel: str) -> str:
 
 
 _SIDEBAR_BY_HAND = _icons_only_sidebar(".sid.collapsed")
-_SIDEBAR_BY_WIDTH = _icons_only_sidebar(".sid")
 
 _CSS = (
     "*{box-sizing:border-box;margin:0;padding:0}"
@@ -624,14 +627,16 @@ _CSS = (
     # ── responsive: phones/tablets (all desktop CSS above is untouched) ──
     # ── the gap between the phone layout and a comfortable desktop ──────────────
     # Above 760px the three columns return at full width and none of them can shrink:
-    # sidebar 210 + thread list 305 + two 4px resize handles = 523px of fixed chrome.
-    # Measured on the live page 2026-07-28 — that leaves the chat 245px on a 768px tablet and
-    # 501px at 1024. Both ends of the range work, which is why the middle went unnoticed: the
-    # layout there is technically desktop and practically unusable.
-    # The sidebar drops to icons (exactly what the manual collapse does) and the thread list
-    # narrows: 523px of chrome becomes 296, and the chat gets 472px at 768.
+    # sidebar 210 + thread list 305 + two 4px resize handles = 523px of fixed chrome, which
+    # leaves a 768px tablet 245px of chat. Only the THREAD LIST narrows here.
+    #
+    # The sidebar deliberately does not: collapsing it to icons hides .sid-ft, and that is
+    # where the branch picker, the bot/sending/comment switches and the language buttons live.
+    # Shipped as an auto-collapse on 2026-07-28 and reverted the same day — the first person to
+    # open the panel on a phone could not find the switches, and no width is a good enough
+    # reason to take controls away from someone who did not ask. The manual collapse stays; it
+    # is a choice, made with a visible button to undo it.
     "@media (min-width:761px) and (max-width:1150px){"
-    f"{_SIDEBAR_BY_WIDTH}"
     ".thr{width:248px}"
     "}"
     "@media (max-width:760px){"

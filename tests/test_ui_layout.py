@@ -52,13 +52,21 @@ def test_a_wide_screen_leaves_the_chat_the_majority_of_the_window() -> None:
     assert 1440 - chrome > 900
 
 
-def test_the_tablet_range_is_not_left_on_the_desktop_layout() -> None:
-    """The bug this file was written for: at 768px the desktop layout gave the chat 245px."""
+def test_the_tablet_range_gives_the_chat_back_what_it_can() -> None:
+    """At 768px the plain desktop layout leaves the chat 245px. The thread list narrows in this
+    range to return some of that — the sidebar deliberately does not, since collapsing it hides
+    the switches (see below), so this buys what it can rather than everything.
+
+    A small tablet is still tight afterwards, and that is the honest trade: the remedy there is
+    the collapse button, which is the person's call to make."""
     narrow = _media_block("@media (min-width:761px) and (max-width:1150px)")
-    chrome = _width_of(".sid", narrow) + _width_of(".thr", narrow) + 2 * _HANDLE
-    assert chrome < 320
-    for viewport in (768, 820, 1024, 1150):
-        assert viewport - chrome > _MIN_USABLE_CHAT, viewport
+    assert _width_of(".thr", narrow) < _width_of(".thr")     # the list gives ground
+    assert ".sid{" not in narrow                             # the sidebar does not
+
+    desktop_chrome = _width_of(".sid") + _width_of(".thr") + 2 * _HANDLE
+    narrow_chrome = _width_of(".sid") + _width_of(".thr", narrow) + 2 * _HANDLE
+    assert desktop_chrome - narrow_chrome >= 50
+    assert 1024 - narrow_chrome > _MIN_USABLE_CHAT
 
 
 def test_the_narrow_range_starts_where_the_phone_layout_stops() -> None:
@@ -75,17 +83,19 @@ def test_a_phone_gets_one_full_width_column_not_three() -> None:
     assert ".sbrz,.thrz{display:none}" in phone  # resize handles are meaningless on touch
 
 
-def test_the_icons_only_sidebar_is_written_once() -> None:
-    """Reached two ways — by hand and by width — and it must look the same both times. Two
-    copies is how they drift, and nothing would notice until one of them looked wrong."""
-    by_hand = _icons_only_sidebar(".sid.collapsed")
-    by_width = _icons_only_sidebar(".sid")
-    assert by_hand in _CSS and by_width in _CSS
-    # Same declarations, different subject: rebuild both from one template with a sentinel
-    # selector. (Substring-replacing ".sid" out of the result would also eat ".sid-ft".)
-    template = _icons_only_sidebar("SEL")
-    assert by_hand == template.replace("SEL", ".sid.collapsed")
-    assert by_width == template.replace("SEL", ".sid")
+def test_the_sidebar_only_collapses_when_someone_asks_it_to() -> None:
+    """The controls people need most — branch picker, bot/sending/comment switches, language —
+    live in .sid-ft, which the icons-only sidebar hides. That is fine as the result of pressing
+    a button you can press again; it is not fine as something a window width decides.
+
+    A width-driven collapse shipped on 2026-07-28 and came back out the same day: the first
+    person to open the panel on a phone could not find the switches. This is what says the
+    only route to that state is the class."""
+    assert _icons_only_sidebar(".sid.collapsed") in _CSS
+    for block in re.findall(r"@media[^{]*\{(?:[^{}]|\{[^{}]*\})*\}", _CSS):
+        assert ".sid-ft{display:none}" not in block, block[:80]
+        assert ".sid-ft," not in block, block[:80]
+        assert "width:48px" not in block, block[:80]
 
 
 def test_the_collapsed_sidebar_still_beats_its_own_default_width() -> None:
