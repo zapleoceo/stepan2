@@ -26,7 +26,7 @@ from app.domain.enums import ChannelKind
 from app.modules.channels.service import ChannelService
 from app.modules.meta.tokens import page_access_token
 from app.modules.settings.repository import SettingRepo
-from app.modules.settings.service import get_settings
+from app.modules.settings.service import get_channel_settings
 
 from ._i18n import apply_lang, t
 from ._ui_panels import (
@@ -160,7 +160,6 @@ async def _channel_cap_usage(
 
     from app.domain.clock import branch_day_start_utc, utc_now  # noqa: PLC0415
     from app.modules.conversation.repository import OutboxRepo  # noqa: PLC0415
-    from app.modules.settings.service import get_channel_settings  # noqa: PLC0415
     cfg = await get_channel_settings(session, branch_id, channel_id)
     repo = OutboxRepo(session, branch_id)
     now = utc_now()
@@ -537,15 +536,18 @@ async def meta_connect(
 
     resolved_token = token.strip()
     if not resolved_token and platform == "facebook_page" and page_id.strip():
+        # Channel scope, not branch: meta_system_user_token is declared scope="channel" in
+        # settings/schema.py, so a token saved on the connector was invisible here and the
+        # form answered "No meta_system_user_token" while the value sat in the row next to it.
         async with session_scope() as session:
-            branch_cfg = await get_settings(session, branch_id)
-        if not branch_cfg.meta_system_user_token:
+            cfg = await get_channel_settings(session, branch_id, ch_id)
+        if not cfg.meta_system_user_token:
             return HTMLResponse(
-                _ch_meta_form(ch_id, error="No meta_system_user_token in branch settings")
+                _ch_meta_form(ch_id, error="No meta_system_user_token in channel settings")
             )
         try:
             resolved_token = await page_access_token(
-                branch_cfg.meta_system_user_token, page_id.strip()
+                cfg.meta_system_user_token, page_id.strip()
             )
         except (httpx.HTTPError, ValueError) as exc:
             return HTMLResponse(_ch_meta_form(ch_id, error=f"Auto token failed: {exc}"[:200]))
