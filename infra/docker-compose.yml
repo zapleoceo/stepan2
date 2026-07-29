@@ -31,6 +31,13 @@ services:
     container_name: stepan2-api
     depends_on:
       postgres: {condition: service_healthy}
+    # Meta webhook secrets are named per branch — STEPAN2_META_VERIFY_TOKEN_<id> and
+    # STEPAN2_META_APP_SECRET_<id> (app/api/webhooks.py reads them straight from os.environ).
+    # A per-name list below would need an infra edit for every new branch, so the whole .env
+    # is passed through. The explicit entries stay: they rename and default values, which
+    # env_file cannot do.
+    env_file:
+      - .env
     environment:
       STEPAN2_DATABASE_URL: postgresql+asyncpg://stepan2:${POSTGRES_PASSWORD}@postgres:5432/stepan2
       STEPAN2_REDIS_URL: redis://redis:6379
