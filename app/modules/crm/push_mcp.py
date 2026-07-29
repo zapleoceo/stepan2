@@ -334,12 +334,20 @@ async def fetch_unpushed_handoffs(
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
+        # `se.reason IS NULL` on the window probe deliberately: a bookkeeping row (a push
+        # marker, a reconciliation stamp) carries from_stage == to_stage and would otherwise
+        # count as a fresh hand-off and pull a months-old lead back into the sweep. Writing the
+        # verification stamps did exactly that on 29.07.2026 — the queue jumped from 2 to 27,
+        # and the next cron would have announced 23 long-closed leads to managers as "contact
+        # immediately". Only a real transition (a stage actually changing) opens the window.
         "   AND EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
-        "     AND se.to_stage IN ('ready','manager','handed_off') AND se.created_at >= :since)"
+        "     AND se.to_stage IN ('ready','manager','handed_off')"
+        "     AND se.from_stage <> se.to_stage AND se.created_at >= :since)"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
-        "     AND se.reason=:pushed)"
+        "     AND se.reason IN (:pushed, :verified))"
         " ORDER BY l.last_active_at DESC NULLS LAST LIMIT :lim"),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_HANDOFF_REASON,
+         "verified": VERIFIED_PRESENT_REASON,
          "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).all()
     await _log_window_drops(session, branch_id, now)
     out = []
@@ -375,7 +383,8 @@ async def _log_window_drops(
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
-        "     AND se.to_stage IN ('ready','manager','handed_off') AND se.created_at >= :since)"),
+        "     AND se.to_stage IN ('ready','manager','handed_off')"
+        "     AND se.from_stage <> se.to_stage AND se.created_at >= :since)"),
         {"bid": branch_id, "pushed": PUSHED_HANDOFF_REASON,
          "verified": VERIFIED_PRESENT_REASON,
          "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).scalar() or 0

@@ -49,6 +49,22 @@ async def _fixture(session):  # noqa: ANN001, ANN201
     return branch.id, channel.id
 
 
+async def test_a_bookkeeping_row_does_not_reopen_the_window(db_session) -> None:
+    """29.07.2026: stamping 23 aged-out leads as reconciled wrote a StageEvent per lead with
+    from_stage == to_stage == 'ready'. The window probe only looked at to_stage and a date, so
+    every one of them read as a brand-new hand-off: the queue went from 2 to 27, and the next
+    cron would have announced 23 long-closed leads to managers as "contact immediately".
+    Only a real transition opens the window."""
+    bid, cid = await _fixture(db_session)
+    lead_id = await _lead(db_session, bid, cid, phone="+6284444444444",
+                          escalated_at=_NOW - timedelta(days=HANDOFF_WINDOW_DAYS + 6))
+    db_session.add(StageEvent(          # ровно та отметка, что всё сломала
+        branch_id=bid, lead_id=lead_id, from_stage="ready", to_stage="ready",
+        actor="system", reason=VERIFIED_PRESENT_REASON))
+    await db_session.flush()
+    assert await fetch_unpushed_handoffs(db_session, bid, now=_NOW) == []
+
+
 async def test_a_recent_handoff_is_picked_up(db_session) -> None:
     bid, cid = await _fixture(db_session)
     await _lead(db_session, bid, cid, phone="+6281111111111",
