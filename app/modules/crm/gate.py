@@ -20,7 +20,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import CrmLeadState, Lead, StageEvent
 from app.config import settings
-from app.domain.clock import utc_now
+from app.domain.clock import naive_utc, utc_now
 from app.domain.enums import Stage
 from app.modules.crm.service import is_safe_webhook_url
 from app.modules.settings.service import get_settings
@@ -92,7 +92,13 @@ def compute_verdict(raw: dict) -> tuple[str, str]:
 
 
 def parse_won_at(value: object) -> datetime | None:
-    """CRM close timestamp → aware datetime, or None when absent/unparseable.
+    """CRM close timestamp → naive UTC datetime, or None when absent/unparseable.
+
+    Naive UTC because that is what this codebase stores: every DB column is TIMESTAMP WITHOUT
+    TIME ZONE and asyncpg refuses a tz-aware value for one. The CRM sends an offset
+    ("2025-11-12T10:39:44+07:00"), and returning that aware datetime made every won deal fail
+    to save with "can't subtract offset-naive and offset-aware datetimes" — silently, since
+    sync_outcomes logs and moves on. A value without an offset is read as UTC.
 
     The CRM does not guarantee this field, so an unusable value must degrade to "no date"
     rather than raise — a sale with no timestamp is still a sale."""
@@ -102,7 +108,7 @@ def parse_won_at(value: object) -> datetime | None:
         at = datetime.fromisoformat(str(value))
     except ValueError:
         return None
-    return at if at.tzinfo else at.replace(tzinfo=UTC)
+    return naive_utc(at if at.tzinfo else at.replace(tzinfo=UTC))
 
 
 def _parse(raw: dict) -> CrmState:

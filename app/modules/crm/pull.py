@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import UTC
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import CrmLeadState, Lead
+from app.domain.clock import naive_utc
 from app.modules.crm.gate import CrmGate, CrmReaderPort, parse_won_at
 from app.modules.settings.service import get_settings
 
@@ -53,10 +53,10 @@ def _ours(state, lead: Lead) -> bool:  # noqa: ANN001
     at = parse_won_at(getattr(state, "won_at", None))
     if at is None or lead.created_at is None:
         return True
-    started = lead.created_at
-    if started.tzinfo is None:
-        started = started.replace(tzinfo=UTC)
-    return at >= started
+    # Both sides naive UTC: parse_won_at normalizes, lead.created_at is stored that way.
+    # naive_utc is a no-op on an already-naive value and guards a row written before the
+    # convention settled.
+    return at >= naive_utc(lead.created_at)
 
 
 class CrmPullService:
