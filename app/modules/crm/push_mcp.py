@@ -33,6 +33,11 @@ PUSHED_REASON = "crm_pushed"
 # 23.07, RSVP'd + escalated on 24.07 — the escalation is a materially new CRM event, not a
 # re-push of the same state), so hand-off idempotency needs its own key.
 PUSHED_HANDOFF_REASON = "crm_pushed_handoff"
+# Aged out of the window, but a phone search confirmed the person IS in the CRM — a manager
+# can see them, so there is nothing to chase. Stamped by the one-off reconciliation, never by
+# a sweep. Kept apart from PUSHED_HANDOFF_REASON because we did NOT push anything: calling it
+# a push would claim our funnel event landed when all we know is that the contact exists.
+VERIFIED_PRESENT_REASON = "crm_verified_present"
 DRAIN_BATCH = 25
 # How far back the hand-off sweep looks. Anything older is deliberately left alone (managers
 # have worked it by hand by then) — but _log_window_drops counts what that costs each run.
@@ -355,19 +360,24 @@ async def fetch_unpushed_handoffs(
 async def _log_window_drops(
     session: AsyncSession, branch_id: int, now: datetime,
 ) -> int:
-    """How many hand-offs the window silently excluded — same predicate as the sweep, minus
-    the date bound. Logged at WARNING because each one is a lead with a phone that no sweep
-    will ever pick up; the number should normally be flat, and a growing one means hand-offs
-    are ageing out unpushed faster than the cron drains them."""
+    """How many aged-out hand-offs nobody can see — same predicate as the sweep, minus the
+    date bound, and minus anyone already reconciled.
+
+    Counting the raw window drop was the first version and it was almost useless: the first
+    run said 23, and a phone-by-phone check found all 23 already sitting in the CRM. A number
+    that never moves gets ignored, and an ignored counter hides the one case that matters. So
+    a lead confirmed present is stamped VERIFIED_PRESENT_REASON and leaves the count; what
+    remains is leads with a phone that neither a sweep nor a manager will ever get to."""
     n = (await session.execute(text(
         "SELECT count(DISTINCT l.id) FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
-        "     AND se.reason=:pushed)"
+        "     AND se.reason IN (:pushed, :verified))"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.to_stage IN ('ready','manager','handed_off') AND se.created_at >= :since)"),
         {"bid": branch_id, "pushed": PUSHED_HANDOFF_REASON,
+         "verified": VERIFIED_PRESENT_REASON,
          "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).scalar() or 0
     if n:
         logger.warning(

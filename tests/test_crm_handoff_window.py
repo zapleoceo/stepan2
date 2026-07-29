@@ -9,10 +9,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, StageEvent
 from app.domain.enums import ChannelKind
 from app.modules.crm.push_mcp import (
     HANDOFF_WINDOW_DAYS,
+    PUSHED_HANDOFF_REASON,
+    VERIFIED_PRESENT_REASON,
     _log_window_drops,
     fetch_unpushed_handoffs,
 )
@@ -66,13 +70,20 @@ async def test_a_handoff_older_than_the_window_is_counted_not_silently_dropped(
     assert await _log_window_drops(db_session, bid, _NOW) == 1
 
 
-async def test_an_already_pushed_old_lead_is_not_counted_as_a_drop(db_session) -> None:
-    """The count is about work nobody will do, not about history that is done."""
+@pytest.mark.parametrize("reason", [PUSHED_HANDOFF_REASON, VERIFIED_PRESENT_REASON])
+async def test_a_reconciled_old_lead_is_not_counted_as_a_drop(db_session, reason: str) -> None:
+    """The count is about work nobody will do, not about history that is done.
+
+    Two ways to leave it: we pushed the lead, or a phone search confirmed the CRM already has
+    them. The first reconciliation run found all 23 aged-out leads already in the CRM — without
+    the second reason the warning would print the same 23 forever and be tuned out, which is
+    exactly how the silent version failed."""
     bid, cid = await _fixture(db_session)
     lead_id = await _lead(db_session, bid, cid, phone="+6283333333333",
                           escalated_at=_NOW - timedelta(days=HANDOFF_WINDOW_DAYS + 6))
+    assert await _log_window_drops(db_session, bid, _NOW) == 1
     db_session.add(StageEvent(
         branch_id=bid, lead_id=lead_id, from_stage="manager", to_stage="manager",
-        actor="system", reason="crm_pushed_handoff"))
+        actor="system", reason=reason))
     await db_session.flush()
     assert await _log_window_drops(db_session, bid, _NOW) == 0
