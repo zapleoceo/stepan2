@@ -10,7 +10,7 @@
 """
 from __future__ import annotations
 
-from app.modules.knowledge.service import KnowledgeService, _FREE_CTX_CHAR_BUDGET
+from app.modules.knowledge.service import _FREE_CTX_CHAR_BUDGET, KnowledgeService
 
 
 def _fit(blocks: list[str]) -> str:
