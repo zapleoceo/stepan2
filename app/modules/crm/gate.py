@@ -148,7 +148,11 @@ def _parse(raw: dict) -> CrmState:
     return CrmState(
         exists=bool(raw.get("exists", True)),
         verdict=verdict, reason=reason,
-        status=raw.get("status"), owner=raw.get("owner"), raw=raw,
+        # `status` — то, что видно в админке и лежит колонкой. Читатель по MCP статуса как
+        # такового не отдаёт, зато отдаёт последний результат контакта, а это и есть самое
+        # близкое к «в каком состоянии лид у менеджера».
+        status=raw.get("status") or raw.get("last_result"),
+        owner=raw.get("owner"), raw=raw,
         deal_won=bool(raw.get("deal_won", False)),
         manager_called=bool(raw.get("manager_called", False)),
         # Accepted under either name so the day the CRM adds it, nothing here has to change.

@@ -25,6 +25,25 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _flatten(rows: list[dict]) -> list[dict]:
+    """Строки истории плюс те, что CRM прячет внутрь `group` у сгруппированных контактов."""
+    out: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out.append(row)
+        out.extend(x for x in (row.get("group") or []) if isinstance(x, dict))
+    return out
+
+
+def _as_dt(value: object) -> datetime | None:
+    try:
+        at = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=UTC)
+
+
 class CrmMcpReader:
     """Reads a lead's CRM state through the CRM's MCP server."""
 
@@ -133,10 +152,17 @@ class CrmMcpReader:
             last_ok_call is not None
             and datetime.now(UTC) - last_ok_call < hold_window
         )
+        result_name, result_at, result_by = self._latest_result(rows)
         return {
             "exists": True,
             "crm_id": crm_id,
             "deal_won": deal_won,
+            # Что менеджер поставил последним контактом — сигнал, определяющий, о чём Степану
+            # говорить дальше. Раньше отбрасывался.
+            "last_result": result_name or None,
+            "last_result_at": result_at.isoformat() if result_at else None,
+            "last_result_by": result_by,
+            "next_contact_at": self._next_contact_at(rows),
             # WHEN it closed, so a sale can be tied to our conversation instead of counted
             # blind. The CRM already sends it — every history row carries `date_time`, which
             # `_last_answered_call` has always read off out-call rows; deal_won just collapsed
@@ -147,6 +173,63 @@ class CrmMcpReader:
             "events_seen": len(rows),
             "source": "mcp",
         }
+
+    @staticmethod
+    def _latest_result(rows: list[dict]) -> tuple[str, datetime | None, str | None]:
+        """Самый свежий результат контакта: (имя, когда, кто из менеджеров).
+
+        Это тот сигнал, ради которого читается история, и до 30.07.2026 он выбрасывался:
+        _derive сводил всю ленту к трём булевым. Между тем филиал за месяц пользуется ровно
+        пятью значениями — wait_call (74%), result_think (11%), result_next_enrollment (9%),
+        result_fail (9%), result_event (1%), — и каждое означает разное продолжение разговора.
+
+        Результаты лежат вложенно и неровно: у части строк своя пачка `results`, у части всё
+        то же самое спрятано в `group`. Обходим и то и другое, иначе теряется примерно
+        половина ленты."""
+        best_at: datetime | None = None
+        best: tuple[str, datetime | None, str | None] = ("", None, None)
+        for row in _flatten(rows):
+            names = [
+                n for res in (row.get("results") or [])
+                if isinstance(res, dict)
+                for n in (res.get("name_result") if isinstance(res.get("name_result"), list)
+                          else [res.get("name_result")])
+                if isinstance(n, str) and n
+            ]
+            if not names:
+                continue
+            at = _as_dt(row.get("date_time"))
+            if at is None or (best_at is not None and at <= best_at):
+                continue
+            who = (row.get("users") or {}).get("fio_user") if isinstance(
+                row.get("users"), dict) else None
+            best_at, best = at, (names[0], at, who)
+        return best
+
+    @staticmethod
+    def _next_contact_at(rows: list[dict]) -> str | None:
+        """Когда менеджер сам запланировал следующий контакт (`remind_at`, формат d.m.y).
+
+        Гейт знает про флаг next_contact_at с самого начала, но заполнять его было некому,
+        поэтому он всегда был пуст. Именно эта дата отвечает на вопрос «до каких пор Степану
+        не проявлять инициативу» — без неё остаётся только гадать константой."""
+        newest: datetime | None = None
+        for row in _flatten(rows):
+            raw = row.get("remind_at")
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            try:
+                at = datetime.strptime(raw.strip(), "%d.%m.%y").replace(tzinfo=UTC)
+            except ValueError:
+                continue
+            if newest is None or at > newest:
+                newest = at
+        # Только БУДУЩАЯ дата: прошедшее напоминание не повод молчать, а гейт трактует любое
+        # непустое значение как основание не проявлять инициативу — вчерашний remind_at
+        # заморозил бы лида навсегда.
+        if newest is None or newest.date() < datetime.now(UTC).date():
+            return None
+        return newest.isoformat()
 
     @staticmethod
     def _latest_event_at(rows: list[dict], type_name: str) -> datetime | None:
