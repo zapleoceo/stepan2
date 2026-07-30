@@ -9,7 +9,15 @@ from __future__ import annotations
 import pytest
 
 from app.api._i18n import _lang, t
-from app.api._ui_strategy import _CRM_CHECKS, _TURN_CHECKS, _wrap, strategy_page_html
+from app.api._ui_strategy import (
+    _CRM_CHECKS,
+    _GEN_CHECKS,
+    _PICK_CHECKS,
+    _SEND_CHECKS,
+    _TURN_CHECKS,
+    _wrap,
+    strategy_page_html,
+)
 from app.modules.conversation.reactivation import BATCH_PER_RUN
 from app.modules.crm.policy import POLICIES
 from app.modules.crm.push_mcp import DRAIN_BATCH, HANDOFF_WINDOW_DAYS
@@ -63,7 +71,7 @@ def test_the_crm_side_is_its_own_chart_not_one_box() -> None:
     содержимого."""
     _lang.set("ru")
     html = strategy_page_html()
-    assert html.count("stg-scroll") >= 2
+    assert html.count("stg-scroll") >= 4
     assert t("stg.crm.title") in html
     for key in ("stg.c.q.phone", "stg.c.q.same", "stg.c.q.human"):
         assert _wrap(t(key), 32)[0] in html      # текст ромба тоже режется на строки
@@ -71,13 +79,30 @@ def test_the_crm_side_is_its_own_chart_not_one_box() -> None:
     assert "crm_pushed_handoff" in html and "crm_pushed:" in html
 
 
-def test_the_order_matches_the_code_not_a_drawing() -> None:
-    keys = [q for q, _t, _k in _TURN_CHECKS]
-    assert keys[0] == "stg.q.blocked"
-    assert keys.index("stg.q.won") < keys.index("stg.q.owner")
-    assert keys[-1] == "stg.q.manager"
-    crm = [q for q, _t, _k in _CRM_CHECKS]
-    assert crm[0] == "stg.c.q.phone"        # без телефона не уедет ничем
+def test_the_crm_gate_sits_in_the_send_phase_where_the_code_puts_it() -> None:
+    """Сверка 30.07.2026 нашла настоящую ошибку в схеме: гейт CRM был нарисован ДО генерации,
+    а allow_send вызывается в outbox.py, то есть при отправке. Разница не косметическая — к
+    этому моменту сообщение уже сочинено и оплачено брокеру, и «стоп» от CRM стоит нам
+    вызова модели."""
+    send = [q for q, _t, _k in _SEND_CHECKS]
+    gen = [q for q, _t, _k in _GEN_CHECKS]
+    assert "stg.q.won" in send and "stg.q.owner" in send
+    assert "stg.q.won" not in gen and "stg.q.owner" not in gen
+
+
+def test_each_phase_starts_where_the_code_starts() -> None:
+    assert [q for q, _t, _k in _PICK_CHECKS][0] == "stg.q.blocked"
+    assert [q for q, _t, _k in _CRM_CHECKS][0] == "stg.c.q.phone"   # без телефона не уедет
+    # блокировка проверяется дважды: состояние успевает измениться между фазами
+    assert "stg.q.blocked2" in [q for q, _t, _k in _SEND_CHECKS]
+
+
+def test_the_send_phase_carries_the_guards_that_were_missing() -> None:
+    """Ни одного из них в первой версии схемы не было, хотя каждый способен остановить уже
+    написанное и оплаченное сообщение."""
+    send = [q for q, _t, _k in _SEND_CHECKS]
+    for key in ("stg.q.paused", "stg.q.quiet", "stg.q.caps", "stg.q.window", "stg.q.soft"):
+        assert key in send
 
 
 def test_live_constants_are_read_not_retyped() -> None:

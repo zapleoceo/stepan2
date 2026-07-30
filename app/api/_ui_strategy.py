@@ -40,20 +40,46 @@ def _live() -> dict[str, str]:
     }
 
 
-_TURN_CHECKS: list[tuple[str, str, str]] = [
+# ТРИ фазы, а не одна цепочка, и это не косметика: они идут в РАЗНЫХ процессах и в разное
+# время. Отбор — крон раз в минуту; генерация — отдельная задача со своим таймаутом;
+# отправка — другой крон, каждые 10 секунд. Между фазами состояние успевает измениться,
+# поэтому блокировка проверяется дважды: лид мог быть заблокирован уже после генерации.
+#
+# Нарисованная одной прямой, схема врала в главном: гейт CRM стоит на ОТПРАВКЕ (allow_send
+# в outbox.py), а не до генерации. Значит сообщение уже сочинено и оплачено брокеру, когда
+# CRM говорит «стоп» (найдено при сверке 30.07.2026).
+_PICK_CHECKS: list[tuple[str, str, str]] = [
     ("stg.q.blocked", "stg.t.blocked", "stop"),
     ("stg.q.channel", "stg.t.channel", "stop"),
     ("stg.q.agent", "stg.t.agent", "stop"),
     ("stg.q.silent", "stg.t.silent", "stop"),
     ("stg.q.pending", "stg.t.pending", "wait"),
-    ("stg.q.bye", "stg.t.bye", "stop"),
+    ("stg.q.stale", "stg.t.stale", "wait"),
+]
+
+_GEN_CHECKS: list[tuple[str, str, str]] = [
     ("stg.q.media", "stg.t.media", "wait"),
-    ("stg.q.won", "stg.t.won", "stop"),
-    ("stg.q.owner", "stg.t.owner", "half"),
+    ("stg.q.bye", "stg.t.bye", "stop"),
+    ("stg.q.budget", "stg.t.budget", "wait"),
     ("stg.q.guard", "stg.t.guard", "hand"),
+    ("stg.q.rsvp", "stg.t.rsvp", "half"),
     ("stg.q.ready", "stg.t.ready", "hand"),
     ("stg.q.manager", "stg.t.manager", "hand"),
+    ("stg.q.discovery", "stg.t.discovery", "half"),
 ]
+
+_SEND_CHECKS: list[tuple[str, str, str]] = [
+    ("stg.q.paused", "stg.t.paused", "wait"),
+    ("stg.q.blocked2", "stg.t.blocked2", "stop"),
+    ("stg.q.quiet", "stg.t.quiet", "wait"),
+    ("stg.q.caps", "stg.t.caps", "wait"),
+    ("stg.q.window", "stg.t.window", "stop"),
+    ("stg.q.won", "stg.t.won", "stop"),
+    ("stg.q.owner", "stg.t.owner", "half"),
+    ("stg.q.soft", "stg.t.soft", "wait"),
+]
+
+_TURN_CHECKS = _PICK_CHECKS + _GEN_CHECKS + _SEND_CHECKS
 
 # Отдельная схема: когда и что именно уезжает в CRM. Раньше это был один узел «передача»,
 # по которому нельзя было понять ни момента, ни содержимого.
@@ -233,8 +259,17 @@ def strategy_page_html() -> str:
 
     out.append(f"<h2>{_h.escape(t('stg.title'))}</h2>")
     out.append(f'<p class="lead">{_h.escape(t("stg.sub"))}</p>')
-    out.append(_zoom_bar())
-    out.append(_chart(_TURN_CHECKS, "stg.q.start", "stg.q.send", "stg-turn"))
+    out.append(f'<p class="lead">{_h.escape(t("stg.phases"))}</p>')
+
+    for title, checks, start, end, ident in (
+        ("stg.ph.pick", _PICK_CHECKS, "stg.q.start", "stg.ph.pick.end", "stg-pick"),
+        ("stg.ph.gen", _GEN_CHECKS, "stg.ph.gen.start", "stg.ph.gen.end", "stg-gen"),
+        ("stg.ph.send", _SEND_CHECKS, "stg.ph.send.start", "stg.q.send", "stg-send"),
+    ):
+        out.append(f"<h2>{_h.escape(t(title))}</h2>")
+        out.append(f'<p class="lead">{_h.escape(t(title + ".sub"))}</p>')
+        out.append(_zoom_bar())
+        out.append(_chart(checks, start, end, ident))
 
     out.append(f"<h2>{_h.escape(t('stg.crm.title'))}</h2>")
     out.append(f'<p class="lead">{_h.escape(t("stg.crm.sub"))}</p>')
