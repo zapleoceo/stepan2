@@ -9,6 +9,9 @@
 """
 from __future__ import annotations
 
+import pytest
+
+import app.modules.crm.rescue as rescue_mod
 from app.adapters.db.models import (
     AppSetting,
     Branch,
@@ -20,11 +23,6 @@ from app.adapters.db.models import (
 )
 from app.domain.enums import ChannelKind
 from app.modules.crm.rescue import CrmRescueService
-
-
-import pytest
-
-import app.modules.crm.rescue as rescue_mod
 
 
 @pytest.fixture(autouse=True)
