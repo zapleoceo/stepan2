@@ -279,8 +279,9 @@ def strategy_page_html() -> str:
 
     silent = ", ".join(sorted(s.value for s in BOT_SILENT_STAGES))
     human = ", ".join(sorted(s.value for s in HUMAN_LED_STAGES))
-    out.append(f'<p class="lead">{_h.escape(t("stg.stages"))} '
-               f"<code>{_h.escape(silent)}</code> · <code>{_h.escape(human)}</code></p>")
+    out.append(f'<p class="lead">{_h.escape(t("stg.stages.silent"))} '
+               f"<code>{_h.escape(silent)}</code><br>"
+               f'{_h.escape(t("stg.stages.human"))} <code>{_h.escape(human)}</code></p>')
     out.append(f'<p class="lead">{_h.escape(t("stg.hint"))}</p>')
     out.append("</div></div>")
     out.append(_zoom_js())

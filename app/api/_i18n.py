@@ -1204,11 +1204,10 @@ _TR: dict[str, dict[str, str]] = {
         "en": "Built from the code: every threshold and schedule is read from the same "
               "modules the worker uses, so the picture cannot drift from the behaviour.",
         "id": "Dibangun dari kode: semua ambang dan jadwal dibaca dari modul yang sama."},
-    "stg.hint": {"ru": "Кнопки над схемой меняют масштаб. Схема листается вместе со "
-                       "страницей; вбок — перетаскиванием мышью.",
-                 "en": "The buttons above each chart change the scale. Charts scroll with "
-                       "the page; drag sideways with the mouse.",
-                 "id": "Tombol di atas bagan mengubah skala."},
+    "stg.hint": {"ru": "Кнопки над схемой меняют масштаб. Вбок схема тянется мышью.",
+                 "en": "The buttons above each chart change the scale. Drag a chart "
+                       "sideways with the mouse.",
+                 "id": "Tombol di atas bagan mengubah skala; seret ke samping."},
     "stg.crm.title": {"ru": "Когда и что уезжает в CRM",
                       "en": "When and what goes to the CRM",
                       "id": "Kapan dan apa yang dikirim ke CRM"},
@@ -1457,9 +1456,12 @@ _TR: dict[str, dict[str, str]] = {
                       "id": "Kanal dimatikan"},
     "stg.yes": {"ru": "да", "en": "yes", "id": "ya"},
     "stg.no": {"ru": "нет", "en": "no", "id": "tidak"},
-    "stg.stages": {"ru": "Бот молчит в стадиях / ведёт человек:",
-                   "en": "Bot-silent stages / human-led stages:",
-                   "id": "Tahap bot diam / dipegang manusia:"},
+    # Двумя строками, а не через разделитель: списки пересекаются, и слитой строкой было не
+    # понять, где кончается один и начинается другой.
+    "stg.stages.silent": {"ru": "Бот молчит в стадиях:", "en": "Bot stays silent in:",
+                          "id": "Bot diam pada tahap:"},
+    "stg.stages.human": {"ru": "Ведёт человек:", "en": "Human-led:",
+                         "id": "Dipegang manusia:"},
     "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
     "rep.total":   {"ru": "Всего лидов",    "en": "Total leads",  "id": "Total lead"},
     "rep.pipeline":{"ru": "В работе",       "en": "Pipeline",     "id": "Pipeline"},
