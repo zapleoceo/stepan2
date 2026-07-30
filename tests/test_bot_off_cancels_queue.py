@@ -10,6 +10,10 @@
 
 'canceled', а не 'failed': ничего не сломалось и повторять нечего, поэтому в чате это не
 должно выглядеть красной кнопкой «отправить снова».
+
+Отменяет РУЧНОЕ выключение (agent_off_manual), а не любое. Бот бывает выключен и системой —
+после жёсткого «не беспокойте» лид обязан получить последнее извинение, и глушить его значит
+оборвать человека на полуслове. Это поймал существующий тест, когда правило было шире.
 """
 from __future__ import annotations
 
@@ -68,3 +72,20 @@ async def test_a_running_bot_keeps_its_queue(db_session) -> None:
     _bid, tid, _lead = await _fixture(db_session, agent_on=True)
     st = await _statuses(db_session, tid)
     assert set(st.values()) == {"pending"}
+
+
+async def test_a_system_mute_does_not_cancel_the_apology(db_session) -> None:
+    """Граница правила. После жёсткого «не беспокойте» бот выключается СИСТЕМОЙ и обязан
+    договорить последнее извинение — тут отменять нечего. Отличает их agent_off_manual:
+    его ставит только кнопка."""
+    from sqlalchemy import text  # noqa: PLC0415
+    _bid, tid, lead_id = await _fixture(db_session, agent_on=True)
+    await db_session.execute(text(
+        "UPDATE lead SET agent_enabled = false WHERE id = :i"), {"i": lead_id})
+    await db_session.flush()
+
+    lead = await db_session.get(Lead, lead_id)
+    assert lead.agent_enabled is False
+    assert lead.agent_off_manual is False        # человека тут не было
+    st = await _statuses(db_session, tid)
+    assert set(st.values()) == {"pending"}       # очередь цела
