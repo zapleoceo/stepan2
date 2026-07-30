@@ -13,7 +13,7 @@ from __future__ import annotations
 import html as _h
 from dataclasses import dataclass
 
-from app.domain.enums import BOT_SILENT_STAGES, HUMAN_LED_STAGES, Stage
+from app.domain.enums import BOT_SILENT_STAGES, HUMAN_LED_STAGES
 
 
 @dataclass(frozen=True)
