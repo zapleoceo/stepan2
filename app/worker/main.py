@@ -759,9 +759,16 @@ async def sync_crm_branch(ctx: dict[str, Any], branch_id: int) -> int:
 
 
 async def crm_rescue(ctx: dict[str, Any]) -> int:
-    """Hourly (work hours only, enforced in the service): pick up leads the CRM's phone
-    calls couldn't reach and have Stepan continue them in chat. Capped to a trickle per
-    run; every send still passes the outbox caps and the CRM gate."""
+    """Hourly (work hours only, enforced in the service), two passes over the same guard-rails:
+
+    1. leads the CRM's phone calls couldn't reach → continue them in chat;
+    2. leads a manager DID reach, whose recorded outcome asks for a conversation
+       (взял паузу / нужен следующий набор / отказ) → act on it per the policy table.
+
+    One job rather than one per outcome: four near-identical crons would each carry their own
+    copy of the work-hours window, cooldown and caps, and would drift apart exactly the way
+    the two CRM drains did. Capped to a trickle per run; every send still passes the outbox
+    caps and the CRM gate."""
     from app.modules.crm.rescue import CrmRescueService  # noqa: PLC0415
     total = 0
     async with session_scope() as session:
@@ -770,7 +777,9 @@ async def crm_rescue(ctx: dict[str, Any]) -> int:
         assert branch.id is not None
         try:
             async with session_scope() as session:
-                total += await CrmRescueService(session, branch.id, BrokerLLM()).run()
+                svc = CrmRescueService(session, branch.id, BrokerLLM())
+                total += await svc.run()
+                total += await svc.run_followthrough()
         except Exception:
             logger.exception("crm rescue failed branch=%d", branch.id)
     return total

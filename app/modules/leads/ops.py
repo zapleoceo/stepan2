@@ -176,12 +176,51 @@ async def call_failed(
     return _result(lead, from_stage, detail, queued=queued)
 
 
+_CRM_NUDGE = (
+    "[System: a teammate has just worked this lead by phone, and the CRM records the outcome"
+    " as '{status}'. That outcome is the one fact you have that the lead does not know you"
+    " have. Write to them in {lang}. What this message must accomplish: {goal}"
+    " Do not recap the phone call back at them, do not re-ask what they already settled with"
+    " the teammate, and do not open by selling. One message, one thing to answer."
+    " Return the JSON as usual.]"
+)
+
+
+async def crm_followthrough(
+    session: AsyncSession, lead: Lead, status: str, goal: str, llm,  # noqa: ANN001
+) -> LeadOpResult:
+    """Act on what a manager recorded in the CRM: journal it and have Stepan write once.
+
+    Deliberately does NOT move the funnel stage. call_failed pulls a parked lead back to
+    QUALIFYING because a missed call means nobody actually spoke; here somebody did speak,
+    and the stage they left the lead in is their judgement, not ours to overwrite."""
+    from_stage = str(lead.stage)
+    reason = f"crm_followthrough: {status}"
+    session.add(StageEvent(
+        branch_id=lead.branch_id, lead_id=lead.id, thread_id=None,
+        from_stage=from_stage, to_stage=from_stage, actor="crm", reason=reason))
+    await session.flush()
+    nudge = _CRM_NUDGE.replace("{status}", status).replace("{goal}", goal)
+    queued = await _queue_call_failed_message(
+        session, lead, llm, nudge=nudge, source="crm_followthrough")
+    return _result(lead, from_stage,
+                   reason + (" · bot will message the lead" if queued
+                             else " · no chat thread to message"),
+                   queued=queued)
+
+
 async def _queue_call_failed_message(
     session: AsyncSession, lead: Lead, llm,  # noqa: ANN001
+    nudge: str = _CALL_FAILED_NUDGE, source: str = "call_failed",
 ) -> bool:
-    """Generate one on-persona 'I tried to call, let's chat here' message and queue it.
+    """Generate one on-persona proactive message and queue it.
+
     Reuses the reply DecisionEngine so the message carries KB context and the lead's
-    language, exactly like a follow-up nudge."""
+    language, exactly like a follow-up nudge. `nudge` is what this particular message must
+    accomplish — the missed-call text is the default because it was the first user, but the
+    CRM follow-through job passes the goal from the policy table instead. Everything after
+    the generation (bubbles, gaps, llm_info, journaling) is identical for every kind, which
+    is why it stays one function rather than four near-copies."""
     thread_id = await _newest_thread_id(session, lead.id)
     if thread_id is None:
         return False
@@ -210,13 +249,13 @@ async def _queue_call_failed_message(
             await engine.free_kb_context(),
             ctx.dialog, lang, stored,
             now_block=await engine._now_block())  # noqa: SLF001
-        messages.append({"role": "user", "content": _CALL_FAILED_NUDGE.format(lang=lang)})
+        messages.append({"role": "user", "content": nudge.format(lang=lang)})
         # A lead we already tried to phone is well past small talk — worth the strong model.
         decision, meta = await generate(
-            engine, ctx, messages, thread_id, workflow="call_failed",
+            engine, ctx, messages, thread_id, workflow=source,
             capability=SMART, branch_id=lead.branch_id)
     except Exception:  # noqa: BLE001 — a generation failure must not undo the funnel move
-        logger.exception("call_failed message gen failed lead=%d", lead.id)
+        logger.exception("%s message gen failed lead=%d", source, lead.id)
         return False
     if decision is None or not decision.reply.strip():
         return False
@@ -226,7 +265,7 @@ async def _queue_call_failed_message(
     for i, bubble in enumerate(_split_bubbles(decision.reply)):
         session.add(Outbox(
             branch_id=lead.branch_id, thread_id=thread_id, text=bubble,
-            source="call_failed", scheduled_at=now + timedelta(seconds=i * _BUBBLE_GAP_S),
+            source=source, scheduled_at=now + timedelta(seconds=i * _BUBBLE_GAP_S),
             llm_info=meta_line,
         ))
     await session.flush()

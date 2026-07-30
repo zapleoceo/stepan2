@@ -21,8 +21,10 @@ from datetime import timedelta
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.adapters.db.models import Lead
 from app.domain.clock import branch_now, utc_now
 from app.modules.crm.gate import build_crm_reader, crm_read_url
+from app.modules.crm.policy import policy_for
 from app.modules.leads import ops
 from app.modules.settings.service import get_settings
 from app.ports.llm import LLMPort
@@ -66,6 +68,62 @@ class CrmRescueService:
         if rescued:
             logger.info("crm rescue branch=%d: %d leads picked up", self.branch_id, rescued)
         return rescued
+
+    async def run_followthrough(self) -> int:
+        """Отработать то, что менеджер записал в CRM, по таблице политик.
+
+        Один проход на все результаты, а не крон на каждый: сегодня их три (думает,
+        следующий набор, отказ), и четыре почти одинаковых задачи со своими копиями
+        ограничителей разъехались бы ровно так же, как разъехались два сгона в CRM.
+
+        Берём уже закэшированный crm_lead_state — он обновляется гейтом и pull-синком, так
+        что ходить в CRM отсюда незачем. Идемпотентность по паре (лид, статус): пока
+        менеджер не поставил новый результат, второй раз не пишем."""
+        cfg = await get_settings(self.session, self.branch_id)
+        if not cfg.crm_rescue_enabled or not cfg.agent_enabled:
+            return 0
+        if not _WORK_START_H <= branch_now(cfg.tz_offset_h).hour < _WORK_END_H:
+            return 0
+        rows = (await self.session.execute(text(
+            "SELECT s.lead_id, s.status FROM crm_lead_state s"
+            " JOIN lead l ON l.id = s.lead_id"
+            " WHERE s.branch_id = :b AND s.status IS NOT NULL"
+            "   AND l.is_blocked = false AND l.agent_enabled = true"
+            " ORDER BY s.fetched_at DESC LIMIT 100"),
+            {"b": self.branch_id})).all()
+        acted = 0
+        for lead_id, status in rows:
+            if acted >= _PER_RUN_CAP:
+                break
+            policy = policy_for(status)
+            if policy is None or not policy.initiates:
+                continue
+            if await self._already_acted(lead_id, status) or await self._recently_messaged(
+                    lead_id):
+                continue
+            lead = await self.session.get(Lead, lead_id)
+            if lead is None:
+                continue
+            try:
+                res = await ops.crm_followthrough(
+                    self.session, lead, status, policy.goal, self.llm)
+            except Exception:
+                logger.exception("crm followthrough failed branch=%d lead=%s",
+                                 self.branch_id, lead_id)
+                continue
+            if res.ok and res.message_queued:
+                acted += 1
+        if acted:
+            logger.info("crm followthrough branch=%d: %d leads picked up",
+                        self.branch_id, acted)
+        return acted
+
+    async def _already_acted(self, lead_id: int, status: str) -> bool:
+        row = (await self.session.execute(
+            text("SELECT 1 FROM stage_event WHERE lead_id = :l AND reason = :r LIMIT 1"),
+            {"l": lead_id, "r": f"crm_followthrough: {status}"},
+        )).first()
+        return row is not None
 
     async def _rescue_one(self, phone: str, missed_at: str) -> bool:
         lead = await ops.find_lead(self.session, phone, self.branch_id)
