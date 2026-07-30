@@ -60,7 +60,7 @@ def test_the_crm_side_is_its_own_chart_not_one_box() -> None:
     assert html.count("stg-scroll") >= 2
     assert t("stg.crm.title") in html
     for key in ("stg.c.q.phone", "stg.c.q.same", "stg.c.q.human"):
-        assert t(key) in html
+        assert _wrap(t(key), 32)[0] in html      # текст ромба тоже режется на строки
     # и три пути названы поимённо, с маркерами
     assert "crm_pushed_handoff" in html and "crm_pushed:" in html
 
@@ -85,7 +85,7 @@ def test_live_constants_are_read_not_retyped() -> None:
 def test_the_page_follows_the_interface_language(lang: str) -> None:
     _lang.set(lang)
     html = strategy_page_html()
-    assert t("stg.title") in html
+    assert t("stg.title") in html          # заголовки не переносятся
     assert t("stg.crm.title") in html
 
 
