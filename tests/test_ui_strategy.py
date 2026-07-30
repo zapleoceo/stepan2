@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.api._i18n import _lang, t
-from app.api._ui_strategy import _CHECKS, strategy_page_html
+from app.api._ui_strategy import _CHECKS, _wrap, strategy_page_html
 from app.modules.conversation.reactivation import BATCH_PER_RUN
 from app.modules.crm.policy import POLICIES
 from app.modules.crm.push_mcp import DRAIN_BATCH, HANDOFF_WINDOW_DAYS
@@ -26,10 +26,12 @@ def test_every_check_is_a_diamond_with_both_answers() -> None:
 
 
 def test_every_check_states_what_happens_on_yes() -> None:
+    """Сверяем по первой строке переноса: длинный текст терминала режется на несколько
+    <text>, и целиком в разметке его нет — это перенос, а не пропажа."""
     _lang.set("ru")
     html = strategy_page_html()
     for _q, term_key, _kind in _CHECKS:
-        assert t(term_key) in html
+        assert _wrap(t(term_key), 40)[0] in html
 
 
 def test_the_order_matches_the_code_not_a_drawing() -> None:
