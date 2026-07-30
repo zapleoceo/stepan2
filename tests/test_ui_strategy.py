@@ -17,14 +17,20 @@ from app.modules.crm.push_mcp import DRAIN_BATCH, HANDOFF_WINDOW_DAYS
 _ALL = _TURN_CHECKS + _CRM_CHECKS
 
 
-def test_the_page_scrolls_with_the_page_not_inside_a_box() -> None:
-    """Живая жалоба 30.07.2026: низ страницы было не достать. Вложенный контейнер с
-    ограниченной высотой съедал прокрутку — вертикаль должна листаться вместе со страницей,
-    свой скролл остаётся только горизонтальным."""
+def test_the_panel_uses_the_house_scroller() -> None:
+    """Проверено в браузере 30.07.2026, после двух неудачных попыток чинить это вслепую.
+
+    #main задан как flex-колонка с overflow:hidden и высотой окна. Содержимое, лежащее в нём
+    напрямую, просто обрезается: у страницы 3771px при видимых 945px, и не прокручивается
+    ничем — ни body, ни html, они ровно в высоту окна. Единственный скроллер панели —
+    .pnl-body (flex:1; overflow-y:auto). Та же ловушка описана в _ui_kb.
+
+    Сначала я вложил схему в контейнер с max-height, из-за чего таблицы под ней стали
+    недостижимы; потом отдал прокрутку странице, которой её никто не даёт."""
     html = strategy_page_html()
-    assert "max-height" not in html
-    assert "overflow-y:visible" in html
-    assert "overflow-x:auto" in html
+    assert '<div class="pnl-body">' in html
+    assert html.index('class="pnl-body"') < html.index('id="stg-page"')
+    assert "max-height" not in html          # свой ограничитель высоты забирает прокрутку
 
 
 def test_zoom_resizes_the_svg_rather_than_transforming_it() -> None:

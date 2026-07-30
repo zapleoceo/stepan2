@@ -224,7 +224,12 @@ def _zoom_bar() -> str:
 
 def strategy_page_html() -> str:
     f = _live()
-    out = [_css(), '<div class="stg" id="stg-page">']
+    # .pnl-body — единственный скроллер панели, и это несущая деталь, а не аккуратность:
+    # #main задан как flex-колонка с overflow:hidden, поэтому содержимое, лежащее в нём
+    # напрямую, просто обрезается по высоте окна и не прокручивается ничем. Ровно на это
+    # я наступил дважды: сначала вложив схему в контейнер с max-height, потом отдав
+    # прокрутку странице, которой её никто не даёт. Та же ловушка описана в _ui_kb.
+    out = [_css(), '<div class="pnl-body"><div class="stg" id="stg-page">']
 
     out.append(f"<h2>{_h.escape(t('stg.title'))}</h2>")
     out.append(f'<p class="lead">{_h.escape(t("stg.sub"))}</p>')
@@ -277,6 +282,6 @@ def strategy_page_html() -> str:
     out.append(f'<p class="lead">{_h.escape(t("stg.stages"))} '
                f"<code>{_h.escape(silent)}</code> · <code>{_h.escape(human)}</code></p>")
     out.append(f'<p class="lead">{_h.escape(t("stg.hint"))}</p>')
-    out.append("</div>")
+    out.append("</div></div>")
     out.append(_zoom_js())
     return "".join(out)
