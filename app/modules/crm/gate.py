@@ -77,6 +77,38 @@ _HOLD_FLAGS = {
 }
 
 
+# Two kinds of hold, because "stop" meant two different things and we shipped the harsher one.
+#
+# SILENCING — the deal is commercially closed. The bot must not write at all: a chatty bot
+# after a signed contract can talk a paying customer back out of it.
+#
+# INITIATIVE-ONLY — a human is mid-way through working this lead. The bot must not START a
+# conversation, but a lead who asks a direct question still gets an answer. Until 30.07.2026
+# both classes ran through the same _stand_down: an answered manager call moved the lead to
+# MANAGER and set agent_enabled=False for 72 hours, so someone writing "а можно оплатить
+# частями?" got silence for three days. Silence in reply to a direct question is the single
+# most expensive thing this system does, and it was happening in the most common case there
+# is — `wait_call` is 74% of all contacts the branch records.
+_SILENCING_FLAGS = ("deal_won", "contract_signed", "paid")
+_INITIATIVE_FLAGS = ("manager_called", "next_contact_at", "open_task")
+
+# Outbox sources that ANSWER the lead rather than start something. Kept here rather than
+# imported so the gate has no dependency on the chat routes.
+REPLY_SOURCES = frozenset({"agent", "manager"})
+
+
+def hold_kind(raw: dict) -> str:
+    """'silence' | 'initiative' | '' — how far a hold reaches. Read from the raw flags, not
+    from the joined reason string: the text is for humans and must stay free to change."""
+    if str(raw.get("owner") or "").lower() == "manager":
+        return "initiative"
+    if any(raw.get(k) for k in _SILENCING_FLAGS):
+        return "silence"
+    if any(raw.get(k) for k in _INITIATIVE_FLAGS):
+        return "initiative"
+    return ""
+
+
 def compute_verdict(raw: dict) -> tuple[str, str]:
     """Derive proceed/hold from raw CRM fields. If the CRM already returns a `verdict`,
     trust it; otherwise apply the stand-down rule (any ownership/close/next-step signal
@@ -149,6 +181,18 @@ class CrmGate:
         state = await self._state_for(lead, cfg.crm_read_secret, url)
         if state is None or not state.exists or state.verdict != "hold":
             return True, ""
+        # An unclassifiable hold is treated as initiative-only, not as silence: whatever the
+        # CRM meant, it is never worth leaving a lead's direct question unanswered on a guess.
+        # A real close is reconstructable from the deal_won column even without the raw JSON.
+        if hold_kind(state.raw or {}) != "silence":
+            # A human is working this lead: we don't start anything, but we do answer.
+            # No stand-down either — disabling the agent would kill the replies too, which
+            # is exactly the behaviour being fixed here.
+            if source in REPLY_SOURCES:
+                return True, ""
+            logger.info("branch=%d lead=%d CRM hold (initiative only), %s held: %s",
+                        self.branch_id, lead.id, source, state.reason)
+            return False, state.reason
         await self._stand_down(lead, state.reason)
         return False, state.reason
 
@@ -168,7 +212,10 @@ class CrmGate:
         state = await self.refresh(lead)
         if state is None:
             return "unknown"
-        if state.exists and state.verdict == "hold":
+        # Only a commercial close silences the bot from here. An initiative-only hold is
+        # enforced per-send in allow_send, where the source is known — standing the lead down
+        # in the background sweep would disable the agent and take the replies with it.
+        if state.exists and state.verdict == "hold" and hold_kind(state.raw or {}) == "silence":
             await self._stand_down(lead, state.reason)
         return state.verdict
 
@@ -227,5 +274,9 @@ class CrmGate:
 
 
 def _from_row(row: CrmLeadState) -> CrmState:
+    # Rebuild the two flags hold_kind actually needs. They are real columns, so the fallback
+    # path (cache row without the verbatim JSON) classifies a closed deal correctly instead
+    # of falling through to "unknown".
     return CrmState(exists=row.exists_in_crm, verdict=row.verdict, reason=row.reason or "",
-                    status=row.status, owner=row.owner, raw={})
+                    status=row.status, owner=row.owner, deal_won=row.deal_won,
+                    raw={"owner": row.owner, "deal_won": row.deal_won})

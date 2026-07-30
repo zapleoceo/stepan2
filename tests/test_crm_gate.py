@@ -5,6 +5,7 @@ import os
 
 os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
 
+import pytest  # noqa: E402
 from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
@@ -91,12 +92,14 @@ async def test_unreachable_crm_fails_open(db_session) -> None:
     assert ok is True  # CRM outage must never silence the bot
 
 
-async def test_hold_blocks_and_stands_lead_down(db_session) -> None:
+async def test_a_closed_deal_blocks_and_stands_lead_down(db_session) -> None:
+    """The harsh branch, and the only one that should be harsh: the deal is done, so a
+    chatty bot can only talk a paying customer back out of it."""
     bid = await _branch(db_session)
     lead = await _lead(db_session, bid, Stage.PRESENTING)
     ok, reason = await CrmGate(
-        db_session, bid, _Reader({"exists": True, "owner": "manager"})).allow_send(lead, "agent")
-    assert ok is False and "manager owns" in reason
+        db_session, bid, _Reader({"exists": True, "deal_won": True})).allow_send(lead, "agent")
+    assert ok is False and "deal won" in reason
     assert lead.stage == Stage.MANAGER and lead.agent_enabled is False  # stood down
 
     from sqlalchemy import func, select
@@ -108,6 +111,47 @@ async def test_hold_blocks_and_stands_lead_down(db_session) -> None:
     cached = (await db_session.execute(
         select(CrmLeadState).where(CrmLeadState.lead_id == lead.id))).scalars().first()
     assert cached is not None and cached.verdict == "hold"  # state cached
+
+
+# ─── the two kinds of hold (behaviour change, 30.07.2026) ───────────────────────
+
+async def test_a_manager_hold_still_lets_stepan_answer(db_session) -> None:
+    """Changed deliberately. Every hold used to run through the same stand-down: an answered
+    manager call moved the lead to MANAGER and set agent_enabled=False for 72 hours, so a
+    lead writing "а можно частями?" got three days of silence. `wait_call` — the result that
+    follows most answered calls — is 74% of everything the branch records, so this was the
+    normal case, not an edge one."""
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, Stage.PRESENTING)
+    gate = CrmGate(db_session, bid,
+                   _Reader({"exists": True, "owner": "manager", "manager_called": True}))
+    ok, _ = await gate.allow_send(lead, "agent")
+    assert ok is True                                   # отвечаем
+    assert lead.stage == Stage.PRESENTING               # и НЕ забираем лида у бота
+    assert lead.agent_enabled is True
+
+
+@pytest.mark.parametrize("source", ["followup", "reactivation"])
+async def test_a_manager_hold_stops_stepan_from_starting_anything(
+    db_session, source: str,
+) -> None:
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, Stage.PRESENTING)
+    gate = CrmGate(db_session, bid,
+                   _Reader({"exists": True, "manager_called": True}))
+    ok, reason = await gate.allow_send(lead, source)
+    assert ok is False and "manager called" in reason
+    assert lead.agent_enabled is True                   # молчим по инициативе, не глушим совсем
+
+
+def test_hold_kind_reads_flags_not_prose() -> None:
+    from app.modules.crm.gate import hold_kind
+    assert hold_kind({"deal_won": True}) == "silence"
+    assert hold_kind({"paid": True}) == "silence"
+    assert hold_kind({"manager_called": True}) == "initiative"
+    assert hold_kind({"next_contact_at": "2026-08-01"}) == "initiative"
+    assert hold_kind({"owner": "manager"}) == "initiative"
+    assert hold_kind({}) == ""
 
 
 async def test_proceed_allows_and_caches(db_session) -> None:
