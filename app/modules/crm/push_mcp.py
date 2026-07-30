@@ -211,6 +211,7 @@ async def fetch_leads_with_phone(
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage NOT IN ('ready','manager','handed_off')"
+        "   AND l.is_blocked = false"  # спам/бан — Степан игнорит его целиком, включая CRM
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
         + not_pushed +
         " ORDER BY l.created_at DESC LIMIT :lim"),
@@ -333,6 +334,7 @@ async def fetch_unpushed_handoffs(
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
+        "   AND l.is_blocked = false"  # см. fetch_leads_with_phone
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
         # `se.reason IS NULL` on the window probe deliberately: a bookkeeping row (a push
         # marker, a reconciliation stamp) carries from_stage == to_stage and would otherwise
@@ -379,6 +381,7 @@ async def _log_window_drops(
     n = (await session.execute(text(
         "SELECT count(DISTINCT l.id) FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
+        "   AND l.is_blocked = false"  # см. fetch_leads_with_phone
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
