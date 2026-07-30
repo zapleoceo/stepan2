@@ -95,6 +95,19 @@ class OutboxSender:
                 logger.info("outbox skip branch=%d thread=%d — lead is blocked",
                             self.branch_id, thread_id)
                 return None
+            # Бот выключен — не отправляем ничего, что он написал. Отмена стоит и в самой
+            # кнопке OFF, а это вторая линия: между её нажатием и этим тиком проходит время,
+            # и выключить бота может не только кнопка (эскалация, ручной перевод стадии).
+            # Без проверки сообщение уходило лиду уже после того, как тред забрал человек —
+            # тред 5632, 30.07.2026.
+            if lead is not None and not lead.agent_enabled:
+                row.status = "canceled"
+                row.error = "bot switched off — human took the thread"
+                self.session.add(row)
+                await self.session.flush()
+                logger.info("outbox cancel branch=%d thread=%d — bot is off",
+                            self.branch_id, thread_id)
+                return None
         # 2026-07-22: reactivation deliberately excluded from the quiet-hour hold (Dima's call,
         # for the one-time full-history backfill) — nights have near-zero live traffic, so
         # letting reactivation send then uses otherwise-idle cap headroom instead of competing

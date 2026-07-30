@@ -397,6 +397,23 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
             text("UPDATE lead SET agent_enabled = :v, agent_off_manual = :m WHERE id = :id"),
             {"v": new_val, "m": not new_val, "id": lead_id},
         )
+        if not new_val:
+            # Выключение забирает и то, что бот УЖЕ написал, но не успел отправить.
+            # Между генерацией и отправкой проходит от одной до трёх минут (паузы между
+            # пузырями), и раньше нажатие OFF в этом окне ничего не меняло: сообщение
+            # уходило лиду уже после того, как человек забрал тред себе. Живой случай —
+            # тред 5632, 30.07.2026: OFF нажали в 09:58, ответ ушёл в 10:01.
+            # 'canceled', а не 'failed': ничего не сломалось и повторять нечего, поэтому в
+            # чате это не должно выглядеть красной кнопкой «отправить снова».
+            res = await session.execute(
+                text("UPDATE outbox SET status = 'canceled',"
+                     " error = 'bot switched off — human took the thread'"
+                     " WHERE thread_id = :t AND status = 'pending' AND source <> 'manager'"),
+                {"t": thread_id},
+            )
+            if res.rowcount:
+                _log.info("bot off thread=%d: canceled %d queued bot messages",
+                          thread_id, res.rowcount)
     return HTMLResponse(chat_bot_pill_html(thread_id, new_val))
 
 
