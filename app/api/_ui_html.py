@@ -819,7 +819,7 @@ def chat_header_html(
     block_pill = chat_block_pill_html(tid, is_blocked)
     clear_btn = _clear_ctx_btn(tid)
     tr_all_btn = (
-        f'<button class="act-btn" onclick="trAll({tid})" tabindex="-1"'
+        f'<button class="act-btn" onclick="trAll({tid},this)" tabindex="-1"'
         f' data-help="{_h.escape(t("chat.translate_all"))}">🌐</button>'
     )
     return (
@@ -1288,31 +1288,57 @@ def app_shell(
         "values:{text:ta.value,source:'agent'}});"
         "document.getElementById('sug-'+tid).innerHTML='';}"
         # per-message translate toggle with LLM fetch + client-side cache
-        "function trMsg(mid,tid){"
+        # Resolves true when the bubble ends up translated. `quiet` suppresses the per-bubble
+        # toast so the batch below can report once instead of once per failure.
+        "function trMsg(mid,tid,quiet){"
         "var el=document.getElementById('bt-'+mid);"
-        "if(!el)return;"
+        "if(!el)return Promise.resolve(true);"
         "if(el.dataset.state==='tr'){"
         "el.innerHTML=el.dataset.orig;el.dataset.state='';"
-        "el.classList.remove('trview');return;}"
+        "el.classList.remove('trview');return Promise.resolve(true);}"
         "if(el.dataset.tr){"
         "el.dataset.orig=el.innerHTML;"
         "el.innerHTML=el.dataset.tr;el.dataset.state='tr';"
-        "el.classList.add('trview');return;}"
+        "el.classList.add('trview');return Promise.resolve(true);}"
         "el.style.opacity='.45';"
         "el.dataset.orig=el.innerHTML;"
-        "trFetch('/ui/chat/'+tid+'/msg/'+mid+'/tr',{headers:{'HX-Request':'true'}})"
+        "return trFetch('/ui/chat/'+tid+'/msg/'+mid+'/tr',{headers:{'HX-Request':'true'}})"
         ".then(function(html){"
         "el.style.opacity='';"
         "if(html.trim()){"
         "el.dataset.tr=html;el.innerHTML=html;"
-        "el.dataset.state='tr';el.classList.add('trview');}"
-        "else{toast(_TRERR);}})"  # empty = the app-level failure path; also a retry cue
-        ".catch(function(){el.style.opacity='';toast(_TRERR);});}"
-        # translate every bubble in the thread at once — loops trMsg over the not-yet-translated
-        # bubbles (each cached in message.tr_text, so re-opening the chat never re-bills)
-        "function trAll(tid){"
-        "document.querySelectorAll('[id^=\"bt-\"]').forEach(function(el){"
-        "if(el.dataset.state!=='tr'){trMsg(el.id.slice(3),tid);}});}"
+        "el.dataset.state='tr';el.classList.add('trview');return true;}"
+        "if(!quiet)toast(_TRERR);return false;})"  # empty = the app-level failure path
+        ".catch(function(){el.style.opacity='';if(!quiet)toast(_TRERR);return false;});}"
+        # Translate every bubble in the thread — ONE AT A TIME.
+        #
+        # This used to be a forEach over trMsg with nothing awaited, so a long thread fired
+        # thirty-odd broker calls in the same instant and a share of them never came back. The
+        # KB translate-all ten lines below has been sequential from the start for exactly this
+        # reason; the chat version never got the same treatment.
+        #
+        # A bubble that fails is retried once after a short pause — that is the difference
+        # between "most of them came back" and all of them. Anything still missing is counted
+        # and reported once at the end, not as one toast per bubble. The button carries the
+        # progress and stays disabled meanwhile, so a second click cannot start a second queue
+        # over the same bubbles.
+        "function trAll(tid,btn){"
+        "var els=[].slice.call(document.querySelectorAll('[id^=\"bt-\"]'))"
+        ".filter(function(el){return el.dataset.state!=='tr';});"
+        "if(!els.length)return;"
+        "var lbl=btn?btn.textContent:'';if(btn)btn.disabled=true;"
+        "var i=0,failed=0;"
+        "function done(){if(btn){btn.disabled=false;btn.textContent=lbl;}"
+        "if(failed)toast(_TRERR+' ('+failed+')');}"
+        "function step(){"
+        "if(i>=els.length){done();return;}"
+        "var mid=els[i++].id.slice(3);"
+        "if(btn)btn.textContent=i+'/'+els.length;"
+        "trMsg(mid,tid,true).then(function(ok){"
+        "if(ok){step();return;}"
+        "setTimeout(function(){trMsg(mid,tid,true).then(function(ok2){"
+        "if(!ok2)failed++;step();});},700);});}"
+        "step();}"
         # KB editor: translate every section (+title) into the UI language, in place, for
         # READING. Reversible toggle; while translated the fields go read-only and Save is
         # locked so a translation can't be saved over the source. Sequential, not parallel, so
