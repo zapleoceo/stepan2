@@ -1,15 +1,16 @@
-"""Страница «Стратегия»: детальная блок-схема одного хода Степана.
+"""Страница «Стратегия»: подробные блок-схемы того, как Степан решает и что уезжает в CRM.
 
 Собирается ИЗ ЖИВОГО КОДА, а не рисуется: пороги, расписания и списки стадий импортируются
 оттуда же, откуда их читает воркер. Только за 30.07.2026 условия передачи менялись трижды —
 нарисованная картинка врала бы уже к вечеру.
 
-Форма — ромб-проверка с двумя подписанными выходами: «да» уводит вбок в терминальный узел
-(что происходит и почему), «нет» ведёт вниз к следующей проверке. Это ровно та форма, которую
-имеет сам код: последовательность гардов, каждый из которых может прервать ход.
+Форма — ромб-проверка с двумя подписанными выходами: «да» уводит вбок в терминал (что
+произойдёт и почему), «нет» ведёт вниз к следующей проверке. Это та же форма, что и у кода:
+цепочка гардов, каждый из которых может прервать ход.
 
-Инлайновый SVG + немного ванильного JS на зум и панорамирование: админка ничего не тянет с
-чужих доменов. Тексты идут через t(), поэтому язык страницы совпадает с языком интерфейса.
+Прокрутка: схема ТЕЧЁТ в странице и по вертикали листается вместе с ней. Вложенный контейнер
+с ограниченной высотой (первая версия) съедал прокрутку страницы, и нижнюю часть было не
+достать. Свой скролл остаётся только горизонтальным — там, где зум делает схему шире экрана.
 """
 from __future__ import annotations
 
@@ -18,11 +19,10 @@ import html as _h
 from app.api._i18n import t
 from app.domain.enums import BOT_SILENT_STAGES, HUMAN_LED_STAGES
 
-# Геометрия. Числа подобраны так, чтобы схема читалась и на ноутбуке, и в зуме.
-_DX, _DY = 340, 96          # шаг ромбов по вертикали
 _DW, _DH = 300, 76          # ромб
-_TW, _TH = 300, 66          # терминал справа
-_RIGHT = 470                # колонка терминалов
+_TW, _TH = 320, 72          # терминал
+_LEFT, _RIGHT = 40, 470     # колонки
+_STEP = 132                 # шаг по вертикали
 
 
 def _live() -> dict[str, str]:
@@ -40,9 +40,7 @@ def _live() -> dict[str, str]:
     }
 
 
-# Последовательность проверок ровно та, что в коде: ingest → отбор → гарды → генерация →
-# money-gate → стадия → очередь. key — вопрос, yes — что будет, если ДА.
-_CHECKS: list[tuple[str, str, str]] = [
+_TURN_CHECKS: list[tuple[str, str, str]] = [
     ("stg.q.blocked", "stg.t.blocked", "stop"),
     ("stg.q.channel", "stg.t.channel", "stop"),
     ("stg.q.agent", "stg.t.agent", "stop"),
@@ -55,6 +53,18 @@ _CHECKS: list[tuple[str, str, str]] = [
     ("stg.q.guard", "stg.t.guard", "hand"),
     ("stg.q.ready", "stg.t.ready", "hand"),
     ("stg.q.manager", "stg.t.manager", "hand"),
+]
+
+# Отдельная схема: когда и что именно уезжает в CRM. Раньше это был один узел «передача»,
+# по которому нельзя было понять ни момента, ни содержимого.
+_CRM_CHECKS: list[tuple[str, str, str]] = [
+    ("stg.c.q.phone", "stg.c.t.phone", "stop"),
+    ("stg.c.q.blocked", "stg.c.t.blocked", "stop"),
+    ("stg.c.q.off", "stg.c.t.off", "stop"),
+    ("stg.c.q.flip", "stg.c.t.flip", "hand"),
+    ("stg.c.q.same", "stg.c.t.same", "wait"),
+    ("stg.c.q.human", "stg.c.t.human", "hand"),
+    ("stg.c.q.old", "stg.c.t.old", "wait"),
 ]
 
 
@@ -78,21 +88,21 @@ def _wrap(s: str, width: int = 42) -> list[str]:
 def _diamond(x: int, y: int, key: str) -> str:
     cx, cy = x + _DW / 2, y + _DH / 2
     pts = f"{cx},{y} {x + _DW},{cy} {cx},{y + _DH} {x},{cy}"
-    lines = _wrap(t(key), 34)
+    lines = _wrap(t(key), 32)
     dy = cy - (len(lines) - 1) * 7
     body = "".join(_txt(cx, dy + i * 14 + 4, ln, "t1 mid") for i, ln in enumerate(lines))
     return f'<g class="n n-dec"><polygon points="{pts}"/>{body}</g>'
 
 
 def _term(x: int, y: int, key: str, kind: str) -> str:
-    lines = _wrap(t(key), 40)
+    lines = _wrap(t(key), 42)
     dy = y + _TH / 2 - (len(lines) - 1) * 8 + 4
     body = "".join(_txt(x + 14, dy + i * 15, ln, "t2") for i, ln in enumerate(lines))
     return (f'<g class="n n-{kind}"><rect x="{x}" y="{y}" width="{_TW}" height="{_TH}" '
             f'rx="9"/>{body}</g>')
 
 
-def _start(x: int, y: int, key: str, kind: str = "start") -> str:
+def _pill(x: int, y: int, key: str, kind: str) -> str:
     return (f'<g class="n n-{kind}"><rect x="{x}" y="{y}" width="{_DW}" height="52" '
             f'rx="26"/>{_txt(x + _DW / 2, y + 31, t(key), "t1 mid")}</g>')
 
@@ -101,7 +111,7 @@ def _down(x: float, y1: float, y2: float, label: str) -> str:
     return (f'<line x1="{x:.0f}" y1="{y1:.0f}" x2="{x:.0f}" y2="{y2 - 9:.0f}" class="ar"/>'
             f'<polygon points="{x - 5:.0f},{y2 - 9:.0f} {x + 5:.0f},{y2 - 9:.0f} '
             f'{x:.0f},{y2:.0f}" class="arh"/>'
-            f'{_txt(x + 9, (y1 + y2) / 2 + 4, label, "t3")}')
+            f'{_txt(x + 9, (y1 + y2) / 2 + 4, label, "t3") if label else ""}')
 
 
 def _side(x1: float, y: float, x2: float, label: str) -> str:
@@ -111,25 +121,27 @@ def _side(x1: float, y: float, x2: float, label: str) -> str:
             f'{_txt((x1 + x2) / 2, y - 9, label, "t3 mid")}')
 
 
-def _flow() -> str:
+def _chart(checks: list[tuple[str, str, str]], start_key: str, end_key: str,
+           svg_id: str) -> str:
     yes, no = t("stg.yes"), t("stg.no")
-    parts = [_start(_DX - _DW // 2, 16, "stg.q.start")]
-    y = 16 + 52 + 44
-    cx = _DX
-    for key, term_key, kind in _CHECKS:
-        parts.append(_down(cx, y - 44, y, ""))
-        parts.append(_diamond(_DX - _DW // 2, y, key))
+    parts = [_pill(_LEFT, 14, start_key, "start")]
+    y = 14 + 52 + 46
+    cx = _LEFT + _DW / 2
+    for i, (key, term_key, kind) in enumerate(checks):
+        parts.append(_down(cx, y - 46, y, ""))
+        parts.append(_diamond(_LEFT, y, key))
         mid = y + _DH / 2
-        parts.append(_side(_DX - _DW // 2 + _DW, mid, _RIGHT, yes))
+        parts.append(_side(_LEFT + _DW, mid, _RIGHT, yes))
         parts.append(_term(_RIGHT, int(mid - _TH / 2), term_key, kind))
-        y += _DY + _DH - 40
-        parts.append(_down(cx, mid + _DH / 2, y, no))
-    parts.append(_start(_DX - _DW // 2, int(y), "stg.q.send", "go"))
-    height = int(y) + 90
-    width = _RIGHT + _TW + 40
-    return (f'<svg id="stg-svg" viewBox="0 0 {width} {height}" width="{width}" '
-            f'height="{height}" role="img" '
-            f'aria-label="{_h.escape(t("stg.title"))}">' + "".join(parts) + "</svg>")
+        nxt = y + _STEP
+        parts.append(_down(cx, mid + _DH / 2, nxt if i < len(checks) - 1 else nxt, no))
+        y = nxt
+    parts.append(_pill(_LEFT, int(y), end_key, "go"))
+    h, w = int(y) + 86, _RIGHT + _TW + 40
+    return (f'<div class="stg-scroll"><svg id="{svg_id}" class="stg-svg" '
+            f'viewBox="0 0 {w} {h}" width="{w}" height="{h}" '
+            f'data-w="{w}" data-h="{h}" role="img" '
+            f'aria-label="{_h.escape(t(start_key))}">' + "".join(parts) + "</svg></div>")
 
 
 _POLICY_KEYS = [("wait_call", "74%"), ("result_think", "11%"),
@@ -140,19 +152,19 @@ _POLICY_KEYS = [("wait_call", "74%"), ("result_think", "11%"),
 def _css() -> str:
     return (
         "<style>"
-        ".stg{max-width:1180px}"
-        ".stg h2{margin:20px 0 4px;font-size:19px}"
+        ".stg{max-width:1180px;padding-bottom:40px}"
+        ".stg h2{margin:26px 0 4px;font-size:19px}"
         ".stg .lead{opacity:.7;margin:0 0 10px;line-height:1.5}"
-        ".stg-wrap{position:relative;border:1px solid var(--bd,#2a3441);border-radius:10px;"
-        "overflow:auto;max-height:74vh;background:var(--bg2,#151b23);cursor:grab}"
-        ".stg-wrap.drag{cursor:grabbing}"
-        ".stg-zoom{position:sticky;top:8px;left:8px;z-index:2;display:inline-flex;gap:4px;"
-        "margin:8px}"
-        ".stg-zoom button{width:30px;height:30px;border-radius:7px;border:1px solid "
+        # Только горизонтальная прокрутка: вертикаль листается вместе со страницей, иначе
+        # низ схемы становится недостижим (живая жалоба 30.07.2026).
+        ".stg-scroll{overflow-x:auto;overflow-y:visible;border:1px solid var(--bd,#2a3441);"
+        "border-radius:10px;background:var(--bg2,#151b23);padding:6px}"
+        ".stg-svg{display:block;max-width:none}"
+        ".stg-zoom{display:inline-flex;gap:4px;margin:6px 0 8px}"
+        ".stg-zoom button{width:32px;height:30px;border-radius:7px;border:1px solid "
         "var(--bd,#2a3441);background:var(--bg,#0f141a);color:var(--fg,#e8eef4);"
         "cursor:pointer;font-size:15px;line-height:1}"
         ".stg-zoom button:hover{border-color:#4dabf7}"
-        "#stg-svg{transform-origin:0 0;display:block}"
         ".stg .n rect,.stg .n polygon{fill:var(--bg,#0f141a);stroke:#3a4757;stroke-width:1.5}"
         ".stg .n-dec polygon{stroke:#c9a227}"
         ".stg .n-stop rect{stroke:#e0698a}"
@@ -162,7 +174,7 @@ def _css() -> str:
         ".stg .n-start rect{stroke:#6c7a8c}"
         ".stg .n-go rect{stroke:#51cf66;stroke-width:2}"
         ".stg .t1{fill:var(--fg,#e8eef4);font:600 12.5px system-ui,sans-serif}"
-        ".stg .t2{fill:var(--fg,#e8eef4);opacity:.75;font:12px system-ui,sans-serif}"
+        ".stg .t2{fill:var(--fg,#e8eef4);opacity:.78;font:12px system-ui,sans-serif}"
         ".stg .t3{fill:#8ec5ff;font:11px system-ui,sans-serif}"
         ".stg .mid{text-anchor:middle}"
         ".stg .ar{stroke:#4a5768;stroke-width:1.5}"
@@ -180,42 +192,64 @@ def _css() -> str:
 
 
 def _zoom_js() -> str:
-    """Зум колесом и перетаскивание. Ванильный JS: ни одной внешней библиотеки."""
+    """Зум меняет РАЗМЕР svg, а не transform: иначе страница не знает, что схема выросла,
+    и до низа не долистать. Ванильный JS, ни одной внешней библиотеки."""
     return (
         "<script>(function(){"
-        "var w=document.getElementById('stg-wrap'),s=document.getElementById('stg-svg');"
-        "if(!w||!s||w.dataset.on)return;w.dataset.on='1';var z=1;"
-        "function ap(){s.style.transform='scale('+z+')';"
-        "s.style.width=(s.getAttribute('width')*z)+'px';"
-        "s.style.height=(s.getAttribute('height')*z)+'px';}"
-        "function set(v){z=Math.min(2.5,Math.max(0.4,v));ap();}"
-        "w.addEventListener('wheel',function(e){if(!e.ctrlKey&&!e.metaKey)return;"
-        "e.preventDefault();set(z*(e.deltaY<0?1.1:0.9));},{passive:false});"
-        "var d=false,sx=0,sy=0,l=0,tp=0;"
-        "w.addEventListener('mousedown',function(e){d=true;w.classList.add('drag');"
-        "sx=e.clientX;sy=e.clientY;l=w.scrollLeft;tp=w.scrollTop;});"
-        "document.addEventListener('mouseup',function(){d=false;w.classList.remove('drag');});"
-        "w.addEventListener('mousemove',function(e){if(!d)return;e.preventDefault();"
-        "w.scrollLeft=l-(e.clientX-sx);w.scrollTop=tp-(e.clientY-sy);});"
-        "var b=w.querySelectorAll('.stg-zoom button');"
-        "b[0].onclick=function(){set(z*1.2);};b[1].onclick=function(){set(z*0.83);};"
-        "b[2].onclick=function(){set(1);w.scrollTop=0;w.scrollLeft=0;};"
+        "var box=document.getElementById('stg-page');if(!box||box.dataset.on)return;"
+        "box.dataset.on='1';var z=1;"
+        "function ap(){box.querySelectorAll('.stg-svg').forEach(function(s){"
+        "s.setAttribute('width',s.dataset.w*z);s.setAttribute('height',s.dataset.h*z);});}"
+        "function set(v){z=Math.min(2.5,Math.max(0.5,v));ap();}"
+        "box.querySelectorAll('.stg-zoom').forEach(function(bar){"
+        "var b=bar.querySelectorAll('button');"
+        "b[0].onclick=function(){set(z*1.2);};"
+        "b[1].onclick=function(){set(z/1.2);};"
+        "b[2].onclick=function(){set(1);};});"
+        "box.querySelectorAll('.stg-scroll').forEach(function(w){"
+        "var d=false,sx=0,l=0;"
+        "w.addEventListener('mousedown',function(e){d=true;sx=e.clientX;l=w.scrollLeft;});"
+        "document.addEventListener('mouseup',function(){d=false;});"
+        "w.addEventListener('mousemove',function(e){if(!d)return;"
+        "w.scrollLeft=l-(e.clientX-sx);});});"
         "})();</script>"
     )
 
 
+def _zoom_bar() -> str:
+    return ('<div class="stg-zoom"><button type="button" title="+">+</button>'
+            '<button type="button" title="-">&minus;</button>'
+            '<button type="button" title="1:1">1:1</button></div>')
+
+
 def strategy_page_html() -> str:
     f = _live()
-    out = [_css(), '<div class="stg">']
+    out = [_css(), '<div class="stg" id="stg-page">']
+
     out.append(f"<h2>{_h.escape(t('stg.title'))}</h2>")
     out.append(f'<p class="lead">{_h.escape(t("stg.sub"))}</p>')
-    out.append('<div class="stg-wrap" id="stg-wrap">'
-               '<div class="stg-zoom"><button type="button" title="+">+</button>'
-               '<button type="button" title="−">−</button>'
-               '<button type="button" title="1:1">⤢</button></div>')
-    out.append(_flow())
-    out.append("</div>")
-    out.append(f'<p class="lead">{_h.escape(t("stg.hint"))}</p>')
+    out.append(_zoom_bar())
+    out.append(_chart(_TURN_CHECKS, "stg.q.start", "stg.q.send", "stg-turn"))
+
+    out.append(f"<h2>{_h.escape(t('stg.crm.title'))}</h2>")
+    out.append(f'<p class="lead">{_h.escape(t("stg.crm.sub"))}</p>')
+    out.append(_zoom_bar())
+    out.append(_chart(_CRM_CHECKS, "stg.c.start", "stg.c.end", "stg-crm"))
+
+    out.append(f"<h2>{_h.escape(t('stg.when.title'))}</h2>")
+    out.append(f"<table><tr><th>{_h.escape(t('stg.when.path'))}</th>"
+               f"<th>{_h.escape(t('stg.when.when'))}</th>"
+               f"<th>{_h.escape(t('stg.when.what'))}</th>"
+               f"<th>{_h.escape(t('stg.when.mark'))}</th></tr>")
+    rows = [
+        ("stg.w.flip", "stg.w.flip.when", "stg.w.flip.what", "crm_pushed_handoff"),
+        ("stg.w.warm", "stg.w.warm.when", "stg.w.warm.what", "crm_pushed:&lt;тип&gt;"),
+        ("stg.w.sweep", "stg.w.sweep.when", "stg.w.sweep.what", "crm_pushed_handoff"),
+    ]
+    for path, when, what, mark in rows:
+        out.append(f"<tr><td>{_h.escape(t(path))}</td><td>{_h.escape(t(when))}</td>"
+                   f"<td>{_h.escape(t(what))}</td><td><code>{mark}</code></td></tr>")
+    out.append("</table>")
 
     chips = [
         (t("stg.k.window"), f["window"]), (t("stg.k.batch"), f["batch"]),
@@ -242,6 +276,7 @@ def strategy_page_html() -> str:
     human = ", ".join(sorted(s.value for s in HUMAN_LED_STAGES))
     out.append(f'<p class="lead">{_h.escape(t("stg.stages"))} '
                f"<code>{_h.escape(silent)}</code> · <code>{_h.escape(human)}</code></p>")
+    out.append(f'<p class="lead">{_h.escape(t("stg.hint"))}</p>')
     out.append("</div>")
     out.append(_zoom_js())
     return "".join(out)
