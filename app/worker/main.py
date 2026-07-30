@@ -1181,7 +1181,11 @@ class WorkerSettings:
         cron(sync_crm, minute={5, 15, 25, 35, 45, 55}, second=10, run_at_startup=False),
         # Rescue of CRM missed-call leads: hourly, work hours only (service-enforced),
         # ≤2 leads per tick — a steady trickle through the 262-lead no-answer backlog.
-        cron(crm_rescue, minute={42}, second=30, run_at_startup=False),
+        # Своё длинное окно и БЕЗ повтора — та же причина, что у generate_one_reply: внутри
+        # идут вызовы MCP и генерация сообщений, и на общем таймауте джоб убивало на 104-й
+        # секунде (30.07.2026), а повтор означал бы вторую оплату брокеру за те же тексты.
+        cron(crm_rescue, minute={42}, second=30, run_at_startup=False,
+             timeout=settings().reply_job_timeout_s, max_tries=1),
         # Profile stats refresh every 30 minutes (heavy, TTL-gated, capped batch)
         cron(refresh_profiles, minute={0, 30}, second=15, run_at_startup=False),
         # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)
