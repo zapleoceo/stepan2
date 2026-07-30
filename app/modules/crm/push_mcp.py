@@ -24,6 +24,36 @@ logger = logging.getLogger(__name__)
 # wait_call | thinking | contract | reject | event | material | waiting_registration | ...
 EVENT_WAIT_CALL = "wait_call"
 
+# Типы, которыми филиал действительно пользуется. В истории они читаются с префиксом
+# (result_think, result_next_enrollment, result_fail), при отправке — без него; это одни и те
+# же состояния, а не разные. Из десяти типов каталога остальные пять — contract, study_yes,
+# material, waiting_registration, interview — за месяц не встретились ни разу, и писать в них
+# значит класть лида в корзину, которую никто не открывает.
+#
+# `contract` Степан не ставит принципиально: оформление договора — зона менеджера.
+EVENT_THINKING = "thinking"
+EVENT_NEXT_ENROLLMENT = "next_enrollment"
+EVENT_REJECT = "reject"
+
+
+def event_type_for(lead: LeadToPush) -> str:
+    """Каким событием описать лида в CRM. Раньше всё уезжало как wait_call — менеджер видел
+    «перезвонить» и на том, кто отказался, и на том, кто ждёт следующего набора."""
+    if (lead.lead_type or "") == "non_target":
+        return EVENT_REJECT
+    if lead.stage == "dormant":
+        return EVENT_THINKING
+    return EVENT_WAIT_CALL
+
+
+def pushed_marker(event_type: str) -> str:
+    """Маркер идемпотентности с типом внутри: смена состояния — это новое событие для CRM,
+    повтор того же состояния — нет. До 30.07 маркер был один на все случаи, поэтому лид,
+    который сначала «думает», а потом отказался, вторым событием в CRM не отражался вовсе;
+    а лид, вернувшийся из закрытой стадии в работу, наоборот получал дубль (жив пример 3066:
+    crm_pushed_handoff, затем crm_pushed — оба по сути «перезвонить»)."""
+    return f"{PUSHED_REASON}:{event_type}"
+
 # StageEvent marker so a lead pushed once is never re-pushed — idempotency across cron runs.
 # A FAILED push is NOT marked, so it retries next run (and auto-drains once the CRM endpoint
 # is fixed). Keyed the same way reactivation keys its cap/gap off a StageEvent reason.
@@ -59,6 +89,7 @@ class LeadToPush:
     product: str | None
     days_idle: int
     last_msg: str
+    lead_type: str | None = None
     job_to_be_done: str = ""
     pains: list[str] = field(default_factory=list)
     desired_state: list[str] = field(default_factory=list)
@@ -206,7 +237,7 @@ async def fetch_leads_with_phone(
     rows = (await session.execute(text(
         "SELECT l.id, l.phone_e164,"  # noqa: S608 — not_pushed is a fixed fragment, values bound
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
-        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, NULL,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.lead_type,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
@@ -232,7 +263,7 @@ async def fetch_leads_with_phone(
         dossier = parse_dossier(r[7])
         out.append(LeadToPush(
             lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
-            product=r[4], days_idle=days_idle, last_msg=r[9] or "",
+            product=r[4], days_idle=days_idle, last_msg=r[9] or "", lead_type=r[8],
             job_to_be_done=dossier.job_to_be_done,
             pains=dossier.pains, desired_state=dossier.desired_state))
     return out
@@ -259,8 +290,8 @@ _HANDOFF_TAIL = "Lead SUDAH diserahkan ke tim (hand-off) - hubungi segera."
 
 async def _drain(
     session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
-    leads: list[LeadToPush], *, marker: str, event_type: str, label: str,
-    comment_fn: Any = _comment_for,
+    leads: list[LeadToPush], *, marker: str, label: str,
+    event_type: str | None = None, comment_fn: Any = _comment_for,
 ) -> dict[str, Any]:
     """Push a batch and record what landed. The two sweeps differed only in which leads they
     select, which marker they stamp and how the comment reads — everything after the push was
@@ -274,8 +305,15 @@ async def _drain(
 
     pushed, failed = 0, 0
     for lead in leads:
+        kind = event_type or event_type_for(lead)
+        # Дедуп по СОСТОЯНИЮ, а не по факту «когда-то отправляли»: смена состояния — новое
+        # событие для CRM и уехать должна, повтор того же состояния — нет. Проверка здесь, а
+        # не в SQL выборки: тип зависит от лида, и переписывать event_type_for ещё и на SQL
+        # значит завести вторую копию правила, которая разъедется с первой.
+        if await _already_pushed(session, lead.lead_id, pushed_marker(kind)):
+            continue
         ok, detail = await pusher.add_lead_event(
-            lead.phone, event_type, comment=comment_fn(lead), name=lead.name)
+            lead.phone, kind, comment=comment_fn(lead), name=lead.name)
         if not ok:
             failed += 1
             logger.warning("crm %s failed lead=%d: %s", label, lead.lead_id, detail)
@@ -285,6 +323,13 @@ async def _drain(
             branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
             from_stage=lead.stage, to_stage=lead.stage,
             actor="system", reason=marker))
+        # Второй маркер, с типом внутри — он и обеспечивает дедуп по состоянию. Первый
+        # оставлен как есть: на нём держатся отчёты и выборки, и менять его значение задним
+        # числом значит переписать историю.
+        session.add(StageEvent(
+            branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
+            from_stage=lead.stage, to_stage=lead.stage,
+            actor="system", reason=pushed_marker(kind)))
         # …and into the chat, where the person working the thread is looking. A sweep's
         # StageEvent carries no thread_id (it works from a lead query, not a conversation),
         # so without this the majority of pushes left no trace in any conversation.
@@ -300,9 +345,12 @@ async def _drain(
 
 async def drain_writeback(
     session: AsyncSession, branch_id: int, pusher: CrmPusherPort,
-    event_type: str = EVENT_WAIT_CALL, limit: int = DRAIN_BATCH,
+    event_type: str | None = None, limit: int = DRAIN_BATCH,
 ) -> dict[str, Any]:
-    """One background pass over warm-but-stalled leads (see fetch_leads_with_phone)."""
+    """One background pass over warm-but-stalled leads (see fetch_leads_with_phone).
+
+    event_type=None → выбирается по состоянию лида (event_type_for). Раньше всё уезжало
+    как wait_call, и менеджер видел «перезвонить» и на том, кто отказался."""
     leads = await fetch_leads_with_phone(session, branch_id, limit=limit, exclude_pushed=True)
     return await _drain(session, branch_id, pusher, leads,
                         marker=PUSHED_REASON, event_type=event_type, label="writeback")
@@ -329,7 +377,7 @@ async def fetch_unpushed_handoffs(
     rows = (await session.execute(text(
         "SELECT l.id, l.phone_e164,"
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
-        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, NULL,"
+        " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.lead_type,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
         "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
@@ -361,10 +409,17 @@ async def fetch_unpushed_handoffs(
         dossier = parse_dossier(r[7])
         out.append(LeadToPush(
             lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
-            product=r[4], days_idle=0, last_msg=r[9] or "",
+            product=r[4], days_idle=0, last_msg=r[9] or "", lead_type=r[8],
             job_to_be_done=dossier.job_to_be_done,
             pains=dossier.pains, desired_state=dossier.desired_state))
     return out
+
+
+async def _already_pushed(session: AsyncSession, lead_id: int, marker: str) -> bool:
+    row = (await session.execute(text(
+        "SELECT 1 FROM stage_event WHERE lead_id = :l AND reason = :r LIMIT 1"),
+        {"l": lead_id, "r": marker})).first()
+    return row is not None
 
 
 async def _log_window_drops(
