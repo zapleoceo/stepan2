@@ -30,6 +30,7 @@ from .engine import _fmt_llm_meta  # noqa: F401 — re-exported for tests/legacy
 from .money_gate import MONEY_ESCALATION_REASON
 from .needs import parse_needs
 from .repository import CoachingNoteRepo, MessageRepo, OutboxRepo, ThreadRepo
+from .signals import BUYING_SIGNAL_RE, PAYMENT_INTENT_RE
 from .signals import DISCOVERY_TURN_CAP as _DISCOVERY_TURN_CAP
 from .signals import SOFT_NO_RE as _SOFT_NO_RE
 from .signals import postpone_days as _postpone_days
@@ -460,6 +461,11 @@ class ReplyDelivery:
         last_in = await self.messages.last_inbound_text(thread.id)
         if not last_in or not _SOFT_NO_RE.search(last_in):
             return False
+        if BUYING_SIGNAL_RE.search(last_in) or PAYMENT_INTENT_RE.search(last_in):
+            # «занят, но запиши меня» — это ДА, а не отказ. Без этой оговорки расширенный
+            # детектор «нет времени» срезал бы настоящих покупателей: слово «sibuk» стоит в
+            # половине сообщений, и одного его мало, чтобы отменить прямое согласие.
+            return False
         if guard.lead_signaled_annoyance(last_in):
             return False  # a real "stop bothering me" — the hard-stop path owns it, not a snooze
         if lead.stage in HUMAN_LED_STAGES or lead.lead_type == "non_target":
@@ -562,6 +568,15 @@ class ReplyDelivery:
             # stage='ready' directly would otherwise slip READY through here (→ _handoff mutes
             # the bot), so remap it down to PRESENTING — the same defensive depth as _is_ready.
             return Stage.PRESENTING if decision.stage == Stage.READY else decision.stage
+        # Мягкий отказ отменяет ГОТОВНОСТЬ, а не только уход в спящие. Сигнал уже считался,
+        # но применялся лишь в самом низу функции, а ветка READY стоит выше и до него не
+        # доходила. Тред 4231, 30.07.2026: лид написал «сейчас совсем нет времени», модель
+        # выставила ready=true, и одна генерация выдала два пузыря подряд — «давай потом,
+        # номер сохранён» и следом «регистрацию передаю команде, свяжутся по оплате». Лид
+        # уехал в CRM как готовый оформляться, менеджер получил звонок в никуда.
+        # Слово лида о себе весит больше, чем догадка модели о лиде.
+        if ready and soft_no:
+            return Stage.OBJECTION
         if ready and lead.phone_e164:
             return Stage.READY
         if decision.needs_manager:

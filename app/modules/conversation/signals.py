@@ -192,7 +192,16 @@ SOFT_NO_RE = re.compile(
     r"(?:nggak|ngga|ndak|gak|ga|gk|g)\s*usah\b|ga+usah\b|"
     r"(?:nggak|ngga|ndak|gak|ga|gk)\s*ikut(?:an)?\b|\bogah\b|\bg\s+dulu\b|"
     r"(tanya|diskusi|izin|ngobrol)\S*\s*(sama|ke|dulu)?\s*"
-    r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap))",
+    r"(istri|suami|orang\s*tua|ortu|bapak|ibu|keluarga|mama|papa|nyokap|bokap)|"
+    # «нет времени» — самая частая форма вежливого отказа, и она не ловилась ни одной ветвью
+    # выше. Тред 4231: «waktu saya sangat pul kk sedikit lowong nyh» прошло насквозь, лид
+    # уехал в CRM как готовый к оформлению, хотя только что сказал, что ему некогда.
+    # 'pul'/'padat'/'penuh'/'mepet' — забитое расписание; 'lowong' — свободное окно, поэтому
+    # берётся только с отрицанием или «мало»; 'sibuk' — просто занят.
+    r"\bsibuk\b|"
+    r"waktu\S*\s*(saya|aku|ku|nya)?\s*(sangat\s*|lagi\s*)?(pul|padat|penuh|mepet)|"
+    r"(sedikit|kurang|dikit|belum\s*ada|nggak\s*ada|ga\s*ada|gak\s*ada|ngga\s*ada)"
+    r"\s*(waktu|lowong|luang|senggang))",
     re.IGNORECASE)
 
 # Money is tight / no income — the full-course price must not lead (UMR context: the course
