@@ -265,6 +265,14 @@ async def ig_preview(media_id: str) -> Response:
                     headers={"Cache-Control": "public, max-age=86400"})
 
 
+@router.get("/strategy/panel", response_class=HTMLResponse)
+async def strategy_panel(request: Request) -> HTMLResponse:
+    """Как Степан принимает решение на каждом ходу — собрано из живого кода, не нарисовано."""
+    apply_lang(request)
+    from app.api._ui_strategy import strategy_page_html  # noqa: PLC0415
+    return HTMLResponse(strategy_page_html())
+
+
 @router.get("/reports/panel", response_class=HTMLResponse)
 async def reports_panel(
     request: Request, date_from: str = "", date_to: str = "",

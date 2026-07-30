@@ -1085,6 +1085,7 @@ def app_shell(
         # library either lands for real or is removed.
         + _hna("nav.products", "/ui/products/panel", "fa-solid fa-box", "products")
         + _hna("nav.reports", "/ui/reports/panel", "fa-solid fa-chart-bar", "reports")
+        + _hna("nav.strategy", "/ui/strategy/panel", "fa-solid fa-sitemap", "strategy")
         + _hna("nav.comments", "/ui/comments/panel", "fa-solid fa-comments", "comments")
         + _hna("nav.leads", "/ui/leads/panel", "fa-solid fa-user-tag", "leads")
         + '<div class="nav-sep"></div>'

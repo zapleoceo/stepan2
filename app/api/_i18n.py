@@ -1192,6 +1192,7 @@ _TR: dict[str, dict[str, str]] = {
     "fnl.blocked": {"ru": "заблокированные", "en": "blocked",    "id": "diblokir"},
     # reports
     "nav.reports": {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
+    "nav.strategy": {"ru": "Стратегия",     "en": "Strategy",     "id": "Strategi"},
     "rep.title":   {"ru": "Отчёты",         "en": "Reports",      "id": "Laporan"},
     "rep.total":   {"ru": "Всего лидов",    "en": "Total leads",  "id": "Total lead"},
     "rep.pipeline":{"ru": "В работе",       "en": "Pipeline",     "id": "Pipeline"},
