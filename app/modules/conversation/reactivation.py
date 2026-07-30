@@ -76,6 +76,14 @@ _DUE_Q = (  # noqa: S608
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid AND l.stage NOT IN ('ready', 'handed_off', 'manager')"
     "   AND l.is_blocked = false"
+    # A thread on a switched-off channel can never be delivered: send_outbox filters inactive
+    # channels out on purpose (2026-07-13, the Meta channel monopolised every batch slot). So
+    # writing for one costs broker spend for text nobody will ever read, and leaves rows that
+    # sit 'pending' for ever and read as a stuck queue. Live 30.07.2026: thread 2569 on the
+    # disabled Meta channel had three reactivation lines generated at 03:00 and a reply at
+    # 03:46, all unsendable.
+    "   AND EXISTS (SELECT 1 FROM channel ch WHERE ch.id = ct.channel_id"
+    "        AND ch.is_active = true)"
     "   AND ct.last_in_at IS NOT NULL"
     "   AND ct.last_in_at < :min_cutoff AND ct.last_in_at > :max_cutoff"
     # An explicitly hard-stopped lead ('jangan ganggu') must never be woken: the refusal-grade

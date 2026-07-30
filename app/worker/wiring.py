@@ -195,6 +195,33 @@ async def sweep_stale_sending(session: AsyncSession, branch_id: int, now: dateti
     return res.rowcount or 0
 
 
+async def sweep_undeliverable(session: AsyncSession, branch_id: int) -> int:
+    """Retire pending rows whose channel is switched off — they can never be sent.
+
+    threads_with_pending_outbox filters inactive channels out of the send batch on purpose
+    (2026-07-13: their rows were the oldest, so they took every slot and the whole outbox
+    looked frozen). Correct, but nothing then retired them, so they sat 'pending' for ever
+    and the admin queue showed permanent "4 messages waiting" for a channel nobody had used
+    in weeks — a counter that never moves is a counter nobody reads, and it hid whether any
+    REAL send was stuck behind it (live 30.07.2026, thread 2569 on the disabled Meta channel).
+
+    'skipped', not 'failed': nothing failed and nothing is retryable — the channel is off by
+    a deliberate operator decision. Turning the channel back on does not resurrect these; a
+    fresh reply is generated instead, which is what we want after weeks of silence."""
+    from sqlalchemy import update  # noqa: PLC0415
+    inactive = (
+        select(ChannelThread.id)
+        .join(Channel, Channel.id == ChannelThread.channel_id)  # type: ignore[arg-type]
+        .where(Channel.is_active.is_(False))  # type: ignore[attr-defined]
+    )
+    res = await session.execute(
+        update(Outbox)
+        .where(Outbox.branch_id == branch_id, Outbox.status == "pending",
+               Outbox.thread_id.in_(inactive))  # type: ignore[attr-defined]
+        .values(status="skipped", error="channel switched off — undeliverable, not retried"))
+    return res.rowcount or 0
+
+
 async def mark_session_status(
     session: AsyncSession, channel_id: int, status: SessionStatus
 ) -> bool:

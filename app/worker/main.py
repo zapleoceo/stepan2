@@ -580,6 +580,11 @@ async def send_outbox_branch(ctx: dict[str, Any], branch_id: int) -> int:
             logger.warning(
                 "branch=%d: swept %d outbox rows orphaned in 'sending' → failed "
                 "(they re-enter awaiting for a fresh reply)", branch_id, swept)
+        dead = await wiring.sweep_undeliverable(session, branch_id)
+        if dead:
+            logger.warning(
+                "branch=%d: retired %d pending outbox rows on switched-off channels — "
+                "they could never be sent and were showing as a live queue", branch_id, dead)
         channels = {c.id: c for c in await wiring.active_channels(session, branch_id)}
         thread_ids = await wiring.threads_with_pending_outbox(session, branch_id)
     for thread_id in thread_ids:
