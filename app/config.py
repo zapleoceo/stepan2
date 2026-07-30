@@ -229,11 +229,17 @@ class Settings(BaseSettings):
                                    "at 8000 the longest threads (12.8k chars in their newest "
                                    "30 messages) still lost their opening")
     free_context_char_budget: int = Field(
-        default=90000, description="char ceiling on the FULL KB surface sent in free reply "
+        default=104000, description="char ceiling on the FULL KB surface sent in free reply "
                                    "mode (persona + all facts docs + the whole objection "
                                    "playbook + every product card). Sized for the strong "
                                    "chat:sales models; the block is a byte-stable prompt "
-                                   "prefix, so the broker's prompt cache absorbs the size")
+                                   "prefix, so the broker's prompt cache absorbs the size. "
+                                   "Raised from 90000 on 30.07.2026: the KB had grown past it "
+                                   "(90.7k assembled) and the Demo Event card — a product we "
+                                   "actually sell — was being dropped whole. The ceiling is a "
+                                   "defensive backstop, not a model limit; ~104k chars is "
+                                   "~29k tokens, which the sales models take comfortably, and "
+                                   "a cache hit pays for the prefix once")
     knowledge_context_char_budget: int = Field(
         default=28000, description="char ceiling on the assembled KB context (persona + policy/"
                                    "market facts + the full focus card + the facts catalog). "
