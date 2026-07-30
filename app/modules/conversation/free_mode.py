@@ -306,6 +306,7 @@ def build_messages_free(  # noqa: PLR0913
     source_block: str | None = None,
     name_block: str | None = None,
     manager_note: str | None = None,
+    crm_block: str | None = None,
     now_block: str | None = None,
     is_first_reply: bool = False,
     first_turn_note: str | None = None,
@@ -321,6 +322,9 @@ def build_messages_free(  # noqa: PLR0913
     variable = [block for block in (
         (now_block or "").strip(),
         _notes_block(coaching_notes),
+        # Сначала то, что сделал менеджер, потом его же адресная заметка: заметка написана
+        # руками под конкретного лида и должна перебивать общую политику, а не наоборот.
+        (crm_block or "").strip(),
         manager_note_block(manager_note) or "",
         (source_block or "").strip(),
         (name_block or "").strip(),

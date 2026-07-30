@@ -74,6 +74,30 @@ class ReplyService(ReplyDelivery):
         self.dossiers = DossierRepo(self.session, self.branch_id)
         self.last_decision: TurnDecision | None = None  # the raw answer, for logging/tests
 
+    async def _crm_block(self, lead: object | None) -> str | None:
+        """Что менеджер сделал с этим лидом в CRM — в промт каждый ход.
+
+        Читается из уже закэшированной строки crm_lead_state, без похода в CRM: гейт и
+        pull-синк её и так обновляют, а ставить внешний вызов на путь ответа значит класть
+        чужую задержку на часы лида."""
+        lead_id = getattr(lead, "id", None)
+        if lead_id is None:
+            return None
+        import json  # noqa: PLC0415
+
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from app.adapters.db.models import CrmLeadState  # noqa: PLC0415
+        from app.modules.crm.policy import crm_state_block  # noqa: PLC0415
+        row = (await self.session.execute(
+            select(CrmLeadState).where(CrmLeadState.lead_id == lead_id))).scalars().first()
+        if row is None or not row.status:
+            return None
+        raw = json.loads(row.raw) if row.raw else {}
+        return crm_state_block(
+            row.status, manager=raw.get("last_result_by"),
+            when=raw.get("last_result_at"), next_contact_at=raw.get("next_contact_at"))
+
     async def decide(self, thread_id: int, workflow: str = "reply") -> Decision | None:
         """Run one turn. None when the thread is foreign, silent, or waiting on media."""
         engine = DecisionEngine(self.session, self.branch_id, self.llm, self.knowledge,
@@ -144,6 +168,7 @@ class ReplyService(ReplyDelivery):
             source_block=None if first_note else _entry_hint(ctx, ad_product),
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
+            crm_block=await self._crm_block(lead),
             now_block=await engine._now_block(ctx.thread),  # noqa: SLF001 — engine owns the clock
             is_first_reply=is_first_reply,
             first_turn_note=first_note,
