@@ -13,7 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ports.llm import LLMPort
 
-from .sim import SimService
+from .sim import SimService, _sandbox
 
 _END = "[END]"
 _MAX_TOTAL_TURNS = 18  # absolute stop across resumes — long enough to work a hard lead
@@ -173,6 +173,31 @@ LAST_100_PERSONAS: dict[str, str] = {
 PERSONAS.update(REAL_PERSONAS)
 PERSONAS.update(LAST_100_PERSONAS)
 
+# Без этого стенд врёт в главном: 99 из последних 100 лидов пришли С РЕКЛАМЫ, и Степан на проде
+# ЗНАЕТ, какое объявление нажали. Симуляционный тред приходил пустым, поэтому «а про что была
+# реклама?» получало ответ про академию вообще — дефект стенда, который я чуть не починил в
+# промпте. 81 из 100 нажали SMM Intensive, в том числе люди, которым нужно совсем другое: это не
+# шум, а самая частая ситуация филиала, и она должна попадать в замер.
+PERSONA_AD_ORIGIN: dict[str, str] = {
+    "template_tapper": "smm_intensive",
+    "broke_student": "smm_intensive",
+    "clicked_by_accident": "smm_intensive",
+    "salary_first": "smm_intensive",
+    "spare_parts_owner": "vibe_coding",
+}
+
+
+async def _apply_ad_origin(
+    session: AsyncSession, branch_id: int, session_key: str, persona_key: str,
+) -> None:
+    slug = PERSONA_AD_ORIGIN.get(persona_key)
+    if slug is None:
+        return
+    th = await _sandbox(session, branch_id, session_key)  # тред создаётся лениво в say()
+    th.product_slug, th.product_source, th.lead_source = slug, "ad", "ad_clicktomsg"
+    session.add(th)
+    await session.flush()
+
 _ACTOR_SYSTEM = (
     "You role-play an Instagram lead DMing a course-sales admin (Stepan) at IT STEP Jakarta. "
     "Write ONLY casual Bahasa Indonesia, SHORT (1-2 sentences), like a real DM. Stay fully in "
@@ -227,6 +252,8 @@ async def run_persona(
     svc = SimService(session, llm)
     actor = LeadActor(llm, persona, branch_id)
     transcript = await _load_dialog(session, session_key)
+    if not transcript:
+        await _apply_ad_origin(session, branch_id, session_key, persona_key)
     ended, reason, last = False, None, {}
     for _ in range(max_turns):
         if len(transcript) >= _MAX_TOTAL_TURNS * 2:
