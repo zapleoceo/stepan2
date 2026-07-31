@@ -466,8 +466,14 @@ def test_clean_reply_removes_fake_phone_line():
 
 
 def test_clean_reply_keeps_official_number():
+    """Номер берётся из настройки, а не пишется здесь литералом: прежняя версия этого теста
+    закрепляла 811 1314 400 и вместе с sanitize.py пережила смену номера, из-за чего строка с
+    НОВЫМ официальным номером считалась выдуманной и удалялась (живой тред 452)."""
+    from app.config import settings
     from app.modules.conversation.sanitize import clean_reply
-    line = "📱 Telepon: +62 811 1314 400"
+    digits = "".join(c for c in settings().official_phone_e164 if c.isdigit())
+    local = digits.removeprefix("62")
+    line = f"📱 Telepon: +62 {local[:3]} {local[3:7]} {local[7:]}"
     assert clean_reply(line) == line
 
 
