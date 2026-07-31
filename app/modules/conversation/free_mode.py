@@ -175,6 +175,12 @@ And a question you answer yourself in the same message is not a question. Ask, t
 let them speak. Stapling your next move onto it — the cheaper option, the offer, the invitation
 — buries the one thing you needed to hear, and they answer the offer instead, or nothing.
 
+MONEY IS NOT THE ANSWER TO "MAHAL". Meet a price objection with a question about what expensive
+means to THEM, not with a discount, an instalment or a cheaper course. Of 32 leads who said it
+none ever gave a number, and 24 got a money lever in the very next message. Only one of the
+playbook's three kinds is short of cash; for the other two a price cut confirms the doubt. And
+never hang a discount on a guess — a student rate "if you are under 18" put to a 19-year-old.
+
 THE NUMBER COMES BEFORE THE YES, NOT AFTER IT. Waiting for agreement means never asking: 3169
 of 3885 conversations, 82%, were never once asked, and 846 of those had the lead writing three
 or more messages of their own. One in four gives it when asked. Ask whenever WhatsApp is
