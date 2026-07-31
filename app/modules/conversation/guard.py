@@ -171,6 +171,49 @@ _REVIEW_CONTENT_RE = re.compile(
     re.IGNORECASE)
 
 
+# «У меня нет примеров» — сказано, и на этом всё. База знаний запрещает такой ответ прямо:
+# «НЕ УХОДИ С ПУСТЫМИ РУКАМИ. Если по ЭТОМУ курсу поимённого кейса нет — назови ближайший
+# реальный и сразу скажи, по какой он программе». Правило прозаическое, и модель его обходит:
+# тред 5440, 27-31.07.2026 — лид четыре раза просил отзывы, четыре раза получил «джакартских
+# нет» плюс адрес и брошюру, и на пятый написал «хватит предлагать, если отзывов нет». Всё это
+# время в facts_market лежали поимённые выпускники сети с фото на itstep.ph/review, включая
+# ровно его случай: человек прошёл курс и построил собственный интернет-магазин, а лид пришёл
+# именно за своим делом.
+#
+# Голое «у нас нет» — худший из возможных ответов на просьбу о доказательстве: человек просил
+# подтверждение, что школа настоящая, а не досье по конкретному курсу. Честное «вот что есть,
+# но это другая программа» закрывает запрос; «нет данных» оставляет его с подозрением.
+#
+# Порядок слов в индонезийском свободный, и обе половины встречаются живьём: «belum ada
+# testimoni» и «testimoni ... belum ada». Первая версия ловила только первую, и две из трёх
+# реальных фраз треда 5440 прошли мимо — ровно те, где отрицание стоит после существительного.
+_PROOF_NOUN = (r"testimoni|testimonial|review|ulasan|contoh|case|cerita|bukti|"
+               r"data\s+lokal|referensi")
+_NO_HAVE = r"(?:belum|ga|gak|nggak|ngga|tidak|blm)\s+(?:ada|punya|pegang|bisa\s+kasih)"
+_NO_PROOF_RE = re.compile(
+    rf"\b{_NO_HAVE}\b[^.!?\n]{{0,40}}?\b(?:{_PROOF_NOUN})\w*"
+    rf"|\b(?:{_PROOF_NOUN})\w*[^.!?\n]{{0,60}}?\b{_NO_HAVE}\b",
+    re.IGNORECASE)
+# Признак, что доказательство всё-таки дано: имя выпускника, компания, публичная страница или
+# проверяемый факт сети. Список намеренно широкий — задача не поймать каждую формулировку, а
+# отличить «нет и точка» от «нет по этой программе, зато есть вот это».
+_HAS_PROOF_RE = re.compile(
+    r"itstep\.ph|diploma\.itstep\.org|itstep\.id|"
+    r"\bUNDP\b|\bAlina\b|\bSarintola\b|\bSreyoun\b|\bSothy\b|\bIsabelle\b|\bSovannak\b|"
+    r"\b1Byte\b|\bWiresk\b|\bSPACElogic\b|"
+    r"\b(?:110|267|1500)\b|\b1999\b|\b24\s*(?:negara|countries)\b|"
+    r"Menara\s+Sudirman",
+    re.IGNORECASE)
+
+
+def empty_handed_refusal(reply: str) -> list[str]:
+    """Сказал «примеров нет» и не дал ни одного проверяемого факта взамен."""
+    hit = _NO_PROOF_RE.search(reply or "")
+    if not hit or _HAS_PROOF_RE.search(reply or ""):
+        return []
+    return [hit.group(0)]
+
+
 def review_content_claims(reply: str) -> list[str]:
     """Claims about what our reviews contain — as opposed to where to find them."""
     return [m.group(0).strip() for m in _REVIEW_CONTENT_RE.finditer(reply or "")]

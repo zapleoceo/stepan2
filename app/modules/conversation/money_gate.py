@@ -24,6 +24,7 @@ from .guard import (
     media_delivery_offers,
     profile_inspection_claims,
     quotes_price,
+    empty_handed_refusal,
     review_content_claims,
     stale_dates,
     ungrounded_urls,
@@ -169,6 +170,12 @@ def money_issues(reply: str, context: str) -> list[str]:
     issues.extend(
         f"a claim about what our reviews say, which nobody has read: {m}"
         for m in review_content_claims(reply))
+    # Обратная ошибка к предыдущей: не выдумал доказательство, а не дал никакого. База требует
+    # называть ближайший реальный кейс вместо «у нас нет» — прозой это правило не держится
+    # (тред 5440: пять ответов подряд «нет отзывов» при полной базе поимённых выпускников).
+    issues.extend(
+        f"says it has no proof and offers nothing verifiable instead: {m}"
+        for m in empty_handed_refusal(reply))
     return issues
 
 
