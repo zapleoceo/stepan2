@@ -103,6 +103,14 @@ def _script_lang(text: str) -> str | None:
 # Horizontal-rule / lone-heading lines the model sometimes leaks into a DM (markdown bleed).
 _MD_ARTIFACT_RE = re.compile(r"^[ \t]*(?:-{3,}|\*{3,}|_{3,}|—{3,}|#{1,6})[ \t]*$", re.MULTILINE)
 
+# The role word is consumed with the marker: a bare '<|im_start|>' strip would leave the word
+# "assistant" sitting at the head of a bubble, which reads worse than the markup it replaced.
+_CHAT_TEMPLATE_RE = re.compile(
+    r"<\|\s*(?:im_start|im_end|endoftext|eot_id|eom_id|start_header_id|end_header_id)\s*\|>"
+    r"[ \t]*(?:assistant|user|system)?[ \t]*\n?"
+    r"|\[/?INST\][ \t]*",
+    re.IGNORECASE)
+
 
 def _clean_bubble(text: str) -> str:
     """Strip markdown artifacts that read as noise in a chat bubble — a horizontal rule
@@ -119,10 +127,26 @@ def _clean_bubble(text: str) -> str:
     return cleaned.strip()
 
 
+def _strip_chat_template(reply: str) -> str:
+    """Cut chat-template markup a provider leaked into the completion itself.
+
+    Not a behaviour guard — a transport artifact. Some open-weight models (Qwen family via the
+    broker) occasionally emit their own turn delimiters as content; sim thread r5b on 31.07.2026
+    shipped three bubbles carrying a literal '<|im_end|><|im_start|>assistant'. Never seen on
+    branch 1, so this is a latch against a known failure mode, not a fix for a live incident —
+    but the lead would read raw markup, and nothing downstream would catch it.
+    """
+    cleaned = _CHAT_TEMPLATE_RE.sub("", reply or "")
+    if cleaned != (reply or ""):
+        found = sorted({m.group(0).strip() for m in _CHAT_TEMPLATE_RE.finditer(reply or "")})
+        logger.warning("chat-template markup leaked into a reply, stripped: %s", "; ".join(found))
+    return cleaned
+
+
 def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
     """Split the model's reply on '|||' into ≤max_parts non-empty bubbles; overflow is
     merged into the last one so we never send more than max_parts messages."""
-    parts = [c for p in reply.split("|||") if (c := _clean_bubble(p))]
+    parts = [c for p in _strip_chat_template(reply).split("|||") if (c := _clean_bubble(p))]
     if len(parts) <= max_parts:
         return parts
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]
