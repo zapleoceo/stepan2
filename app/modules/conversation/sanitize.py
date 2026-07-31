@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from app.config import settings
+
 from .dates import strip_date_annotations
 
 # Zero-width + word-joiner control chars that reasoning models inject silently
@@ -40,8 +42,21 @@ _HUMANIZE: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r" {2,}"), " "),     # collapse double spaces produced by above subs
 ]
 
+def _official_phone_re() -> re.Pattern[str]:
+    """Match the branch's own number in any spacing the model happens to write it.
+
+    Hardcoding it rotted: the constant still held the retired 811 1314 400 when the number
+    changed, so every line carrying the NEW official number looked fabricated and was deleted
+    whole — taking the wa.me link with it (live thread 452, 31.07.2026: the lead got "вот
+    ссылка на наш WhatsApp:" and nothing after it). Reading it from settings means changing
+    the number in one place changes it here too."""
+    digits = re.sub(r"\D", "", settings().official_phone_e164).removeprefix("62")
+    groups = (digits[:3], digits[3:7], digits[7:])
+    return re.compile(r"[\s.\-]?".join(re.escape(g) for g in groups if g))
+
+
 # Official IT STEP WA/phone — lines containing this are NEVER stripped
-_OFFICIAL_PHONE = re.compile(r"811[\s.\-]?1314[\s.\-]?400")
+_OFFICIAL_PHONE = _official_phone_re()
 
 # IG contact-card line the LLM copies ("📱 Телефон · …")
 _FAKE_PHONE_LINE = re.compile(r"\U0001f4f1\s*(?:телефон|telepon|phone)", re.I)

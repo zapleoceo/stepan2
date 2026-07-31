@@ -190,6 +190,14 @@ class Settings(BaseSettings):
                                "(~8 × soft_block_retry_min ≈ 2h) — a permanent block used to "
                                "retry forever and never surface to a human")
 
+    official_phone_e164: str = Field(
+        default="+6281111858519",
+        description="the branch's own WhatsApp/phone. sanitize.clean_reply deletes any line "
+                    "carrying a phone that is NOT this one — a fabricated number must never "
+                    "reach a lead. It lived as a literal regex in sanitize.py and went stale "
+                    "when the number changed, which silently ate the wa.me link out of every "
+                    "hand-off message (thread 452, 31.07.2026)")
+
     # ── LLM cost / quality knobs ────────────────────────────────────────────────
     llm_read_timeout_s: float = Field(
         default=120.0, description="HTTP read timeout for normal broker calls (chat:fast/translate/"
