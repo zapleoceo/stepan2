@@ -31,11 +31,15 @@ def test_every_new_setting_has_a_description() -> None:
 
 def test_operational_knobs_are_present_with_sane_defaults() -> None:
     s = settings()
-    # the caps that must stay under the worker job timeout. Raised 120→240 (2026-07-07): a
-    # single thread's worst case is one llm_read_timeout_slow_s (90s) call plus a guard regen
-    # ALSO at the 90s ceiling — 120s was tight enough that a broker running near its own
-    # timeout got this job killed mid-flight and retried, duplicating the reply/send.
-    assert s.worker_job_timeout_s == 240
+    # the caps that must stay under the worker job timeout. 120→240 (2026-07-07), 240→420
+    # (2026-07-31): a single thread's worst case is one llm_read_timeout_slow_s call plus a
+    # guard regen ALSO at that ceiling, and the ceiling itself went 90→180 because every
+    # non-reply timeout that day landed at ~91s — on the budget, not on the provider.
+    assert s.worker_job_timeout_s == 420
+    # the whole waiting chain must nest: one broker wait < the reply job that contains two of
+    # them, and the slow poll budget < the generic worker job that contains two of THOSE.
+    assert s.reply_broker_budget_s * 2 < s.reply_job_timeout_s
+    assert s.llm_read_timeout_slow_s * 2 < s.worker_job_timeout_s
     # reply_batch_cap halved alongside the raised timeout so several worst-case threads in one
     # tick still finish with room to spare, not just the average case.
     assert s.reply_batch_cap == 5 and s.send_batch_cap == 15 and s.deletion_thread_cap == 3

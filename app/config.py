@@ -105,11 +105,15 @@ class Settings(BaseSettings):
     # on its OWN timeout, so a slow generation no longer gets killed by the shared tick budget
     # (the head-of-line + timeout→retry→double-bill problem of the old batch loop).
     reply_broker_budget_s: float = Field(
-        default=150.0, description="how long ONE reply waits for the broker per chat call before "
-                                   "giving up — generous (vs the old 90s) so a slow provider "
-                                   "completes instead of timing out and re-billing on retry")
+        default=240.0, description="how long ONE reply waits for the broker per chat call before "
+                                   "giving up — generous so a slow provider completes instead of "
+                                   "timing out and re-billing on retry. 150 was measurably too "
+                                   "short: on 31.07.2026 the slowest SUCCESSFUL prod chat:sales "
+                                   "took 161s, i.e. live replies were being cut off by our own "
+                                   "budget rather than by the broker. Waiting costs nothing but "
+                                   "wall-clock; giving up costs the answer")
     reply_job_timeout_s: int = Field(
-        default=420, description="per-reply ARQ job kill deadline; must exceed the worst single "
+        default=660, description="per-reply ARQ job kill deadline; must exceed the worst single "
                                  "thread: initial chat:smart + a guard regen (each up to "
                                  "reply_broker_budget_s) + a chat:fast verify")
     reply_dispatch_cap: int = Field(
@@ -119,10 +123,10 @@ class Settings(BaseSettings):
         default=6, description="max SLOW reply jobs running at once — kept below worker_max_jobs "
                                "so a burst can't fill every worker slot and starve ingest/send")
     worker_job_timeout_s: int = Field(
-        default=240, description="per-job kill deadline; every batch cap below is sized to "
+        default=420, description="per-job kill deadline; every batch cap below is sized to "
                                  "finish inside this. Must comfortably clear a single thread's "
-                                 "WORST case: one llm_read_timeout_slow_s (90s) initial call "
-                                 "plus a guard regen also at 90s ceiling — 120s used to be "
+                                 "WORST case: one llm_read_timeout_slow_s (180s) initial call "
+                                 "plus a guard regen also at that ceiling — 120s used to be "
                                  "tight enough that a broker running near its own timeout "
                                  "ceiling got this job killed mid-flight and retried, and the "
                                  "retry re-picked a thread whose advisory lock had already "
@@ -188,7 +192,7 @@ class Settings(BaseSettings):
 
     # ── LLM cost / quality knobs ────────────────────────────────────────────────
     llm_read_timeout_s: float = Field(
-        default=70.0, description="HTTP read timeout for normal broker calls (chat:fast/translate/"
+        default=120.0, description="HTTP read timeout for normal broker calls (chat:fast/translate/"
                                   "embed/suggest); the broker can be spiky, 20s cut off simple "
                                   "replies — waiting longer is cheaper than dropping the answer. "
                                   "Kept a margin above the broker's own chat:fast/chat:smart "
@@ -198,8 +202,12 @@ class Settings(BaseSettings):
                                   "unstructured transport abort instead of a retriable HTTP "
                                   "status, with no time left for FAST→SMART escalation")
     llm_read_timeout_slow_s: float = Field(
-        default=90.0, description="HTTP read timeout for chat:smart/chat:edit (long JSON, "
-                                  "provider fallback); keep < worker_job_timeout_s")
+        default=180.0, description="poll budget for the slow capabilities (chat:smart, "
+                                   "chat:sales, vision, audio) OUTSIDE the reply path — long "
+                                   "JSON, provider fallback. 90 was where every non-reply "
+                                   "timeout landed on 31.07.2026 (failures clustered at ~91s, "
+                                   "the budget itself, not the provider). Keep < "
+                                   "worker_job_timeout_s")
     llm_read_timeout_deep_s: float = Field(
         default=600.0, description="HTTP read timeout for chat:deep (full-context analysis, "
                                    "the model may think for minutes); background/batch ONLY, "
