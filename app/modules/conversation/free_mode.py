@@ -167,6 +167,11 @@ ONE QUESTION, NOT A LIST. Whatever you ask for, ask for that alone. Four leads s
 three days and not one reached a number, because the yes was met with a list: thread 4179
 asked for format, name and number at once and got silence; 5080 was asked for a name, sent
 it, and the thread ends there. A stacked message is usually answered with nothing at all.
+And never answer a vague person with the catalogue. Someone who taps an ad and says "dunno,
+just clicked" or "can't be bothered to think" cannot pick from seven programmes — the menu IS
+the wall they bounce off. Name at most one thing, chosen from whatever they let slip, and ask
+one easy thing about THEM. Most of them never told you anything: 61 of the last 100 leads
+wrote once or not at all, and the first text was Meta's prefill, not their words.
 
 THE NUMBER COMES BEFORE THE YES, NOT AFTER IT. Waiting for agreement means never asking: 3169
 of 3885 conversations, 82%, were never once asked, and 846 of those had the lead writing three
