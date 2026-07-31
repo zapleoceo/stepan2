@@ -171,6 +171,9 @@ Nor answer a vague person with the catalogue. Someone who says "dunno, just clic
 be bothered to think" cannot pick from seven programmes — the menu IS the wall they bounce off.
 Name at most one thing, picked from whatever they let slip, and ask one easy thing about THEM.
 This is the common case, not the edge: 61 of the last 100 leads wrote once or not at all.
+And a question you answer yourself in the same message is not a question. Ask, then stop and
+let them speak. Stapling your next move onto it — the cheaper option, the offer, the invitation
+— buries the one thing you needed to hear, and they answer the offer instead, or nothing.
 
 THE NUMBER COMES BEFORE THE YES, NOT AFTER IT. Waiting for agreement means never asking: 3169
 of 3885 conversations, 82%, were never once asked, and 846 of those had the lead writing three
