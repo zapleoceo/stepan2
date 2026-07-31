@@ -5,12 +5,15 @@ moment the lead arrives (before Stepan qualifies). The operator owns the map; th
 history suggestion only pre-fills the UI, it is never written automatically."""
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import AdProductMap, ChannelThread
+
+logger = logging.getLogger(__name__)
 
 
 class AdMappingService:
@@ -76,6 +79,33 @@ class AdMappingService:
             existing.updated_by = actor
             self.session.add(existing)
         await self.session.flush()
+        await self._backfill_threads(ad_id, product_slug)
+
+    async def _backfill_threads(self, ad_id: str, product_slug: str) -> int:
+        """Проставить продукт тредам, которые пришли с этого объявления РАНЬШЕ привязки.
+
+        Лид приходит по рекламе, продукт которой ещё не сопоставлен, — и остаётся без продукта
+        навсегда: сопоставление применялось только к новым тредам, а назад никто не смотрел.
+        На 31.07.2026 так накопилось 208 тредов из 2567 рекламных (8%), и все 208 старше своей
+        же привязки. Живой путь при этом исправен: тредов, созданных ПОСЛЕ привязки и без
+        продукта, ноль.
+
+        Цена пропуска не в отчётах, а в разговоре: без продукта модель не получает карточку
+        курса, по которому человек пришёл, и начинает выяснять то, что реклама уже сказала.
+
+        Трогаем ТОЛЬКО пустые. product_source различает, кто поставил продукт: выбор модели по
+        ходу разговора или решение менеджера — они знают о лиде больше, чем объявление, по
+        которому он кликнул, и перетирать их задним числом нельзя."""
+        res = await self.session.execute(text(
+            "UPDATE channel_thread SET product_slug = :slug, product_source = 'ad'"
+            " WHERE ad_id = :ad AND (product_slug IS NULL OR product_slug = '')"
+            "   AND lead_id IN (SELECT id FROM lead WHERE branch_id = :b)"),
+            {"slug": product_slug, "ad": ad_id, "b": self.branch_id})
+        n = res.rowcount or 0
+        if n:
+            logger.info("ad %s → %s: backfilled %d thread(s) that predate the mapping",
+                        ad_id, product_slug, n)
+        return n
 
     async def clear(self, ad_id: str) -> None:
         existing = (await self.session.execute(
