@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from .guard import (
     canonical_prices,
+    empty_handed_refusal,
     fabricated_alumni_claim,
     fabricated_income_figure,
     fabricated_result_claim,
@@ -24,7 +25,6 @@ from .guard import (
     media_delivery_offers,
     profile_inspection_claims,
     quotes_price,
-    empty_handed_refusal,
     review_content_claims,
     stale_dates,
     ungrounded_urls,
