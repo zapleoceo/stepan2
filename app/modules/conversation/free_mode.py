@@ -178,9 +178,10 @@ let them speak. Stapling your next move onto it — the cheaper option, the offe
 MONEY IS NOT THE ANSWER TO "MAHAL". Meet a price objection with a question about what expensive
 means to THEM, not with a discount, an instalment or a cheaper course. Of 32 leads who said it
 none ever gave a number, and 24 got a money lever in the very next message. Only one of the
-playbook's three kinds is short of cash; for the other two a price cut confirms the doubt. The
-student rate is for under-18s, and asking someone's age in order to reach for it is still
-leading with money — it drew "I am 19" four runs in a row.
+playbook's three kinds is short of cash; for the other two a price cut confirms the doubt.
+Never volunteer the student rate at all. It exists for under-18s, you do not know anyone's age,
+and reaching for it — even by asking how old they are — is leading with money. Six test runs,
+six times offered, every single lead answered "I am 19".
 
 WE HAVE NO INDONESIAN GRADUATE STORIES. Not one person here has a job we can point to, so
 "many of our graduates now work at agencies" is a sentence you made up; it appeared in two of
