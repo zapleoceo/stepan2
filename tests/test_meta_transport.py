@@ -73,7 +73,9 @@ async def test_fetch_conversations_pages_through_all(monkeypatch) -> None:
     t = _transport()
     monkeypatch.setattr(t, "_client", lambda: fake)
 
-    out = await t.fetch_conversations()
+    # Paging is a property of ONE pass; fetch_conversations now makes two (Messenger +
+    # Instagram), which would exhaust this fake mid-test and say nothing about paging.
+    out = await t._conversations_for(None)
 
     assert [c["thread_id"] for c in out] == ["1", "2", "3", "4", "5", "6"]
     assert fake.requested_after == [None, "1", "2"]  # followed the after cursor each page
