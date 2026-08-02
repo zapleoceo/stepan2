@@ -49,19 +49,13 @@ def _conv(*, tid: str, from_id: str, participants: list[dict]) -> dict:
                                    "created_time": "2026-08-02T13:45:56+0000"}]}}
 
 
-def test_picks_the_participant_who_sent_the_message() -> None:
-    """Not "the one that isn't the page": on Instagram our own id is the IG business id, which
-    the transport does not hold. Matching the author cannot pick the wrong side."""
-    conv = _conv(tid=_IG_TID, from_id="1690990202132445", participants=[
-        {"id": "17841406968997652", "username": "zapleosoft"},
-        {"id": "1690990202132445", "username": "zapleo_ceo"},
-    ])
-    assert GraphTransportHTTP._participant(conv, "1690990202132445")["username"] == "zapleo_ceo"
+# Picking the lead out of `participants` now keys on "every id that is us" and lives in
+# tests/test_meta_own_ids.py — matching the last message's author named the lead after our own
+# Page whenever we had replied last.
 
 
 def test_missing_participants_degrade_quietly() -> None:
-    assert GraphTransportHTTP._participant({"id": "x"}, "1") == {}
-    assert GraphTransportHTTP._participant(_conv(tid="t", from_id="", participants=[]), "") == {}
+    assert GraphTransportHTTP._participant({"id": "x"}, {"207513496325789"}) == {}
 
 
 def test_adapter_passes_messenger_name_through() -> None:

@@ -40,6 +40,9 @@ class _FakeClient:
         return False
 
     async def get(self, _url: str, params: dict[str, Any] | None = None) -> _FakeResp:
+        # One-off lookup of the Page's linked IG id — not part of the paging contract here.
+        if (params or {}).get("fields") == "instagram_business_account":
+            return _FakeResp({"id": "447"})
         after = (params or {}).get("after")
         self.requested_after.append(after)
         idx = 0 if after is None else int(after)

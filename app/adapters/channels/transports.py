@@ -402,6 +402,7 @@ class GraphTransportHTTP:
         self._base = base_url.rstrip("/")
         self._account_id = account_id
         self._token = token
+        self._own_ids_cache: set[str] | None = None
 
     def _client(self) -> Any:
         import httpx  # lazy: real transport only, never imported by unit tests
@@ -450,17 +451,16 @@ class GraphTransportHTTP:
         return out[:settings().meta_live_conversations]
 
     @staticmethod
-    def _participant(conv: dict[str, Any], from_id: str) -> dict[str, Any]:
-        """The human in this conversation — matched by id against the message author.
+    def _participant(conv: dict[str, Any], own: set[str]) -> dict[str, Any]:
+        """The human in this conversation: the participant that is not us.
 
-        Both our own account and the lead are in `participants`, and which one is "ours"
-        differs by platform: Messenger lists the Page id, Instagram lists the IG business id,
-        which the transport does not hold. Matching the inbound author's id sidesteps that
-        entirely and cannot pick the wrong side.
+        Matching the LAST message's author looked simpler and was wrong — when we answered
+        last, the author is our own Page, and the lead was filed under our own name ("Zapleo
+        Soft" showed up as a lead twice). `own` covers both platforms; see _own_ids.
         """
         people = ((conv.get("participants") or {}).get("data")) or []
         for p in people:
-            if str(p.get("id", "")) == str(from_id) and from_id:
+            if str(p.get("id", "")) not in own:
                 return p
         return {}
 
@@ -474,6 +474,7 @@ class GraphTransportHTTP:
         out: list[dict[str, Any]] = []
         cursor: str | None = None
         async with self._client() as c:
+            own = await self._own_ids(c)
             for _ in range(max_pages):
                 # participants rides along in the same call — it is what carries the human's
                 # name. Graph splits it by platform: Messenger gives `name`, Instagram gives
@@ -494,7 +495,7 @@ class GraphTransportHTTP:
                         continue
                     last = msgs[0]
                     from_id = (last.get("from") or {}).get("id", "")
-                    who = self._participant(conv, from_id)
+                    who = self._participant(conv, own)
                     out.append(
                         {
                             "thread_id": conv.get("id", ""),
@@ -511,15 +512,40 @@ class GraphTransportHTTP:
                     break
         return out[:cap]
 
+    async def _own_ids(self, c: Any) -> set[str]:
+        """Every id that means "us" inside a participants list.
+
+        On Messenger that is the Page id. On Instagram the participants carry IG-scoped ids and
+        our side is the IG business account — a number this transport was never told. Comparing
+        against the Page id alone therefore matched nobody, so "the participant that isn't us"
+        returned the FIRST one, which is us: sends went to ourselves and Graph answered
+        "(#100) no matching user" (subcode 2018001), while the inbox showed our own Page name
+        where the lead's should be. Resolved once and cached — it does not change for a Page.
+        """
+        if self._own_ids_cache is None:
+            ids = {str(self._account_id)}
+            try:
+                r = await c.get(f"/{self._account_id}",
+                                params={"fields": "instagram_business_account"})
+                r.raise_for_status()
+                ig = (r.json().get("instagram_business_account") or {}).get("id")
+                if ig:
+                    ids.add(str(ig))
+            except Exception as exc:  # noqa: BLE001 — a Page without Instagram is normal
+                logger.warning("could not resolve own IG id for %s: %s", self._account_id, exc)
+            self._own_ids_cache = ids
+        return self._own_ids_cache
+
     async def _resolve_psid(self, thread_id: str, c: Any) -> str:
-        """The Send API needs the lead's PSID, not the conversation id fetch_conversations
-        hands back as thread_id — resolve it via the conversation's participants, picking
-        whichever participant isn't our own Page/IG account."""
+        """The Send API needs the lead's id, not the conversation id fetch_conversations hands
+        back as thread_id — resolve it from the conversation's participants, excluding every id
+        that means us (see _own_ids)."""
+        own = await self._own_ids(c)
         r = await c.get(f"/{thread_id}", params={"fields": "participants"})
         r.raise_for_status()
         participants = ((r.json().get("participants") or {}).get("data")) or []
         for p in participants:
-            if str(p.get("id", "")) != str(self._account_id):
+            if str(p.get("id", "")) not in own:
                 return str(p["id"])
         raise RuntimeError(f"no non-self participant found for conversation {thread_id}")
 
