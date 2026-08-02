@@ -28,6 +28,7 @@ from ._query import (
     AWAITING_BASE,
     DEAL_WON,
     IN_QUEUE_EXTRA,
+    SETTLED_EXTRA,
     _branch_where,
     awaiting_cutoff,
     fetch_blocked_count,
@@ -282,12 +283,19 @@ async def threads_partial(
         conditions.append(f"l.stage IN ({', '.join(names)})")
         params.update({f"g{i}": st for i, st in enumerate(grp_stages)})
     aw = awaiting.strip()
-    if aw:  # unanswered chats; 'queue' = Stepan will reply, 'off' = won't, else = all unanswered
-        if aw == "queue":
-            conditions.append(f"({AWAITING_BASE}) AND ({IN_QUEUE_EXTRA})")
+    # unanswered chats, split three ways: 'settled' = no reply is owed (handed off, or the CRM
+    # gate already refused a send), 'queue' = Stepan will reply, 'off' = he won't, else = all.
+    if aw:
+        if aw == "settled":
+            conditions.append(f"({AWAITING_BASE}) AND {SETTLED_EXTRA}")
+            params["awaiting_cutoff"] = awaiting_cutoff()
+        elif aw == "queue":
+            conditions.append(
+                f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})")
             params["awaiting_cutoff"] = awaiting_cutoff()
         elif aw == "off":
-            conditions.append(f"({AWAITING_BASE}) AND NOT ({IN_QUEUE_EXTRA})")
+            conditions.append(
+                f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})")
             params["awaiting_cutoff"] = awaiting_cutoff()
         else:
             conditions.append(AWAITING_BASE)

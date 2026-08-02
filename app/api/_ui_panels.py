@@ -85,12 +85,14 @@ def outbox_count_html(n: int) -> str:
     return str(n) if n > 0 else ""
 
 
-def inbox_awaiting_badge_html(in_queue: int, off: int) -> str:
-    """Inbox nav badge, split into two clickable numbers that sum to the total unanswered
+def inbox_awaiting_badge_html(in_queue: int, off: int, settled: int = 0) -> str:
+    """Inbox nav badge, split into three clickable numbers that sum to the total unanswered
     (Meta Business chats excluded until that connector is finished): in Stepan's ACTIVE queue
-    (bot on + a funnel stage Stepan works, orange) and everything else (dormant / handed off /
-    ready / bot off, grey). Empty when nothing awaits (hidden)."""
-    if in_queue + off <= 0:
+    (bot on + a funnel stage Stepan works, orange), everything else he won't answer (dormant /
+    ready / bot off, grey), and settled — nobody owes these a reply at all (handed off, or the
+    CRM gate already refused a send). Settled is shown rather than hidden so a lead the CRM
+    held by mistake stays findable. Empty when nothing awaits (hidden)."""
+    if in_queue + off + settled <= 0:
         return ""
 
     def _num(cls: str, n: int, val: str, tip: str) -> str:
@@ -98,8 +100,11 @@ def inbox_awaiting_badge_html(in_queue: int, off: int) -> str:
               f"location.href='/ui/inbox?awaiting={val}';return false")
         return f'<span class="{cls}" title="{_h.escape(t(tip))}" onclick="{js}">{n}</span>'
 
-    return (_num("iaw iaw-q", in_queue, "queue", "inbox.await_queue")
-            + _num("iaw iaw-off", off, "off", "inbox.await_off"))
+    out = (_num("iaw iaw-q", in_queue, "queue", "inbox.await_queue")
+           + _num("iaw iaw-off", off, "off", "inbox.await_off"))
+    if settled:
+        out += _num("iaw iaw-settled", settled, "settled", "inbox.await_settled")
+    return out
 
 
 def outbox_panel_html(

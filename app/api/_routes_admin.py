@@ -29,6 +29,7 @@ from ._ig_preview import fetch_creative_bytes
 from ._query import (
     AWAITING_BASE,
     IN_QUEUE_EXTRA,
+    SETTLED_EXTRA,
     _branch_where,
     awaiting_cutoff,
     fetch_ad_funnel,
@@ -101,21 +102,26 @@ async def outbox_count(request: Request) -> HTMLResponse:
 
 @router.get("/inbox/awaiting-count", response_class=HTMLResponse)
 async def inbox_awaiting_count(request: Request) -> HTMLResponse:
-    """Polled by the Inbox nav badge. Splits the unanswered chats into two numbers that sum to
-    the total: IN the generation queue (Stepan will reply) and NOT in it (bot off / silent
-    stage / older than the age cap / reply already queued). Each number opens its filtered list."""
+    """Polled by the Inbox nav badge. Splits the unanswered chats into three numbers that sum
+    to the total: settled (no reply owed — handed off, or the CRM gate already refused a send),
+    IN the generation queue (Stepan will reply), and NOT in it (bot off / silent stage / older
+    than the age cap). Each number opens its filtered list."""
     branch_ids = branch_ids_from_request(request)
     where, params = _branch_where(branch_ids, col="l.branch_id")
     cond = ("AND" if where else "WHERE")
     params["awaiting_cutoff"] = awaiting_cutoff()
     async with session_scope() as session:
         row = (await session.execute(text(
-            f"SELECT count(*) FILTER (WHERE {IN_QUEUE_EXTRA}) AS in_queue, count(*) AS total"  # noqa: S608
+            f"SELECT count(*) FILTER (WHERE {SETTLED_EXTRA}) AS settled,"  # noqa: S608
+            f" count(*) FILTER (WHERE NOT {SETTLED_EXTRA} AND {IN_QUEUE_EXTRA}) AS in_queue,"
+            " count(*) AS total"
             " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
             f" {where} {cond} {AWAITING_BASE}"), params)).first()
-    in_queue = int(row[0] or 0)
-    total = int(row[1] or 0)
-    return HTMLResponse(inbox_awaiting_badge_html(in_queue, total - in_queue))
+    settled = int(row[0] or 0)
+    in_queue = int(row[1] or 0)
+    total = int(row[2] or 0)
+    return HTMLResponse(
+        inbox_awaiting_badge_html(in_queue, total - in_queue - settled, settled))
 
 
 @router.get("/outbox/panel", response_class=HTMLResponse)

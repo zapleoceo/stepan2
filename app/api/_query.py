@@ -50,8 +50,10 @@ DEAL_WON = (
 # on a WORKING connector (Meta Business is excluded until its connector is finished — those
 # chats just hang, they don't count). IN_QUEUE = the chats Stepan actively works: bot on AND in
 # a funnel stage where Stepan participates (new/nurturing/qualifying/presenting/objection). The
-# complement (base AND NOT in-queue) is everything else unanswered — dormant, handed_off/manager
-# (a human owns it), ready, or bot off. The two partition AWAITING_BASE, so they sum to total.
+# complement is everything else unanswered — dormant, ready, or bot off. SETTLED (below) is
+# carved out FIRST: those need no reply at all. The three partition AWAITING_BASE and sum to
+# the total. Settled rows stay VISIBLE rather than being filtered away, because a lead the CRM
+# held by mistake would otherwise vanish from the only list where anyone would notice.
 AWAITING_BASE = (
     "ct.last_in_at IS NOT NULL"
     " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
@@ -62,6 +64,22 @@ AWAITING_BASE = (
 IN_QUEUE_EXTRA = (
     "l.agent_enabled = true"
     " AND l.stage IN ('new', 'nurturing', 'qualifying', 'presenting', 'objection')"
+)
+# A third answer the first two can't give: nobody OWES this lead a reply. Thread 3066 sat in
+# "Stepan will reply" for days — stage nurturing, bot on — while the CRM gate had already
+# blocked two sends with `crm hold: manager called` and the lead's last words were "Oke ka",
+# agreeing to continue on WhatsApp. The list asked "is anything unanswered?" and got labelled
+# "awaiting reply"; those are different questions.
+#
+# Keyed on what HAPPENED, never on the CRM's current opinion: crm_lead_state has a 300s TTL and
+# is refetched (3066 read 'hold' on 01.08 and 'proceed' by 02.08), so a predicate on the live
+# verdict would make rows blink in and out of the list. A recorded hand-off and a send the gate
+# actually refused are events — they don't un-happen.
+SETTLED_EXTRA = (
+    "(l.handed_off_at IS NOT NULL"
+    " OR EXISTS (SELECT 1 FROM outbox o WHERE o.thread_id = ct.id"
+    "            AND o.status = 'skipped' AND o.error LIKE 'crm hold%'"
+    "            AND o.scheduled_at > ct.last_in_at))"
 )
 
 
