@@ -22,6 +22,7 @@ from sqlalchemy import text
 from app.adapters.crypto import encrypt
 from app.adapters.db.session import session_scope
 from app.config import settings
+from app.modules.meta.app_secret import app_secret_for
 from app.modules.meta.oauth import (
     authorize_url,
     exchange_code,
@@ -95,12 +96,15 @@ async def callback(
 
     async with session_scope() as session:
         cfg = await get_channel_settings(session, branch_id, channel_id)
-    if not cfg.meta_app_id or not cfg.meta_app_secret:
+    # Same resolver the webhook signature check uses: one app, one secret, one source. A copy
+    # in the settings table would be a value able to disagree with itself after a rotation.
+    secret = app_secret_for(branch_id)
+    if not cfg.meta_app_id or not secret:
         return _page("Not configured yet", "<p>The Meta app id or secret is missing.</p>")
 
     try:
         user_token = await exchange_code(
-            code=code, app_id=cfg.meta_app_id, app_secret=cfg.meta_app_secret,
+            code=code, app_id=cfg.meta_app_id, app_secret=secret,
             redirect_uri=_redirect_uri(), version=settings().ig_graph_version,
         )
         pages = await list_pages(user_token, settings().ig_graph_version)
