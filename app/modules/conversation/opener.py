@@ -82,22 +82,19 @@ def _is_typed(t: str) -> bool:
 
 # ── deterministic templates (no LLM) ─────────────────────────────────────────
 
-# Retired 2026-07-25 as a SENT opener — the model writes ad taps and story replies now (it
-# was answered 14.3% of the time against 36.3% for a written first reply, and it opened with
-# the DP figure before the lead said a word). Kept as a constant because live threads still
-# carry it as their first outbound: reply.decide reads it to tell "the template already went
-# out" from "the model has spoken", which decides whether the next turn is the first real
-# generation.
-AD_TAP_OPENER = (
-    "Halo, aku MinStep dari IT STEP Academy 😊 Seneng banget Kakak tertarik! Biar aku bisa "
-    "kasih info yang paling pas, boleh cerita dulu — Kakak lagi cari kursus buat apa nih?"
-)
 # Neutral on purpose: it answers a bare greeting ("halo") and unreadable garble ("Qqq b
 # nnq", thread 5020) equally well — no "I didn't understand", which reads oddly to someone
 # who only said hello. The one first contact still shipped by code: an emoji or garble gives
 # the model nothing to react to, so a fixed clarifier is as good as a written one and free.
-JUNK_OPENER = (
-    "Halo Kak, aku MinStep dari IT STEP Academy Jakarta 😊 Boleh cerita, Kakak lagi cari "
-    "info tentang apa ya? Biar aku bisa bantu yang paling pas."
-)
+#
+# The fallback names nobody. A branded line lived here until 2026-08-02 and introduced EVERY
+# branch as the first client this product ever had — including the demo branch Meta reviews,
+# where "hi" is the likeliest opening word a reviewer types (it is a bare ack, so it lands
+# here rather than with the model). Branches that want a branded greeting set junk_opener.
+JUNK_OPENER = "Halo Kak 😊 Boleh cerita, Kakak lagi cari info tentang apa ya?"
+
+
+def junk_opener(settings_value: str | None) -> str:
+    """The branch's own greeting, or the unbranded fallback."""
+    return (settings_value or "").strip() or JUNK_OPENER
 

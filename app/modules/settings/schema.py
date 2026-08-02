@@ -74,6 +74,16 @@ SCHEMA: list[SettingSection] = [
                    "For phones in a lead's text (62=Indonesia, 60=Malaysia, 63=Philippines)",
                    "Untuk nomor dari teks lead (62=Indonesia, 60=Malaysia, 63=Filipina)"),
            width="64px", scope="channel"),
+        _f("junk_opener", "text", "",
+           _l("Ответ на «привет» без текста", "Reply to a contentless hello",
+              "Balasan untuk sapaan kosong"),
+           help=_l("Единственный ответ, который пишет не модель: лид прислал эмодзи или "
+                   "голое «привет». Пусто — нейтральная фраза без названия компании",
+                   "The one reply the model does not write: the lead sent an emoji or a bare "
+                   "hello. Empty falls back to a neutral line with no company name",
+                   "Satu-satunya balasan yang bukan dari model: lead kirim emoji atau sapaan "
+                   "kosong. Kosong = kalimat netral tanpa nama perusahaan"),
+           width="100%"),
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [
