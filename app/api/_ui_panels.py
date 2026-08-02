@@ -1128,8 +1128,20 @@ def _ch_ig_form(
 
 
 def _ch_meta_form(ch_id: int, error: str = "") -> str:
+    # The button first, the paste form second: a client cannot obtain a System User token, and
+    # Meta's App Review needs a recording of someone granting the permissions — which only the
+    # consent screen behind this button can show. The manual form stays for our own channels
+    # and as the fallback when the app is not configured yet.
     return (
         f'{_ch_err(error)}'
+        f'<a class="btn-sm btn-p" href="/connect/meta/{ch_id}/start" target="_blank"'
+        f' rel="noopener" style="display:inline-block;text-decoration:none;margin-bottom:.6rem">'
+        f'{_h.escape(t("ch.connect_fb"))}</a>'
+        f'<div style="font-size:.7rem;color:#8a94a6;margin:-.35rem 0 .8rem">'
+        f'{_h.escape(t("ch.connect_fb_hint"))}</div>'
+        f'<details style="margin-bottom:.6rem"><summary style="cursor:pointer;'
+        f'font-size:.75rem;color:#8a94a6">{_h.escape(t("ch.connect_manual"))}</summary>'
+        f'<div style="height:.5rem"></div>'
         f'<form hx-post="/ui/channels/{ch_id}/meta/connect"'
         f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
         f'<div class="frm-grp">'
@@ -1150,7 +1162,7 @@ def _ch_meta_form(ch_id: int, error: str = "") -> str:
         f'(настройки филиала → meta_system_user_token)</div></div>'
         f'<button type="submit" class="btn-sm btn-p">'
         f'{_h.escape(t("ch.connect"))}</button>'
-        f'</form>'
+        f'</form></details>'
     )
 
 
