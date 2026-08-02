@@ -449,6 +449,21 @@ class GraphTransportHTTP:
                 out.append(conv)
         return out[:settings().meta_live_conversations]
 
+    @staticmethod
+    def _participant(conv: dict[str, Any], from_id: str) -> dict[str, Any]:
+        """The human in this conversation — matched by id against the message author.
+
+        Both our own account and the lead are in `participants`, and which one is "ours"
+        differs by platform: Messenger lists the Page id, Instagram lists the IG business id,
+        which the transport does not hold. Matching the inbound author's id sidesteps that
+        entirely and cannot pick the wrong side.
+        """
+        people = ((conv.get("participants") or {}).get("data")) or []
+        for p in people:
+            if str(p.get("id", "")) == str(from_id) and from_id:
+                return p
+        return {}
+
     async def _conversations_for(self, platform: str | None) -> list[dict[str, Any]]:
         # The default /conversations page is ~25, so older-but-active chats were dropped. Page
         # through with the `after` cursor up to a config cap (header auth kept — following the
@@ -460,8 +475,12 @@ class GraphTransportHTTP:
         cursor: str | None = None
         async with self._client() as c:
             for _ in range(max_pages):
+                # participants rides along in the same call — it is what carries the human's
+                # name. Graph splits it by platform: Messenger gives `name`, Instagram gives
+                # `username`. Without it every lead shows in the inbox as "Lead".
                 params: dict[str, Any] = {
-                    "fields": "id,messages{from,message,created_time}", "limit": page_size}
+                    "fields": "id,participants,messages{from,message,created_time}",
+                    "limit": page_size}
                 if platform:
                     params["platform"] = platform
                 if cursor:
@@ -474,12 +493,16 @@ class GraphTransportHTTP:
                     if not msgs:
                         continue
                     last = msgs[0]
+                    from_id = (last.get("from") or {}).get("id", "")
+                    who = self._participant(conv, from_id)
                     out.append(
                         {
                             "thread_id": conv.get("id", ""),
-                            "from_id": (last.get("from") or {}).get("id", ""),
+                            "from_id": from_id,
                             "message": last.get("message", ""),
                             "created_time": last.get("created_time"),
+                            "sender_name": who.get("name") or "",
+                            "sender_username": who.get("username") or "",
                         }
                     )
                 paging = body.get("paging") or {}

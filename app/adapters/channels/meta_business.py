@@ -51,12 +51,16 @@ class MetaBusinessAdapter:
         return _map_token(debug)
 
     def _to_inbound(self, conv: dict[str, Any]) -> InboundMessage:
+        # Graph splits the human's identity by platform: Messenger returns `name`, Instagram
+        # returns `username`. Passing both through is what stops every lead reading as "Lead".
         return InboundMessage(
             external_thread_id=str(conv["thread_id"]),
             sender_id=str(conv["from_id"]),
             text=str(conv.get("message", "")),
             occurred_at=as_naive_utc(conv.get("created_time")),
             product_hint=conv.get("referral_product"),
+            sender_name=conv.get("sender_name") or None,
+            sender_username=conv.get("sender_username") or None,
         )
 
 
