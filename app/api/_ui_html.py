@@ -1063,8 +1063,9 @@ def app_shell(
     # Inbox badge = chats awaiting a Stepan reply (the queue). The nav LINK opens the full
     # inbox; the badge NUMBER opens only the awaiting chats (stopPropagation so the click
     # doesn't also trigger the parent link). Empty when zero → hidden by .na-badge:empty.
-    # Two-number badge: the endpoint fills it with an in-queue pill + a won't-reply pill, each
-    # clickable to its own filter. The outer span just polls and holds them (no own onclick).
+    # One-number badge: the endpoint fills it with the count Stepan owes a reply to, or with
+    # nothing at all when that is zero. The outer span just polls and holds it (no own onclick);
+    # the number itself swaps the thread list via htmx, so the open chat survives the click.
     inbox_badge = (
         '<span class="na-badge2" id="inbox-badge"'
         ' hx-get="/ui/inbox/awaiting-count" hx-trigger="load, every 15s"'
@@ -1500,8 +1501,8 @@ def app_shell(
             f' title="{_h.escape(t("inbox.ad_clear"))}">✕</a></div>'
         ) if (lead_type or audience) else ""
         # awaiting filter (opened from an inbox badge number) — dismissable back to full inbox.
-        _await_lbl = {"queue": "inbox.await_queue", "off": "inbox.await_off"}.get(
-            awaiting, "inbox.awaiting_filter")
+        _await_lbl = {"queue": "inbox.await_queue", "off": "inbox.await_off",
+                      "settled": "inbox.await_settled"}.get(awaiting, "inbox.awaiting_filter")
         _await_chip = (
             f'<div class="ad-filter">'
             f'<span class="ad-filter-id">{_h.escape(t(_await_lbl))}</span>'

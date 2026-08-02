@@ -27,10 +27,24 @@ def test_three_buckets_partition_the_base() -> None:
     assert "NOT " + SETTLED_EXTRA in off
 
 
-def test_settled_is_visible_not_filtered_away() -> None:
-    """Лид, придержанный CRM по ошибке, обязан остаться видимым — иначе он исчезнет из
-    единственного списка, где это заметят."""
+def test_badge_shows_only_what_needs_answering() -> None:
+    """Бейдж, который никогда не ноль, никто не читает: спящие, готовые и выключенные тоже
+    «без ответа», но проблемой не являются."""
     from app.api._ui_panels import inbox_awaiting_badge_html
-    html = inbox_awaiting_badge_html(0, 0, 7)
-    assert "7" in html and "awaiting=settled" in html
-    assert inbox_awaiting_badge_html(0, 0, 0) == ""
+    html = inbox_awaiting_badge_html(4)
+    assert ">4<" in html and "awaiting=queue" in html
+    assert "awaiting=off" not in html and "awaiting=settled" not in html
+
+
+def test_badge_hides_itself_at_zero() -> None:
+    from app.api._ui_panels import inbox_awaiting_badge_html
+    assert inbox_awaiting_badge_html(0) == ""
+
+
+def test_badge_swaps_the_list_instead_of_reloading_the_page() -> None:
+    """Бейдж опрашивается каждые 15 секунд; полная перезагрузка выбрасывала бы открытый чат."""
+    from app.api._ui_panels import inbox_awaiting_badge_html
+    html = inbox_awaiting_badge_html(1)
+    assert 'hx-get="/ui/threads?awaiting=queue"' in html
+    assert 'hx-target="#tl"' in html
+    assert "location.href" not in html

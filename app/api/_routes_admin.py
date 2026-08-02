@@ -102,26 +102,20 @@ async def outbox_count(request: Request) -> HTMLResponse:
 
 @router.get("/inbox/awaiting-count", response_class=HTMLResponse)
 async def inbox_awaiting_count(request: Request) -> HTMLResponse:
-    """Polled by the Inbox nav badge. Splits the unanswered chats into three numbers that sum
-    to the total: settled (no reply owed — handed off, or the CRM gate already refused a send),
-    IN the generation queue (Stepan will reply), and NOT in it (bot off / silent stage / older
-    than the age cap). Each number opens its filtered list."""
+    """Polled by the Inbox nav badge. Returns ONE number — the chats Stepan should answer and
+    hasn't: unanswered, bot on, a stage he works, minus the ones nobody owes a reply (handed
+    off, or the CRM gate already refused a send). The buckets that need no action are counted
+    out here rather than shown, so the badge is empty exactly when nothing is waiting on us."""
     branch_ids = branch_ids_from_request(request)
     where, params = _branch_where(branch_ids, col="l.branch_id")
     cond = ("AND" if where else "WHERE")
     params["awaiting_cutoff"] = awaiting_cutoff()
     async with session_scope() as session:
         row = (await session.execute(text(
-            f"SELECT count(*) FILTER (WHERE {SETTLED_EXTRA}) AS settled,"  # noqa: S608
-            f" count(*) FILTER (WHERE NOT {SETTLED_EXTRA} AND {IN_QUEUE_EXTRA}) AS in_queue,"
-            " count(*) AS total"
+            f"SELECT count(*) FILTER (WHERE NOT {SETTLED_EXTRA} AND {IN_QUEUE_EXTRA})"  # noqa: S608
             " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
             f" {where} {cond} {AWAITING_BASE}"), params)).first()
-    settled = int(row[0] or 0)
-    in_queue = int(row[1] or 0)
-    total = int(row[2] or 0)
-    return HTMLResponse(
-        inbox_awaiting_badge_html(in_queue, total - in_queue - settled, settled))
+    return HTMLResponse(inbox_awaiting_badge_html(int(row[0] or 0)))
 
 
 @router.get("/outbox/panel", response_class=HTMLResponse)

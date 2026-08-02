@@ -80,8 +80,7 @@ _CSS = (
     ".iaw{padding:.05rem .4rem;border-radius:8px;font-size:.7rem;font-weight:700;color:#fff;"
     "cursor:pointer}"
     ".iaw-q{background:#e8590c}"    # in generation queue — Stepan will reply
-    ".iaw-off{background:#6b7685}"  # bot off / silent / too old / already queued — won't reply
-    ".iaw-settled{background:#2f9e44}"  # no reply owed — handed off or held by the CRM
+    ".iaw-off{background:#6b7685}"  # kept: the ?awaiting=off list still labels its rows
     ".nav-sep{height:1px;background:#2d3748;margin:.4rem .9rem}"
     ".sid-ft{padding:.55rem .7rem .7rem;border-top:1px solid #2d3748}"
     ".lrow{display:flex;gap:.22rem;margin-top:.3rem}"

@@ -157,12 +157,15 @@ def test_inbox_nav_has_polled_awaiting_badge() -> None:
     assert "/ui/inbox/awaiting-count" in resp.text
 
 
-def test_inbox_awaiting_badge_splits_into_two_clickable_numbers() -> None:
+def test_inbox_awaiting_badge_shows_one_actionable_number() -> None:
+    """Было два числа; большое серое («не ответит») оказалось шумом — спящие, готовые и
+    выключенные тоже без ответа, и ни один из них не проблема. Осталось одно число: сколько
+    Стёпа должен ответить и не ответил."""
     from app.api._ui_panels import inbox_awaiting_badge_html
-    html = inbox_awaiting_badge_html(7, 97)
-    assert ">7<" in html and ">97<" in html                 # both numbers rendered
-    assert "awaiting=queue" in html and "awaiting=off" in html  # each opens its own filter
-    assert inbox_awaiting_badge_html(0, 0) == ""            # empty when nothing awaits → hidden
+    html = inbox_awaiting_badge_html(7)
+    assert ">7<" in html and "awaiting=queue" in html
+    assert "awaiting=off" not in html
+    assert inbox_awaiting_badge_html(0) == ""            # empty when nothing awaits → hidden
 
 
 def test_inbox_awaiting_queue_and_off_render_chip_and_scoped_load() -> None:

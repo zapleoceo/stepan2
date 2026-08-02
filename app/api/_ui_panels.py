@@ -85,26 +85,29 @@ def outbox_count_html(n: int) -> str:
     return str(n) if n > 0 else ""
 
 
-def inbox_awaiting_badge_html(in_queue: int, off: int, settled: int = 0) -> str:
-    """Inbox nav badge, split into three clickable numbers that sum to the total unanswered
-    (Meta Business chats excluded until that connector is finished): in Stepan's ACTIVE queue
-    (bot on + a funnel stage Stepan works, orange), everything else he won't answer (dormant /
-    ready / bot off, grey), and settled — nobody owes these a reply at all (handed off, or the
-    CRM gate already refused a send). Settled is shown rather than hidden so a lead the CRM
-    held by mistake stays findable. Empty when nothing awaits (hidden)."""
-    if in_queue + off + settled <= 0:
+def inbox_awaiting_badge_html(in_queue: int) -> str:
+    """One number: the chats Stepan is supposed to answer and hasn't. Nothing else.
+
+    It used to show every unanswered chat split into buckets, and the big grey number was
+    noise: dormant, ready, bot-off and handed-off leads are all "unanswered" and none of them
+    is a problem. A badge that is never zero is a badge nobody reads — so the counts that need
+    no action are gone, and this one hides itself at zero. Empty here means nothing is waiting
+    on us, which is the only state worth reporting at a glance.
+
+    The other buckets stay reachable by URL (?awaiting=off / settled) for when someone is
+    looking for them on purpose; they just no longer ask to be looked at.
+
+    Clicking swaps the thread list in place (htmx → #tl) instead of navigating: the badge polls
+    every 15s, and a full page load would throw away the open chat next to it."""
+    if in_queue <= 0:
         return ""
-
-    def _num(cls: str, n: int, val: str, tip: str) -> str:
-        js = ("event.stopPropagation();event.preventDefault();"
-              f"location.href='/ui/inbox?awaiting={val}';return false")
-        return f'<span class="{cls}" title="{_h.escape(t(tip))}" onclick="{js}">{n}</span>'
-
-    out = (_num("iaw iaw-q", in_queue, "queue", "inbox.await_queue")
-           + _num("iaw iaw-off", off, "off", "inbox.await_off"))
-    if settled:
-        out += _num("iaw iaw-settled", settled, "settled", "inbox.await_settled")
-    return out
+    return (
+        f'<span class="iaw iaw-q" title="{_h.escape(t("inbox.await_queue"))}"'
+        ' hx-get="/ui/threads?awaiting=queue" hx-target="#tl" hx-swap="innerHTML"'
+        ' hx-push-url="/ui/inbox?awaiting=queue"'
+        ' onclick="event.stopPropagation()">'
+        f"{in_queue}</span>"
+    )
 
 
 def outbox_panel_html(
