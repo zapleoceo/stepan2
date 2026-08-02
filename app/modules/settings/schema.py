@@ -172,6 +172,17 @@ SCHEMA: list[SettingSection] = [
         _f("meta_app_id", "text", "", _l("App ID", "App ID", "App ID"),
            ph=_l("1068545755735887", "1068545755735887", "1068545755735887"), width="220px",
            scope="channel"),
+        _f("meta_app_secret", "secret", "",
+           _l("App Secret (для кнопки «Подключить Facebook»)",
+              "App Secret (for the Connect Facebook button)",
+              "App Secret (untuk tombol Connect Facebook)"),
+           ph=_l("••••", "••••", "••••"),
+           help=_l("Нужен только для подключения клиента: обменивает код на токен. "
+                   "Пусто = не менять",
+                   "Only for the client connect flow: exchanges the code for a token. "
+                   "Blank = keep current",
+                   "Hanya untuk alur koneksi klien: menukar kode jadi token. Kosong = tetap"),
+           width="340px", scope="channel"),
         _f("fb_business_id", "text", "", _l("Business ID", "Business ID", "Business ID"),
            ph=_l("1234567890", "1234567890", "1234567890"), width="220px", scope="channel"),
         _f("fb_account_id", "text", "", _l("Ad Account ID", "Ad Account ID", "Ad Account ID"),

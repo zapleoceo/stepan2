@@ -32,7 +32,10 @@ SESSION_MAX_AGE_S = 60 * 60 * 24 * 30  # 30 days
 _PUBLIC_EXACT = ("/healthz", "/login", "/api/tg_login", "/logout", "/", "/privacy",
                  "/terms", "/data-deletion",
                  "/llms.txt", "/robots.txt", "/sitemap.xml", "/og.svg", "/og.png")
-_PUBLIC_PREFIXES = ("/webhooks/", "/mcp/", "/connector/", "/reader/", "/demo/")
+# /connect/ is the client OAuth flow: Meta redirects the browser back here with no session
+# cookie, so it cannot sit behind auth. It trusts nothing from the request — the channel id
+# arrives in an HMAC-signed state parameter (app/modules/meta/oauth.py).
+_PUBLIC_PREFIXES = ("/webhooks/", "/mcp/", "/connector/", "/reader/", "/demo/", "/connect/")
 
 
 def _secret() -> str:
