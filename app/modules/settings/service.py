@@ -83,8 +83,6 @@ class BranchSettings:
     # System User token scoped for ads + pixel + page/IG messaging — replaces the older split
     # meta_capi_token/meta_ads_token pair, kept above for backward compatibility.
     meta_app_id: str = ""
-    # Only the client connect flow uses this (app/modules/meta/oauth.py); the worker never does.
-    meta_app_secret: str = ""
     fb_account_id: str = ""
     meta_page_id: str = ""
     meta_system_user_token: str = ""
@@ -216,7 +214,6 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),
-        meta_app_secret=raw.get("meta_app_secret", ""),
         fb_account_id=raw.get("fb_account_id", ""),
         meta_page_id=raw.get("meta_page_id", ""),
         meta_system_user_token=raw.get("meta_system_user_token", ""),

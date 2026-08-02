@@ -10,6 +10,8 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Request, Response, status
 
+from app.modules.meta.app_secret import app_secret_for
+
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
@@ -18,9 +20,10 @@ def _verify_token_for(branch_id: int) -> str | None:
     return os.environ.get(f"STEPAN2_META_VERIFY_TOKEN_{branch_id}")
 
 
-def _app_secret_for(branch_id: int) -> str | None:
-    """Per-branch Meta app secret used to sign payloads (X-Hub-Signature-256)."""
-    return os.environ.get(f"STEPAN2_META_APP_SECRET_{branch_id}")
+def _app_secret_for(branch_id: int) -> str:
+    """The app secret this branch signs with — resolved in one shared place, so the webhook
+    and the client connect flow can never read different values."""
+    return app_secret_for(branch_id)
 
 
 def _signature_ok(branch_id: int, raw: bytes, header: str) -> bool:
