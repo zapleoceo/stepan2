@@ -31,9 +31,11 @@ def client() -> TestClient:
 # ─── item 1: active-thread highlight survives the poll ────────────────────────
 
 def _thread_row(tid: int) -> tuple:
+    # Trailing field is the Graph conversation id — the platform badge reads it, because one
+    # meta_business channel now serves both Messenger and Instagram Direct.
     return (tid, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
             "+62811", "course-a", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0,
-            "instagram")
+            "instagram", None)
 
 
 def test_thread_list_shows_exact_datetime_not_relative_ago() -> None:

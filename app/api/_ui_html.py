@@ -248,9 +248,24 @@ _CHANNEL_ICON = {
 }
 
 
-def _channel_badge(kind: str | None) -> str:
-    icon, color = _CHANNEL_ICON.get(str(kind), ("fa-solid fa-comment", "#8a94a6"))
-    return f'<i class="{icon}" style="color:{color}" title="{_h.escape(str(kind or ""))}"></i>'
+def _is_instagram_thread(external_thread_id: str | None) -> bool:
+    """Graph conversation ids tell the platforms apart: Messenger is "t_<digits>", Instagram is
+    base64 beginning with "aWdf" (the encoded "ig_")."""
+    return str(external_thread_id or "").startswith("aWdf")
+
+
+def _channel_badge(kind: str | None, external_thread_id: str | None = None) -> str:
+    """Platform badge for a thread.
+
+    The channel kind alone stopped being enough the moment one meta_business channel began
+    serving BOTH Messenger and Instagram Direct: every Instagram conversation showed a Facebook
+    mark. The conversation id already on the row settles it — no extra query, no new column.
+    """
+    key = str(kind or "")
+    if key == "meta_business" and _is_instagram_thread(external_thread_id):
+        key = "instagram"
+    icon, color = _CHANNEL_ICON.get(key, ("fa-solid fa-comment", "#8a94a6"))
+    return f'<i class="{icon}" style="color:{color}" title="{_h.escape(key)}"></i>'
 
 
 def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
@@ -258,7 +273,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
     (tid, name, stage, last_act, phone, product_slug,
      ig_username, avatar_url, follower_count, following_count, agent_enabled,
      last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h,
-     channel_kind) = row  # type: ignore[misc]
+     channel_kind, external_thread_id) = row  # type: ignore[misc]
     dt = _as_dt(last_act)  # raw UTC; _fmt_dt_short applies the viewer offset once (was a
     # per-row branch shift here + the contextvar shift there — now a single viewer shift)
     on = " on" if tid == active_tid else ""
@@ -303,7 +318,7 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
         f' href="{_h.escape(_back_url)}">'
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
-        f'<div class="ti-t">{_channel_badge(channel_kind)}'
+        f'<div class="ti-t">{_channel_badge(channel_kind, external_thread_id)}'
         f' <span class="ti-n">{_name_esc}</span>'
         f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_fmt_dt_short(dt)}</span></div>'

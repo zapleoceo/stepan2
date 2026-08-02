@@ -77,7 +77,7 @@ def test_opening_a_chat_keeps_its_own_url() -> None:
 
     from app.api._ui_html import thread_list_html
     row = (452, "Alice", "new", datetime.now(UTC).replace(tzinfo=None), "+62811", "c", "alice",
-           None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0, "instagram")
+           None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0, "instagram", None)
     row_html = thread_list_html([row], filter_qs="stage=dormant")
     assert 'hx-push-url="/ui/chat/452?stage=dormant"' in row_html
 
