@@ -43,6 +43,10 @@ class _FakeClient:
         return None
 
     async def get(self, url: str, params: dict) -> _FakeResp:
+        # The transport asks once for the Page's linked IG id, so it can tell which participant
+        # is itself. Not what this file tests — answer it and move on.
+        if params.get("fields") == "instagram_business_account":
+            return _FakeResp({"id": "207513496325789"})
         platform = params.get("platform")
         self.seen.append(platform)
         body = self.by_platform.get(platform)
