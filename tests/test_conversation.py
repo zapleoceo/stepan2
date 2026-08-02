@@ -261,7 +261,7 @@ async def test_decide_returns_decision_from_fake_llm(db_session):
         dossier=LeadDossier(pains=["takut telat"], desired_state=["kerja remote"]).to_json())
     # A prior bot turn — the opener module owns every genuine FIRST turn deterministically,
     # so the full-pipeline plumbing under test needs history (like production turn 2+).
-    from app.modules.conversation.opener import AD_TAP_OPENER as _OPENER
+    _OPENER = "Halo Kak 😊 Kakak lagi cari kursus buat apa nih?"  # any prior outbound will do
     thread = (await s.exec(select(ChannelThread).where(ChannelThread.id == thread_id))).first()
     s.add(Message(branch_id=branch_id, thread_id=thread_id, channel_id=thread.channel_id,
                   external_id="out-0", direction="out", sent_by="agent", text=_OPENER))

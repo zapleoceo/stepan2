@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.modules.conversation.opener import (
-    AD_TAP_OPENER,  # noqa: F401 — re-export surface used by reply.py and older tests
-    Entry,
-    classify,
-)
+from app.modules.conversation.opener import Entry, classify
 
 _PREFILL = "Halo! Tertarik kursus. Boleh info jadwal, durasi, dan biaya?"
 

@@ -18,6 +18,7 @@ from dataclasses import replace
 
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.adapters.db.models import Lead
+from app.modules.settings.service import get_settings
 
 from .decision import Decision, TurnDecision, generate
 from .delivery import ReplyDelivery, _script_lang
@@ -32,7 +33,7 @@ from .money_gate import (
     MONEY_ESCALATION_REASON,
     money_issues,
 )
-from .opener import JUNK_OPENER, Entry
+from .opener import Entry, junk_opener
 from .opener import classify as classify_entry
 from .prompt import (
     ORGANIC_ENTRY_HINT,
@@ -132,11 +133,12 @@ class ReplyService(ReplyDelivery):
             # the model. The tap used to get a template that opened with the DP figure; over
             # 30 days it was answered 14.3% of the time against 36.3% for a written reply,
             # and quoting money before the lead says a word contradicts the contract itself.
-            # Gated on the lead writing in the branch's own script: the template is
-            # Bahasa-only, so a Cyrillic first contact goes straight to the model.
+            # Gated on the lead writing in the branch's own script: the template is written
+            # in one language, so a Cyrillic first contact goes straight to the model.
             fc = classify_entry(ctx.dialog, ctx.thread.lead_source, ctx.thread.ad_id)
             if fc.entry is Entry.JUNK:
-                decision = TurnDecision(reply=JUNK_OPENER)
+                cfg = await get_settings(self.session, self.branch_id)
+                decision = TurnDecision(reply=junk_opener(cfg.junk_opener))
                 self.last_decision = decision
                 self._last_llm_meta = TEMPLATED_META
                 logger.info("reply branch=%d thread=%d tier=templated first=True",

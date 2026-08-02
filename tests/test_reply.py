@@ -77,8 +77,7 @@ async def _thread(s, *, texts: tuple[tuple[str, str], ...] = (("in", "halo"),), 
     """Unless the texts already carry an outbound, a prior bot greeting is prepended so the
     turn models mid-conversation state (a genuine FIRST turn is the opener module's regime)."""
     if not any(d == "out" for d, _ in texts):
-        from app.modules.conversation.opener import AD_TAP_OPENER  # noqa: PLC0415
-        texts = (("out", AD_TAP_OPENER), *texts)
+        texts = (("out", "Halo Kak 😊 Kakak lagi cari info tentang apa ya?"), *texts)
     b = Branch(name="T", lang="id")
     s.add(b)
     await s.flush()

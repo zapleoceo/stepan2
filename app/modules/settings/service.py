@@ -73,6 +73,10 @@ class BranchSettings:
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
     phone_country_code: str = "62"
+    # The one reply still shipped by code rather than written by the model (opener.py). Per
+    # branch because it names the business: hardcoding it made every branch introduce itself
+    # as the first client this product ever had.
+    junk_opener: str = ""
     # Independent from agent_enabled: agent_enabled gates whether Stepan SCANS incoming and
     # QUEUES a reply (reply_pending/schedule_followups); this gates whether send_outbox
     # actually DRAINS the queue. Off = the queue just accumulates, nothing goes out — the
