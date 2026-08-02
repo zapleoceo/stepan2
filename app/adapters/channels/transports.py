@@ -416,6 +416,40 @@ class GraphTransportHTTP:
         )
 
     async def fetch_conversations(self) -> list[dict[str, Any]]:
+        """Inbound threads across BOTH inboxes hanging off this Page.
+
+        /{page-id}/conversations defaults to Messenger only. Instagram Direct lives behind the
+        same endpoint with platform=instagram, so without that second call an Instagram message
+        never arrives — the channel looks connected and healthy and silently reads half of what
+        the business receives. Verified live on 2026-08-02: page 207513496325789 returned the
+        Messenger history and nothing at all from Direct.
+
+        A failure on one platform must not lose the other: Instagram Direct also answers
+        "(#200) the account owner has disabled access to Instagram Direct messages" when the
+        business has that setting off, which is a normal state, not an outage.
+        """
+        import httpx  # lazy: real transport only, never imported by unit tests  # noqa: PLC0415
+
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for platform in (None, "instagram"):
+            try:
+                convos = await self._conversations_for(platform)
+            except httpx.HTTPError as exc:
+                logger.warning("meta conversations failed (platform=%s): %s",
+                               platform or "messenger", exc)
+                continue
+            # Dedup by thread id: the two calls are meant to return disjoint sets, and a thread
+            # counted twice would be re-ingested and could be answered twice.
+            for conv in convos:
+                tid = conv.get("thread_id", "")
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                out.append(conv)
+        return out[:settings().meta_live_conversations]
+
+    async def _conversations_for(self, platform: str | None) -> list[dict[str, Any]]:
         # The default /conversations page is ~25, so older-but-active chats were dropped. Page
         # through with the `after` cursor up to a config cap (header auth kept — following the
         # opaque paging.next URL would leak the token into logs; the cursor doesn't).
@@ -428,6 +462,8 @@ class GraphTransportHTTP:
             for _ in range(max_pages):
                 params: dict[str, Any] = {
                     "fields": "id,messages{from,message,created_time}", "limit": page_size}
+                if platform:
+                    params["platform"] = platform
                 if cursor:
                     params["after"] = cursor
                 r = await c.get(f"/{self._account_id}/conversations", params=params)
