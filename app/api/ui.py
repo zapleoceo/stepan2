@@ -188,6 +188,25 @@ async def funnel_partial(request: Request, stage: str = "") -> HTMLResponse:
         funnel_html(counts, active_stage=stage.strip(), bot_on=bot_on, blocked=blocked))
 
 
+# A search term only reaches the phone column once it carries this many digits. Below it the
+# term is almost always a name — "62" would otherwise match every Indonesian number in the
+# inbox and bury what the person was actually looking for.
+_MIN_PHONE_DIGITS = 4
+
+
+def _phone_needle(term: str) -> str | None:
+    """The digits to look for in a stored number, or None when the term isn't a number search.
+
+    Handles the three ways the same Indonesian number gets typed: +6281211120213 as stored,
+    081211120213 as it is written locally, and any fragment of either. The local form differs
+    from the stored one only by 0 vs +62, so dropping a leading zero makes both land on the
+    same digits — 81211120213, which sits inside 6281211120213."""
+    digits = "".join(ch for ch in term if ch.isdigit())
+    if len(digits) < _MIN_PHONE_DIGITS:
+        return None
+    return digits.lstrip("0") or digits
+
+
 @router.get("/threads", response_class=HTMLResponse)
 async def threads_partial(
     request: Request, stage: str = "", ad_id: str = "", grp: str = "", lead_type: str = "",
@@ -205,10 +224,17 @@ async def threads_partial(
     # the whole branch-scoped inbox.
     needle = q.strip()
     if needle:
-        conditions.append(
-            "(LOWER(COALESCE(l.display_name, '')) LIKE :q"
-            " OR LOWER(COALESCE(l.ig_username, '')) LIKE :q)")
+        matches = ["LOWER(COALESCE(l.display_name, '')) LIKE :q",
+                   "LOWER(COALESCE(l.ig_username, '')) LIKE :q"]
         params["q"] = f"%{needle.lower()}%"
+        if (phone := _phone_needle(needle)) is not None:
+            # Stored E.164 keeps its leading '+', so strip that on the column side and compare
+            # digits to digits. REPLACE rather than a regex because the tests run on SQLite and
+            # regexp_replace is Postgres-only — and a search nobody can test is a search that
+            # quietly stops working.
+            matches.append("REPLACE(COALESCE(l.phone_e164, ''), '+', '') LIKE :phone")
+            params["phone"] = f"%{phone}%"
+        conditions.append("(" + " OR ".join(matches) + ")")
     # Connector filter is a MULTI-TOGGLE facet: `kind` is a comma-list of the channels to SHOW
     # (empty/absent = all, the literal 'none' = every chip toggled off). Server-side (not a CSS
     # hide) so an older Meta chat isn't hidden behind newer IG ones past the per-query LIMIT.

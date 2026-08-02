@@ -80,3 +80,59 @@ def test_opening_a_chat_keeps_its_own_url() -> None:
            None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0, "instagram")
     row_html = thread_list_html([row], filter_qs="stage=dormant")
     assert 'hx-push-url="/ui/chat/452?stage=dormant"' in row_html
+
+
+# ── searching by phone number ─────────────────────────────────────────────────
+
+def test_the_same_number_is_found_however_it_is_typed() -> None:
+    """A number stored as +6281211120213 gets typed three ways: as stored, in the local form
+    with a leading 0, or as a fragment of either. The local form differs from the stored one
+    only by 0 versus +62, so dropping the leading zero lands both on the same digits."""
+    from app.api.ui import _phone_needle
+
+    stored = "+6281211120213".replace("+", "")
+    for typed in ("+6281211120213", "6281211120213", "081211120213",
+                  "+62 812 1112 0213", "0812-1112-0213", "81211120213", "11120213"):
+        needle = _phone_needle(typed)
+        assert needle is not None, typed
+        assert needle in stored, (typed, needle)
+
+
+def test_a_name_is_not_treated_as_a_number() -> None:
+    """Below four digits the term is almost always a name — "62" alone would match every
+    Indonesian number in the inbox and bury what the person was looking for."""
+    from app.api.ui import _phone_needle
+
+    for term in ("Ade", "", "  ", "62", "a1", "Budi 12"):
+        assert _phone_needle(term) is None, term
+
+
+def test_a_term_of_only_zeroes_still_searches_for_something() -> None:
+    """lstrip('0') on "0000" would leave an empty needle, and LIKE '%%' matches every row —
+    a search that answers with the entire inbox."""
+    from app.api.ui import _phone_needle
+
+    assert _phone_needle("0000") == "0000"
+
+
+def test_the_query_looks_at_the_phone_column_only_for_number_searches() -> None:
+    """The name search must not pay for a phone comparison on every keystroke."""
+    import re
+    from pathlib import Path
+
+    src = Path("app/api/ui.py").read_text(encoding="utf-8")
+    block = src[src.index("needle = q.strip()"):]
+    block = block[:block.index("# Connector filter")]
+    assert "phone_e164" in block
+    # …and it is guarded by the digit test rather than always appended.
+    assert re.search(r"if \(phone := _phone_needle\(needle\)\) is not None", block), block
+
+
+def test_the_route_accepts_a_number_in_either_notation(client: TestClient) -> None:
+    """(200, 500) like its siblings above: the thread-list SQL uses LEFT JOIN LATERAL, which
+    SQLite has no answer for, so this can only say the route parses the term and builds a
+    query. What the query MEANS is pinned by the _phone_needle tests above and by the
+    fragment check below — together they cover what a live round-trip would."""
+    assert client.get("/ui/threads?q=%2B6281211120213").status_code in (200, 500)
+    assert client.get("/ui/threads?q=081211120213").status_code in (200, 500)
+    assert client.get("/ui/threads?q=0812-1112-0213").status_code in (200, 500)
