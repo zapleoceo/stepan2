@@ -24,6 +24,21 @@ _ORPHAN = (
     " AND NOT EXISTS (SELECT 1 FROM channel_thread ct WHERE ct.lead_id = l.id)"
 )
 
+# Every table holding an FK to the row being deleted, keyed by the parent. Nothing here
+# cascades at the DB level, so a table missing from a list aborts the whole purge on a
+# ForeignKeyViolation — which is exactly how the "can't delete connector" bug kept coming
+# back (lead refs when needs-cloud + CRM landed; thread_log and post_comment after that).
+# tests/test_channel_purge_covers_fks.py reads these tuples and fails when a new FK appears,
+# so the next feature that adds one is caught in CI rather than in the field.
+_BY_THREAD = ("outbox", "manager_alert", "stage_event", "thread_log")
+_BY_LEAD = ("manager_alert", "stage_event", "crm_lead_state", "lead_need_tag",
+            "need_lead_state")
+# app_setting rows scoped to a channel are per-connector overrides. Production carries no FK
+# for that column (the migration added it without one, unlike the model), so they never
+# blocked the delete — they just outlived it, and would have attached themselves to whatever
+# channel took the id next.
+_BY_CHANNEL = ("post_comment", "channel_session", "app_setting")
+
 
 @dataclass(frozen=True)
 class PurgeResult:
@@ -58,30 +73,21 @@ class ChannelService:
             "DELETE FROM media_asset WHERE message_id IN"
             " (SELECT id FROM message WHERE channel_id = :c)", p)
         await self._exec("DELETE FROM message WHERE channel_id = :c", p)
-        await self._exec(
-            "DELETE FROM outbox WHERE thread_id IN"
-            " (SELECT id FROM channel_thread WHERE channel_id = :c)", p)
-        await self._exec(
-            "DELETE FROM manager_alert WHERE thread_id IN"
-            " (SELECT id FROM channel_thread WHERE channel_id = :c)", p)
-        await self._exec(
-            "DELETE FROM stage_event WHERE thread_id IN"
-            " (SELECT id FROM channel_thread WHERE channel_id = :c)", p)
+        for tbl in _BY_THREAD:
+            await self._exec(
+                f"DELETE FROM {tbl} WHERE thread_id IN"  # noqa: S608
+                " (SELECT id FROM channel_thread WHERE channel_id = :c)", p)
         await self._exec("DELETE FROM channel_thread WHERE channel_id = :c", p)
 
-        # 2) leads now orphaned (threads on this channel were their only ones) + their refs.
-        # Every table that FK-references lead.id must be cleared BEFORE the lead, or the delete
-        # aborts on a ForeignKeyViolation (this used to silently 500 the whole purge once the
-        # needs-cloud + CRM features added new lead references — the "can't delete connector"
-        # bug). Keep this list in sync with FKs to lead.id (see models.py).
+        # 2) leads now orphaned — the threads on this channel were their only ones.
         n_leads = await self._count(f"({_ORPHAN}) AS orphan", p)  # noqa: S608
-        for tbl in ("manager_alert", "stage_event", "crm_lead_state",
-                    "lead_need_tag", "need_lead_state"):
+        for tbl in _BY_LEAD:
             await self._exec(f"DELETE FROM {tbl} WHERE lead_id IN ({_ORPHAN})", p)  # noqa: S608
         await self._exec(f"DELETE FROM lead WHERE id IN ({_ORPHAN})", p)  # noqa: S608
 
         # 3) the channel itself
-        await self._exec("DELETE FROM channel_session WHERE channel_id = :c", p)
+        for tbl in _BY_CHANNEL:
+            await self._exec(f"DELETE FROM {tbl} WHERE channel_id = :c", p)  # noqa: S608
         await self._exec("DELETE FROM channel WHERE id = :c", p)
         await self.session.flush()
 
