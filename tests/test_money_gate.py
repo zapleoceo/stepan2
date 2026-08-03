@@ -333,6 +333,16 @@ def test_ordinary_payment_and_schedule_talk_is_not_a_start_promise() -> None:
 
 
 def test_a_real_date_still_passes() -> None:
-    """The fix is not 'never mention a start' — a day from the knowledge base is the point."""
-    assert money_issues("Skill Booster Python hari Minggu, 2 Agustus 2026, jam 09:00-14:00",
+    """The fix is not 'never mention a start' — a day from the knowledge base is the point.
+
+    The date is computed rather than written down: a literal one quietly becomes a PAST date
+    and fails this test on an ordinary morning with nothing having changed (it did, on
+    2026-08-03, when "2 Agustus 2026" aged out overnight)."""
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    soon = date.today() + timedelta(days=14)
+    months = ("Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli",
+              "Agustus", "September", "Oktober", "November", "Desember")
+    when = f"{soon.day} {months[soon.month - 1]} {soon.year}"
+    assert money_issues(f"Skill Booster Python hari Minggu, {when}, jam 09:00-14:00",
                         _KB) == []

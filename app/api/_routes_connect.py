@@ -26,6 +26,7 @@ from app.modules.meta.app_secret import app_secret_for
 from app.modules.meta.oauth import (
     authorize_url,
     exchange_code,
+    exchange_long_lived,
     list_pages,
     state_channel_id,
     state_token,
@@ -106,6 +107,12 @@ async def callback(
         user_token = await exchange_code(
             code=code, app_id=cfg.meta_app_id, app_secret=secret,
             redirect_uri=_redirect_uri(), version=settings().ig_graph_version,
+        )
+        # Before listing Pages, not after: a Page token inherits the lifetime of the user token
+        # that minted it, and the one from the code exchange lasts about an hour.
+        user_token = await exchange_long_lived(
+            user_token=user_token, app_id=cfg.meta_app_id, app_secret=secret,
+            version=settings().ig_graph_version,
         )
         pages = await list_pages(user_token, settings().ig_graph_version)
     except httpx.HTTPError as exc:

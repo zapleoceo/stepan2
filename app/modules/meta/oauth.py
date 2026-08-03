@@ -78,6 +78,30 @@ async def exchange_code(
     return str(resp.json().get("access_token", ""))
 
 
+async def exchange_long_lived(
+    *, user_token: str, app_id: str, app_secret: str, version: str,
+) -> str:
+    """Short-lived user token → long-lived one (~60 days).
+
+    Skipping this is a silent time bomb: the token from the code exchange expires in about an
+    hour, and a Page token minted from it inherits that lifetime, so the client's channel goes
+    dead the same afternoon they connected it. A Page token derived from a LONG-lived user
+    token does not expire at all — which is the only version worth storing.
+    """
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            f"{_GRAPH.format(ver=version)}/oauth/access_token",
+            params={
+                "grant_type": "fb_exchange_token",
+                "client_id": app_id,
+                "client_secret": app_secret,
+                "fb_exchange_token": user_token,
+            },
+        )
+        resp.raise_for_status()
+    return str(resp.json().get("access_token", "")) or user_token
+
+
 async def list_pages(user_token: str, version: str) -> list[dict]:
     """Pages this user administers, each with its own Page token and linked IG account.
 
