@@ -5,6 +5,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
+from app.adapters.db.models import _utcnow
 from app.adapters.db.session import session_scope
 from app.admin._branch import (
     actor_from_request,
@@ -12,10 +13,15 @@ from app.admin._branch import (
     is_branch_forbidden,
     is_branch_write_forbidden,
     writable_branch_ids,
+    writable_selected_branch_id,
 )
-from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
+from app.modules.knowledge.history import (
+    list_revisions,
+    record_revision,
+    restore_revision_scoped,
+)
 
-from ._i18n import apply_lang
+from ._i18n import apply_lang, t
 from ._query import _branch_where
 from ._ui_kb import kb_history_html
 from ._ui_panels import product_edit_html, products_panel_html
@@ -128,10 +134,13 @@ async def products_create(
     sort_order: int = Form(default=0),
 ) -> HTMLResponse:
     apply_lang(request)
-    # Create in a branch the caller may WRITE (super: None → default branch 1). The
-    # WriteGuardMiddleware already blocks a pure viewer, so `writable` is never [] here.
-    writable = writable_branch_ids(request)
-    branch_id = writable[0] if writable else 1
+    # The product lands in the branch ON SCREEN. The old `writable[0] if writable else 1`
+    # made every super_admin's new product a branch-1 (Indonesia) product regardless of the
+    # branch filter — and branch 1 is the one tenant whose catalogue must not grow by accident.
+    branch_id = writable_selected_branch_id(request)
+    if branch_id is None:
+        return HTMLResponse(
+            f'<div class="emp">{t("branch.pick_one")}</div>', status_code=403)
     slug = slug.strip().lower().replace(" ", "_")
     if not slug:
         return HTMLResponse(
@@ -141,12 +150,18 @@ async def products_create(
     async with session_scope() as session:
         await session.execute(
             text(
-                "INSERT INTO product (branch_id, slug, title, content, is_active, sort_order)"
-                " VALUES (:bid, :slug, :t, :c, :a, :s)"
+                "INSERT INTO product"
+                " (branch_id, slug, title, content, is_active, sort_order, kind, updated_at)"
+                " VALUES (:bid, :slug, :t, :c, :a, :s, :k, :ts)"
                 " ON CONFLICT (branch_id, slug) DO NOTHING"
             ),
+            # kind and updated_at spelled out rather than left to their server_defaults: the
+            # values are the same, but a raw INSERT that omits two NOT NULL columns only
+            # works because of defaults declared in migrations nothing here references — and
+            # the sibling save route already writes updated_at itself.
             {"bid": branch_id, "slug": slug, "t": title.strip(),
-             "c": content.strip(), "a": active, "s": sort_order},
+             "c": content.strip(), "a": active, "s": sort_order,
+             "k": "course", "ts": _utcnow()},
         )
         row = (
             await session.execute(
@@ -189,10 +204,14 @@ async def products_history(prod_id: int, request: Request) -> HTMLResponse:
 @router.post("/products/restore", response_class=HTMLResponse)
 async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLResponse:
     apply_lang(request)
-    writable = writable_branch_ids(request)  # scope by WRITE right, not view (viewer can't)
-    bid = writable[0] if writable else None
+    # Scope by WRITE right on the REVISION'S OWN branch — never on a positional pick out of
+    # the writable set, which restored into (or 404'd on) the wrong tenant.
+    writable = writable_branch_ids(request)
     async with session_scope() as session:
-        out = await restore_revision(session, bid, rev_id, actor=actor_from_request(request))
+        status, out = await restore_revision_scoped(
+            session, rev_id, writable=writable, actor=actor_from_request(request))
+        if status == "forbidden":
+            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         if out is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
         row = (await session.execute(

@@ -74,3 +74,32 @@ def writable_branch_ids(request: Request) -> list[int] | None:
 def is_branch_write_forbidden(branch_id: int, writable: list[int] | None) -> bool:
     """True when the caller may not WRITE to branch_id; [] (read-only) denies everything."""
     return writable is not None and branch_id not in writable
+
+
+def selected_branch_id(request: Request) -> int | None:
+    """The ONE branch the operator is currently viewing, or None when the view spans several
+    branches (or all of them). None means "no unambiguous branch" — a caller must say so, not
+    pick one, because there is no reading of a multi-branch view under which a single-branch
+    read or write is correct."""
+    view = branch_ids_from_request(request)
+    return view[0] if view and len(view) == 1 else None
+
+
+def writable_selected_branch_id(request: Request) -> int | None:
+    """The branch currently being viewed, if the caller may WRITE to it; None otherwise.
+
+    Every branch-scoped write resolves its target through here. It replaces the fallback
+    `writable = writable_branch_ids(request); bid = writable[0] if writable else 1`, which
+    was wrong in both directions: writable_branch_ids is None for a super_admin, so every
+    settings save and every product create landed on branch 1 — live Indonesia — no matter
+    which branch the panel was showing; and for a multi-branch admin `writable[0]` picked
+    whichever branch happened to sort first rather than the one on screen. Configuring the
+    test branch rewrote Indonesia's alert group and greeting, and the test branch could not
+    be configured at all.
+
+    There is no safe positional guess, so the failure mode here is None and a visible refusal.
+    """
+    target = selected_branch_id(request)
+    if target is None or is_branch_write_forbidden(target, writable_branch_ids(request)):
+        return None
+    return target

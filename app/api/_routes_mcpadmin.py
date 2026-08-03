@@ -12,7 +12,11 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request, is_super_admin, writable_branch_ids
+from app.admin._branch import (
+    is_super_admin,
+    selected_branch_id,
+    writable_selected_branch_id,
+)
 from app.config import settings
 from app.modules.mcp.tokens import McpTokenService
 from app.modules.settings.repository import SettingRepo
@@ -33,11 +37,6 @@ def _base_url() -> str:
     return (settings().public_url or "https://stepan2.zapleo.com").rstrip("/")
 
 
-def _branch_id(request: Request) -> int:
-    ids = branch_ids_from_request(request)
-    return ids[0] if ids else 1
-
-
 async def _crm_cfg(session, branch_id: int) -> tuple[bool, str, bool]:
     rows = dict((await session.execute(
         text("SELECT key, value FROM app_setting WHERE branch_id = :b"
@@ -48,10 +47,13 @@ async def _crm_cfg(session, branch_id: int) -> tuple[bool, str, bool]:
 
 
 async def _render(request: Request, new_token: str | None = None) -> HTMLResponse:
-    branch_id = _branch_id(request)
+    # The CRM block is per branch. With no single branch in view it renders blank rather
+    # than showing branch 1's live CRM endpoint as if it belonged to whatever is on screen.
+    branch_id = selected_branch_id(request)
     async with session_scope() as session:
         tokens = await McpTokenService(session).list()
-        enabled, url, has_secret = await _crm_cfg(session, branch_id)
+        enabled, url, has_secret = (
+            await _crm_cfg(session, branch_id) if branch_id is not None else (False, "", False))
         branches = [
             (r[0], r[1]) for r in (await session.execute(
                 text("SELECT id, name FROM branch ORDER BY name"))).all()]
@@ -113,8 +115,11 @@ async def mcp_outgoing_save(
     apply_lang(request)
     if not is_super_admin(request):
         return _FORBIDDEN
-    writable = writable_branch_ids(request)
-    bid = writable[0] if writable else _branch_id(request)
+    # crm_state_url / crm_read_secret are per-branch credentials — writing them to a guessed
+    # branch pointed one tenant's CRM reader at another's endpoint. No branch in view, no write.
+    bid = writable_selected_branch_id(request)
+    if bid is None:
+        return await _render(request)
     on = "true" if enabled else "false"
     async with session_scope() as session:
         await _set(session, bid, "crm_read_enabled", on)

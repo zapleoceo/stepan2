@@ -43,6 +43,7 @@ from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
 from ._routes_channels import router as _channels_router
 from ._routes_chat import router as _chat_router
+from ._routes_coach import coach_branch
 from ._routes_coach import router as _coach_router
 from ._routes_comments import router as _comments_router
 from ._routes_knowledge import router as _knowledge_router
@@ -167,8 +168,14 @@ async def knowledge_page(request: Request) -> HTMLResponse:
 @router.get("/coach", response_class=HTMLResponse)
 async def coach_page(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    branch_id = branch_ids[0] if branch_ids else 1
+    # Same resolver as the coach partial and its write routes, so the page can't show one
+    # branch's coaching history while the writes land on another (it showed branch 1's for
+    # every super_admin with no filter, and coached branch 1 to match).
+    branch_id = coach_branch(request)
+    if branch_id is None:
+        panel = f'<div class="emp" style="padding:1rem">{_h.escape(t("branch.pick_one"))}</div>'
+        return HTMLResponse(app_shell(lang, panel, active_nav="coach",
+                                      is_super=is_super_admin(request)))
     async with session_scope() as session:
         edits, notes = await fetch_coach_data(session, branch_id)
     panel = coach_chat_html(branch_id, edits, notes)

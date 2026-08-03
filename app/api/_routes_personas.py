@@ -8,7 +8,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request, writable_branch_ids
+from app.admin._branch import writable_selected_branch_id
 from app.api._i18n import apply_lang, t
 from app.api._ui_personas import persona_detail_html, personas_panel_html
 from app.modules.persona import service as P
@@ -17,13 +17,10 @@ router = APIRouter()
 
 
 def _acting_branch(request: Request) -> int | None:
-    """The single branch a write acts on: the caller's writable branch, or the one selected
-    in the branch filter for a super_admin. None when the scope isn't a single branch."""
-    w = writable_branch_ids(request)
-    if w:
-        return w[0]
-    b = branch_ids_from_request(request)  # None = super_admin; may still have a single filter
-    return b[0] if b and len(b) == 1 else None
+    """The single branch a persona write acts on. Was `writable_branch_ids(request)[0]` with
+    the view filter only as a super_admin fallback, so a two-branch admin looking at branch 7
+    swapped branch 3's persona instead — the salesperson of a branch nobody was editing."""
+    return writable_selected_branch_id(request)
 
 
 async def _render_library(request: Request) -> str:

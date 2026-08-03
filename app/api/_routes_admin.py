@@ -14,7 +14,9 @@ from app.admin._branch import (
     branch_ids_from_request,
     is_branch_write_forbidden,
     is_super_admin,
+    selected_branch_id,
     writable_branch_ids,
+    writable_selected_branch_id,
 )
 from app.domain.clock import branch_day_start_utc, utc_now
 from app.modules.ads import AdMappingService
@@ -417,14 +419,26 @@ async def reports_panel(
 @router.get("/settings/panel", response_class=HTMLResponse)
 async def settings_panel(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    where, params = _branch_where(branch_ids)
+    branch_id = selected_branch_id(request)
+    if branch_id is None:
+        # Every value here belongs to exactly one branch. The old query had no branch
+        # predicate when the filter was off, so five tenants' rows collapsed into one
+        # key→value map and the panel showed whichever branch won the ORDER BY — an
+        # operator could read Indonesia's alert group while thinking they saw the test
+        # branch's. No branch on screen → no values, not a blend.
+        return HTMLResponse(_pick_branch_html())
     async with session_scope() as session:
-        q = f"SELECT key, value FROM app_setting {where} ORDER BY key"  # noqa: S608
-        rows = (await session.execute(text(q), params)).all()
+        rows = (await session.execute(
+            text("SELECT key, value FROM app_setting"
+                 " WHERE branch_id = :b AND channel_id IS NULL ORDER BY key"),
+            {"b": branch_id})).all()
     # Anti-ban caps moved to the per-connector editor (with a per-channel live-usage badge),
     # so the branch panel no longer shows or computes them.
     return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
+
+
+def _pick_branch_html() -> str:
+    return f'<div class="emp" style="padding:1rem">{_h.escape(t("branch.pick_one"))}</div>'
 
 
 
@@ -471,15 +485,21 @@ async def settings_save_by_key(
     # branch the caller can write — reuse the channel-branch ownership guard (blocks IDOR).
     if channel_id is not None and field.scope != "channel":
         return HTMLResponse("", status_code=400)
-    # Settings write → scope by WRITE right (viewer can't); middleware blocks a pure viewer.
-    writable = writable_branch_ids(request)
-    bid = writable[0] if writable else 1
     if channel_id is not None:
+        writable = writable_branch_ids(request)
         async with session_scope() as session:
             owner = await _channel_branch_id(session, channel_id, writable)
         if owner is None:
             return HTMLResponse("", status_code=403)
         bid = owner
+    else:
+        # The branch tier writes to the branch ON SCREEN, never to a positional fallback:
+        # writable_branch_ids is None for a super_admin, so the old `writable[0] if writable
+        # else 1` sent every setting saved from any branch's panel to branch 1 (Indonesia).
+        target = writable_selected_branch_id(request)
+        if target is None:
+            return HTMLResponse(_pick_branch_html(), status_code=403)
+        bid = target
     val = value.strip()
     async with session_scope() as session:
         if field.kind == "secret" and not val:
@@ -533,18 +553,10 @@ async def _write_flag(session, branch_id: int | None, key: str, on: bool) -> Non
         key, "true" if on else "false", branch_id=branch_id)
 
 
-async def _single_selected_branch(request: Request) -> int | None:
-    """The ONE branch the sidebar filter currently narrows to, or None when the view
-    spans multiple/all branches — in which case there's no single branch left for the
-    per-branch toggle to mean anything, so callers must not silently guess one."""
-    branch_ids = branch_ids_from_request(request)
-    return branch_ids[0] if branch_ids and len(branch_ids) == 1 else None
-
-
 @router.get("/agent-status", response_class=HTMLResponse)
 async def agent_status(request: Request) -> HTMLResponse:
     apply_lang(request)
-    branch_id = await _single_selected_branch(request)
+    branch_id = selected_branch_id(request)
     is_super = is_super_admin(request)
     async with session_scope() as session:
         platform_on = await _read_flag(session, None, _PLATFORM_KEY)
@@ -553,15 +565,13 @@ async def agent_status(request: Request) -> HTMLResponse:
 
 
 @router.post("/agent-toggle", response_class=HTMLResponse)
-async def agent_toggle(
-    request: Request, scope: str = Form(default="branch"), branch_id: int = Form(default=1),
-) -> HTMLResponse:
+async def agent_toggle(request: Request, scope: str = Form(default="branch")) -> HTMLResponse:
+    # The form's hidden branch_id is not read: the target comes from the server-side view,
+    # so a stale or forged field can't aim the toggle at another tenant.
     apply_lang(request)
     is_super = is_super_admin(request)
-    allowed = branch_ids_from_request(request)
-    if allowed and branch_id not in allowed:
-        branch_id = allowed[0]
-    selected = await _single_selected_branch(request)
+    selected = selected_branch_id(request)
+    target = writable_selected_branch_id(request)
     async with session_scope() as session:
         if scope == "platform":
             # The platform switch is only rendered for super admins (_agent_toggles_html),
@@ -570,16 +580,14 @@ async def agent_toggle(
             if is_super:
                 new = not await _read_flag(session, None, _PLATFORM_KEY)
                 await _write_flag(session, None, _PLATFORM_KEY, new)
-        elif selected is not None and not is_branch_write_forbidden(
-            selected, writable_branch_ids(request)
-        ):
+        elif target is not None:
             # The branch-scope button only renders when a single branch is selected (see
             # _agent_toggles_html) — a POST for scope=branch with no branch actually
             # selected (e.g. a stale form from an "all branches" view) is a no-op, not a
             # silent branch-1 guess. A branch_viewer of the selected branch can't flip it.
-            new = not await _read_flag(session, selected, _BRANCH_KEY)
-            await _write_flag(session, selected, _BRANCH_KEY, new)
-            invalidate(selected)
+            new = not await _read_flag(session, target, _BRANCH_KEY)
+            await _write_flag(session, target, _BRANCH_KEY, new)
+            invalidate(target)
         platform_on = await _read_flag(session, None, _PLATFORM_KEY)
         branch_on = await _read_flag(session, selected, _BRANCH_KEY) if selected else None
     return HTMLResponse(_agent_toggles_html(selected, platform_on, branch_on, is_super))
@@ -591,26 +599,22 @@ _SENDING_KEY = "sending_enabled"  # per-branch send_outbox master switch (see se
 @router.get("/sending-status", response_class=HTMLResponse)
 async def sending_status(request: Request) -> HTMLResponse:
     apply_lang(request)
-    branch_id = await _single_selected_branch(request)
+    branch_id = selected_branch_id(request)
     async with session_scope() as session:
         sending_on = await _read_flag(session, branch_id, _SENDING_KEY) if branch_id else None
     return HTMLResponse(_sending_toggle_html(branch_id, sending_on))
 
 
 @router.post("/sending-toggle", response_class=HTMLResponse)
-async def sending_toggle(request: Request, branch_id: int = Form(default=1)) -> HTMLResponse:
+async def sending_toggle(request: Request) -> HTMLResponse:
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
-    if allowed and branch_id not in allowed:
-        branch_id = allowed[0]
-    selected = await _single_selected_branch(request)
+    selected = selected_branch_id(request)
+    target = writable_selected_branch_id(request)
     async with session_scope() as session:
-        if selected is not None and not is_branch_write_forbidden(
-            selected, writable_branch_ids(request)
-        ):
-            new = not await _read_flag(session, selected, _SENDING_KEY)
-            await _write_flag(session, selected, _SENDING_KEY, new)
-            invalidate(selected)
+        if target is not None:
+            new = not await _read_flag(session, target, _SENDING_KEY)
+            await _write_flag(session, target, _SENDING_KEY, new)
+            invalidate(target)
         sending_on = await _read_flag(session, selected, _SENDING_KEY) if selected else None
     return HTMLResponse(_sending_toggle_html(selected, sending_on))
 
@@ -621,7 +625,7 @@ _COMMENTS_KEY = "comment_replies_enabled"  # per-branch reply-to-comments switch
 @router.get("/comment-status", response_class=HTMLResponse)
 async def comment_status(request: Request) -> HTMLResponse:
     apply_lang(request)
-    branch_id = await _single_selected_branch(request)
+    branch_id = selected_branch_id(request)
     async with session_scope() as session:
         # Default OFF (unlike bot/sending which default ON) — read with a false fallback.
         on = await _read_flag_off(session, branch_id, _COMMENTS_KEY) if branch_id else None
@@ -629,19 +633,15 @@ async def comment_status(request: Request) -> HTMLResponse:
 
 
 @router.post("/comment-toggle", response_class=HTMLResponse)
-async def comment_toggle(request: Request, branch_id: int = Form(default=1)) -> HTMLResponse:
+async def comment_toggle(request: Request) -> HTMLResponse:
     apply_lang(request)
-    allowed = branch_ids_from_request(request)
-    if allowed and branch_id not in allowed:
-        branch_id = allowed[0]
-    selected = await _single_selected_branch(request)
+    selected = selected_branch_id(request)
+    target = writable_selected_branch_id(request)
     async with session_scope() as session:
-        if selected is not None and not is_branch_write_forbidden(
-            selected, writable_branch_ids(request)
-        ):
-            new = not await _read_flag_off(session, selected, _COMMENTS_KEY)
-            await _write_flag(session, selected, _COMMENTS_KEY, new)
-            invalidate(selected)
+        if target is not None:
+            new = not await _read_flag_off(session, target, _COMMENTS_KEY)
+            await _write_flag(session, target, _COMMENTS_KEY, new)
+            invalidate(target)
         on = await _read_flag_off(session, selected, _COMMENTS_KEY) if selected else None
     return HTMLResponse(_comment_toggle_html(selected, on))
 

@@ -1182,6 +1182,14 @@ _TR: dict[str, dict[str, str]] = {
     "bot.pick_branch": {"ru": "Выберите один филиал в фильтре, чтобы управлять его ботом",
                         "en": "Pick a single branch in the filter to control its bot",
                         "id": "Pilih satu cabang di filter untuk mengatur botnya"},
+    # Shown wherever a single-branch read or write has no one branch on screen to act on.
+    # The panel refuses instead of guessing — the guess used to be branch 1, live Indonesia.
+    "branch.pick_one": {"ru": "Выберите один филиал в фильтре — настройки хранятся "
+                              "отдельно для каждого филиала",
+                        "en": "Pick a single branch in the filter — settings are stored "
+                              "per branch",
+                        "id": "Pilih satu cabang di filter — pengaturan disimpan "
+                              "per cabang"},
     # time abbreviations
     "time.m":        {"ru": "м",  "en": "m",  "id": "m"},
     "time.h":        {"ru": "ч",  "en": "h",  "id": "j"},

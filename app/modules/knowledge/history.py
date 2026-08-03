@@ -39,6 +39,31 @@ async def list_revisions(
     return list(rows.all())
 
 
+async def restore_revision_scoped(
+    session: AsyncSession, rev_id: int, *, writable: list[int] | None, actor: str | None,
+) -> tuple[str, tuple[str, str] | None]:
+    """Restore a revision into ITS OWN branch, once the caller is shown to have WRITE there.
+
+    Returns ("ok", (entity_type, slug)) | ("missing", None) | ("forbidden", None) so the
+    route can answer 404 and 403 honestly. Callers used to pass `writable[0]` as the scope,
+    which for a multi-branch admin scoped every restore to whichever branch sorted first —
+    silently "not found" for the branch they were actually looking at, and one membership
+    change away from restoring into the wrong tenant.
+    """
+    row = (await session.execute(
+        text("SELECT branch_id FROM knowledge_revision WHERE id=:id"), {"id": rev_id})).first()
+    if row is None:
+        return "missing", None
+    owner = row[0]
+    if writable is not None:
+        # owner is None on a revision written before revisions carried a branch: there is
+        # nothing to check it against, so only a write-anywhere caller may touch one.
+        if owner is None or owner not in writable:
+            return "forbidden", None
+    out = await restore_revision(session, owner, rev_id, actor)
+    return ("ok", out) if out is not None else ("missing", None)
+
+
 async def restore_revision(
     session: AsyncSession, branch_id: int | None, rev_id: int, actor: str | None,
 ) -> tuple[str, str] | None:
