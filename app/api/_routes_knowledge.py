@@ -18,7 +18,11 @@ from app.admin._branch import (
     writable_branch_ids,
 )
 from app.modules.conversation.translate import target_for_lang, translate_text
-from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
+from app.modules.knowledge.history import (
+    list_revisions,
+    record_revision,
+    restore_revision_scoped,
+)
 from app.modules.knowledge.sections import reassemble
 
 from ._i18n import apply_lang
@@ -162,18 +166,26 @@ async def knowledge_history(doc_id: int, request: Request) -> HTMLResponse:
 @router.post("/knowledge/restore", response_class=HTMLResponse)
 async def knowledge_restore(request: Request, rev_id: int = Form(...)) -> HTMLResponse:
     apply_lang(request)
-    # Scope the restore by WRITE right, not the view filter — a viewer can't restore.
-    # (WriteGuardMiddleware already blocks a pure viewer, so `writable` is never [] here.)
+    # Scope the restore by WRITE right on the REVISION'S OWN branch, not the view filter and
+    # not a positional pick out of the writable set (`writable[0]` restored into whichever
+    # branch sorted first, which for a multi-branch admin is rarely the one on screen).
     writable = writable_branch_ids(request)
-    bid = writable[0] if writable else None
     async with session_scope() as session:
-        out = await restore_revision(session, bid, rev_id, actor=_actor(request))
+        status, out = await restore_revision_scoped(
+            session, rev_id, writable=writable, actor=_actor(request))
+        if status == "forbidden":
+            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         if out is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
-        _, slug = out
+        _, slug, owner = out
+        # Read back the doc that was actually restored. slug is unique PER BRANCH
+        # (uq_kdoc_branch_slug), so a bare `WHERE slug=:s` returned an arbitrary tenant's
+        # row and rendered its content — and its id — into the editor the operator then
+        # keeps typing into.
         row = (await session.execute(
             text("SELECT id, slug, title, content, updated_by"
-                 " FROM knowledge_doc WHERE slug=:s"), {"s": slug})).first()
+                 " FROM knowledge_doc WHERE slug=:s AND branch_id=:b"),
+            {"s": slug, "b": owner})).first()
     if not row:
         return HTMLResponse('<div class="emp">Restored</div>')
     resp = HTMLResponse(kb_editor_html(

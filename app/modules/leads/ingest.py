@@ -5,6 +5,7 @@ persist the message, advance the thread's reply window. Branch-scoped throughout
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timedelta
 
@@ -59,6 +60,12 @@ class IngestService:
             external_id = inbound.external_id or _external_id(inbound)
             if await self.messages.by_external(channel_id, external_id) is not None:
                 continue  # already ingested — idempotent (incl. rows OutboxSender recorded)
+            # Two older shapes of the same identity. Without these a re-poll would store a
+            # second copy of every message ingested before each change.
+            if await self.messages.by_external(
+                channel_id, _legacy_external_id(inbound)
+            ) is not None:
+                continue
             if inbound.external_id and await self.messages.by_external(
                 channel_id, _external_id(inbound)
             ) is not None:
@@ -363,6 +370,20 @@ class IngestService:
             logger.warning("bot-off alert failed lead=%s", lead.id, exc_info=True)
 
 
-def _external_id(inbound: InboundMessage) -> str:
-    """Stable per-message id — InboundMessage carries no native id, so derive one."""
+def _legacy_external_id(inbound: InboundMessage) -> str:
+    """The pre-2026-08-03 shape, kept ONLY so rows already stored under it are still
+    recognised and never ingested a second time."""
     return f"{inbound.external_thread_id}:{inbound.occurred_at.isoformat()}:{inbound.sender_id}"
+
+
+def _external_id(inbound: InboundMessage) -> str:
+    """Stable per-message id — InboundMessage carries no native id, so derive one.
+
+    The text is part of it because timestamps are second-resolution: someone typing two quick
+    lines produces two messages with one timestamp, and an id of thread+time+sender made them
+    collide, so the second was discarded as "already ingested". A hash rather than the text
+    itself keeps the column short and free of message content.
+    """
+    digest = hashlib.sha256((inbound.text or "").encode()).hexdigest()[:12]
+    return (f"{inbound.external_thread_id}:{inbound.occurred_at.isoformat()}"
+            f":{inbound.sender_id}:{digest}")

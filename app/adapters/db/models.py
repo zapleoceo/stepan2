@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Index, LargeBinary, String, UniqueConstraint, text
+from sqlalchemy import BigInteger, Index, LargeBinary, String, UniqueConstraint, func, text
 from sqlmodel import Field, SQLModel
 
 from app.domain.clock import utc_now as _utcnow
@@ -193,8 +193,17 @@ class Product(SQLModel, table=True):
     content: str = Field(default="")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
-    kind: str = Field(default="course", description="course | event — event = RSVP not enrolment")
-    updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
+    # server_default mirrors what the migrations put in the PRODUCTION DDL (kind DEFAULT
+    # 'course', updated_at DEFAULT now() — read off prod 2026-08-03). Declared here so the
+    # metadata-generated schema the tests run on is the same schema, and a raw INSERT that
+    # omits these columns behaves identically on both. Without it the create route had to
+    # spell the values out in application code, duplicating the migration's default where it
+    # could drift unnoticed.
+    kind: str = Field(default="course", description="course | event — event = RSVP not enrolment",
+                      sa_column_kwargs={"server_default": "course"})
+    updated_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_column_kwargs={"onupdate": _utcnow, "server_default": func.now()})
     updated_by: str | None = Field(default=None)
 
 

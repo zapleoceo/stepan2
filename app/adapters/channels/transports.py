@@ -26,6 +26,11 @@ _AD_ATTR_RE = re.compile(r"\b(ctd|ads?|click.?to.?(dm|direct|message))\b")
 # history is a separate, on-demand path.
 _LIVE_THREADS = 20
 
+# How many of a thread's most recent messages Graph returns per poll. One was the old
+# behaviour and lost anything a lead sent in a burst; 25 covers any realistic burst between
+# two polls while keeping the payload small. Already-seen ones are dropped by external_id.
+_MSGS_PER_THREAD = 25
+
 
 def _paged_threads(client: Any, endpoint: str, amount: int = _LIVE_THREADS) -> list[dict]:
     """Raw inbox threads with cursor pagination — instagrapi extractor bypassed."""
@@ -432,23 +437,58 @@ class GraphTransportHTTP:
         import httpx  # lazy: real transport only, never imported by unit tests  # noqa: PLC0415
 
         out: list[dict[str, Any]] = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str, str, str]] = set()
         for platform in (None, "instagram"):
             try:
-                convos = await self._conversations_for(platform)
+                msgs = await self._conversations_for(platform)
             except httpx.HTTPError as exc:
                 logger.warning("meta conversations failed (platform=%s): %s",
                                platform or "messenger", exc)
                 continue
-            # Dedup by thread id: the two calls are meant to return disjoint sets, and a thread
-            # counted twice would be re-ingested and could be answered twice.
-            for conv in convos:
-                tid = conv.get("thread_id", "")
-                if tid in seen:
+            # Dedup per MESSAGE, not per thread. The two platform calls are meant to return
+            # disjoint sets and something counted twice would be answered twice — but keying
+            # on the thread alone collapsed a burst back to a single message, undoing the
+            # whole point of reading the thread (caught by tests/test_meta_no_message_loss).
+            for m in msgs:
+                # The text is part of the key because Graph timestamps are second-resolution:
+                # two lines typed quickly share a created_time, and a key without the text
+                # would drop the second one — the very loss this change exists to stop.
+                key = (str(m.get("thread_id", "")), str(m.get("created_time", "")),
+                       str(m.get("from_id", "")), str(m.get("message", "")))
+                if key in seen:
                     continue
-                seen.add(tid)
-                out.append(conv)
-        return out[:settings().meta_live_conversations]
+                seen.add(key)
+                out.append(m)
+        return out
+
+    @staticmethod
+    def _inbound_of(conv: dict[str, Any], msgs: list[dict[str, Any]],
+                    who: dict[str, Any], own: set[str]) -> list[dict[str, Any]]:
+        """Every message in this thread that the LEAD wrote, oldest first.
+
+        Reading only the newest one silently dropped messages: a lead who sent two lines
+        between two polls had the first line thrown away, and the agent answered half the
+        question (reported live 2026-08-03). Returning them all costs nothing — ingest
+        deduplicates on external_id, so anything already stored is skipped.
+
+        Our own messages are excluded here, not later. Graph returns the whole thread, ours
+        included, and the id it reports for a message we SENT differs from the id it reports
+        when the same message is READ back — so dedup cannot recognise them and the agent
+        would read its own replies as new lead messages and answer itself.
+        """
+        oldest_first = list(reversed(msgs))  # Graph returns newest-first
+        return [
+            {
+                "thread_id": conv.get("id", ""),
+                "from_id": (m.get("from") or {}).get("id", ""),
+                "message": m.get("message", ""),
+                "created_time": m.get("created_time"),
+                "sender_name": who.get("name") or "",
+                "sender_username": who.get("username") or "",
+            }
+            for m in oldest_first
+            if str((m.get("from") or {}).get("id", "")) not in own
+        ]
 
     @staticmethod
     def _participant(conv: dict[str, Any], own: set[str]) -> dict[str, Any]:
@@ -472,6 +512,7 @@ class GraphTransportHTTP:
         page_size = max(1, min(50, cap))
         max_pages = max(1, -(-cap // page_size)) + 2  # safety: cap/page_size pages + slack
         out: list[dict[str, Any]] = []
+        threads = 0
         cursor: str | None = None
         async with self._client() as c:
             own = await self._own_ids(c)
@@ -480,7 +521,9 @@ class GraphTransportHTTP:
                 # name. Graph splits it by platform: Messenger gives `name`, Instagram gives
                 # `username`. Without it every lead shows in the inbox as "Lead".
                 params: dict[str, Any] = {
-                    "fields": "id,participants,messages{from,message,created_time}",
+                    "fields": ("id,participants,"
+                               f"messages.limit({_MSGS_PER_THREAD})"
+                               "{from,message,created_time}"),
                     "limit": page_size}
                 if platform:
                     params["platform"] = platform
@@ -493,22 +536,12 @@ class GraphTransportHTTP:
                     msgs = (conv.get("messages") or {}).get("data") or []
                     if not msgs:
                         continue
-                    last = msgs[0]
-                    from_id = (last.get("from") or {}).get("id", "")
+                    threads += 1
                     who = self._participant(conv, own)
-                    out.append(
-                        {
-                            "thread_id": conv.get("id", ""),
-                            "from_id": from_id,
-                            "message": last.get("message", ""),
-                            "created_time": last.get("created_time"),
-                            "sender_name": who.get("name") or "",
-                            "sender_username": who.get("username") or "",
-                        }
-                    )
+                    out.extend(self._inbound_of(conv, msgs, who, own))
                 paging = body.get("paging") or {}
                 cursor = ((paging.get("cursors") or {}).get("after"))
-                if len(out) >= cap or not cursor or not paging.get("next"):
+                if threads >= cap or not cursor or not paging.get("next"):
                     break
         return out[:cap]
 

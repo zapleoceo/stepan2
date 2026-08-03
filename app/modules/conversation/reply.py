@@ -373,7 +373,14 @@ _CLOSING_WORDS = frozenset("""
     gue min mimin kak kakak ya deh dong nya lah kok aja juga banyak sekali
     selamat malam siang sore dan hari
 """.split())
-_WORD_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
+# Any Unicode letter, not just Latin. The old class was [a-zA-ZÀ-ɏ] — Latin Extended-B and
+# below — so a message written entirely in Cyrillic, Arabic, Chinese, Thai or Greek produced
+# ZERO words, and _is_closing_only took its "nothing was said at all" branch, the one meant for
+# a lone emoji. With our previous reply also non-Latin, _goodbye_loop concluded both sides had
+# said goodbye, decide() returned None, and the thread went silent for good — logging a line
+# that reads like correct behaviour. Branch 1 carries 85 all-Cyrillic inbound messages in the
+# last 90 days, hard price objections among them. A no-op for Latin and Indonesian text.
+_WORD_RE = re.compile(r"[^\W\d_]+")
 
 
 def _is_closing_only(text: str, extra: frozenset[str] = frozenset()) -> bool:

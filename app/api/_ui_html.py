@@ -328,6 +328,15 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
     )
 
 
+def pick_branch_html() -> str:
+    """What a branch-scoped panel shows when the view spans several branches, or none.
+
+    One renderer, not one per route: the first pass at this wave shipped three near-copies and
+    two of them forgot to escape. t() returns static translations today, so nothing was
+    exploitable — but there should be a single place to get it right."""
+    return f'<div class="emp" style="padding:1rem">{_h.escape(t("branch.pick_one"))}</div>'
+
+
 def thread_list_html(
     threads: list, active_tid: int | None = None, show_branch: bool = False,
     filter_qs: str = "",
