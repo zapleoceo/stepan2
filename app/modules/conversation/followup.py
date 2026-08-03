@@ -288,7 +288,7 @@ class FollowupService:
         decision, meta = await generate(
             engine, ctx, messages, thread_id, workflow="followup",
             capability=capability, branch_id=self.branch_id,
-            country_code=self._country_code(), lang=lang)
+            country_code=self._country_code(), money_lang=lang)
         if decision is None:
             return False
         # Every one of the three ad prefills asks about cost. The opener may not answer it (a
@@ -298,7 +298,7 @@ class FollowupService:
         ad_promised_price = bool(
             first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
         if uninvited_price(decision.reply, stored, ad_promised_price=ad_promised_price,
-                           lang=lang):
+                           money_lang=lang):
             # A nudge is never a reply to a fresh question — a price in one is always
             # volunteered (thread 4849). One rewrite, same as reply.py's money gate; if it
             # still quotes a figure, drop the nudge rather than send it.
@@ -308,9 +308,10 @@ class FollowupService:
             fixed, meta = await generate(
                 engine, ctx, regen_messages, thread_id, workflow="followup",
                 capability=SMART, branch_id=self.branch_id,
-                country_code=self._country_code(), lang=lang)
+                country_code=self._country_code(), money_lang=lang)
             if fixed is None or uninvited_price(
-                    fixed.reply, stored, ad_promised_price=ad_promised_price, lang=lang):
+                    fixed.reply, stored, ad_promised_price=ad_promised_price,
+                    money_lang=lang):
                 logger.warning("followup pitch gate unfixable branch=%d thread=%d — dropped",
                                 self.branch_id, thread_id)
                 await self._burn_dry_step(thread_id, now)

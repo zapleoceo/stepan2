@@ -120,9 +120,13 @@ class DecisionEngine:
             self._tz_offset_h = int(branch.tz_offset_h or 0) if branch is not None else 0
         return datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=self._tz_offset_h)
 
-    async def _branch_lang(self) -> str:
-        """The BRANCH's language, never the lead's: this feeds the cached prefix, which must
-        stay byte-identical across every lead of a branch or the broker's prompt cache dies."""
+    async def branch_lang(self) -> str:
+        """The BRANCH's language, never the lead's — two callers, one reason.
+
+        The date annotations feed the cached prefix, which must stay byte-identical across
+        every lead of a branch or the broker's prompt cache dies. The money gate reads it
+        because currency belongs to the market, not to the sentence: a lead who writes to
+        branch 1 in Russian is still quoted rupiah out of an Indonesian knowledge base."""
         if self._lang is None:
             branch = await self._branch()
             self._lang = (branch.lang if branch is not None else "id") or "id"
@@ -175,7 +179,7 @@ class DecisionEngine:
         if self._free_ctx is None:
             context = await self.knowledge.full_knowledge_context()
             self._free_ctx = annotate_dates(
-                context, (await self._now_local()).date(), await self._branch_lang())
+                context, (await self._now_local()).date(), await self.branch_lang())
         self.last_context = self._free_ctx  # the money gate checks the draft against this
         return self._free_ctx
 

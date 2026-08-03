@@ -57,9 +57,13 @@ class DateLocale:
     today: str                 # formatted with {weekday}
     tomorrow: str              # formatted with {weekday}
     ahead: str                 # formatted with {weekday} and {days}
-    # Regex source matching a bracket this locale plausibly wrote, deliberately looser than
-    # what we emit: the model copies our markers into its own text and does not copy them
-    # exactly, and sanitize.clean_reply is the last chance to keep one out of a lead's message.
+    # Regex source matching a bracket this locale plausibly wrote, looser than what we emit
+    # (the model copies our markers into its own text and does not copy them exactly, and
+    # sanitize.clean_reply is the last chance to keep one out of a lead's message) — but not
+    # so loose that it eats a bracket the model wrote for the LEAD. strip_date_annotations
+    # runs on EVERY branch's outgoing bubbles, so the English clause is a live regex on
+    # branch 1 too: "Promo [today only] Kak" must survive it. Anchoring on the weekday +
+    # comma our own format always emits is what keeps it off ordinary prose.
     loose: str
 
 
@@ -71,13 +75,14 @@ _ID = DateLocale(
     ahead="hari {weekday}, {days} hari lagi",
     loose=r"[^\]]*hari[^\]]*",
 )
+_EN_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 _EN = DateLocale(
-    weekdays=("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
+    weekdays=_EN_WEEKDAYS,
     expired="ALREADY PAST — do not offer",
     today="{weekday}, today",
     tomorrow="{weekday}, tomorrow",
     ahead="{weekday}, in {days} days",
-    loose=r"[^\]]*(?:today|tomorrow|in \d+ days?)[^\]]*",
+    loose=r"[^\]]*\b(?:" + "|".join(_EN_WEEKDAYS) + r"),[^\]]*",
 )
 _LOCALES: dict[str, DateLocale] = {"id": _ID, "en": _EN}
 _FALLBACK = _EN

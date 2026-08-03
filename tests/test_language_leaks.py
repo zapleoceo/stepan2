@@ -155,6 +155,19 @@ def test_the_stripper_removes_every_locale_it_can_write(lang: str) -> None:
     assert strip_date_annotations(annotated) == "Demo Event: 8 Agustus 2026"
 
 
+@pytest.mark.parametrize("text", [
+    "Promo [today only] Kak",
+    "Sampai jumpa [see you tomorrow] ya Kak",
+    "The intake [Monday classes] fills up fast",
+])
+def test_the_stripper_leaves_the_model_s_own_brackets_alone(text: str) -> None:
+    """strip_date_annotations runs on EVERY branch's outgoing bubbles, branch 1 included — so
+    a loose English clause here is a live regex on Bahasa replies, not an English-branch-only
+    risk. Matching any bracket containing "today"/"tomorrow" ate the model's own words; the
+    clause is anchored on the weekday + comma our own format always writes."""
+    assert strip_date_annotations(text) == text
+
+
 def test_annotating_twice_changes_nothing_in_any_locale() -> None:
     """The context is memoized and reused across a turn's rewrites — brackets must not stack."""
     once = annotate_dates("Sabtu, 8 Agustus 2026", _TODAY, "en")
@@ -257,6 +270,26 @@ def test_no_branch_gets_a_russian_paragraph_in_its_prompt(status: str, lang: str
                             lang=lang)
     assert block is not None
     assert not _CYRILLIC.search(block)
+
+
+def test_a_lead_who_switches_to_russian_keeps_the_russian_block() -> None:
+    """_script_lang flips any Cyrillic-writing lead to 'ru'. Keyed on the branch language, the
+    Russian text sat under "id" and 'ru' fell through to the ENGLISH fallback — so a lead on
+    branch 1 who typed one Cyrillic word silently moved the manager block from the Russian the
+    owner wrote to a translation. The key is the language of the TEXT now."""
+    assert crm_state_block("wait_call", manager="Rina", lang="ru") == \
+        crm_state_block("wait_call", manager="Rina", lang="id")
+
+
+def test_an_empty_policy_answers_instead_of_raising() -> None:
+    """`goals: dict` on a frozen dataclass buys nothing: Policy() raised KeyError on .goal()
+    and hash(Policy(...)) raised TypeError, because a dict is unhashable. Two string fields
+    keep frozen=True meaning what it says."""
+    from app.modules.crm.policy import POLICIES, Policy  # noqa: PLC0415
+
+    assert Policy().goal("id") == ""
+    assert Policy().goal(None) == ""
+    assert hash(POLICIES["wait_call"])
 
 
 def test_the_english_block_keeps_the_do_not_write_first_instruction() -> None:

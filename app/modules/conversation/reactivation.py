@@ -235,7 +235,7 @@ class ReactivationService:
             engine, ctx, messages, thread_id, workflow="followup",
             capability=SALES, branch_id=self.branch_id,
             country_code=(self.settings.phone_country_code if self.settings else "62") or "62",
-            lang=lang)
+            money_lang=lang)
         if decision is None:
             return False  # transient bad JSON — retries next run, not suppressed
         if not decision.reply.strip() or money_issues(decision.reply, context, lang):

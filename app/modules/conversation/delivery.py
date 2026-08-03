@@ -286,6 +286,11 @@ class ReplyDelivery:
             # when the model already told them what happens next — which it usually does, it
             # knows the working hours — appending a canned line repeats it in different words
             # and spends a bubble against the anti-ban cap on the sharpest turn of the funnel.
+            # Same language decide() answered in, without re-deriving it from the dialog:
+            # decide() writes the lead's own script into lead.preferred_language before this
+            # runs, and this block is only reachable when a Lead row exists (_apply_decision
+            # is what sets exit_kind). So the two ladders cannot disagree — a lead answered in
+            # Russian never gets an Indonesian closing stapled underneath.
             lang = await self._lang(lead)
             if exit_kind == "manager":
                 closing = manager_closing(lang, has_phone=bool(lead.phone_e164))

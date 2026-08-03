@@ -49,16 +49,21 @@ def test_no_other_branch_greets_a_stranger_in_bahasa(lang: str) -> None:
 
 
 def test_a_branch_greeting_wins_over_the_fallback() -> None:
-    assert junk_opener("Hi! I'm Stepan.") == "Hi! I'm Stepan."
+    assert junk_opener("Hi! I'm Stepan.", "id") == "Hi! I'm Stepan."
 
 
 @pytest.mark.parametrize("empty", ["", "   ", None])
 def test_unset_falls_back(empty: str | None) -> None:
-    assert junk_opener(empty) == junk_opener(None, "id")
+    """An unset branch greeting falls back within its OWN language. The language argument is
+    required for exactly this reason: it used to default to Indonesian, so the one call most
+    likely to be made without thinking about language was the one that shipped Bahasa."""
+    assert junk_opener(empty, "id") == junk_opener(None, "id")
+    assert junk_opener(empty, "en") == junk_opener(None, "en")
+    assert junk_opener(empty, None) == junk_opener(None, "en")
 
 
 def test_whitespace_is_trimmed() -> None:
-    assert junk_opener("  Halo Kak  ") == "Halo Kak"
+    assert junk_opener("  Halo Kak  ", "id") == "Halo Kak"
 
 
 def test_the_setting_ships_empty_so_no_branch_inherits_a_brand() -> None:

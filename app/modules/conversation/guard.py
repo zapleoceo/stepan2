@@ -645,7 +645,7 @@ _PROHIBITION_TOPIC_RE = re.compile(
     re.IGNORECASE)
 
 
-def is_risky(reply: str, lang: str = "id") -> bool:
+def is_risky(reply: str, money_lang: str = "id") -> bool:
     """Cheap gate: does the reply look like it might hand out an offer/resource/link,
     state a concrete price (chat-452 shape), tell a specific alumni/success story
     (chat-1827 shape), or promise an Open-House experience the cards forbid (chat-2879)?
@@ -655,7 +655,7 @@ def is_risky(reply: str, lang: str = "id") -> bool:
     it silently, taking the whole verify with it."""
     text = reply or ""
     return bool(
-        _URL_RE.search(text) or _RISKY_RE.search(text) or quotes_price(text, lang)
+        _URL_RE.search(text) or _RISKY_RE.search(text) or quotes_price(text, money_lang)
         or _STORY_RE.search(text) or _PROHIBITION_TOPIC_RE.search(text))
 
 
@@ -664,7 +664,7 @@ def is_risky(reply: str, lang: str = "id") -> bool:
 _PRICE_WORDS = frozenset({"harga", "biaya", "tarif", "cicilan", "angsuran"})
 
 
-def price_claims_grounded(reply: str, context: str, lang: str = "id") -> bool:
+def price_claims_grounded(reply: str, context: str, money_lang: str = "id") -> bool:
     """True when the ONLY thing that made this reply risky is price talk AND every figure it
     quotes appears (canonically) in the KB context — the draft repeats a grounded fact, so
     the LLM verify would spend ~3k tokens re-reading the KB to confirm a substring match we
@@ -676,10 +676,10 @@ def price_claims_grounded(reply: str, context: str, lang: str = "id") -> bool:
     for m in _RISKY_RE.finditer(text):
         if m.group(0).lower() not in _PRICE_WORDS:
             return False  # a non-price offer word (gratis/promo/akses/…) — verify for real
-    prices = canonical_prices(text, lang=lang)
+    prices = canonical_prices(text, money_lang=money_lang)
     if not prices:
         return False  # price words but no figure — nothing to string-match, let the LLM judge
-    return prices <= canonical_prices(context, liberal=True, lang=lang)
+    return prices <= canonical_prices(context, liberal=True, money_lang=money_lang)
 
 
 async def verify_grounding(

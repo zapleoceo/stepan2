@@ -94,7 +94,7 @@ def test_a_grounded_dollar_price_still_passes_on_an_english_branch() -> None:
     ("Rp 13.360.000", {13_360_000}),  # the fallback stays a superset of the Indonesian shapes
 ])
 def test_english_figures_canonicalise(text: str, expected: set) -> None:
-    assert canonical_prices(text, lang="en") == expected
+    assert canonical_prices(text, money_lang="en") == expected
 
 
 @pytest.mark.parametrize("text", [
@@ -105,14 +105,14 @@ def test_english_figures_canonicalise(text: str, expected: set) -> None:
 def test_ordinary_prose_is_not_read_as_a_price(text: str) -> None:
     """A false positive here is not harmless: it blocks a good reply and, on a first message,
     reads as leading with money — the thing measured to halve the reply rate."""
-    assert canonical_prices(text, lang="en") == set()
+    assert canonical_prices(text, money_lang="en") == set()
     assert not quotes_price(text, "en")
 
 
 def test_an_unlisted_language_gets_the_broad_parser_not_the_indonesian_one() -> None:
     """A Vietnamese branch is not covered by a table row yet, and the fallback must be the
     one that sees the most currencies — not the one that sees only rupiah."""
-    assert canonical_prices("The deposit is $250", lang="vi") == {250}
+    assert canonical_prices("The deposit is $250", money_lang="vi") == {250}
 
 
 def test_an_english_price_now_routes_the_reply_to_the_fabrication_verify() -> None:
@@ -137,8 +137,97 @@ def test_the_dossier_records_a_dollar_figure_the_bot_just_quoted() -> None:
     from app.modules.conversation.decision import parse_turn_decision  # noqa: PLC0415
 
     body = '{"reply": "The full course is $1,500.", "needs_human": false}'
-    assert parse_turn_decision(body, lang="en").dossier.prices_quoted == ["1.500"]
+    assert parse_turn_decision(body, money_lang="en").dossier.prices_quoted == ["1.500"]
     assert parse_turn_decision(body).dossier.prices_quoted == []
+
+
+# ── the two ways a broad parser goes wrong ────────────────────────────────────
+
+_PHP_KB = "Backend track: PHP 8.3, Laravel 11, Python 3.12. Price: $1,500"
+
+
+@pytest.mark.parametrize("text", [
+    "We teach PHP 8.3 and Python 3.12",
+    "PHP 8 is covered in week 3",
+    "Coming from PHP/Laravel? The OOP transfers directly",
+])
+def test_a_programming_language_is_not_a_currency(text: str) -> None:
+    """PHP is the Philippine peso's ISO code AND the language this school teaches. With it in
+    the currency list "we cover PHP 8.3" canonicalised to a price of 8.3, the money gate found
+    that absent from the knowledge base, and a correct answer about a backend course was
+    replaced by the hold-line plus a hand-off. Branch 10 IS the Philippines, runs lang='en',
+    and its live KB says "PHP/Laravel" — this fired on the branch it was meant to serve."""
+    assert canonical_prices(text, money_lang="en") == set()
+    assert not quotes_price(text, "en")
+    assert not is_risky(text, "en")
+
+
+def test_the_backend_course_answer_passes_the_money_gate() -> None:
+    assert money_issues("We cover PHP 8.3 in the backend track", _PHP_KB, "en") == []
+
+
+def test_the_peso_is_still_readable_by_its_symbol() -> None:
+    """Dropping the ISO code must not blind the gate to the currency — the symbol collides
+    with no word in any language."""
+    assert canonical_prices("₱15,000 for the full course", money_lang="en") == {15_000}
+    assert quotes_price("₱15,000", "en")
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("$1,500.00", {1500}),
+    ("The deposit is $250.00", {250}),
+    ("RM1,500.00", {1500}),
+    ("€1.5 million", {1_500_000}),
+    ("Rp 1.882.955", {1_882_955}),   # a three-digit tail is still a thousands group
+])
+def test_cents_are_not_read_as_another_thousands_group(text: str, expected: set) -> None:
+    """'.00' is the normal way a dollar, euro or ringgit price is written, and rupiah — which
+    has no cents — is why nobody noticed. Read as a third group, $1,500.00 became 150,000: a
+    grounded quote escalated to the hold-line, and 150.000 written into prices_quoted, which is
+    handed back to the model next turn as "the price you already gave them"."""
+    assert canonical_prices(text, money_lang="en") == expected
+
+
+def test_a_grounded_price_written_with_cents_still_ships() -> None:
+    assert money_issues("The total is $1,500.00, deposit $250.00", _EN_KB, "en") == []
+
+
+def test_the_dossier_records_the_price_quoted_not_a_hundred_times_it() -> None:
+    from app.modules.conversation.decision import parse_turn_decision  # noqa: PLC0415
+
+    body = '{"reply": "Total is $1,500.00, deposit $250.00.", "needs_human": false}'
+    assert parse_turn_decision(body, money_lang="en").dossier.prices_quoted == ["250", "1.500"]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("cicilan 4× Rp 3.250 juta", {3_250_000}),
+    ("cicilan 4×3,25jt/bln", {3_250_000}),
+    ("Rp 1.5 juta", {1_500_000}),
+])
+def test_the_number_before_a_magnitude_word_is_a_count_not_a_grouped_figure(
+        text: str, expected: set) -> None:
+    """Found by replaying 4000 live branch-1 messages through both parsers: exactly one wrote
+    the installment as "Rp 3.250 juta" instead of "Rp 3.250.000". Reading that '.' as a
+    thousands grouper makes it 3.25 BILLION, absent from the knowledge base, and holds a
+    correct reply behind the hold-line. Nobody writes a count of millions with grouping — the
+    separator in front of juta/jt/million is always a decimal point, in every locale. The
+    English row used to strip it instead, which is how branches 9 and 10 (Bahasa knowledge
+    base, non-Indonesian row) read "3,25jt" as 325 million."""
+    assert canonical_prices(text) == expected
+    assert canonical_prices(text, money_lang="en") == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Rp2,5 juta", "1,67 juta", "Rp 13.360.000", "500 ribu", "Rp 1.500.000",
+])
+def test_an_indonesian_figure_reads_the_same_whichever_row_is_asked(text: str) -> None:
+    """The decimal convention used to be a per-locale flag, so the SAME rupiah figure came out
+    ten times larger under the fallback row. That mattered on branch 1: a Cyrillic-writing lead
+    flips the reply language to 'ru', which has no row of its own. The separator now answers
+    for itself — a thousands group is three digits, so a one- or two-digit tail is a decimal
+    point in any language — and the rows can no longer disagree about a number."""
+    assert canonical_prices(text) == canonical_prices(text, money_lang="en")
+    assert canonical_prices(text) == canonical_prices(text, money_lang="ru")
 
 
 class _Dossier:
@@ -153,5 +242,5 @@ def test_an_uninvited_dollar_figure_in_a_nudge_is_caught() -> None:
     volunteered (thread 4849). The check read the Indonesian vocabulary, so on any other
     branch every nudge could quote a price at a lead who never mentioned money."""
     nudge = "Still thinking it over? The course is $1,500 and we start next month."
-    assert uninvited_price(nudge, _Dossier(), lang="en")
+    assert uninvited_price(nudge, _Dossier(), money_lang="en")
     assert not uninvited_price(nudge, _Dossier())

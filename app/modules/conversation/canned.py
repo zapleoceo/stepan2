@@ -139,6 +139,11 @@ def comment_persona(lang: str | None) -> str:
     return _text("comment_persona", lang)
 
 
-def junk_opener(settings_value: str | None, lang: str | None = "id") -> str:
-    """The branch's own greeting, or the unbranded fallback in the branch's own language."""
+def junk_opener(settings_value: str | None, lang: str | None) -> str:
+    """The branch's own greeting, or the unbranded fallback in the branch's own language.
+
+    `lang` is required, unlike every other entry point here. It defaulted to Indonesian, which
+    is the one thing this module says never to do — and this is the line most likely to be
+    called by someone who has not thought about language at all, because it is a template and
+    templates feel language-free. Passing None is fine and means English."""
     return (settings_value or "").strip() or _text("junk_opener", lang)
