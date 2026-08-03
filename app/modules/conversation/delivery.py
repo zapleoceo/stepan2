@@ -276,6 +276,11 @@ class ReplyDelivery:
                 )
             )
         lead = await self.session.get(Lead, thread.lead_id)
+        # Read BEFORE _apply_decision: _sync_lead_fields overwrites preferred_language with
+        # decision.reply_language, and that self-report is exactly the thing that drifts back to
+        # the branch default mid-conversation (see _script_lang). Afterwards the field no longer
+        # says what this turn was answered in.
+        lead_lang = lead.preferred_language if lead is not None else None
         exit_kind: str | None = None
         if lead is not None:
             exit_kind = await self._apply_decision(lead, thread, decision)
@@ -286,12 +291,10 @@ class ReplyDelivery:
             # when the model already told them what happens next — which it usually does, it
             # knows the working hours — appending a canned line repeats it in different words
             # and spends a bubble against the anti-ban cap on the sharpest turn of the funnel.
-            # Same language decide() answered in, without re-deriving it from the dialog:
-            # decide() writes the lead's own script into lead.preferred_language before this
-            # runs, and this block is only reachable when a Lead row exists (_apply_decision
-            # is what sets exit_kind). So the two ladders cannot disagree — a lead answered in
-            # Russian never gets an Indonesian closing stapled underneath.
-            lang = await self._lang(lead)
+            # Same ladder decide() used, off the snapshot taken above: the lead's own script
+            # (decide() writes it onto the lead) then the branch default. A lead answered in
+            # Russian must not get an Indonesian closing stapled underneath.
+            lang = lead_lang or await self._lang()
             if exit_kind == "manager":
                 closing = manager_closing(lang, has_phone=bool(lead.phone_e164))
             else:

@@ -415,6 +415,31 @@ async def test_the_closing_follows_the_conversation_s_language(db_session) -> No
     assert "Kak" not in out.text
 
 
+async def test_the_closing_ignores_a_self_reported_language_that_contradicts_the_lead(
+        db_session) -> None:
+    """The same hand-off, with the one field that used to undo it.
+
+    decision.reply_language is the model's own report of what it just wrote, and it drifts back
+    to the branch default mid-conversation — that drift is why the lead's own script was made
+    the stronger signal in the first place. _sync_lead_fields copies that report onto the lead
+    inside _apply_decision, i.e. BETWEEN the model answering in Russian and the closing being
+    built, so reading preferred_language afterwards handed a Russian body an Indonesian
+    goodbye at the sharpest turn of the funnel."""
+    from app.modules.conversation.canned import manager_closing
+
+    bid, tid, lead = await _world(db_session, phone="+6281234567890")
+    lead.preferred_language = "ru"
+    db_session.add(lead)
+    await db_session.flush()
+
+    out = await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(needs_manager=True, manager_question="Когда позвонят?",
+                       reply="Хорошо, передаю менеджеру.", reply_language="id"))
+
+    assert out is not None
+    assert out.text == manager_closing("ru", has_phone=True)
+
+
 async def test_needs_manager_without_phone_asks_for_it(db_session) -> None:
     """thread 452, 5005: needs_manager has no phone gate the way ready/READY does — a lead
     genuinely ready to commit got muted and handed off with no contact for a manager to call.

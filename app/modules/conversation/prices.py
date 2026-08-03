@@ -108,9 +108,21 @@ _GROUP_LEN = 3  # a thousands group is exactly three digits, in every locale tha
 _SEPARATORS = re.compile(r"[.,]")
 
 
-def _fraction(groups: list[str]) -> float:
-    """Everything but the last group, then a decimal point, then the last."""
-    return float("".join(groups[:-1]) + "." + groups[-1])
+def _scaled(groups: list[str], factor: int) -> int:
+    """Everything but the last group, then a decimal point, then the last — times `factor`,
+    rounded to the nearest integer, ties to even.
+
+    Integer arithmetic rather than float because this gate fails closed and therefore must not
+    raise: `float("9" * 400 + ".5")` is infinity, and int(round(inf)) is an OverflowError that
+    propagates out of the gate and kills the turn. The knowledge base is long enough to carry a
+    digit run like that. Ties-to-even is what round() did before, kept so the reading of a real
+    figure does not move."""
+    fraction = groups[-1]
+    unit = 10 ** len(fraction)
+    whole, rest = divmod(int("".join(groups[:-1]) + fraction) * factor, unit)
+    if 2 * rest > unit or (2 * rest == unit and whole % 2):
+        whole += 1
+    return whole
 
 
 def _parse_money(num: str, mag: str, loc: MoneyLocale) -> int | None:
@@ -136,10 +148,10 @@ def _parse_money(num: str, mag: str, loc: MoneyLocale) -> int | None:
     if not groups or not all(g.isdigit() for g in groups):
         return None
     if mag:
-        value = float(groups[0]) if len(groups) == 1 else _fraction(groups)
-        return int(round(value * loc.magnitudes[mag]))
+        factor = loc.magnitudes[mag]
+        return int(groups[0]) * factor if len(groups) == 1 else _scaled(groups, factor)
     if len(groups) > 1 and len(groups[-1]) < _GROUP_LEN:
-        return int(round(_fraction(groups)))
+        return _scaled(groups, 1)
     return int("".join(groups))
 
 

@@ -192,6 +192,19 @@ def test_a_grounded_price_written_with_cents_still_ships() -> None:
     assert money_issues("The total is $1,500.00, deposit $250.00", _EN_KB, "en") == []
 
 
+@pytest.mark.parametrize("money_lang", ["id", "en"])
+def test_an_absurdly_long_digit_run_does_not_crash_the_gate(money_lang: str) -> None:
+    """The gate fails closed, which makes it the one place that must never raise. Reading the
+    tail group as cents put the figure through float, where ~309 digits is infinity and the
+    int() after it raises OverflowError — out of _vet, out of the turn, and the lead gets
+    nothing at all. A run that long is not a price, but the knowledge base is model- and
+    owner-written and the gate reads every character of it."""
+    absurd = "Rp " + "9" * 400 + ",5"
+
+    assert canonical_prices(absurd, money_lang=money_lang) == {10 ** 400}  # …9,5 → …10, exact
+    assert money_issues(absurd, _ID_KB, money_lang) != []
+
+
 def test_the_dossier_records_the_price_quoted_not_a_hundred_times_it() -> None:
     from app.modules.conversation.decision import parse_turn_decision  # noqa: PLC0415
 

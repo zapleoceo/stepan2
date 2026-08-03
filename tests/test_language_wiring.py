@@ -203,6 +203,29 @@ async def test_a_russian_speaking_lead_on_branch_one_is_still_priced_in_rupiah(d
     assert decision.reply.startswith("Полная стоимость")
 
 
+async def test_branch_one_reads_a_russian_reply_with_indonesian_money_rules(db_session) -> None:  # noqa: ANN001
+    """The half of that wire a rupiah figure cannot pin, and the reason this test exists.
+
+    The two rows now agree on every rupiah shape, so a rupiah reply passes the gate whichever
+    row is asked — only a currency branch 1 does not sell in can tell them apart. '$' is in the
+    fallback row and not in the Indonesian one, which is branch 1's behaviour in production:
+    money_issues took no language at all before this step and read every branch with the
+    Indonesian row, where a dollar figure is not a quote from our catalogue.
+
+    Keyed on the REPLY's language instead, one Cyrillic word moves branch 1 to the fallback
+    row, a third-party tool's subscription becomes a price of 15, the Indonesian knowledge base
+    does not contain it, and a correct grounded answer is replaced by the hold-line."""
+    bid, tid = await _thread(db_session, lang="id", inbound="Сколько стоит курс?")
+    grounded = _answer(reply="Полная стоимость Rp 13.360.000. Figma отдельно, $15 в месяц.")
+    llm = _LLM(grounded, grounded)
+
+    decision = await _service(db_session, bid, llm, _ID_KB).decide(tid)
+
+    assert decision is not None and not decision.needs_manager
+    assert "$15" in decision.reply
+    assert len(llm.messages) == 1  # the gate never tripped: no correction round-trip
+
+
 async def test_the_rewrite_still_names_the_tenant_catalogue_for_a_russian_lead(db_session) -> None:  # noqa: ANN001
     """Which of our offers is free is the TENANT's catalogue, not a fact about the language a
     single lead happens to write in. Keyed on the reply language it vanished for exactly the
