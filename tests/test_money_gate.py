@@ -333,6 +333,18 @@ def test_ordinary_payment_and_schedule_talk_is_not_a_start_promise() -> None:
 
 
 def test_a_real_date_still_passes() -> None:
-    """The fix is not 'never mention a start' — a day from the knowledge base is the point."""
-    assert money_issues("Skill Booster Python hari Minggu, 2 Agustus 2026, jam 09:00-14:00",
-                        _KB) == []
+    """The fix is not 'never mention a start' — a day from the knowledge base is the point.
+
+    The date is computed, not typed: it used to read "2 Agustus 2026" and the suite went red
+    on 3 August, when that day became the past and stale_dates started firing correctly. A
+    test that expires is a test that will one day block a deploy for no reason."""
+    from datetime import timedelta
+
+    from app.domain.clock import utc_now  # noqa: PLC0415
+    from app.modules.conversation.dates import _MONTHS  # noqa: PLC0415
+
+    soon = utc_now() + timedelta(days=14)
+    month = next(name for name, num in _MONTHS.items() if num == soon.month)
+    assert money_issues(
+        f"Skill Booster Python, {soon.day} {month.capitalize()} {soon.year}, jam 09:00-14:00",
+        _KB) == []
