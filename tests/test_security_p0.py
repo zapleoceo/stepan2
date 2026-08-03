@@ -508,7 +508,10 @@ def test_webhook_post_rejects_unsigned_and_forged(monkeypatch) -> None:
         headers={"X-Hub-Signature-256": f"sha256={sig}"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"accepted": 1}
+    # This entry carries no messaging[], so there is nothing ingestible in it — `accepted`
+    # counts MESSAGES queued for ingest, not entries. What this test guards is the signature
+    # gate: a correctly signed body gets past it, a forged one never does.
+    assert resp.json() == {"accepted": 0}
 
 
 def test_webhook_unconfigured_branch_rejected(monkeypatch) -> None:

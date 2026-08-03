@@ -178,8 +178,31 @@ class IngestService:
     async def _store(
         self, lead, thread, channel_id: int, external_id: str, inbound: InboundMessage
     ) -> Message | None:
-        if inbound.media_url is None and await self.messages.duplicate_by_content(
-            thread.id, "in", inbound.text, inbound.occurred_at
+        # A photo/share reaches us twice, described two incompatible ways: the webhook as
+        # '🖼 media' + a MediaAsset (or '🔗 …' + a link_url), the Graph poll as an empty
+        # `message` with no attachment. duplicate_by_content compares '' against '🖼 media',
+        # finds no match, and writes a SECOND, blank inbound — which re-opens the 24h window,
+        # resets the follow-up cycle and enters the model's context as silence. The race has no
+        # favourite (the poll fires every 2 min; the webhook job queues behind the worker), so
+        # both orders are handled: the blank copy is dropped, the rich copy fills the blank in.
+        if _is_contentless(inbound):
+            rich = await self.messages.attachment_inbound_at(thread.id, inbound.occurred_at)
+            if rich is not None:
+                return None
+        elif inbound.media_url or inbound.link_url:
+            blank = await self.messages.contentless_inbound_at(thread.id, inbound.occurred_at)
+            if blank is not None:
+                await self._fill_in_blank(blank, external_id, inbound)
+                return None  # the row already existed — this call created nothing
+        if (
+            inbound.media_url is None
+            # An empty text is not "the same message" — it is the absence of one, and every
+            # blank inbound in a thread matches every other. Two attachments the poll returned
+            # a second apart are two messages; matching them dropped the second outright.
+            and (inbound.text or "").strip()
+            and await self.messages.duplicate_by_content(
+                thread.id, "in", inbound.text, inbound.occurred_at
+            )
         ):
             return None  # same text already in thread within 2s (pending→main id drift)
         if inbound.media_url is None and await self.messages.echo_of_our_own(
@@ -293,6 +316,30 @@ class IngestService:
                     await self._notify_unmapped_ad(lead, thread)
         return msg
 
+    async def _fill_in_blank(
+        self, row: Message, external_id: str, inbound: InboundMessage
+    ) -> None:
+        """Give the poll's blank row the webhook's description of the same attachment.
+
+        The external_id moves to the webhook's mid as well: without it a Meta redelivery would
+        find the row no longer blank, skip the guard above and store the photo a second time.
+        The poll's own re-read is still recognised — the row now carries an attachment, which is
+        exactly what attachment_inbound_at looks for. Nothing else in _store is replayed: the
+        blank row already advanced the window, last_in_at and the follow-up cycle to this same
+        instant when it was written."""
+        row.text = inbound.text
+        row.external_id = external_id
+        row.link_url = inbound.link_url or row.link_url
+        row.preview_url = inbound.preview_url or row.preview_url
+        if inbound.media_url:
+            row.media_pending = True
+            self.session.add(MediaAsset(
+                branch_id=self.branch_id, message_id=row.id,
+                kind=inbound.media_kind or "image", url=inbound.media_url,
+            ))
+        self.session.add(row)
+        await self.session.flush()
+
     async def _reset_followup_cycle(self, thread) -> None:
         """Fresh inbound restarts the follow-up cycle and cancels a queued nudge."""
         thread.followups_sent = 0
@@ -368,6 +415,15 @@ class IngestService:
             )
         except Exception:
             logger.warning("bot-off alert failed lead=%s", lead.id, exc_info=True)
+
+
+def _is_contentless(inbound: InboundMessage) -> bool:
+    """No text and no media — a row nobody, human or model, can read anything from.
+
+    Branch 1 (instagrapi) cannot produce one: ig_parse.item_content always substitutes a
+    placeholder, falling back to '[{item_type}]'. Only the Graph poll does, and only for a
+    message whose content Graph does not put in `message` — i.e. exactly an attachment."""
+    return inbound.media_url is None and not (inbound.text or "").strip()
 
 
 def _legacy_external_id(inbound: InboundMessage) -> str:

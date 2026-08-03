@@ -33,6 +33,12 @@ Redis; правок инфры на филиал не нужно.
 | `aggregate_needs` | раз в сутки 17:00 UTC (полночь Джакарты) | needs-cloud: инкрементальная классификация изменившихся `lead.needs` на канонические сущности (`chat:smart`, кап 400 лидов/прогон), суточный перевод лейблов, снапшот частот в `need_agg_snapshot` (см. `docs/needs-cloud.md`) |
 | `sync_ads` | `minute={3,23,43}` | Meta Marketing API: дополняет карту `media_pk → ad` (только при незамапленных лидах — иначе ноль запросов к Graph) и обновляет скользящее 14-дневное окно `ad_insight_daily` по объявлениям, откуда есть наши лиды. Намеренно редкий крон: рекламный аккаунт троттлит **весь аккаунт** (`code 80004`), а атрибуция Meta лагает ~7 дней. Не гейтится kill-switch'ем — это read-only отчётность. Карта и инсайты в разных транзакциях (троттл инсайтов не должен откатить дорогую строку карты). См. `docs/ad-attribution-and-reports.md` |
 
+## Джобы по требованию (не cron)
+
+| Задача | Кто ставит | Что делает |
+|---|---|---|
+| `ingest_meta_webhook` | `POST /webhooks/meta/{branch}` ([app/api/webhooks.py](../app/api/webhooks.py)) | пишет пачку сообщений, которую Meta прислала пушем: `page_id` → канал филиала, PSID отправителя → `external_thread_id` опроса, дальше обычный `IngestService`. Дедуп по нативному `mid`, поэтому пересечение с опросом — no-op. Опрос **не выключен**: он остаётся медленной сверкой для вебхуков, которые Meta не доставила. Ответ по-прежнему генерирует `reply_pending` — гейты не дублируются. Подробности и почему PSID нельзя писать как есть — [meta-webhooks.md](meta-webhooks.md) |
+
 Секунды подобраны так, чтобы в пределах минуты шло ingest → reply → send по порядку.
 Платформенный kill-switch: `app_setting` `agent_enabled_platform` (branch_id IS NULL)
 глушит reply/followup/**deletions/refresh_profiles/backfill_media** (всё, что пишет в IG)

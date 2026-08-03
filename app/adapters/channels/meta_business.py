@@ -26,6 +26,9 @@ class GraphTransport(Protocol):
     async def download_media(self, url: str) -> bytes:
         ...
 
+    async def find_conversation_id(self, user_id: str) -> str | None:
+        ...
+
 
 class MetaBusinessAdapter:
     """Implements app.ports.channel.ChannelPort over the official Graph API (read path)."""
@@ -60,6 +63,11 @@ class MetaBusinessAdapter:
         method), so every photo/voice message would sit media_pending forever — and a pending
         placeholder holds the reply, so the thread would go silent instead of answering."""
         return await self._t.download_media(url)
+
+    async def find_conversation_id(self, user_id: str) -> str | None:
+        """Webhook-only: translate a sender PSID/IGSID into the conversation id the poll uses
+        as external_thread_id. See app/modules/meta/webhook_threads.py for why this matters."""
+        return await self._t.find_conversation_id(user_id)
 
     def _to_inbound(self, conv: dict[str, Any]) -> InboundMessage:
         # Graph splits the human's identity by platform: Messenger returns `name`, Instagram
