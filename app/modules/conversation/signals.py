@@ -201,7 +201,22 @@ SOFT_NO_RE = re.compile(
     r"\bsibuk\b|"
     r"waktu\S*\s*(saya|aku|ku|nya)?\s*(sangat\s*|lagi\s*)?(pul|padat|penuh|mepet)|"
     r"(sedikit|kurang|dikit|belum\s*ada|nggak\s*ada|ga\s*ada|gak\s*ada|ngga\s*ada)"
-    r"\s*(waktu|lowong|luang|senggang))",
+    r"\s*(waktu|lowong|luang|senggang)|"
+    # «не подходит» — отказ через несовпадение, а не через нехватку. Все ветви выше ищут
+    # «нет времени»; здесь человек говорит «время есть, просто не наше». Тред 38: «memang ga
+    # cocok aja dari sisi waktunya» прошло насквозь, модель прочитала это как готовность,
+    # лид ушёл в ready и был передан менеджеру «для оплаты» — через минуту после собственного
+    # прощания бота. Объект обязателен (waktu/jadwal/harga/…), иначе «ga cocok buat pemula?» —
+    # обычный уточняющий вопрос — превратится в отказ.
+    # Порядок слов свободный, поэтому обе стороны: «harganya belum cocok» и «ga cocok dari sisi
+    # waktunya». Объект обязателен в обеих ветвях — он и отличает отказ от вопроса: «cocok gak
+    # buat pemula?» объекта не несёт и остаётся вопросом.
+    r"(?:waktu|jadwal|timing|harga|biaya|budget|lokasi|tempat|program|kelas)\S*"
+    r"[^\n]{0,20}?(?:nggak|ngga|ndak|gak|ga|gk|tidak|tdk|belum|blm|kurang)\s*"
+    r"(?:cocok|pas|sesuai|sreg|memungkinkan)|"
+    r"(?:nggak|ngga|ndak|gak|ga|gk|tidak|tdk|belum|blm|kurang)\s*"
+    r"(?:cocok|pas|sesuai|sreg)[^\n]{0,30}?"
+    r"(?:waktu|jadwal|timing|harga|biaya|budget|lokasi|tempat|program|kelas))",
     re.IGNORECASE)
 
 # Money is tight / no income — the full-course price must not lead (UMR context: the course
