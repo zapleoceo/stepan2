@@ -77,6 +77,28 @@ class _Client:
         return _Resp({"data": []})
 
 
+class _FieldPickyClient(_Client):
+    """A Graph that 400s any request naming `attachments` — an unknown or unpermitted
+    subfield rejects the WHOLE call, both platforms, every tick."""
+
+    def __init__(self, convs: list[dict]) -> None:
+        super().__init__(convs, both_platforms=True)
+        self.attempted: list[str] = []
+
+    async def get(self, url: str, params: dict) -> _Resp:
+        import httpx
+
+        fields = params.get("fields", "")
+        if fields != "instagram_business_account":
+            self.attempted.append(fields)
+        if "attachments" in fields:
+            req = httpx.Request("GET", "https://graph.facebook.com/v21.0/x")
+            raise httpx.HTTPStatusError(
+                "(#100) Tried accessing nonexisting field (attachments)",
+                request=req, response=httpx.Response(400, request=req))
+        return await super().get(url, params)
+
+
 def _msg(text: str = "", *, mid: str = "m1", attachments: list[dict] | None = None,
          when: str = _WHEN, who: str = _LEAD) -> dict:
     out: dict = {"id": mid, "from": {"id": who}, "message": text, "created_time": when}
@@ -183,6 +205,108 @@ async def test_attachments_and_the_message_id_are_actually_requested() -> None:
     assert all("{id," in f for f in client.fields)
 
 
+# ------------------------------------------------------- media must never cost the channel
+
+@pytest.mark.asyncio
+async def test_graph_refusing_the_media_fields_costs_the_media_not_the_channel() -> None:
+    """`attachments` went into the field string BOTH platform calls share, and Graph 400s the
+    whole request over one subfield it dislikes. fetch_conversations logs that and moves on —
+    so an unpermitted field would silently take branch 7 from 'photos ingest blank' to
+    'nothing ingests at all'. The poll must fall back to the field set that ran before."""
+    client = _FieldPickyClient([_conv([_msg("halo kak", mid="m5")])])
+    rows = await _transport(client).fetch_conversations()
+
+    assert [r["message"] for r in rows] == ["halo kak"]  # the channel still delivers
+    assert rows[0]["media_url"] is None                  # media is what we lost
+    assert client.attempted[0].count("attachments") == 1  # asked first
+    assert "attachments" not in client.attempted[-1]      # then degraded
+
+
+@pytest.mark.asyncio
+async def test_a_non_400_from_graph_is_not_treated_as_a_bad_field() -> None:
+    """A 500 or an auth failure must keep bubbling to fetch_conversations' own handler —
+    silently dropping the media fields on every error would hide a real outage as data loss."""
+    import httpx
+
+    class _Broken(_Client):
+        async def get(self, url: str, params: dict) -> _Resp:
+            if params.get("fields") == "instagram_business_account":
+                return await super().get(url, params)
+            req = httpx.Request("GET", "https://graph.facebook.com/v21.0/x")
+            raise httpx.HTTPStatusError(
+                "boom", request=req, response=httpx.Response(500, request=req))
+
+    transport = _transport(_Broken([_conv([_msg("hi")])]))
+    assert await transport.fetch_conversations() == []
+    assert "attachments" in transport._msg_fields
+
+
+@pytest.mark.asyncio
+async def test_the_webhook_shape_of_attachments_does_not_take_the_channel_down() -> None:
+    """Messenger sends attachments as a BARE LIST, not {"data": [...]}. `.get("data")` on it
+    raised AttributeError, which is not an httpx error — it escapes the poll's handler and
+    fetch_inbound (the worker catches only RuntimeError there) and dies at the worker's
+    blanket except, so the channel returns zero messages for the tick. Every tick."""
+    m = _msg("lihat ini")
+    m["attachments"] = [{"type": "image", "payload": {"url": "https://cdn/a.jpg"}}]
+    (row,) = await _transport(_Client([_conv([m])])).fetch_conversations()
+    assert row["message"] == "lihat ini"
+
+
+@pytest.mark.parametrize("attachments", [
+    [{"type": "image", "payload": {"url": "https://cdn/a.jpg"}}],  # webhook shape
+    "nonsense", 7, {"data": "nope"}, {"data": [None, 3]}, None])
+def test_media_of_never_raises_on_a_container_shape_it_does_not_know(attachments) -> None:
+    """The parser itself, not the guard above it. Returning None here is the contract: whoever
+    calls it gets 'no media', never an exception it has no reason to expect."""
+    from app.adapters.channels import graph_parse
+
+    assert graph_parse.media_of({"id": "m1", "attachments": attachments}) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attachments", ["nonsense", 7, {"data": "nope"}, {"data": [None, 3]}])
+async def test_a_junk_attachments_payload_still_delivers_the_message(attachments) -> None:
+    m = _msg("halo")
+    m["attachments"] = attachments
+    (row,) = await _transport(_Client([_conv([m])])).fetch_conversations()
+    assert row["message"] == "halo" and row["media_kind"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_is_not_dressed_up_as_an_image() -> None:
+    """Calling an unknown attachment an image sent a PDF to the VISION describer and gave it
+    the '🖼 media' placeholder — and that placeholder holds the reply for the whole 6h media
+    window. Branch 7 is a Page inbox, where leads attach documents routinely. No kind we can
+    establish means no media: the message goes through and the bot answers."""
+    client = _Client([_conv([_msg("ini dokumennya", attachments=[
+        {"mime_type": "application/pdf",
+         "file_url": "https://lookaside.fbsbx.com/brosur.pdf"}])])])
+    (row,) = await _transport(client).fetch_conversations()
+    assert row["media_kind"] is None and row["media_url"] is None
+    assert row["message"] == "ini dokumennya"
+
+
+@pytest.mark.asyncio
+async def test_a_file_url_with_no_mime_is_still_read_from_its_extension() -> None:
+    """Dropping the guess must not drop real photos: the url still says what it is."""
+    client = _Client([_conv([_msg(attachments=[
+        {"file_url": "https://lookaside.fbsbx.com/p.jpg?ccb=1&oh=00_AT"}])])])
+    (row,) = await _transport(client).fetch_conversations()
+    assert row["media_kind"] == "image"
+    assert row["message"] == IMAGE_PENDING_PH
+
+
+@pytest.mark.asyncio
+async def test_a_document_next_to_a_photo_does_not_hide_the_photo() -> None:
+    """An attachment we cannot classify is skipped, not returned as the answer."""
+    client = _Client([_conv([_msg(attachments=[
+        {"mime_type": "application/pdf", "file_url": "https://cdn/a.pdf"},
+        {"mime_type": "image/jpeg", "image_data": {"url": "https://cdn/b.jpg"}}])])])
+    (row,) = await _transport(client).fetch_conversations()
+    assert row["media_kind"] == "image" and row["media_url"] == "https://cdn/b.jpg"
+
+
 # ------------------------------------------------------------- native mid (finding c)
 
 @pytest.mark.asyncio
@@ -227,8 +351,10 @@ async def test_two_lines_in_the_same_second_still_both_survive() -> None:
 
 @pytest.mark.asyncio
 async def test_direction_comes_from_the_payload_not_from_a_default() -> None:
-    """The transport filters our own Page replies out, but that is a decision made elsewhere.
-    Anything reading InboundMessage.direction must get the truth, not a hopeful default."""
+    """The adapter half of the contract. Note what this does NOT claim: the poll filters our
+    own ids out before a row is built, so on the poll path direction can only read "in" today.
+    The value is derived rather than defaulted so the webhook path (S8), which does deliver
+    echoes of our own sends, gets the truth out of the same builder."""
     rows = [{"thread_id": "t1", "from_id": _OWN_IG, "message": "our reply",
              "created_time": _WHEN, "mid": "m9", "direction": "out"}]
     (inbound,) = await MetaBusinessAdapter(_FakeGraph(rows), account_id=_PAGE).fetch_inbound()
@@ -240,6 +366,17 @@ async def test_the_poll_states_direction_in_on_every_lead_message() -> None:
     client = _Client([_conv([_msg("halo")])])
     out = await _transport(client).fetch_conversations()
     assert [m["direction"] for m in out] == ["in"]
+
+
+def test_direction_is_computed_from_who_sent_it_not_hardcoded() -> None:
+    """The row builder decides by comparing the sender against our own ids — the same test the
+    instagrapi transport makes. Hardcoding "in" here would look identical on the poll path (our
+    ids are filtered out first) and be a lie the moment a webhook delivers our own echo."""
+    from app.adapters.channels import graph_parse
+
+    ours = graph_parse.row_of({"id": "t1"}, {"id": "m1", "from": {"id": _OWN_IG}}, {}, {_OWN_IG})
+    theirs = graph_parse.row_of({"id": "t1"}, {"id": "m2", "from": {"id": _LEAD}}, {}, {_OWN_IG})
+    assert (ours["direction"], theirs["direction"]) == ("out", "in")
 
 
 # -------------------------------------------------------------------------- into the DB
@@ -292,16 +429,34 @@ async def test_a_repoll_of_the_same_mid_does_not_duplicate_the_row(db_session) -
 
 async def test_a_row_stored_before_mids_is_not_duplicated_once_the_mid_arrives(
         db_session) -> None:
-    """The legacy-id lookups have to survive this change. A media message is the sharp case:
-    it is excluded from content dedup (two different photos share '🖼 media'), so ONLY the
-    synthetic-id lookup stands between the old row and a duplicate on the first poll after
-    deploy — every media message already in branch 7 would otherwise come back."""
+    """The legacy-id lookup has to survive this change. A media message is the sharp case: it
+    is excluded from content dedup (two different photos share '🖼 media'), so only the id
+    lookups stand between the row branch 7 already has and a duplicate on the first poll after
+    deploy — and a duplicate re-enters _store as a fresh inbound, resetting the follow-up cycle
+    and reviving the bot on a thread nobody wrote to.
+
+    The pre-change row is built here the way PRODUCTION wrote it, not the way this test used to
+    reconstruct it: the old poll never asked for attachments, so a photo's text is EMPTY (not
+    the placeholder — no pre-change code could produce that), and production's external_id is
+    the bare thread:time:sender shape. Reconstructing the placeholder made this pass for the
+    wrong reason: it hashed the same text on both sides, which the real deploy never does.
+
+    Not covered, deliberately: a row written by the connector branch itself, whose id carries
+    a :sha256("") suffix that no lookup here reproduces. Nothing has ever deployed that shape
+    to branch 7, and it stays that way only if the connector stack lands as one deploy."""
     bid, cid = await _world(db_session)
     when = datetime(2026, 8, 3, 10, 0, 1)
-    before = InboundMessage(
-        external_thread_id="t1", sender_id=_LEAD, text=IMAGE_PENDING_PH,
-        occurred_at=when, media_url="https://cdn/photo.jpg", media_kind="image")
-    assert len(await IngestService(db_session, bid).ingest(cid, [before])) == 1
+    lead = Lead(branch_id=bid, stage=Stage.QUALIFYING)
+    db_session.add(lead)
+    await db_session.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=cid, external_thread_id="t1")
+    db_session.add(thread)
+    await db_session.flush()
+    db_session.add(Message(
+        branch_id=bid, thread_id=thread.id, channel_id=cid,
+        external_id=f"t1:{when.isoformat()}:{_LEAD}",
+        direction="in", sent_by="lead", text="", occurred_at=when))
+    await db_session.flush()
 
     after = InboundMessage(
         external_thread_id="t1", sender_id=_LEAD, text=IMAGE_PENDING_PH,

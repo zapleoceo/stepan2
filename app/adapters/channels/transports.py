@@ -410,50 +410,15 @@ class EvolutionTransport:
         return ((r.json().get("instance") or {}).get("state")) or "close"
 
 
-def _graph_row(conv: dict[str, Any], m: dict[str, Any],
-               who: dict[str, Any]) -> dict[str, Any]:
-    """One Graph message → the flat dict MetaBusinessAdapter maps to an InboundMessage.
-
-    `mid` is Graph's own message id. Carrying it is what lets a webhook delivery and a poll
-    of the same message dedup to ONE row instead of two — the synthetic thread+time+text id
-    differs between the two paths. Empty when Graph omits it; ingest falls back then.
-
-    `direction` is stated rather than assumed. Our own messages are already filtered out
-    upstream (_inbound_of), but a filter is a decision made elsewhere and downstream code
-    reading `direction` deserves the truth from the payload, not a default that happens to
-    be right."""
-    kind_url = graph_parse.media_of(m)
-    text = str(m.get("message") or "")
-    if not text and kind_url:
-        # A photo/video/voice DM arrives with an EMPTY message string — ingesting that
-        # verbatim stored a blank turn the model could not read and the backfill could not
-        # find. Same placeholder the instagrapi path writes; the recognizer swaps it later.
-        text = graph_parse.placeholder_for(kind_url[0])
-    return {
-        "thread_id": conv.get("id", ""),
-        "mid": str(m.get("id") or ""),
-        "direction": "in",
-        "from_id": (m.get("from") or {}).get("id", ""),
-        "message": text,
-        "created_time": m.get("created_time"),
-        "sender_name": who.get("name") or "",
-        "sender_username": who.get("username") or "",
-        "media_kind": kind_url[0] if kind_url else None,
-        "media_url": kind_url[1] if kind_url else None,
-    }
-
-
-def _graph_key(m: dict[str, Any]) -> str:
-    """Identity of a polled Graph message for cross-platform dedup.
-
-    The native mid when Graph gives one. Otherwise thread+time+sender+TEXT: Graph timestamps
-    are second-resolution, so two lines typed quickly share a created_time and a key without
-    the text drops the second — the very loss this dedup must not cause."""
-    mid = str(m.get("mid") or "")
-    if mid:
-        return mid
-    return "\x00".join((str(m.get("thread_id", "")), str(m.get("created_time", "")),
-                        str(m.get("from_id", "")), str(m.get("message", ""))))
+# Graph 400s the WHOLE request over one subfield it dislikes, and fetch_conversations turns
+# that into a warning and moves on — so an `attachments` this Page's token is not allowed to
+# read would take branch 7 from "photos ingest blank" to "nothing ingests at all", on BOTH
+# platform calls, with nothing louder than a log line. These two sets are a ladder: the media
+# fields are dropped on a 400 and the poll continues on the field set that ran in production
+# before 2026-08-03. The choice is per transport instance, i.e. per tick — a transient 400
+# does not cost the media forever.
+_MSG_FIELDS_FULL = "id,from,message,created_time,attachments"
+_MSG_FIELDS_TEXT_ONLY = "from,message,created_time"
 
 
 class GraphTransportHTTP:
@@ -464,6 +429,7 @@ class GraphTransportHTTP:
         self._account_id = account_id
         self._token = token
         self._own_ids_cache: set[str] | None = None
+        self._msg_fields = _MSG_FIELDS_FULL
 
     def _client(self) -> Any:
         import httpx  # lazy: real transport only, never imported by unit tests
@@ -506,7 +472,7 @@ class GraphTransportHTTP:
             # on the thread alone collapsed a burst back to a single message, undoing the
             # whole point of reading the thread (caught by tests/test_meta_no_message_loss).
             for m in msgs:
-                key = _graph_key(m)
+                key = graph_parse.dedup_key(m)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -530,7 +496,7 @@ class GraphTransportHTTP:
         """
         oldest_first = list(reversed(msgs))  # Graph returns newest-first
         return [
-            _graph_row(conv, m, who)
+            graph_parse.row_of(conv, m, who, own)
             for m in oldest_first
             if str((m.get("from") or {}).get("id", "")) not in own
         ]
@@ -562,24 +528,12 @@ class GraphTransportHTTP:
         async with self._client() as c:
             own = await self._own_ids(c)
             for _ in range(max_pages):
-                # participants rides along in the same call — it is what carries the human's
-                # name. Graph splits it by platform: Messenger gives `name`, Instagram gives
-                # `username`. Without it every lead shows in the inbox as "Lead".
-                # `id` on the message is Graph's native mid (dedup key, see _graph_row);
-                # `attachments` is the only place a photo/video/voice DM exists — without it
-                # Graph reports those messages as an empty string and they ingest blank.
-                params: dict[str, Any] = {
-                    "fields": ("id,participants,"
-                               f"messages.limit({_MSGS_PER_THREAD})"
-                               "{id,from,message,created_time,attachments}"),
-                    "limit": page_size}
+                params: dict[str, Any] = {"limit": page_size}
                 if platform:
                     params["platform"] = platform
                 if cursor:
                     params["after"] = cursor
-                r = await c.get(f"/{self._account_id}/conversations", params=params)
-                r.raise_for_status()
-                body = r.json()
+                body = await self._conversations_page(c, params)
                 for conv in body.get("data", []):
                     msgs = (conv.get("messages") or {}).get("data") or []
                     if not msgs:
@@ -592,6 +546,44 @@ class GraphTransportHTTP:
                 if threads >= cap or not cursor or not paging.get("next"):
                     break
         return out[:cap]
+
+    def _fields_param(self) -> str:
+        # participants rides along in the same call — it is what carries the human's name.
+        # Graph splits it by platform: Messenger gives `name`, Instagram gives `username`.
+        # Without it every lead shows in the inbox as "Lead". `id` on the message is Graph's
+        # native mid (dedup key, see graph_parse.dedup_key); `attachments` is the only place a
+        # photo/video/voice DM exists — without it Graph reports those messages as an empty
+        # string and they ingest blank.
+        return ("id,participants,"
+                f"messages.limit({_MSGS_PER_THREAD})"
+                "{" + self._msg_fields + "}")
+
+    async def _conversations_page(self, c: Any, params: dict[str, Any]) -> dict[str, Any]:
+        """One /conversations page, degrading to the text-only field set if Graph refuses.
+
+        A 400 here is the whole channel, not one message: fetch_conversations logs it and
+        continues, so both platform calls would return nothing every tick. Text without media
+        is a bad day; no messages at all is an outage nobody is paged for."""
+        import httpx  # lazy: real transport only, never imported by unit tests  # noqa: PLC0415
+
+        params = {**params, "fields": self._fields_param()}
+        try:
+            r = await c.get(f"/{self._account_id}/conversations", params=params)
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # getattr, not exc.response: an error raised without one (a wrapped transport
+            # failure) must fall through to the caller as the outage it is, not be mistaken
+            # for a field Graph rejected.
+            if (self._msg_fields == _MSG_FIELDS_TEXT_ONLY
+                    or getattr(exc.response, "status_code", None) != 400):
+                raise
+            logger.warning("meta conversations rejected the media fields (%s) — "
+                           "polling text-only for this tick: %s", self._msg_fields, exc)
+            self._msg_fields = _MSG_FIELDS_TEXT_ONLY
+            params["fields"] = self._fields_param()
+            r = await c.get(f"/{self._account_id}/conversations", params=params)
+            r.raise_for_status()
+        return r.json()
 
     async def _own_ids(self, c: Any) -> set[str]:
         """Every id that means "us" inside a participants list.

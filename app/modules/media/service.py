@@ -3,7 +3,8 @@
 Ingest sees a media item with empty text and flags the message (media_pending=True);
 this branch-scoped service later downloads the bytes via a channel transport and
 attaches a MediaAsset, clearing the flag. A download failure leaves the flag set so
-the next tick retries — nothing is lost and the loop never crashes."""
+the next tick retries — but only while the retry window is open, because the flag also
+holds the reply. Nothing is lost and the loop never crashes."""
 from __future__ import annotations
 
 import logging
@@ -28,9 +29,10 @@ from app.ports.llm import LLMPort
 _VOICE_UNAVAILABLE = "🎤 (voice — no transcript)"
 _IMAGE_UNAVAILABLE = "🖼 (image — tidak bisa dibaca)"
 
-# The bytes are downloaded once, but recognition (broker transcribe/vision) can fail for a
-# while — the broker may be briefly down or its provider key not yet configured. Keep
-# media_pending set on a failed recognition so the backfill cron retries it every tick, but
+# Recognition (broker transcribe/vision) can fail for a while — the broker may be briefly down
+# or its provider key not yet configured — and so can the download itself (a CDN link that has
+# expired, a host that wants credentials we deliberately do not send). Keep media_pending set
+# on either failure so the backfill cron retries it every tick, but
 # only for this long after the message arrived; past it, give up and release the hold so the
 # thread isn't frozen indefinitely. Covers "the voice hangs unanswered until the broker is
 # fixed" without hammering a permanently-broken provider forever.
@@ -198,7 +200,19 @@ class MediaService:
                 except Exception as exc:  # noqa: BLE001 — transient: keep flag, back off, retry
                     logger.warning("media download failed branch=%d msg=%d (attempt %d): %s",
                                    self.branch_id, msg.id, (msg.media_attempts or 0) + 1, exc)
-                    self._defer(msg)
+                    if self._retry_window_open(msg):
+                        self._defer(msg)
+                    else:
+                        # The 6h window bounded a failing RECOGNITION but not a failing
+                        # DOWNLOAD, so a url that never downloads (an expired CDN link, a host
+                        # that wants auth we deliberately do not send) kept media_pending set
+                        # forever while its placeholder held the thread silent, with no alert
+                        # — the exact freeze _release_media_hold exists to prevent, reached
+                        # through the one path that never consulted the window.
+                        logger.warning("media download gave up past the retry window "
+                                       "branch=%d msg=%d", self.branch_id, msg.id)
+                        self._release_media_hold(msg)
+                        msg.media_pending = False
                     self.session.add(msg)
                     await self.session.flush()
                     continue
