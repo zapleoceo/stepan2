@@ -113,9 +113,23 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
 
 
+def _mute_transport_loggers() -> None:
+    """httpx logs every request at INFO as a full URL — query string included.
+
+    Meta's OAuth endpoints take the app secret and the access tokens as QUERY parameters, so a
+    single INFO line writes `client_secret=…` and a live token into the container log in clear
+    text (observed 2026-08-03, right after the first connect through the flow). The worker
+    muted these loggers long ago; the API never did. Anyone who can read a log — us, a log
+    shipper, a support dump — reads the credentials.
+    """
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+
 def create_app() -> FastAPI:
     """Build the HTTP app: health probe, webhook router, admin dashboard."""
     settings().validate_runtime()  # fail-fast on broken config before serving a request
+    _mute_transport_loggers()
     app = FastAPI(title="stepan2", lifespan=_lifespan)
     app.add_middleware(_PartialShellMiddleware)
     app.add_middleware(WriteGuardMiddleware)  # branch_viewer = read-only (no /ui writes)
