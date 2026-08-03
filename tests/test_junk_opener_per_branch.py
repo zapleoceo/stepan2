@@ -1,9 +1,10 @@
-"""The one code-written reply must not name a business the branch has nothing to do with.
+"""The one code-written reply must not name a business — or speak a language — the branch has
+nothing to do with.
 
 Until 2026-08-02 the greeting sent to a contentless first message was a literal naming this
 product's first client. Every branch sent it — including the demo branch Meta reviews, where
 "hi" is the likeliest opening word a reviewer types and, being a bare ack, lands exactly here
-instead of with the model.
+instead of with the model. The brand went then; the Bahasa stayed until 2026-08-03.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ import re  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.modules.conversation.opener import JUNK_OPENER, Entry, classify, junk_opener  # noqa: E402
+from app.modules.conversation.opener import Entry, classify, junk_opener  # noqa: E402
 from app.modules.settings.schema import defaults  # noqa: E402
 
 
@@ -28,8 +29,23 @@ class _M:
         self.direction, self.text = direction, text
 
 
-def test_the_fallback_names_no_business() -> None:
-    assert not re.search(r"it\s*step|academy|minstep", JUNK_OPENER, re.IGNORECASE)
+@pytest.mark.parametrize("lang", ["id", "en", "ru", "vi"])
+def test_the_fallback_names_no_business(lang: str) -> None:
+    assert not re.search(r"it\s*step|academy|minstep", junk_opener(None, lang), re.IGNORECASE)
+
+
+def test_the_indonesian_fallback_is_unchanged() -> None:
+    """Branch 1's answer to a bare "halo", pinned — the wording is measured."""
+    assert junk_opener(None, "id") == \
+        "Halo Kak 😊 Boleh cerita, Kakak lagi cari info tentang apa ya?"
+
+
+@pytest.mark.parametrize("lang", ["en", "ru", "vi"])
+def test_no_other_branch_greets_a_stranger_in_bahasa(lang: str) -> None:
+    """The very first thing a lead ever reads from a branch — and on the demo branch Meta
+    reviews, what a reviewer typing "hi" gets back."""
+    greeting = junk_opener(None, lang)
+    assert "Kak" not in greeting and "Halo" not in greeting
 
 
 def test_a_branch_greeting_wins_over_the_fallback() -> None:
@@ -38,7 +54,7 @@ def test_a_branch_greeting_wins_over_the_fallback() -> None:
 
 @pytest.mark.parametrize("empty", ["", "   ", None])
 def test_unset_falls_back(empty: str | None) -> None:
-    assert junk_opener(empty) == JUNK_OPENER
+    assert junk_opener(empty) == junk_opener(None, "id")
 
 
 def test_whitespace_is_trimmed() -> None:

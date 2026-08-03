@@ -1,8 +1,10 @@
 """Reply sanitization — strip LLM artifacts from outgoing text before delivery.
 
-Zero-width chars, AI-style dashes and curly quotes, and fabricated Indonesian phone
-numbers are removed. Lines containing the official IT STEP number are never stripped.
-Ported from Stepan 1 `decision_parser._clean_reply()`."""
+Zero-width chars, AI-style dashes and curly quotes, and fabricated phone numbers are removed.
+Lines containing the branch's own official number are never stripped. What counts as a phone
+number depends on the country, so the shapes come from the branch's dialling code rather than
+being hardcoded to Indonesia's — they were, and every other branch shipped invented local
+numbers unchecked. Ported from Stepan 1 `decision_parser._clean_reply()`."""
 from __future__ import annotations
 
 import re
@@ -61,9 +63,33 @@ _OFFICIAL_PHONE = _official_phone_re()
 # IG contact-card line the LLM copies ("📱 Телефон · …")
 _FAKE_PHONE_LINE = re.compile(r"\U0001f4f1\s*(?:телефон|telepon|phone)", re.I)
 
-# Indonesian phone: +62… or 08x… with a long digit tail.
-# Prices (Rp/jt/IDR) do NOT start with +62/08x → no false positives on prices.
-_PHONE_PAT = re.compile(r"(?:\+62|\b08[1-9])[\d\s.\-]{6,}")
+# A phone number, in the shapes the branch's own country writes them: the international form
+# (+<dialling code>…) and the national trunk form, which carries no '+' at all and is therefore
+# invisible to the international pattern. Indonesian mobiles start 08; elsewhere the safe
+# generic is a trunk zero plus two digits.
+#
+# This was hardcoded to Indonesia until 2026-08-03, so a branch anywhere else shipped invented
+# local numbers to its leads with nothing to stop them. Default "62" keeps branch 1 on exactly
+# the pattern it has always run. Prices (Rp/jt/IDR) never start with +62/08x, so this cannot
+# eat a figure.
+_NATIONAL_TRUNK = {"62": r"08[1-9]"}
+_DEFAULT_TRUNK = r"0\d{2}"
+
+
+def _phone_pattern(country_code: str) -> re.Pattern[str]:
+    cc = re.sub(r"\D", "", country_code) or "62"
+    trunk = _NATIONAL_TRUNK.get(cc, _DEFAULT_TRUNK)
+    return re.compile(rf"(?:\+{cc}|\b{trunk})[\d\s.\-]{{6,}}")
+
+
+_PHONE_PATTERNS: dict[str, re.Pattern[str]] = {}
+
+
+def _phone_re(country_code: str) -> re.Pattern[str]:
+    """Compiled once per country code — clean_reply runs on every outgoing bubble."""
+    if country_code not in _PHONE_PATTERNS:
+        _PHONE_PATTERNS[country_code] = _phone_pattern(country_code)
+    return _PHONE_PATTERNS[country_code]
 
 # Markdown artifacts reasoning models emit — IM users never type these, so strip the
 # markers (keep the text). Single-`*` italic is left alone: too risky next to prices/×.
@@ -78,10 +104,10 @@ def _strip_markdown(s: str) -> str:
     return _MD_BULLET.sub(r"\1• ", s)
 
 
-def _has_fake_phone(line: str) -> bool:
-    """True if line contains a phone-like token that is NOT the official IT STEP number."""
+def _has_fake_phone(line: str, country_code: str) -> bool:
+    """True if line contains a phone-like token that is NOT the branch's official number."""
     return any(
-        not _OFFICIAL_PHONE.search(m.group(0)) for m in _PHONE_PAT.finditer(line)
+        not _OFFICIAL_PHONE.search(m.group(0)) for m in _phone_re(country_code).finditer(line)
     )
 
 
@@ -91,8 +117,11 @@ def _has_fake_phone(line: str) -> bool:
 _URL_TRAILING_DOT = re.compile(r"(https?://[^\s]*[a-zA-Z0-9/=_-])\.(?=\s|$)")
 
 
-def clean_reply(text: str) -> str:
-    """Strip zero-width chars, AI punctuation, and fabricated Indonesian phone lines."""
+def clean_reply(text: str, country_code: str = "62") -> str:
+    """Strip zero-width chars, AI punctuation, and fabricated phone lines.
+
+    `country_code` is the branch's dialling code (BranchSettings.phone_country_code) — it
+    decides which number shapes count as a phone at all."""
     s = (text or "").translate(_ZW)
     s = _LITERAL_NEWLINE.sub("\n", s)
     s = strip_date_annotations(s)
@@ -106,6 +135,6 @@ def clean_reply(text: str) -> str:
     lines = [
         ln for ln in s.split("\n")
         if not (_FAKE_PHONE_LINE.search(ln) and not _OFFICIAL_PHONE.search(ln))
-        and not _has_fake_phone(ln)
+        and not _has_fake_phone(ln, country_code)
     ]
     return "\n".join(lines).strip()

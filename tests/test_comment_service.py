@@ -196,3 +196,53 @@ async def test_verify_catches_wrong_price_and_regen_fixes_it(db_session) -> None
     assert llm.verifies >= 1                      # the LLM fabrication verify ran
     assert "1.882.955" in port.posted[0][1]       # the corrected price shipped
     assert "99.000.000" not in port.posted[0][1]  # the wrong one never went public
+
+
+class _PromptCapturingLLM(_FakeLLM):
+    def __init__(self, reply: str) -> None:
+        super().__init__(reply)
+        self.prompts: list[str] = []
+
+    async def chat(self, messages, *, workflow=None, **kw):  # noqa: ANN001, ANN003
+        self.prompts.append(messages[-1]["content"])
+        return await super().chat(messages, workflow=workflow, **kw)
+
+
+async def _english_branch(s) -> tuple[int, Channel]:
+    b = Branch(name="EN", lang="en")
+    s.add(b)
+    await s.flush()
+    s.add(KnowledgeDoc(branch_id=b.id, slug="payment_policy",
+                       content="SMM Intensive: $1,500 in total, $250 deposit."))
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM, handle="demo")
+    s.add(ch)
+    await s.flush()
+    return b.id, ch
+
+
+async def test_an_english_branch_posts_its_fallback_in_english(db_session) -> None:
+    """The invite-only fallback was one Indonesian constant for every tenant, posted PUBLICLY
+    under their own post whenever a draft could not be grounded. An English branch's followers
+    read "Halo Kak! Boleh DM aku ya" from the company they follow."""
+    bid, ch = await _english_branch(db_session)
+    port = _FakePort([_comment("c1", "how much is it?")])
+    # $9,900 is not in this branch's KB — the gate has to see it and degrade to the invite.
+    svc = CommentService(db_session, bid, _FakeLLM("It's only $9,900!"),
+                         _kb(db_session, bid), _cfg())
+    await svc.ingest(ch, port)
+    await svc.process(ch, port)
+    assert "9,900" not in port.posted[0][1]
+    assert "Kak" not in port.posted[0][1]
+    assert "DM" in port.posted[0][1]
+
+
+async def test_an_english_branch_does_not_introduce_itself_as_minstep(db_session) -> None:
+    """A persona name is tenant identity, not language: every branch's public comments were
+    signed with the Jakarta branch's mascot."""
+    bid, ch = await _english_branch(db_session)
+    port = _FakePort([_comment("c1", "is it online or on site?")])
+    llm = _PromptCapturingLLM("Both, actually - want the details in DM?")
+    svc = CommentService(db_session, bid, llm, _kb(db_session, bid), _cfg())
+    await svc.ingest(ch, port)
+    await svc.process(ch, port)
+    assert llm.prompts and "MinStep" not in llm.prompts[0]

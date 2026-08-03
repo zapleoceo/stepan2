@@ -24,6 +24,7 @@ from app.ports.llm import LLMPort
 from app.ports.notify import NotifierPort
 
 from . import guard
+from .canned import manager_closing, ready_closing
 from .decision import Decision
 from .dormancy import park_dormant
 from .engine import _fmt_llm_meta  # noqa: F401 — re-exported for tests/legacy imports
@@ -43,35 +44,10 @@ TECHNICAL_HANDOFF_REASONS = (MONEY_ESCALATION_REASON, guard.GUARD_HANDOFF_REASON
 _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
-# A needs_manager turn always mutes the bot (agent_enabled=False) — but the model's own
-# reply that same turn is about answering the lead's question, not about announcing a
-# hand-off; nothing told the LEAD a human is now taking over. A lead who then sends a
-# follow-up (e.g. a phone number, thread 1023) gets pure silence — no bot, no confirmation,
-# because the account is already muted. Append this deterministic closing line whenever the
-# stage newly flips to MANAGER, so the lead is never left hanging without an explanation.
-_MANAGER_HANDOFF_CLOSING = (
-    "Terima kasih ya Kak! Untuk ini tim kami yang akan bantu langsung - nanti dihubungi via "
-    "telepon atau WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) ya 🙏"
-)
-# Same closing, but the lead has NO phone on file yet (thread 452, 5005: needs_manager has no
-# phone gate the way the ready/READY path does — a real "ready to commit, no contact" lead got
-# muted and handed off with nothing for a manager to call). Asking here is the only remaining
-# chance: the bot is muted (agent_enabled=False) the instant this ships, but ingest's own
-# phone miner (identity._backfill) runs on EVERY inbound regardless of mute state, so a lead
-# who replies to THIS explicit ask still gets captured automatically.
-_MANAGER_HANDOFF_CLOSING_NO_PHONE = (
-    "Terima kasih ya Kak! Untuk ini tim kami yang akan bantu langsung. Boleh minta nomor "
-    "telepon/WhatsApp Kakak? Biar tim bisa hubungi di jam kerja (Senin-Jumat, 09.00-18.00 "
-    "WIB) ya 🙏"
-)
-# The sale/READY exit muted the bot like MANAGER but never guaranteed the lead a closing —
-# it relied on the model's own reply confirming next steps, which isn't guaranteed. Append
-# this on the fresh READY flip so a won lead always knows what happens next (same shape as
-# the manager closing, but about the enrollment: registration → payment during work hours).
-_READY_HANDOFF_CLOSING = (
-    "Siap Kak! Pendaftaran Kakak aku teruskan ke tim ya - nanti dihubungi via telepon atau "
-    "WhatsApp di jam kerja (Senin-Jumat, 09.00-18.00 WIB) untuk langkah pembayaran & jadwal 🙏"
-)
+
+# The three hand-off closings and the escalation hold-line live in canned.py — one table, in
+# the language of the conversation. They used to be constants right here, in Bahasa, appended
+# to the replies of every branch that ever handed a lead over.
 
 # Did the model already tell the lead what happens next? Deliberately loose: it only has to
 # name the team/contact and a channel or the working hours, in any wording. A false positive
@@ -256,6 +232,10 @@ class ReplyDelivery:
         # the same test the CRM push was moved out on.
         self.pending_capi: list[tuple[str, str | None, str]] = []
 
+    def _country_code(self) -> str:
+        """The branch's dialling code — what makes an invented phone number recognisable."""
+        return (self.settings.phone_country_code if self.settings else "62") or "62"
+
     async def _lang(self, lead: Lead | None = None) -> str:
         """Reply language ladder: the lead's stated preference wins, else the branch default.
         The KB may be written in any language — this only controls what the bot replies in."""
@@ -306,11 +286,11 @@ class ReplyDelivery:
             # when the model already told them what happens next — which it usually does, it
             # knows the working hours — appending a canned line repeats it in different words
             # and spends a bubble against the anti-ban cap on the sharpest turn of the funnel.
+            lang = await self._lang(lead)
             if exit_kind == "manager":
-                closing = (_MANAGER_HANDOFF_CLOSING if lead.phone_e164
-                          else _MANAGER_HANDOFF_CLOSING_NO_PHONE)
+                closing = manager_closing(lang, has_phone=bool(lead.phone_e164))
             else:
-                closing = _READY_HANDOFF_CLOSING
+                closing = ready_closing(lang)
             outbox = await self.outbox.add(
                 Outbox(
                     branch_id=self.branch_id,

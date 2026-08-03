@@ -56,7 +56,7 @@ ONLY job: report what the LEAD revealed about themselves — their own meaning, 
 rep suggested or offered. Capture it whenever the lead DESCRIBES a situation, a problem, a \
 wish, a fear, a constraint or a reason — you do NOT need the exact word, and you do NOT need \
 a full sentence; a short phrase in their own words is enough. Paraphrase tightly into \
-Indonesian. A bare "iya"/"ok"/"boleh" with no content of its own reveals nothing. Never \
+{target}. A bare "iya"/"ok"/"boleh" with no content of its own reveals nothing. Never \
 invent anything they did not say. Report only what is NEW — don't repeat what is already \
 listed as known below. Nothing new: return empty values.
 
@@ -117,6 +117,23 @@ Return ONLY this JSON, no prose, no markdown fences:
 "budget_signal": str, "product_slug": str}
 """
 
+# What the dossier gets written IN. It is read back by the selling model on the next turn and
+# by a human in the admin UI, so it has to be the branch's own language — the extractor used
+# to be told "paraphrase into Indonesian" unconditionally, which is how an English branch's
+# dossier came back in Bahasa and then fed the reply prompt.
+#
+# Not free_mode.language_name: that says "Bahasa Indonesia", and the word here has been
+# "Indonesian" since the prompt was written. Changing it would change branch 1's extraction
+# for no reason. Anything unlisted falls back to the English name of the language.
+_PARAPHRASE_NAME = {"id": "Indonesian"}
+
+
+def _system(lang: str) -> str:
+    from .free_mode import language_name  # noqa: PLC0415 — free_mode imports prompt, not this
+
+    key = (lang or "").lower()
+    return _SYSTEM.replace("{target}", _PARAPHRASE_NAME.get(key) or language_name(key))
+
 
 def _transcript(dialog: list[Message]) -> str:
     lines = []
@@ -163,7 +180,8 @@ async def extract_discovery(  # noqa: PLR0913
     try:
         raw, meta = await asyncio.wait_for(
             llm.chat(
-                [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}],
+                [{"role": "system", "content": _system(lang)},
+                 {"role": "user", "content": user}],
                 capability=FAST, require_json_schema=True,
                 workflow="discovery", thread_id=thread_id, branch_id=branch_id),
             timeout=_TIMEOUT_S)
