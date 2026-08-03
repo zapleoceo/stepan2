@@ -23,6 +23,9 @@ class GraphTransport(Protocol):
     async def token_debug(self) -> dict[str, Any]:
         ...
 
+    async def download_media(self, url: str) -> bytes:
+        ...
+
 
 class MetaBusinessAdapter:
     """Implements app.ports.channel.ChannelPort over the official Graph API (read path)."""
@@ -50,6 +53,14 @@ class MetaBusinessAdapter:
         debug = await self._t.token_debug()
         return _map_token(debug)
 
+    async def download_media(self, url: str) -> bytes:
+        """Bytes of a DM attachment, for the media backfill worker.
+
+        Without this the worker cannot build a port for the channel at all (it probes for the
+        method), so every photo/voice message would sit media_pending forever — and a pending
+        placeholder holds the reply, so the thread would go silent instead of answering."""
+        return await self._t.download_media(url)
+
     def _to_inbound(self, conv: dict[str, Any]) -> InboundMessage:
         # Graph splits the human's identity by platform: Messenger returns `name`, Instagram
         # returns `username`. Passing both through is what stops every lead reading as "Lead".
@@ -61,6 +72,15 @@ class MetaBusinessAdapter:
             product_hint=conv.get("referral_product"),
             sender_name=conv.get("sender_name") or None,
             sender_username=conv.get("sender_username") or None,
+            # Stated by the payload, not inferred here. The transport filters our own Page
+            # replies out, but nothing downstream should have to KNOW that to tell a lead's
+            # message from ours — mirrors what the instagrapi adapter carries.
+            direction=str(conv.get("direction") or "in"),
+            # Graph's native mid. Keeping it is what lets a webhook delivery and a poll of the
+            # same message land on one row; ingest falls back to its synthetic id when absent.
+            external_id=str(conv.get("mid") or "") or None,
+            media_url=conv.get("media_url") or None,
+            media_kind=conv.get("media_kind") or None,
         )
 
 

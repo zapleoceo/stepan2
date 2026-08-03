@@ -169,6 +169,21 @@ async def test_backfill_failure_keeps_pending(db_session) -> None:
     assert asset is not None and asset.data is None  # stub kept, undownloaded
 
 
+async def test_backfill_download_failure_past_the_window_releases_the_thread(
+        db_session) -> None:
+    """A download that has failed for the whole retry window is not going to start working —
+    and until now media_pending stayed True forever while the '🖼 media' placeholder held the
+    reply, so the thread sat silent with no answer and no alert. The window bounded a failing
+    RECOGNITION; the download path was the one that never consulted it."""
+    bid = await _branch(db_session)
+    cid = await _channel(db_session, bid)
+    msg = await _media_msg(db_session, bid, cid, ext="m1", at=_utcnow() - timedelta(hours=7))
+    assert await MediaService(db_session, bid).backfill(cid, FakeDownloader(fail=True), 20) == 0
+    refreshed = (await db_session.exec(select(Message).where(Message.id == msg.id))).first()
+    assert refreshed.media_pending is False
+    assert refreshed.text != "🖼 media"  # hold released — the bot answers instead of freezing
+
+
 async def test_backfill_permanent_reject_clears_flag(db_session) -> None:
     """A ValueError (e.g. the transport's size cap on a huge video) is permanent — the flag
     is cleared so it isn't re-streamed every tick forever, unlike a transient failure."""
