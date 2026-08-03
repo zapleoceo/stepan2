@@ -269,6 +269,14 @@ class Settings(BaseSettings):
         default=1500, description="output token budget for a per-bubble translation (Cyrillic "
                                   "is token-heavy)")
 
+    meta_webhook_fields: str = Field(
+        default="messages,messaging_referrals",
+        description="subscribed_fields sent to /{page-id}/subscribed_apps when a client "
+                    "connects a Page. `messages` is what makes Meta push DMs at all; "
+                    "`messaging_referrals` carries the ad/story attribution of a first "
+                    "contact. Deliberately excludes message_echoes — our own sends are "
+                    "already recorded at send time and an echo would double them.")
+
     # ── Pinned external API versions (bump without a code deploy) ────────────────
     meta_graph_version: str = Field(
         default="v18.0", description="Facebook Graph API version for Meta CAPI Lead events")

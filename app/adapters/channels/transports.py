@@ -545,6 +545,37 @@ class GraphTransportHTTP:
                     break
         return out[:cap]
 
+    async def find_conversation_id(self, user_id: str) -> str | None:
+        """The conversation id for a person, given only their PSID/IGSID.
+
+        The webhook identifies a sender by PSID and never carries the conversation id, while
+        the poll keys every thread on that id — so without this translation the same chat is
+        stored twice. /{page-id}/conversations?user_id=… is the documented reverse lookup.
+
+        Both platforms are tried, Messenger first: a Page with Instagram Direct switched off
+        answers "(#200) the account owner has disabled access" for the instagram call, which is
+        a normal configuration, not an outage. None = we could not establish it, and the caller
+        leaves the message to the reconcile poll rather than invent a key.
+        """
+        import httpx  # lazy: real transport only, never imported by unit tests  # noqa: PLC0415
+
+        async with self._client() as c:
+            for platform in (None, "instagram"):
+                params: dict[str, Any] = {"user_id": user_id, "fields": "id", "limit": 1}
+                if platform:
+                    params["platform"] = platform
+                try:
+                    r = await c.get(f"/{self._account_id}/conversations", params=params)
+                    r.raise_for_status()
+                except httpx.HTTPError as exc:
+                    logger.warning("meta conversation lookup failed (platform=%s): %s",
+                                   platform or "messenger", exc)
+                    continue
+                data = r.json().get("data") or []
+                if data and data[0].get("id"):
+                    return str(data[0]["id"])
+        return None
+
     async def _own_ids(self, c: Any) -> set[str]:
         """Every id that means "us" inside a participants list.
 

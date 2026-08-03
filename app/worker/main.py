@@ -100,6 +100,25 @@ async def _ingest_channel(branch_id: int, channel_id: int) -> int:
         return 0
 
 
+async def ingest_meta_webhook(
+    ctx: dict[str, Any], branch_id: int, events: list[dict[str, Any]]
+) -> int:
+    """Ingest a batch the Meta webhook already parsed and acknowledged. Returns rows stored.
+
+    Not a cron job — the API enqueues it the moment Meta delivers, which is the whole point of
+    the official connector: an answer that starts within seconds instead of on the next poll.
+    The poll stays on as the reconcile pass for anything Meta never delivered, and both paths
+    write through IngestService, so an overlap is a dedup, not a duplicate.
+
+    The reply itself is left to the reply_pending cron (once a minute, second=45) — it owns the
+    kill switch, the broker guard, the per-lead gating and the batch caps, none of which should
+    be re-implemented on an inbound path."""
+    from app.modules.meta.webhook_ingest import ingest_webhook_messages  # noqa: PLC0415
+
+    return await ingest_webhook_messages(
+        branch_id, events, notifier_factory=_build_notifier)
+
+
 # Adaptive polling: the base ingest runs every 2 min (anti-ban footprint fixed). During a
 # LIVE back-and-forth the lead should not wait a whole 2-min tick for each of their replies to
 # be seen, so an interleaved poll on the OFF minutes picks up ONLY channels that currently have
@@ -1107,6 +1126,10 @@ class WorkerSettings:
         backfill_media_branch, aggregate_needs_branch,
         daily_digest_branch, ingest_comments_branch,
         sync_ads_branch, backfill_ads_branch,
+        # Push, not cron: enqueued by app/api/webhooks.py the moment Meta delivers a message.
+        # It MUST be listed here — an unregistered name is accepted by enqueue_job and then
+        # dropped by the worker, which is a webhook that acks and ingests nothing.
+        ingest_meta_webhook,
         # Per-reply job: its OWN long timeout (waits out a slow broker); no ARQ retry (a broker
         # timeout re-dispatches next tick rather than immediately re-hitting the same slow broker
         # and double-billing). keep_result=0 is the worker default — a killed/failed reply job

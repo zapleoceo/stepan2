@@ -31,6 +31,7 @@ from app.modules.meta.oauth import (
     state_channel_id,
     state_token,
 )
+from app.modules.meta.subscribe import subscribe_page
 from app.modules.settings.service import get_channel_settings
 
 router = APIRouter()
@@ -157,3 +158,33 @@ async def _persist(channel_id: int, page: dict) -> None:
             text("INSERT INTO channel_session (channel_id, secret_enc, status)"
                  " VALUES (:ch, :sec, 'active')"),
             {"ch": channel_id, "sec": encrypt(json.dumps(dump))})
+    await _subscribe_webhook(channel_id, page)
+
+
+async def _subscribe_webhook(channel_id: int, page: dict) -> None:
+    """Ask Meta to start pushing this Page's messages to our webhook.
+
+    Storing the token connects us to the Page; it does not make Meta send us anything. That is
+    /{page-id}/subscribed_apps, and nothing in this codebase ever called it — which is why the
+    webhook endpoint had never received a single message.
+
+    Non-fatal on purpose. Until the app is approved for pages_messaging, Meta answers 403 here,
+    and refusing to finish the connect over that would block the very review that lifts it. The
+    channel still works: the poll is the reconcile path and keeps ingesting. But a silent
+    failure would leave us believing webhooks are live when they are not, so it is logged at
+    ERROR with Graph's own words.
+    """
+    ok, detail = await subscribe_page(
+        page_id=str(page.get("id", "")),
+        page_token=str(page.get("access_token", "")),
+        fields=settings().meta_webhook_fields,
+        version=settings().ig_graph_version,
+    )
+    if ok:
+        _log.info("meta webhook subscribed channel=%s page=%s fields=%s",
+                  channel_id, page.get("id", ""), settings().meta_webhook_fields)
+        return
+    _log.error(
+        "META WEBHOOK SUBSCRIPTION FAILED channel=%s page=%s: %s — this Page will NOT push "
+        "messages; ingest stays on the polling path until it is subscribed",
+        channel_id, page.get("id", ""), detail)

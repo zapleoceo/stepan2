@@ -76,18 +76,79 @@ def test_meta_verify_rejects_unknown_branch(client: TestClient) -> None:
     assert resp.status_code == 403
 
 
-def test_meta_ingest_counts_entries(client: TestClient) -> None:
-    payload = {
+def _message_payload(*mids: str) -> dict:
+    return {
         "object": "page",
-        "entry": [
-            {"id": "100", "messaging": [{"sender": {"id": "1"}}]},
-            {"id": "101", "messaging": [{"sender": {"id": "2"}}]},
-        ],
+        "entry": [{
+            "id": "PAGE1",
+            "messaging": [
+                {"sender": {"id": f"PSID{i}"}, "recipient": {"id": "PAGE1"},
+                 "timestamp": 1_754_200_000_000,
+                 "message": {"mid": mid, "text": "halo"}}
+                for i, mid in enumerate(mids)
+            ],
+        }],
     }
+
+
+@pytest.fixture
+def queued(monkeypatch) -> list[tuple]:
+    """Capture what the handler hands to the worker instead of talking to a real Redis."""
+    calls: list[tuple] = []
+
+    async def _fake(job_name: str, *args: object, job_id: str | None = None) -> bool:
+        calls.append((job_name, args, job_id))
+        return True
+
+    monkeypatch.setattr("app.api.webhooks.enqueue", _fake)
+    return calls
+
+
+def test_meta_ingest_enqueues_the_messages_it_acks(
+    client: TestClient, queued: list[tuple],
+) -> None:
+    """The handler used to count the entries, answer 200 and DISCARD the payload — its own
+    docstring claimed ingest was enqueued downstream and nothing was. Every DM to an official
+    connector was invisible until the next poll."""
+    body, headers = _signed(_message_payload("m_aaa", "m_bbb"))
+    resp = client.post(f"/webhooks/meta/{BRANCH_ID}", content=body, headers=headers)
+
+    assert resp.status_code == 200
+    assert resp.json() == {"accepted": 2}
+    [(job_name, args, job_id)] = queued
+    assert job_name == "ingest_meta_webhook"
+    assert args[0] == BRANCH_ID
+    assert [e["mid"] for e in args[1]] == ["m_aaa", "m_bbb"]
+    # Meta retries a delivery it thinks failed; a stable job id makes the retry a no-op.
+    assert job_id == f"metahook:{BRANCH_ID}:m_aaa"
+
+
+def test_meta_ingest_answers_503_when_the_queue_is_unreachable(
+    client: TestClient, monkeypatch,
+) -> None:
+    """A 200 would end Meta's retries for a message we never stored. 503 keeps the delivery on
+    their retry schedule, which is the only durability this endpoint has."""
+    async def _boom(*_a: object, **_kw: object) -> bool:
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr("app.api.webhooks.enqueue", _boom)
+    body, headers = _signed(_message_payload("m_aaa"))
+    resp = client.post(f"/webhooks/meta/{BRANCH_ID}", content=body, headers=headers)
+    assert resp.status_code == 503
+
+
+def test_meta_ingest_queues_nothing_for_an_event_with_no_message(
+    client: TestClient, queued: list[tuple],
+) -> None:
+    """Delivery/read receipts ride the same subscription. They are acked and dropped, not
+    counted — `accepted` now means messages queued for ingest."""
+    payload = {"object": "page", "entry": [
+        {"id": "PAGE1", "messaging": [{"sender": {"id": "1"}, "delivery": {"watermark": 1}}]}]}
     body, headers = _signed(payload)
     resp = client.post(f"/webhooks/meta/{BRANCH_ID}", content=body, headers=headers)
     assert resp.status_code == 200
-    assert resp.json() == {"accepted": 2}
+    assert resp.json() == {"accepted": 0}
+    assert queued == []
 
 
 def test_meta_ingest_empty_payload(client: TestClient) -> None:
