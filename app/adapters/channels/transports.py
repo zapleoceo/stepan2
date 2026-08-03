@@ -11,10 +11,14 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+from app.adapters.channels import graph_parse
 from app.config import settings
 from app.domain.clock import as_naive_utc
 
 logger = logging.getLogger(__name__)
+
+_MEDIA_MAX_BYTES = 60 * 1024 * 1024  # 60 MB — a DM video well past this is dropped
+_MEDIA_TIMEOUT = 90.0                 # a large video CDN fetch needs more than 30s
 
 # Ad click-to-DM attribution codes. Word-boundary matched so an ordinary name that merely
 # CONTAINS these letters ("Ahmad", "Nadia", "Murad") is not misfiled as an ad lead.
@@ -84,6 +88,32 @@ def _detect_lead_source(thread: dict, lead_pk: Any) -> str | None:
         if "story" in low:
             return "story"
     return None
+
+
+async def download_bounded(url: str, *, follow_redirects: bool = False) -> bytes:
+    """Stream raw media bytes from a CDN url, bounded so a huge video can't OOM the worker.
+
+    Deliberately unauthenticated: these are signed CDN links, and attaching the channel's
+    token would ship a live page/session credential to a host that never needs it.
+
+    Redirects are OFF by default — that is exactly what the IG path has always done, and
+    branch 1 runs it. Graph opts in because its attachment urls are lookaside redirectors."""
+    import httpx  # lazy: real transport only, never imported by unit tests  # noqa: PLC0415
+
+    # connect kept short; read stretched for a big video over a slow CDN.
+    timeout = httpx.Timeout(_MEDIA_TIMEOUT, connect=10.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects) as c, \
+            c.stream("GET", url) as r:
+        r.raise_for_status()
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in r.aiter_bytes():
+            total += len(chunk)
+            if total > _MEDIA_MAX_BYTES:
+                raise ValueError(
+                    f"media exceeds {_MEDIA_MAX_BYTES} bytes — refusing to buffer")
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class InstagrapiTransport:
@@ -253,28 +283,8 @@ class InstagrapiTransport:
             "avatar_url": str(getattr(info, "profile_pic_url", "") or "") or None,
         }
 
-    _MEDIA_MAX_BYTES = 60 * 1024 * 1024  # 60 MB — a DM video well past this is dropped
-    _MEDIA_TIMEOUT = 90.0                 # a large video CDN fetch needs more than 30s
-
     async def download_media(self, url: str) -> bytes:
-        """Stream raw media bytes from a CDN url, bounded so a huge video can't OOM the
-        worker (the old `r.content` loaded the whole file into memory with a 30s cap)."""
-        import httpx  # lazy: real transport only, never imported by unit tests
-
-        # connect kept short; read stretched for a big video over a slow CDN.
-        timeout = httpx.Timeout(self._MEDIA_TIMEOUT, connect=10.0)
-        async with httpx.AsyncClient(timeout=timeout) as c, \
-                c.stream("GET", url) as r:
-            r.raise_for_status()
-            chunks: list[bytes] = []
-            total = 0
-            async for chunk in r.aiter_bytes():
-                total += len(chunk)
-                if total > self._MEDIA_MAX_BYTES:
-                    raise ValueError(
-                        f"media exceeds {self._MEDIA_MAX_BYTES} bytes — refusing to buffer")
-                chunks.append(chunk)
-        return b"".join(chunks)
+        return await download_bounded(url)
 
     # How many recent posts to scan for new comments per run, and how many comments per post.
     # Small on purpose: a comment walk is a private-API call sequence, and IG throttles it hard.
@@ -400,6 +410,52 @@ class EvolutionTransport:
         return ((r.json().get("instance") or {}).get("state")) or "close"
 
 
+def _graph_row(conv: dict[str, Any], m: dict[str, Any],
+               who: dict[str, Any]) -> dict[str, Any]:
+    """One Graph message → the flat dict MetaBusinessAdapter maps to an InboundMessage.
+
+    `mid` is Graph's own message id. Carrying it is what lets a webhook delivery and a poll
+    of the same message dedup to ONE row instead of two — the synthetic thread+time+text id
+    differs between the two paths. Empty when Graph omits it; ingest falls back then.
+
+    `direction` is stated rather than assumed. Our own messages are already filtered out
+    upstream (_inbound_of), but a filter is a decision made elsewhere and downstream code
+    reading `direction` deserves the truth from the payload, not a default that happens to
+    be right."""
+    kind_url = graph_parse.media_of(m)
+    text = str(m.get("message") or "")
+    if not text and kind_url:
+        # A photo/video/voice DM arrives with an EMPTY message string — ingesting that
+        # verbatim stored a blank turn the model could not read and the backfill could not
+        # find. Same placeholder the instagrapi path writes; the recognizer swaps it later.
+        text = graph_parse.placeholder_for(kind_url[0])
+    return {
+        "thread_id": conv.get("id", ""),
+        "mid": str(m.get("id") or ""),
+        "direction": "in",
+        "from_id": (m.get("from") or {}).get("id", ""),
+        "message": text,
+        "created_time": m.get("created_time"),
+        "sender_name": who.get("name") or "",
+        "sender_username": who.get("username") or "",
+        "media_kind": kind_url[0] if kind_url else None,
+        "media_url": kind_url[1] if kind_url else None,
+    }
+
+
+def _graph_key(m: dict[str, Any]) -> str:
+    """Identity of a polled Graph message for cross-platform dedup.
+
+    The native mid when Graph gives one. Otherwise thread+time+sender+TEXT: Graph timestamps
+    are second-resolution, so two lines typed quickly share a created_time and a key without
+    the text drops the second — the very loss this dedup must not cause."""
+    mid = str(m.get("mid") or "")
+    if mid:
+        return mid
+    return "\x00".join((str(m.get("thread_id", "")), str(m.get("created_time", "")),
+                        str(m.get("from_id", "")), str(m.get("message", ""))))
+
+
 class GraphTransportHTTP:
     """Implements channels.meta_business.GraphTransport over the official Graph API (HTTP)."""
 
@@ -437,7 +493,7 @@ class GraphTransportHTTP:
         import httpx  # lazy: real transport only, never imported by unit tests  # noqa: PLC0415
 
         out: list[dict[str, Any]] = []
-        seen: set[tuple[str, str, str, str]] = set()
+        seen: set[str] = set()
         for platform in (None, "instagram"):
             try:
                 msgs = await self._conversations_for(platform)
@@ -450,11 +506,7 @@ class GraphTransportHTTP:
             # on the thread alone collapsed a burst back to a single message, undoing the
             # whole point of reading the thread (caught by tests/test_meta_no_message_loss).
             for m in msgs:
-                # The text is part of the key because Graph timestamps are second-resolution:
-                # two lines typed quickly share a created_time, and a key without the text
-                # would drop the second one — the very loss this change exists to stop.
-                key = (str(m.get("thread_id", "")), str(m.get("created_time", "")),
-                       str(m.get("from_id", "")), str(m.get("message", "")))
+                key = _graph_key(m)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -478,14 +530,7 @@ class GraphTransportHTTP:
         """
         oldest_first = list(reversed(msgs))  # Graph returns newest-first
         return [
-            {
-                "thread_id": conv.get("id", ""),
-                "from_id": (m.get("from") or {}).get("id", ""),
-                "message": m.get("message", ""),
-                "created_time": m.get("created_time"),
-                "sender_name": who.get("name") or "",
-                "sender_username": who.get("username") or "",
-            }
+            _graph_row(conv, m, who)
             for m in oldest_first
             if str((m.get("from") or {}).get("id", "")) not in own
         ]
@@ -520,10 +565,13 @@ class GraphTransportHTTP:
                 # participants rides along in the same call — it is what carries the human's
                 # name. Graph splits it by platform: Messenger gives `name`, Instagram gives
                 # `username`. Without it every lead shows in the inbox as "Lead".
+                # `id` on the message is Graph's native mid (dedup key, see _graph_row);
+                # `attachments` is the only place a photo/video/voice DM exists — without it
+                # Graph reports those messages as an empty string and they ingest blank.
                 params: dict[str, Any] = {
                     "fields": ("id,participants,"
                                f"messages.limit({_MSGS_PER_THREAD})"
-                               "{from,message,created_time}"),
+                               "{id,from,message,created_time,attachments}"),
                     "limit": page_size}
                 if platform:
                     params["platform"] = platform
@@ -606,6 +654,14 @@ class GraphTransportHTTP:
             raise RuntimeError(f"Graph send {r.status_code}: {r.text[:300]}")
         data = r.json()
         return {"message_id": data.get("message_id"), "error": data.get("error")}
+
+    async def download_media(self, url: str) -> bytes:
+        """Fetch a DM attachment's bytes for the media backfill.
+
+        Redirects are followed here: Graph hands out lookaside.fbsbx.com urls that 302 to the
+        real CDN host, and without this the backfill would store the redirect page as if it
+        were the photo. Not our authenticated client — the token has no business on a CDN."""
+        return await download_bounded(url, follow_redirects=True)
 
     async def token_debug(self) -> dict[str, Any]:
         async with self._client() as c:
