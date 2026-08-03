@@ -8,13 +8,19 @@ reconciliation and the dedup that stop that.
 """
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import select
 
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
+from app.adapters.db.models import (
+    Branch,
+    Channel,
+    ChannelThread,
+    Lead,
+    MediaAsset,
+    Message,
+)
 from app.domain.enums import ChannelKind, Stage
 from app.modules.leads.ingest import IngestService
 from app.modules.meta import webhook_ingest
@@ -23,18 +29,6 @@ from app.ports.channel import InboundMessage
 _TS_MS = 1_754_200_000_000
 _OCCURRED = datetime.fromtimestamp(_TS_MS // 1000, tz=UTC).replace(tzinfo=None)
 _CONVO = "t_conversation_1"
-
-
-class _Recorder(logging.Handler):
-    """Own handler on the module logger — pytest's caplog depends on root propagation, which
-    another test in the suite reconfigures, and this assertion must not be order-dependent."""
-
-    def __init__(self) -> None:
-        super().__init__(level=logging.NOTSET)
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.records.append(record)
 
 
 class _FakePort:
@@ -216,18 +210,20 @@ async def test_an_unmatched_entry_id_is_logged_loudly_not_at_info(
 ) -> None:
     """The one failure mode this whole step exists to remove is SILENT loss. The HTTP layer has
     already answered 200, Meta will not retry, and the poll keeps delivering leads — so if this
-    drop is not greppable in the log, nobody ever learns the webhook ingests nothing."""
+    drop is not greppable in the log, nobody ever learns the webhook ingests nothing.
+
+    Spy the logger METHOD, like test_config_validate and test_channels do: a handler sees
+    nothing once tests/test_infra.py has run alembic, whose migrations/env.py calls
+    fileConfig() — which disables every logger imported before it."""
     branch_id, _ = await _world(db_session, page_id="OTHER_PAGE")
     _wire(monkeypatch, db_session, _FakePort())
-    seen = _Recorder()
-    webhook_ingest._log.addHandler(seen)
-    try:
-        assert await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event())) == 0
-    finally:
-        webhook_ingest._log.removeHandler(seen)
+    warnings: list[str] = []
+    monkeypatch.setattr(webhook_ingest._log, "warning",
+                        lambda msg, *a, **k: warnings.append(msg % a if a else msg))
 
-    assert any(r.levelno >= logging.WARNING and "META WEBHOOK DROPPED" in r.getMessage()
-               for r in seen.records)
+    assert await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event())) == 0
+
+    assert any("META WEBHOOK DROPPED" in w for w in warnings)
 
 
 async def test_an_instagram_dm_reaches_the_channel_despite_a_foreign_entry_id(
@@ -288,6 +284,72 @@ async def test_a_photo_the_webhook_stored_is_not_stored_again_by_the_poll(
 
     rows = await _messages(db_session, branch_id)
     assert [r.text for r in rows] == ["🖼 media"]
+
+
+async def test_a_photo_the_poll_delivered_blank_first_is_filled_in_not_duplicated(
+    db_session, monkeypatch,
+) -> None:
+    """The same collapse in the other order, which is the ORDINARY one: the Graph poll fires
+    every two minutes while the webhook job waits behind whatever the arq worker is already
+    doing, so any worker lag puts the blank copy first. Guarding only the webhook-wins direction
+    left every media DM in that window duplicated exactly as before — the blank row re-opening
+    the 24h window and reaching the model as silence."""
+    branch_id, channel_id = await _world(db_session)
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    _wire(monkeypatch, db_session, _FakePort())
+
+    polled = InboundMessage(
+        external_thread_id=_CONVO, sender_id="PSID1", text="", occurred_at=_OCCURRED,
+    )
+    await IngestService(db_session, branch_id).ingest(channel_id, [polled])
+    photo = {"mid": "m_pic", "attachments": [
+        {"type": "image", "payload": {"url": "https://cdn/i.jpg"}}]}
+    await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event(message=photo)))
+
+    [row] = await _messages(db_session, branch_id)
+    assert row.text == "🖼 media"
+    assert row.media_pending is True
+    assert row.external_id == "m_pic"  # a Meta redelivery is now dedupable by id alone
+    assets = (await db_session.exec(select(MediaAsset))).all()
+    assert [a.message_id for a in assets] == [row.id]
+
+
+async def test_a_blank_media_copy_survives_unrelated_text_a_second_earlier(
+    db_session, monkeypatch,
+) -> None:
+    """The guard matches on the instant, so its reach has to be bounded by something else or a
+    plain text row eats a DIFFERENT, real photo the poll delivers a second later — a silent
+    inbound drop on the shared write path. Only a neighbour that CARRIES an attachment can be
+    another description of the same message."""
+    branch_id, channel_id = await _world(db_session)
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    _wire(monkeypatch, db_session, _FakePort())
+    await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event(text="halo")))
+
+    polled = InboundMessage(  # a real attachment, one second later, blank as Graph returns it
+        external_thread_id=_CONVO, sender_id="PSID1", text="",
+        occurred_at=_OCCURRED + timedelta(seconds=1),
+    )
+    await IngestService(db_session, branch_id).ingest(channel_id, [polled])
+
+    assert len(await _messages(db_session, branch_id)) == 2
+
+
+async def test_two_blank_attachments_seconds_apart_are_two_messages(db_session) -> None:
+    """A lead sending two photos in a burst reaches the poll as two empty Graph messages. An
+    empty text is the absence of content, not content two rows can share, so matching them by
+    text made the second one vanish — the loss class 8d45063 exists to prevent."""
+    branch_id, channel_id = await _world(db_session)
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    svc = IngestService(db_session, branch_id)
+
+    for delta in (0, 1):
+        await svc.ingest(channel_id, [InboundMessage(
+            external_thread_id=_CONVO, sender_id="PSID1", text="",
+            occurred_at=_OCCURRED + timedelta(seconds=delta),
+        )])
+
+    assert len(await _messages(db_session, branch_id)) == 2
 
 
 async def test_text_with_a_trailing_newline_is_not_stored_twice(

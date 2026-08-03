@@ -9,9 +9,20 @@ claimed more than the code did and every media DM was stored twice for it:
   - identical text at the same second → dedup by content (IngestService.duplicate_by_content);
     this is why webhook_parse does not strip the text and truncates the ms timestamp;
   - a photo/share, which the webhook describes as '🖼 media'/'🔗 …' and the poll as an empty
-    message → dedup by IngestService._is_contentless + MessageRepo.inbound_exists_at;
+    message → collapsed in BOTH orders by IngestService._store: the blank copy arriving second
+    is dropped (MessageRepo.attachment_inbound_at), the rich copy arriving second fills the
+    blank row in instead of adding one (MessageRepo.contentless_inbound_at). The poll landing
+    first is the ordinary case, not the exotic one — it fires every two minutes while the
+    webhook job queues behind whatever the arq worker is already doing;
   - by native message id (mid) → NOT yet. The poll does not carry the mid until step S3. Until
     it merges, the two heuristics above are the whole of it.
+
+Two limits worth knowing before this is trusted further:
+  - the object='instagram' fallback in _channel_for_entry does NOT check entry.id at all, so a
+    reconnected or foreign IG account writes into the branch's one active Meta channel instead
+    of being dropped. Branch scoping still holds, so it is never cross-tenant;
+  - the timestamps have to agree to within 2s for either direction of the media dedup to fire.
+    A clock or truncation drift wider than that reverts to the duplicate-row behaviour.
 """
 from __future__ import annotations
 
@@ -189,6 +200,12 @@ async def _instagram_channel(
     the wrong client's inbox is worse than a poll-cycle delay. Restricted to object='instagram'
     so an object='page' entry with an unknown Page id stays a hard drop, which is the mismatch
     that means someone reconnected a different Page.
+
+    Note what this does NOT do: it never looks at ig_account_id. Any entry.id on an
+    object='instagram' payload resolves to that one channel, so a DM from a reconnected or
+    foreign IG account is ingested rather than dropped. The branch_id scope above still holds,
+    so this cannot cross tenants — it is a wrong-account risk inside one branch, and the price
+    of not storing the IG id anywhere.
 
     Storing the IG id at connect time (/{page-id}?fields=instagram_business_account) is the
     real fix and needs a Channel column — logged as debt in docs/tech-debt.md.
