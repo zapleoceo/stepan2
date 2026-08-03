@@ -32,7 +32,12 @@ def _verify_token_for(branch_id: int) -> str | None:
 
 def _app_secret_for(branch_id: int) -> str:
     """The app secret this branch signs with — resolved in one shared place, so the webhook
-    and the client connect flow can never read different values."""
+    and the client connect flow can never read different values.
+
+    Note what this is NOT: per-tenant. app_secret_for falls back to the shared product secret,
+    so a valid signature proves the caller holds *an* app secret, not that they own the branch
+    in the URL. The tenant boundary is the branch-scoped channel lookup in
+    webhook_ingest._channel_for_entry — do not weaken it on the strength of the signature."""
     return app_secret_for(branch_id)
 
 
@@ -49,14 +54,18 @@ def _signature_ok(branch_id: int, raw: bytes, header: str) -> bool:
 
 
 async def _dispatch(branch_id: int, messages: list[WebhookMessage]) -> None:
-    """Hand the batch to the worker. The job id is the first native message id, so Meta's own
-    retry of a delivery still in flight does not queue the work twice."""
-    await enqueue(
-        WEBHOOK_JOB,
-        branch_id,
-        [m.as_dict() for m in messages],
-        job_id=f"metahook:{branch_id}:{messages[0].mid}",
-    )
+    """Hand the batch to the worker.
+
+    The job id is the first native message id. That only collapses a retry that arrives while
+    the first job is still IN FLIGHT — WorkerSettings.keep_result = 0 frees the id the instant
+    the job ends, so a retry seconds later is genuinely re-enqueued and re-runs. What makes
+    that harmless is IngestService dedup on the mid, not this id; the id just saves the work.
+    """
+    job_id = f"metahook:{branch_id}:{messages[0].mid}"
+    if not await enqueue(
+        WEBHOOK_JOB, branch_id, [m.as_dict() for m in messages], job_id=job_id
+    ):
+        _log.info("webhook: %s already in flight — Meta redelivered it", job_id)
 
 
 @router.get("/meta/{branch_id}")

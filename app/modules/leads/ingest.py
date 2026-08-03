@@ -178,6 +178,17 @@ class IngestService:
     async def _store(
         self, lead, thread, channel_id: int, external_id: str, inbound: InboundMessage
     ) -> Message | None:
+        if _is_contentless(inbound) and await self.messages.inbound_exists_at(
+            thread.id, inbound.occurred_at
+        ):
+            # The poll's degraded copy of a message the webhook already stored in full. The
+            # webhook turns a photo into '🖼 media' + a MediaAsset and a share into '🔗 …';
+            # Graph's /conversations returns the same message with an empty `message` and no
+            # attachment, so duplicate_by_content compares '' against '🖼 media', finds no
+            # match, and writes a SECOND, blank inbound — which then re-opened the 24h window,
+            # reset the follow-up cycle and entered the model's context as silence. Every
+            # single media DM, from the moment the webhook went live.
+            return None
         if inbound.media_url is None and await self.messages.duplicate_by_content(
             thread.id, "in", inbound.text, inbound.occurred_at
         ):
@@ -368,6 +379,15 @@ class IngestService:
             )
         except Exception:
             logger.warning("bot-off alert failed lead=%s", lead.id, exc_info=True)
+
+
+def _is_contentless(inbound: InboundMessage) -> bool:
+    """No text and no media — a row nobody, human or model, can read anything from.
+
+    Branch 1 (instagrapi) cannot produce one: ig_parse.item_content always substitutes a
+    placeholder, falling back to '[{item_type}]'. Only the Graph poll does, and only for a
+    message whose content Graph does not put in `message` — i.e. exactly an attachment."""
+    return inbound.media_url is None and not (inbound.text or "").strip()
 
 
 def _legacy_external_id(inbound: InboundMessage) -> str:

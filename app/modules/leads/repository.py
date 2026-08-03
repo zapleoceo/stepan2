@@ -101,6 +101,25 @@ class MessageRepo(BranchScoped[Message]):
         ).limit(1)
         return (await self.session.exec(q)).first() is not None
 
+    async def inbound_exists_at(
+        self, thread_id: int, occurred_at: datetime, window: timedelta = _DEDUP_WINDOW,
+    ) -> bool:
+        """Any inbound already in this thread at ±window, whatever it says.
+
+        Text-blind on purpose, and only ever asked about a CONTENTLESS inbound (no text, no
+        media). The webhook describes a photo as '🖼 media' + a MediaAsset; the poll's copy of
+        that same photo is an empty Graph `message` with no attachment, so a text compare can
+        never match the two and the photo was stored twice — the second row blank, and blank
+        enough to re-open the 24h window and reset the follow-up cycle. Same for a share
+        ('🔗 …' vs ''). Matching on the instant alone is what the two descriptions do share."""
+        q = self._q().where(
+            Message.thread_id == thread_id,
+            Message.direction == "in",
+            Message.occurred_at >= occurred_at - window,
+            Message.occurred_at <= occurred_at + window,
+        ).limit(1)
+        return (await self.session.exec(q)).first() is not None
+
     async def echo_of_our_own(
         self, thread_id: int, text: str, occurred_at: datetime
     ) -> bool:

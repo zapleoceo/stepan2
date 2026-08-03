@@ -8,6 +8,7 @@ reconciliation and the dedup that stop that.
 """
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
@@ -24,6 +25,18 @@ _OCCURRED = datetime.fromtimestamp(_TS_MS // 1000, tz=UTC).replace(tzinfo=None)
 _CONVO = "t_conversation_1"
 
 
+class _Recorder(logging.Handler):
+    """Own handler on the module logger — pytest's caplog depends on root propagation, which
+    another test in the suite reconfigures, and this assertion must not be order-dependent."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.NOTSET)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
 class _FakePort:
     """Stands in for MetaBusinessAdapter — only the reverse lookup matters here."""
 
@@ -36,16 +49,19 @@ class _FakePort:
         return self.convo
 
 
-def _event(mid: str = "m_aaa", text: str = "halo", sender: str = "PSID1") -> dict:
+def _event(
+    mid: str = "m_aaa", text: str = "halo", sender: str = "PSID1",
+    *, object_type: str = "page", entry_id: str = "PAGE1", message: dict | None = None,
+) -> dict:
     return {
-        "object": "page",
+        "object": object_type,
         "entry": [{
-            "id": "PAGE1",
+            "id": entry_id,
             "messaging": [{
                 "sender": {"id": sender},
-                "recipient": {"id": "PAGE1"},
+                "recipient": {"id": entry_id},
                 "timestamp": _TS_MS,
-                "message": {"mid": mid, "text": text},
+                "message": message or {"mid": mid, "text": text},
             }],
         }],
     }
@@ -193,6 +209,120 @@ async def test_a_switched_off_channel_receives_nothing(db_session, monkeypatch) 
     _wire(monkeypatch, db_session, _FakePort())
 
     assert await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event())) == 0
+
+
+async def test_an_unmatched_entry_id_is_logged_loudly_not_at_info(
+    db_session, monkeypatch,
+) -> None:
+    """The one failure mode this whole step exists to remove is SILENT loss. The HTTP layer has
+    already answered 200, Meta will not retry, and the poll keeps delivering leads — so if this
+    drop is not greppable in the log, nobody ever learns the webhook ingests nothing."""
+    branch_id, _ = await _world(db_session, page_id="OTHER_PAGE")
+    _wire(monkeypatch, db_session, _FakePort())
+    seen = _Recorder()
+    webhook_ingest._log.addHandler(seen)
+    try:
+        assert await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event())) == 0
+    finally:
+        webhook_ingest._log.removeHandler(seen)
+
+    assert any(r.levelno >= logging.WARNING and "META WEBHOOK DROPPED" in r.getMessage()
+               for r in seen.records)
+
+
+async def test_an_instagram_dm_reaches_the_channel_despite_a_foreign_entry_id(
+    db_session, monkeypatch,
+) -> None:
+    """For object='instagram' Meta sends the INSTAGRAM professional-account id in entry.id, not
+    the Page id we store on Channel.account_id — so the direct match cannot hit and every
+    Instagram DM (Stepan's entire revenue path) was dropped. One active Meta channel on the
+    branch is an unambiguous join; anything else refuses to guess."""
+    branch_id, channel_id = await _world(db_session, page_id="PAGE1")
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    _wire(monkeypatch, db_session, _FakePort())
+
+    stored = await webhook_ingest.ingest_webhook_messages(
+        branch_id, _events(_event(object_type="instagram", entry_id="IG_ACCOUNT_17841")))
+
+    assert stored == 1
+    [msg] = await _messages(db_session, branch_id)
+    assert msg.channel_id == channel_id
+
+
+async def test_two_meta_channels_make_an_unmatched_instagram_entry_a_refusal(
+    db_session, monkeypatch,
+) -> None:
+    """The fallback is a join, not a shrug. With two candidates, routing a client's DM into the
+    wrong inbox is worse than the poll-cycle delay of dropping it."""
+    branch_id, channel_id = await _world(db_session, page_id="PAGE1")
+    second = Channel(branch_id=branch_id, kind=ChannelKind.META_BUSINESS,
+                     account_id="PAGE2", is_active=True)
+    db_session.add(second)
+    await db_session.flush()
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    _wire(monkeypatch, db_session, _FakePort())
+
+    assert await webhook_ingest.ingest_webhook_messages(
+        branch_id, _events(_event(object_type="instagram", entry_id="IG_ACCOUNT_17841"))) == 0
+
+
+async def test_a_photo_the_webhook_stored_is_not_stored_again_by_the_poll(
+    db_session, monkeypatch,
+) -> None:
+    """The regression this step shipped: the webhook describes a photo as '🖼 media' + a
+    MediaAsset, Graph's /conversations returns the same message with an EMPTY message and no
+    attachment, so the text compare found no match and wrote a second, blank inbound. That
+    blank row re-opened the 24h window, reset the follow-up cycle and reached the model as
+    silence — on every media DM."""
+    branch_id, channel_id = await _world(db_session)
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    _wire(monkeypatch, db_session, _FakePort())
+    photo = {"mid": "m_pic", "attachments": [
+        {"type": "image", "payload": {"url": "https://cdn/i.jpg"}}]}
+    await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event(message=photo)))
+
+    polled = InboundMessage(  # exactly what MetaBusinessAdapter._to_inbound builds for it
+        external_thread_id=_CONVO, sender_id="PSID1", text="", occurred_at=_OCCURRED,
+    )
+    await IngestService(db_session, branch_id).ingest(channel_id, [polled])
+
+    rows = await _messages(db_session, branch_id)
+    assert [r.text for r in rows] == ["🖼 media"]
+
+
+async def test_text_with_a_trailing_newline_is_not_stored_twice(
+    db_session, monkeypatch,
+) -> None:
+    """A one-character .strip() in the parser disarmed the only dedup that exists until S3:
+    the webhook stored 'halo', the poll stored 'halo\\n', and the exact-text compare missed."""
+    branch_id, channel_id = await _world(db_session)
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+    _wire(monkeypatch, db_session, _FakePort())
+    await webhook_ingest.ingest_webhook_messages(branch_id, _events(_event(text="halo\n")))
+
+    polled = InboundMessage(
+        external_thread_id=_CONVO, sender_id="PSID1", text="halo\n", occurred_at=_OCCURRED,
+    )
+    await IngestService(db_session, branch_id).ingest(channel_id, [polled])
+
+    assert len(await _messages(db_session, branch_id)) == 1
+
+
+async def test_a_blank_polled_message_is_still_stored_when_the_webhook_never_ran(
+    db_session, monkeypatch,
+) -> None:
+    """The contentless guard must not eat the poll's only copy. With no webhook row at that
+    instant there is nothing to be a duplicate OF, and losing it would be the silent drop the
+    step is meant to remove — webhooks are not live on every channel yet."""
+    branch_id, channel_id = await _world(db_session)
+    await _existing_thread(db_session, branch_id, channel_id, "PSID1")
+
+    polled = InboundMessage(
+        external_thread_id=_CONVO, sender_id="PSID1", text="", occurred_at=_OCCURRED,
+    )
+    created = await IngestService(db_session, branch_id).ingest(channel_id, [polled])
+
+    assert len(created) == 1
 
 
 def _events(payload: dict) -> list[dict]:

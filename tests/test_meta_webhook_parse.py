@@ -106,6 +106,59 @@ def test_an_image_becomes_pending_media_not_an_empty_message() -> None:
     assert msg.text == "🖼 media"
 
 
+def test_the_text_is_stored_exactly_as_meta_sent_it() -> None:
+    """Not stripped. The poll stores Graph's `message` verbatim, and until S3 carries the mid
+    the only dedup between the two paths is an exact text compare — a trailing newline was
+    enough to store the lead's message twice, in the thread and in the model's context."""
+    [msg] = parse_meta_messages(_payload(_item(text="halo\n")))
+    assert msg.text == "halo\n"
+
+
+def test_a_whitespace_only_message_is_not_a_message() -> None:
+    """Stripping is still the emptiness TEST — a body of spaces has nothing to answer, and
+    with no attachment behind it there is nothing to store either."""
+    assert parse_meta_messages(_payload(_item(text="   \n "))) == []
+
+
+def test_a_message_without_a_usable_timestamp_is_left_to_the_poll() -> None:
+    """as_naive_utc(None) is 1970-01-01. That row drags thread.last_in_at back with it, putting
+    the thread permanently outside reply_pending's `last_in_at > cutoff` window — the lead is
+    never answered and nothing says why. One poll cycle of latency is the cheaper failure."""
+    for bad in (None, "not-a-number", 0, True):
+        item = _item(text="halo")
+        item["timestamp"] = bad
+        assert parse_meta_messages(_payload(item)) == []
+
+
+def test_a_document_is_not_filed_as_an_image() -> None:
+    """type='file' is any document (pdf, docx, zip). Filed as 'image' it was handed to the
+    image describer, which billed the broker for describing a PDF."""
+    item = _item(attachments=[{"type": "file", "payload": {"url": "https://cdn/x.pdf"}}])
+    [msg] = parse_meta_messages(_payload(item))
+    assert msg.media_kind == "file"
+    assert msg.text == "🖼 media"
+
+
+def test_the_object_type_travels_with_every_message() -> None:
+    """entry.id means the Page id for object='page' and the Instagram professional-account id
+    for object='instagram'. The worker cannot look a channel up without knowing which."""
+    [page] = parse_meta_messages(_payload(_item(text="hi")))
+    ig = {"object": "instagram",
+          "entry": [{"id": "IG_17841", "messaging": [_item(text="hi")]}]}
+    [insta] = parse_meta_messages(ig)
+    assert (page.object_type, page.page_id) == ("page", "PAGE1")
+    assert (insta.object_type, insta.page_id) == ("instagram", "IG_17841")
+
+
+def test_an_old_queued_job_without_object_type_still_decodes() -> None:
+    """The API and the worker deploy separately, so a job enqueued by the previous image is
+    decoded by the new one. A new required field there is a crashed worker, not a migration."""
+    [msg] = parse_meta_messages(_payload(_item(text="hi")))
+    raw = msg.as_dict()
+    del raw["object_type"]
+    assert WebhookMessage.from_dict(raw).object_type == ""
+
+
 def test_a_share_is_a_link_not_a_downloadable_asset() -> None:
     """A story_mention/share payload url is not media; filing it as media would leave a
     MediaAsset the backfill worker can never complete."""

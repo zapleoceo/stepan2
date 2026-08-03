@@ -109,8 +109,16 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """No DB I/O on boot — schema/seed live in migrations. Each mounted Streamable-HTTP
     MCP (write connector + read-only reader) needs its session-manager task group running
     for the app's lifetime."""
-    async with mcp_connector.session_manager.run(), mcp_reader.session_manager.run():
-        yield
+    from app.adapters.queue import reset_pool  # noqa: PLC0415 — keeps boot free of Redis
+
+    try:
+        async with mcp_connector.session_manager.run(), mcp_reader.session_manager.run():
+            yield
+    finally:
+        # The webhook's ARQ pool is a process singleton opened on first use. Without this the
+        # sockets are dropped on the floor at shutdown, and reset_pool() — which claims to give
+        # the process a way back after a Redis restart — had no caller at all.
+        await reset_pool()
 
 
 def _mute_transport_loggers() -> None:

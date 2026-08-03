@@ -5,13 +5,19 @@ so everything that can be decided from the bytes alone is decided here, and the 
 what travels to the worker. Keeping it pure is also what makes the shape testable without a
 Page, a token or a queue.
 
-Shape (identical for object='page' and object='instagram'):
-    entry[].messaging[] = {sender:{id}, recipient:{id}, timestamp, message:{mid, text, ...}}
-Note what is NOT in there: the conversation id the poll keys threads on. That reconciliation
+Shape of `entry[].messaging[]` is identical for object='page' and object='instagram':
+    {sender:{id}, recipient:{id}, timestamp, message:{mid, text, ...}}
+`entry.id` is NOT: it is the Page id for object='page' and the Instagram professional-account
+id for object='instagram', which is a different number and not the one we store on the channel.
+That is why `object` travels with every message — webhook_ingest has to know which id it is
+holding before it looks a channel up. See webhook_ingest._channel_for_entry.
+
+Note what is in neither: the conversation id the poll keys threads on. That reconciliation
 needs I/O and lives in webhook_threads.py.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -19,8 +25,17 @@ from typing import Any
 from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.domain.clock import as_naive_utc
 
-_MEDIA_KINDS = {"image": "image", "video": "video", "audio": "audio", "file": "image"}
-_MEDIA_TEXT = {"image": IMAGE_PENDING_PH, "video": IMAGE_PENDING_PH, "audio": VOICE_PENDING_PH}
+_log = logging.getLogger(__name__)
+
+# "file" keeps its own kind on purpose: it is any document (pdf, docx, zip). Filing it as
+# "image" fed it to the image describer in media/service.py, which then charged the broker for
+# describing a PDF. An unrecognised kind is downloaded, found unreadable and released — which
+# is the correct outcome for a document nobody can transcribe.
+_MEDIA_KINDS = {"image": "image", "video": "video", "audio": "audio", "file": "file"}
+_MEDIA_TEXT = {
+    "image": IMAGE_PENDING_PH, "video": IMAGE_PENDING_PH,
+    "audio": VOICE_PENDING_PH, "file": IMAGE_PENDING_PH,
+}
 
 
 @dataclass(frozen=True)
@@ -39,6 +54,9 @@ class WebhookMessage:
     media_url: str | None = None
     media_kind: str | None = None
     link_url: str | None = None
+    # payload["object"] — "page" or "instagram". Decides how page_id must be read; defaulted
+    # so a job already on the queue when this deploys still decodes instead of crashing.
+    object_type: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """JSON-safe form for the queue — the API and the worker are separate containers and
@@ -63,13 +81,14 @@ def parse_meta_messages(payload: dict[str, Any]) -> list[WebhookMessage]:
     entries = payload.get("entry")
     if not isinstance(entries, list):
         return []
+    object_type = str(payload.get("object") or "")
     out: list[WebhookMessage] = []
     for entry in entries:
         if not isinstance(entry, dict):
             continue
         page_id = str(entry.get("id") or "")
         for item in _messaging(entry):
-            parsed = _one(page_id, item)
+            parsed = _one(page_id, object_type, item)
             if parsed is not None:
                 out.append(parsed)
     return out
@@ -85,7 +104,7 @@ def _messaging(entry: dict[str, Any]) -> list[dict[str, Any]]:
     return [i for i in items if isinstance(i, dict)]
 
 
-def _one(page_id: str, item: dict[str, Any]) -> WebhookMessage | None:
+def _one(page_id: str, object_type: str, item: dict[str, Any]) -> WebhookMessage | None:
     message = _sub(item, "message")
     if message is None:
         return None
@@ -100,18 +119,25 @@ def _one(page_id: str, item: dict[str, Any]) -> WebhookMessage | None:
     if not mid or not sender_id:
         return None
     media_url, media_kind, link_url = _attachment(message)
-    text = str(message.get("text") or "").strip()
-    if not text:
+    # NOT stripped. The poll stores Graph's `message` verbatim, and the only dedup that can
+    # recognise the polled copy of a webhook message until S3 lands is an exact text compare —
+    # a lone trailing "\n" was enough to store the lead's message twice, in the thread and in
+    # the model's context. Strip for the emptiness TEST only, never for what is stored.
+    text = str(message.get("text") or "")
+    if not text.strip():
         text = _MEDIA_TEXT.get(media_kind or "", "") or (f"🔗 {link_url}" if link_url else "")
     if not text and not media_url:
         return None  # nothing a human or the model could read
+    occurred_at = _occurred_at(item)
+    if occurred_at is None:
+        return None
     ad_id, ad_media_id, ad_preview_url, lead_source = _referral(item, message)
     return WebhookMessage(
         page_id=page_id,
         sender_id=sender_id,
         mid=mid,
         text=text,
-        occurred_at=_occurred_at(item),
+        occurred_at=occurred_at,
         ad_id=ad_id,
         ad_media_id=ad_media_id,
         ad_preview_url=ad_preview_url,
@@ -119,18 +145,24 @@ def _one(page_id: str, item: dict[str, Any]) -> WebhookMessage | None:
         media_url=media_url,
         media_kind=media_kind,
         link_url=link_url,
+        object_type=object_type,
     )
 
 
-def _occurred_at(item: dict[str, Any]) -> datetime:
+def _occurred_at(item: dict[str, Any]) -> datetime | None:
     """Webhook timestamps are epoch MILLIseconds; Graph's created_time (the poll's source) is
     whole seconds. Truncating here makes the two paths produce the identical occurred_at for
     the same message, which is what lets the ±2s content dedup in IngestService recognise a
-    polled message as one the webhook already stored."""
+    polled message as one the webhook already stored.
+
+    None rather than a fallback: as_naive_utc(None) is 1970-01-01, and a row dated 1970 drags
+    thread.last_in_at back with it, permanently outside reply_pending's `last_in_at > cutoff`
+    window — the lead would simply never be answered, with nothing in the logs. Dropping the
+    message costs one poll cycle instead."""
     raw = item.get("timestamp")
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and raw > 0:
         return as_naive_utc(int(raw // 1000))
-    return as_naive_utc(raw)
+    return None
 
 
 def _sub(obj: dict[str, Any], key: str, *, default: dict | None = None) -> dict[str, Any] | None:
@@ -139,13 +171,21 @@ def _sub(obj: dict[str, Any], key: str, *, default: dict | None = None) -> dict[
 
 
 def _attachment(message: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
-    """(media_url, media_kind, link_url) of the first attachment we can do something with.
+    """(media_url, media_kind, link_url) of the FIRST attachment we can do something with.
 
     A share / story_mention / template has a url but no downloadable media — it is a link,
-    and storing it as media would leave a permanently pending MediaAsset."""
+    and storing it as media would leave a permanently pending MediaAsset.
+
+    Known limitation, deliberate: one message carrying several photos ingests only the first.
+    A Message row is keyed on the mid, and Meta gives the whole batch a single mid, so a second
+    row would need a synthetic id that the poll can never reproduce — i.e. exactly the
+    duplicate this wave is removing. The rest are logged, not silently swallowed."""
     atts = message.get("attachments")
     if not isinstance(atts, list):
         return None, None, None
+    if len(atts) > 1:
+        _log.warning("meta webhook: message mid=%s carries %d attachments — only the first is "
+                     "ingested", message.get("mid"), len(atts))
     for att in atts:
         if not isinstance(att, dict):
             continue
