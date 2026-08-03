@@ -209,6 +209,15 @@ class MediaService:
                         # forever while its placeholder held the thread silent, with no alert
                         # — the exact freeze _release_media_hold exists to prevent, reached
                         # through the one path that never consulted the window.
+                        #
+                        # The price, deliberately paid: giving up is FINAL for the bytes. The
+                        # stub keeps its url but nothing retries it, and recognize_now (the
+                        # manual button) refuses a stub without bytes, so an outage longer than
+                        # six hours — branch 1 has had multi-hour IG soft-blocks — loses those
+                        # photos instead of backfilling them late. A thread frozen with no
+                        # answer and no alert is the worse of the two; the lead is asked to
+                        # type instead. Restoring late recovery means teaching the manual path
+                        # to re-download, which is a channel port a route does not have today.
                         logger.warning("media download gave up past the retry window "
                                        "branch=%d msg=%d", self.branch_id, msg.id)
                         self._release_media_hold(msg)

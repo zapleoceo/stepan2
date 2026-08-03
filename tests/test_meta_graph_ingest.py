@@ -54,6 +54,22 @@ class _Resp:
         return self._body
 
 
+def _as_graph_would(convs: list[dict], fields: str) -> list[dict]:
+    """The conversations trimmed to the message subfields THIS request named.
+
+    Graph answers the field list literally: a poll that omits `attachments` gets an empty
+    message string with no trace of the photo, and one that omits `id` gets no mid at all. A
+    fake that hands back the same payload whatever was asked cannot show what a reduced field
+    set costs — which is how a degraded rung that dropped `id` passed review."""
+    want = {f for f in fields.partition("{")[2].rstrip("}").split(",") if f}
+    return [
+        {**conv, "messages": {"data": [
+            {k: v for k, v in msg.items() if k in want}
+            for msg in ((conv.get("messages") or {}).get("data") or [])]}}
+        for conv in convs
+    ]
+
+
 class _Client:
     """Serves one page of Instagram conversations and records the requested fields."""
 
@@ -71,9 +87,10 @@ class _Client:
     async def get(self, _url: str, params: dict) -> _Resp:
         if params.get("fields") == "instagram_business_account":
             return _Resp({"id": _PAGE, "instagram_business_account": {"id": _OWN_IG}})
-        self.fields.append(params.get("fields", ""))
+        fields = params.get("fields", "")
+        self.fields.append(fields)
         if self.both or params.get("platform") == "instagram":
-            return _Resp({"data": self.convs})
+            return _Resp({"data": _as_graph_would(self.convs, fields)})
         return _Resp({"data": []})
 
 
@@ -218,6 +235,7 @@ async def test_graph_refusing_the_media_fields_costs_the_media_not_the_channel()
 
     assert [r["message"] for r in rows] == ["halo kak"]  # the channel still delivers
     assert rows[0]["media_url"] is None                  # media is what we lost
+    assert rows[0]["mid"] == "m5"        # ...and ONLY the media: identity survives the rung
     assert client.attempted[0].count("attachments") == 1  # asked first
     assert "attachments" not in client.attempted[-1]      # then degraded
 
@@ -424,6 +442,46 @@ async def test_a_repoll_of_the_same_mid_does_not_duplicate_the_row(db_session) -
     inbound = await MetaBusinessAdapter(_FakeGraph(rows), account_id=_PAGE).fetch_inbound()
     assert len(await IngestService(db_session, bid).ingest(cid, inbound)) == 1
     assert await IngestService(db_session, bid).ingest(cid, inbound) == []
+    assert len((await db_session.exec(select(Message))).all()) == 1
+
+
+async def _polled(client: _Client) -> list[InboundMessage]:
+    """One whole tick: a fresh transport over this client, through the adapter."""
+    rows = await _transport(client).fetch_conversations()
+    return await MetaBusinessAdapter(_FakeGraph(rows), account_id=_PAGE).fetch_inbound()
+
+
+_PHOTO = [{"mime_type": "image/jpeg", "image_data": {"url": "https://cdn/photo.jpg"}}]
+
+
+async def test_a_photo_polled_full_then_degraded_is_still_one_row(db_session) -> None:
+    """The ladder's TRANSITION, on the message type the ladder exists for.
+
+    Both rungs have to report the same identity. A degraded set without `id` sends external_id
+    back to ingest's synthetic thread+time+text hash — a different key for the same message —
+    and a photo is excluded from content dedup (two different photos both read '🖼 media'), so
+    nothing downstream would catch the second copy. And a duplicate is not a cosmetic extra
+    row: it enters _store as a fresh inbound, resetting the follow-up cycle and reviving the
+    bot on a thread nobody wrote to."""
+    bid, cid = await _world(db_session)
+    conv = _conv([_msg(mid="mid-photo", attachments=_PHOTO)])
+    svc = IngestService(db_session, bid)
+
+    assert len(await svc.ingest(cid, await _polled(_Client([conv], both_platforms=True)))) == 1
+    assert await svc.ingest(cid, await _polled(_FieldPickyClient([conv]))) == []
+    assert len((await db_session.exec(select(Message))).all()) == 1
+
+
+async def test_a_photo_polled_degraded_then_full_is_still_one_row(db_session) -> None:
+    """The other direction: the tick after Graph stops refusing the field. The transport is
+    rebuilt per tick, so climbing back up is as routine as falling, and it duplicates just as
+    readily — the degraded row is already stored under whatever id that rung reported."""
+    bid, cid = await _world(db_session)
+    conv = _conv([_msg(mid="mid-photo", attachments=_PHOTO)])
+    svc = IngestService(db_session, bid)
+
+    assert len(await svc.ingest(cid, await _polled(_FieldPickyClient([conv])))) == 1
+    assert await svc.ingest(cid, await _polled(_Client([conv], both_platforms=True))) == []
     assert len((await db_session.exec(select(Message))).all()) == 1
 
 

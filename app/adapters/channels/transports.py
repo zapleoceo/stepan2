@@ -413,12 +413,18 @@ class EvolutionTransport:
 # Graph 400s the WHOLE request over one subfield it dislikes, and fetch_conversations turns
 # that into a warning and moves on — so an `attachments` this Page's token is not allowed to
 # read would take branch 7 from "photos ingest blank" to "nothing ingests at all", on BOTH
-# platform calls, with nothing louder than a log line. These two sets are a ladder: the media
-# fields are dropped on a 400 and the poll continues on the field set that ran in production
-# before 2026-08-03. The choice is per transport instance, i.e. per tick — a transient 400
-# does not cost the media forever.
+# platform calls, with nothing louder than a log line. These two sets are a ladder: ONLY the
+# media field is dropped on a 400, and the poll keeps reading text. The choice is per
+# transport instance, i.e. per tick — a transient 400 does not cost the media forever.
+#
+# `id` is on both rungs and must stay there. It is the message's identity (external_id), so a
+# rung without it re-derives a synthetic id from thread+time+text — a different key for the
+# same message. Every step of the ladder, in either direction, would then re-ingest the whole
+# 25-message window as new rows, and media is excluded from ingest's content dedup, so exactly
+# the messages this ladder exists for are the ones that would duplicate. Each duplicate enters
+# _store as a fresh inbound: follow-up cycle reset, bot revived on a dormant thread.
 _MSG_FIELDS_FULL = "id,from,message,created_time,attachments"
-_MSG_FIELDS_TEXT_ONLY = "from,message,created_time"
+_MSG_FIELDS_TEXT_ONLY = "id,from,message,created_time"
 
 
 class GraphTransportHTTP:
