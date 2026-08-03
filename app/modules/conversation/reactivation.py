@@ -233,10 +233,12 @@ class ReactivationService:
         # Cheap here does not save money, it wastes the touch and burns the lead's patience.
         decision, meta = await generate(
             engine, ctx, messages, thread_id, workflow="followup",
-            capability=SALES, branch_id=self.branch_id)
+            capability=SALES, branch_id=self.branch_id,
+            country_code=(self.settings.phone_country_code if self.settings else "62") or "62",
+            money_lang=lang)
         if decision is None:
             return False  # transient bad JSON — retries next run, not suppressed
-        if not decision.reply.strip() or money_issues(decision.reply, context):
+        if not decision.reply.strip() or money_issues(decision.reply, context, lang):
             # No fresh hook, or a figure we cannot stand behind. Suppress so this lead is not
             # re-picked and re-generated every run, blocking a slot another dormant lead could use.
             await self._suppress(thread_id, lead_id, now)

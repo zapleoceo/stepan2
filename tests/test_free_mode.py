@@ -10,9 +10,10 @@ from datetime import UTC, datetime
 
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.domain.enums import ChannelKind, Stage
+from app.modules.conversation.canned import escalation_hold
 from app.modules.conversation.dossier import LeadDossier
 from app.modules.conversation.free_mode import build_messages_free, free_contract
-from app.modules.conversation.reply import ESCALATION_HOLD_REPLY, ReplyService
+from app.modules.conversation.reply import ReplyService
 
 _NOW = datetime.now(UTC).replace(tzinfo=None)
 _KB = "KB FACTS: Vibe Coding — DP Rp 500.000, total Rp 9.000.000"
@@ -182,7 +183,7 @@ async def test_invented_price_still_escalates(db_session) -> None:  # noqa: ANN0
     llm = _LLM(bad, bad)  # the rewrite repeats the invented figure
     decision = await _service(db_session, bid, llm).decide(tid)
     assert decision is not None
-    assert decision.reply == ESCALATION_HOLD_REPLY
+    assert decision.reply == escalation_hold("id")
     assert decision.needs_manager
 
 

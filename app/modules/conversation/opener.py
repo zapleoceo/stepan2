@@ -1,7 +1,7 @@
 """The first contact — SILENT entries answered by template, typed ones by the model.
 
 The entry is classified deterministically into one of five shapes. Silent/junk shapes ship
-a known-good Bahasa template with zero LLM (anti-ban, zero cost, measured wording); a TYPED
+a known-good template with zero LLM (anti-ban, zero cost, measured wording); a TYPED
 entry (AD_TYPED / ORGANIC) goes to the full free reply pipeline — with the strong chat:sales
 chain writing the opener, the old fixed-frame-plus-slot skeleton became scaffolding for a
 weaker model and was retired with the scripted path (2026-07-25).
@@ -17,14 +17,15 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+from .canned import junk_opener  # noqa: F401 — re-exported; the text lives with the rest
 from .signals import AD_TEMPLATE_RE, ANY_POST_SHARE_RE
 
 logger = logging.getLogger(__name__)
 
 # Any Unicode letter — [a-zA-Z] alone silently classified a Cyrillic first message as
 # letterless junk (a Russian-speaking lead like thread 452 would have gotten the Bahasa
-# clarify template). Note the templates below are Bahasa-only regardless: reply.decide gates
-# this whole module on the lead writing in the branch's own script.
+# clarify template). reply.decide also gates this whole module on the lead writing in the
+# branch's own script, and the clarifier itself now follows the branch language (canned.py).
 _LETTER_RE = re.compile(r"[^\W\d_]")
 _MIN_TYPED_LETTERS = 3  # "Q)" (thread 5020) is noise, not a message to reflect
 # IG's attachment placeholder in its SHORT form — icon + handle ("📷 itstep_jakarta",
@@ -82,19 +83,11 @@ def _is_typed(t: str) -> bool:
 
 # ── deterministic templates (no LLM) ─────────────────────────────────────────
 
-# Neutral on purpose: it answers a bare greeting ("halo") and unreadable garble ("Qqq b
-# nnq", thread 5020) equally well — no "I didn't understand", which reads oddly to someone
-# who only said hello. The one first contact still shipped by code: an emoji or garble gives
-# the model nothing to react to, so a fixed clarifier is as good as a written one and free.
-#
-# The fallback names nobody. A branded line lived here until 2026-08-02 and introduced EVERY
-# branch as the first client this product ever had — including the demo branch Meta reviews,
-# where "hi" is the likeliest opening word a reviewer types (it is a bare ack, so it lands
-# here rather than with the model). Branches that want a branded greeting set junk_opener.
-JUNK_OPENER = "Halo Kak 😊 Boleh cerita, Kakak lagi cari info tentang apa ya?"
-
-
-def junk_opener(settings_value: str | None) -> str:
-    """The branch's own greeting, or the unbranded fallback."""
-    return (settings_value or "").strip() or JUNK_OPENER
+# The junk clarifier is neutral on purpose: it answers a bare greeting ("halo") and
+# unreadable garble ("Qqq b nnq", thread 5020) equally well — no "I didn't understand", which
+# reads oddly to someone who only said hello. Its TEXT moved to canned.py on 2026-08-03,
+# alongside every other line the code writes to a lead: the fallback stopped naming a company
+# on 2026-08-02 but stayed in Bahasa, so the demo branch Meta reviews still answered "hi" in
+# Indonesian. `junk_opener` is imported at the top of this module and re-exported, because
+# this is where callers look for it.
 

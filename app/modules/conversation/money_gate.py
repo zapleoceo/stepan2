@@ -63,18 +63,36 @@ AD_TAP_PRICE_CORRECTION = (
     "to their next message, not to a button press.]"
 )
 
-MONEY_CORRECTION = (
+_MONEY_CORRECTION = (
     "[System: your draft states a figure/link OR offers a service/material that is NOT in the "
     "knowledge base: {issues}. Rewrite the SAME message keeping its intent and warmth, but "
     "state only figures and links that appear in the knowledge base above, and offer ONLY what "
-    "the school actually provides — the only free thing you may offer is a campus visit; the "
-    "Demo Event is a paid offer. Do NOT invent a consultation, session, or a document you'll "
-    "prepare. If you don't have the fact, say what you do know and offer to confirm with the "
-    "team — do not go silent and do not hand the lead off.]"
+    "the school actually provides{catalogue}. Do NOT invent a consultation, session, or a "
+    "document you'll prepare. If you don't have the fact, say what you do know and offer to "
+    "confirm with the team — do not go silent and do not hand the lead off.]"
 )
+# Which of our offers is free and which is not is IT STEP Jakarta's catalogue, not a fact
+# about selling — naming a "Demo Event" to a branch that has never held one teaches the model
+# an offer that does not exist, and the rewrite it produces invents around it. The knowledge
+# base already carries every branch's real catalogue; only the Indonesian branches get the
+# reminder they have been trained against.
+_ID_CATALOGUE_CLAUSE = (
+    " — the only free thing you may offer is a campus visit; the Demo Event is a paid offer")
 
 
-def uninvited_price(reply: str, dossier: object, *, ad_promised_price: bool = False) -> bool:
+def money_correction(branch_lang: str = "id") -> str:
+    """The correction handed back to the model when the gate trips, with the tenant-specific
+    offer reminder only where it is true.
+
+    Keyed on the BRANCH, not on the reply: which offers are free is IT STEP Jakarta's
+    catalogue, and it does not stop being their catalogue because this particular lead is
+    being answered in Russian."""
+    catalogue = _ID_CATALOGUE_CLAUSE if (branch_lang or "").lower() == "id" else ""
+    return _MONEY_CORRECTION.replace("{catalogue}", catalogue)
+
+
+def uninvited_price(reply: str, dossier: object, *, ad_promised_price: bool = False,
+                    money_lang: str = "id") -> bool:
     """A price figure in a NUDGE to someone money was never discussed with — volunteered, since
     a follow-up is never an answer to a fresh question (thread 4849). Used only by followup.py;
     live replies leave price timing to the model.
@@ -101,7 +119,7 @@ def uninvited_price(reply: str, dossier: object, *, ad_promised_price: bool = Fa
 
     So the ad may buy a price ONCE: not in the opener, and not again once we have answered —
     only while the question the ad put in their mouth is still hanging."""
-    if not quotes_price(reply):
+    if not quotes_price(reply, money_lang):
         return False
     if dossier.readiness == "ready":
         return False
@@ -110,10 +128,16 @@ def uninvited_price(reply: str, dossier: object, *, ad_promised_price: bool = Fa
     return not (dossier.budget_signal or dossier.payment_preference)
 
 
-def money_issues(reply: str, context: str) -> list[str]:
+def money_issues(reply: str, context: str, money_lang: str = "id") -> list[str]:
     """Ungrounded money/link claims AND invented services in the draft — the fail-closed set.
     Empty means it is safe to send. (Named 'money' for history; it now also gates a promised
-    service/material that isn't part of the offering — same must-not-ship severity.)"""
+    service/material that isn't part of the offering — same must-not-ship severity.)
+
+    `money_lang` is the BRANCH's language — the market's, not the reply's — and it decides how
+    a sum is recognised. Default 'id' so an unlanguaged caller keeps branch 1's exact
+    behaviour; every live path passes the branch language, because a gate that cannot see
+    "$1,500" is not a gate at all, and one that reads branch 1's rupiah with another market's
+    rules turns a grounded price into an invented one."""
     issues: list[str] = []
     for url in ungrounded_urls(reply, context):
         issues.append(f"link not in the knowledge base: {url}")
@@ -123,7 +147,7 @@ def money_issues(reply: str, context: str) -> list[str]:
     for bubble in (reply or "").split("|||"):
         if is_hedged_salary_reference(bubble):
             continue
-        issues.extend(_ungrounded_prices(bubble, context))
+        issues.extend(_ungrounded_prices(bubble, context, money_lang))
     issues.extend(fabricated_income_figure(reply))
     # A result stated as a percentage is never in the knowledge base and never true of us.
     # Thread 4799 produced one twice — first as an outside brand, then as "our alumni".
@@ -179,17 +203,17 @@ def money_issues(reply: str, context: str) -> list[str]:
     return issues
 
 
-def _ungrounded_prices(reply: str, context: str) -> list[str]:
+def _ungrounded_prices(reply: str, context: str, money_lang: str = "id") -> list[str]:
     """Every money figure quoted must appear in the knowledge base.
 
     v2 split this across three mechanisms (a no-prices-at-all check, a subset check, and an
     LLM verify) that could each let a wrong figure through on their own. One rule: if the
     number isn't in the KB, it isn't real. Quoting a price that doesn't exist is the single
     most expensive mistake this bot can make — it is a promise the school has to honour."""
-    quoted = canonical_prices(reply or "")
+    quoted = canonical_prices(reply or "", money_lang=money_lang)
     if not quoted:
         return []
-    grounded = canonical_prices(context or "", liberal=True)
+    grounded = canonical_prices(context or "", liberal=True, money_lang=money_lang)
     invented = sorted(quoted - grounded)
     return [f"price figure not in the knowledge base: {value:,}".replace(",", ".")
             for value in invented]

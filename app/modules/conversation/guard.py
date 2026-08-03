@@ -28,6 +28,10 @@ from datetime import UTC, date, datetime
 
 from app.ports.llm import LLMPort
 
+# Re-exported, not reimplemented: every caller reaches the money parser through guard, and
+# prices.py owns the one implementation so a second one cannot quietly drift away from it.
+from .prices import canonical_prices, quotes_price  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 _URL_RE = re.compile(r"https?://[^\s<>()\"']+", re.IGNORECASE)
@@ -42,11 +46,6 @@ _RISKY_RE = re.compile(
     r"sertifikat cisco|cyberops|template|tutorial|download|kirim(?:kan)? (?:link|file|akses)|"
     r"harga|biaya|tarif|cicilan|angsuran)\b",
     re.IGNORECASE)
-# A concrete money figure (e.g. "Rp 297.000", "1.670.000/bulan", "500 ribu") — the exact
-# shape of the chat-452 fabrication, which carried no "diskon/promo/gratis" trigger word.
-_PRICE_RE = re.compile(
-    r"\brp\.?\s?\d[\d.,]*|\d[\d.,]*\s?(?:ribu|juta|rb\b)", re.IGNORECASE)
-
 # A claim that a file/screenshot/dataset has ALREADY been sent, or delivered specifically
 # via WhatsApp — deterministically false regardless of KB content: Stepan is text-only (no
 # image/file attach capability) and Instagram-only (no WhatsApp channel). A 50-thread live
@@ -217,14 +216,6 @@ def empty_handed_refusal(reply: str) -> list[str]:
 def review_content_claims(reply: str) -> list[str]:
     """Claims about what our reviews contain — as opposed to where to find them."""
     return [m.group(0).strip() for m in _REVIEW_CONTENT_RE.finditer(reply or "")]
-
-
-def quotes_price(reply: str) -> bool:
-    """A concrete money figure appears in the reply — same shape the money gate already
-    verifies against the KB. Used by the pitch gate as a content-based backstop: the model
-    can mislabel its own `move` (thread 4972 shipped a full price quote tagged
-    `answer_question`, which isn't in `_PITCH_MOVES`), but it can't hide the figure itself."""
-    return bool(_PRICE_RE.search(reply or ""))
 
 
 # Thread 1721: the bot promised "aku kirim file dataset ... via WhatsApp ya", asked for the
@@ -654,72 +645,26 @@ _PROHIBITION_TOPIC_RE = re.compile(
     re.IGNORECASE)
 
 
-def is_risky(reply: str) -> bool:
+def is_risky(reply: str, money_lang: str = "id") -> bool:
     """Cheap gate: does the reply look like it might hand out an offer/resource/link,
     state a concrete price (chat-452 shape), tell a specific alumni/success story
-    (chat-1827 shape), or promise an Open-House experience the cards forbid (chat-2879)?"""
+    (chat-1827 shape), or promise an Open-House experience the cards forbid (chat-2879)?
+
+    The price half reads the branch's own money vocabulary — this is what routes a reply to
+    the LLM fabrication verify, and on an English branch an English figure used to slip past
+    it silently, taking the whole verify with it."""
     text = reply or ""
     return bool(
-        _URL_RE.search(text) or _RISKY_RE.search(text) or _PRICE_RE.search(text)
+        _URL_RE.search(text) or _RISKY_RE.search(text) or quotes_price(text, money_lang)
         or _STORY_RE.search(text) or _PROHIBITION_TOPIC_RE.search(text))
 
 
 # Price-vocabulary risky words — when these are the ONLY risky trigger and every quoted
 # figure is verbatim in the KB context, the draft merely repeats a grounded fact.
 _PRICE_WORDS = frozenset({"harga", "biaya", "tarif", "cicilan", "angsuran"})
-_MAGNITUDE = {"juta": 1_000_000, "jt": 1_000_000, "ribu": 1_000, "rb": 1_000, "k": 1_000}
-
-_BARE_NUMBER_RE = re.compile(r"\d[\d.,]{3,}")
-# A money figure with an OPTIONAL magnitude word — crucially captures that word even behind
-# an "Rp" prefix ("Rp2,5 juta"), which the old regex dropped (→ 25 instead of 2_500_000).
-_MONEY_RE = re.compile(
-    r"(rp\.?\s*)?(\d[\d.,]*)\s*(juta|jt|ribu|rb|k)?\b", re.IGNORECASE)
 
 
-def _parse_money(num: str, mag: str) -> int | None:
-    """A magnitude word makes the number a DECIMAL count of that unit — '2,5 juta' → 2.5 →
-    2_500_000, '1,67 juta' → 1_670_000, '500 ribu' → 500_000 (Indonesian ',' = decimal).
-    With NO magnitude word, separators are thousands groupers — '1.882.955' → 1_882_955."""
-    digits_only = re.sub(r"[^\d]", "", num)
-    if not digits_only:
-        return None
-    if not mag:
-        return int(digits_only)
-    s = num.replace(",", ".")
-    parts = s.split(".")
-    if len(parts) > 1:
-        s = "".join(parts[:-1]) + "." + parts[-1]
-    try:
-        return int(round(float(s) * _MAGNITUDE[mag]))
-    except ValueError:
-        return int(digits_only) * _MAGNITUDE[mag]
-
-
-def _canonical_prices(text: str, *, liberal: bool = False) -> set[int]:
-    """Every money figure in `text` as a canonical integer — 'Rp 1.882.955' → 1882955,
-    'Rp2,5 juta' → 2500000, '500rb' / '500 ribu' → 500000 — so a reply figure can be matched
-    against the KB regardless of formatting. Strict side: only figures carrying an 'Rp' prefix
-    OR a magnitude word count (a bare '16' isn't a price). liberal=True (the KB side) also
-    takes bare digit runs ('500,000 IDR'): extra KB numbers only make the subset check
-    stricter-side-safe, while the REPLY side stays strict money shapes."""
-    out: set[int] = set()
-    for m in _MONEY_RE.finditer(text or ""):
-        has_rp = bool(m.group(1))
-        mag = (m.group(3) or "").lower()
-        if not has_rp and not mag:
-            continue  # bare number, no Rp and no magnitude word — not a price on the strict side
-        val = _parse_money(m.group(2), mag)
-        if val is not None:
-            out.add(val)
-    if liberal:
-        for m in _BARE_NUMBER_RE.finditer(text or ""):
-            digits = re.sub(r"[^\d]", "", m.group(0))
-            if digits:
-                out.add(int(digits))
-    return out
-
-
-def price_claims_grounded(reply: str, context: str) -> bool:
+def price_claims_grounded(reply: str, context: str, money_lang: str = "id") -> bool:
     """True when the ONLY thing that made this reply risky is price talk AND every figure it
     quotes appears (canonically) in the KB context — the draft repeats a grounded fact, so
     the LLM verify would spend ~3k tokens re-reading the KB to confirm a substring match we
@@ -731,16 +676,10 @@ def price_claims_grounded(reply: str, context: str) -> bool:
     for m in _RISKY_RE.finditer(text):
         if m.group(0).lower() not in _PRICE_WORDS:
             return False  # a non-price offer word (gratis/promo/akses/…) — verify for real
-    prices = _canonical_prices(text)
+    prices = canonical_prices(text, money_lang=money_lang)
     if not prices:
         return False  # price words but no figure — nothing to string-match, let the LLM judge
-    return prices <= _canonical_prices(context, liberal=True)
-
-
-# Public alias — the v3 money gate matches figures with exactly these canonicalisation rules
-# (Rp prefixes, 'juta'/'ribu' magnitudes, liberal on the KB side); it imports rather than
-# growing a second money parser that could disagree with this one.
-canonical_prices = _canonical_prices
+    return prices <= canonical_prices(context, liberal=True, money_lang=money_lang)
 
 
 async def verify_grounding(

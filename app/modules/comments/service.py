@@ -15,6 +15,7 @@ import logging
 from app.adapters.db.models import Branch, Channel, PostComment
 from app.domain.clock import utc_now
 from app.modules.conversation import guard
+from app.modules.conversation.canned import comment_fallback, comment_persona
 from app.modules.conversation.delivery import guard_prompt
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import BranchSettings
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 # context (the gate enforces it). A warm author is invited to DM; everyone else just gets the
 # answer. Kept tiny on purpose — a public comment reply is a hook, not a brochure.
 _COMMENT_PROMPT = (
-    "You are MinStep, replying PUBLICLY to a comment under our own Instagram post. Reply in "
+    "You are {persona}, replying PUBLICLY to a comment under our own Instagram post. Reply in "
     "{lang}, short and friendly (max ~300 chars), warm and human. Answer ONLY from the "
     "KNOWLEDGE BASE below — never invent a price, date, discount, link or fact that isn't "
     "there. If the answer isn't in the KB, don't guess: invite them to DM for details.\n"
@@ -52,8 +53,9 @@ _CORRECTION = (
     "number from that specific product's own card — do NOT mix prices between products. If "
     "you cannot ground a fact, drop it and invite them to DM instead. Return ONLY the reply "
     "text.]")
-# Safe fallback when the draft can't be grounded — no facts, just a warm pull into DMs.
-_INVITE_ONLY = "Halo Kak! 😊 Boleh DM aku ya biar aku bantu jelasin lengkap 🙏"
+# The safe fallback (no facts, just a warm pull into DMs) and the name this prompt gives
+# itself both live in conversation/canned.py — a public reply in the wrong language is
+# visible to everyone who reads the post, not only to the one person it was meant for.
 
 
 class CommentService:
@@ -171,12 +173,13 @@ class CommentService:
         # prefix rides the broker's prompt cache the DM path already keeps warm.
         context = await self.knowledge.full_knowledge_context()
         prompt = _COMMENT_PROMPT.format(
-            lang=lang, kb=context, caption=(c.media_caption or "")[:400], comment=c.text,
+            persona=comment_persona(lang), lang=lang, kb=context,
+            caption=(c.media_caption or "")[:400], comment=c.text,
             invite=_DM_INVITE if is_warm(c.text) else "")
-        text, meta = await self._generate(prompt, context)
+        text, meta = await self._generate(prompt, context, lang)
         if text is None:
-            return _INVITE_ONLY, meta
-        if not guard.is_risky(text):
+            return comment_fallback(lang), meta
+        if not guard.is_risky(text, lang):
             return text, meta  # nothing risky to verify — a plain grounded line
         # LLM fabrication verify (chat:smart), same gate as the DM reply guard.
         system = await guard_prompt(self.session, self.branch_id)
@@ -187,19 +190,21 @@ class CommentService:
         logger.info("comment verify flagged branch=%d comment=%s: %s → regen",
                     self.branch_id, c.external_id, unsupported[:3])
         fixed, meta2 = await self._generate(
-            prompt + "\n" + _CORRECTION.format(issues="; ".join(unsupported[:5])), context)
+            prompt + "\n" + _CORRECTION.format(issues="; ".join(unsupported[:5])),
+            context, lang)
         if fixed is None:
-            return _INVITE_ONLY, meta2 or meta
-        if guard.is_risky(fixed):
+            return comment_fallback(lang), meta2 or meta
+        if guard.is_risky(fixed, lang):
             still = await guard.verify_grounding(
                 self.llm, fixed, context, branch_id=self.branch_id, thread_id=0, system=system)
             if still:
                 logger.info("comment still ungrounded after regen branch=%d comment=%s "
                             "→ invite-only", self.branch_id, c.external_id)
-                return _INVITE_ONLY, meta2
+                return comment_fallback(lang), meta2
         return fixed, meta2
 
-    async def _generate(self, prompt: str, context: str) -> tuple[str | None, dict]:
+    async def _generate(self, prompt: str, context: str,
+                        lang: str = "id") -> tuple[str | None, dict]:
         """chat:fast, then chat:smart on a blank or fabricated draft. Returns (text, meta) or
         (None, meta) when nothing usable came back. The free chat:fast model returns EMPTY
         content ~half the time (it stuffs the answer into a reasoning field) — measured live —
@@ -216,12 +221,12 @@ class CommentService:
                                self.branch_id, capability, exc)
                 continue
             text = _clean(raw)
-            if text and not _fabricated(text, context):
+            if text and not _fabricated(text, context, lang):
                 return text, meta
         return None, meta
 
 
-def _fabricated(text: str, context: str) -> bool:
+def _fabricated(text: str, context: str, lang: str = "id") -> bool:
     """Public text is held to a STRICTER bar than a DM: there is no cheap LLM-verify in this
     light path, and a public mistake screenshots. So a risky reply (a price, an offer, a
     link, a story) must be verbatim-grounded in the KB context — every money figure it quotes
@@ -231,7 +236,7 @@ def _fabricated(text: str, context: str) -> bool:
     if guard.ungrounded_urls(text, context) or guard.impossible_capability_offers(text) \
             or guard.false_delivery_claims(text):
         return True
-    return guard.is_risky(text) and not guard.price_claims_grounded(text, context)
+    return guard.is_risky(text, lang) and not guard.price_claims_grounded(text, context, lang)
 
 
 def _clean(raw: str) -> str:

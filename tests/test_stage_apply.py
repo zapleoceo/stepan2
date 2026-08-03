@@ -278,14 +278,14 @@ async def test_ready_without_phone_keeps_selling(db_session) -> None:
 
 async def test_ready_handoff_appends_a_closing_line_for_the_lead(db_session) -> None:
     """The won/READY exit muted the bot but never guaranteed the lead a 'what happens next'
-    line (unlike the manager exit). The fresh READY flip now appends _READY_HANDOFF_CLOSING."""
-    from app.modules.conversation.delivery import _READY_HANDOFF_CLOSING
+    line (unlike the manager exit). The fresh READY flip now appends the ready closing."""
+    from app.modules.conversation.canned import ready_closing
 
     bid, tid, _lead = await _world(db_session, phone="+6281234567890")
     await _svc(db_session, bid).enqueue_reply(tid, _decision(ready=True, stage=Stage.PRESENTING))
     rows = (await db_session.exec(
         select(Outbox).where(Outbox.thread_id == tid).order_by(Outbox.scheduled_at))).all()
-    assert [r.text for r in rows] == ["ok", _READY_HANDOFF_CLOSING]  # model's reply, then it
+    assert [r.text for r in rows] == ["ok", ready_closing("id")]  # model's reply, then it
 
 
 async def test_repeated_non_target_winds_down_to_dormant(db_session) -> None:
@@ -385,16 +385,59 @@ async def test_needs_manager_appends_a_closing_line_for_the_lead(db_session) -> 
     """Live case (thread 1023): needs_manager mutes the bot, but nothing told the LEAD a
     human was taking over — a follow-up they sent days later got pure silence. The bot's own
     turn must include a closing bubble saying a human will follow up."""
-    from app.modules.conversation.delivery import _MANAGER_HANDOFF_CLOSING
+    from app.modules.conversation.canned import manager_closing
 
     bid, tid, _lead = await _world(db_session, phone="+6281234567890")
     out = await _svc(db_session, bid).enqueue_reply(
         tid, _decision(needs_manager=True, manager_question="Jadwal Demo Event?"),
     )
-    assert out is not None and out.text == _MANAGER_HANDOFF_CLOSING
+    assert out is not None and out.text == manager_closing("id", has_phone=True)
     rows = (await db_session.exec(
         select(Outbox).where(Outbox.thread_id == tid).order_by(Outbox.scheduled_at))).all()
-    assert [r.text for r in rows] == ["ok", _MANAGER_HANDOFF_CLOSING]  # model's reply, then it
+    # the model's reply, then the closing
+    assert [r.text for r in rows] == ["ok", manager_closing("id", has_phone=True)]
+
+
+async def test_the_closing_follows_the_conversation_s_language(db_session) -> None:
+    """The closing is appended by CODE after the model's reply, so a lead who has been talking
+    to us in Russian for ten turns — the model duly answering in Russian — got one bubble of
+    Bahasa Indonesia at the single sharpest moment of the funnel, the hand-off."""
+    from app.modules.conversation.canned import manager_closing
+
+    bid, tid, lead = await _world(db_session, phone="+6281234567890")
+    lead.preferred_language = "ru"
+    db_session.add(lead)
+    await db_session.flush()
+    out = await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(needs_manager=True, manager_question="Когда позвонят?"))
+    assert out is not None
+    assert out.text == manager_closing("ru", has_phone=True)
+    assert "Kak" not in out.text
+
+
+async def test_the_closing_ignores_a_self_reported_language_that_contradicts_the_lead(
+        db_session) -> None:
+    """The same hand-off, with the one field that used to undo it.
+
+    decision.reply_language is the model's own report of what it just wrote, and it drifts back
+    to the branch default mid-conversation — that drift is why the lead's own script was made
+    the stronger signal in the first place. _sync_lead_fields copies that report onto the lead
+    inside _apply_decision, i.e. BETWEEN the model answering in Russian and the closing being
+    built, so reading preferred_language afterwards handed a Russian body an Indonesian
+    goodbye at the sharpest turn of the funnel."""
+    from app.modules.conversation.canned import manager_closing
+
+    bid, tid, lead = await _world(db_session, phone="+6281234567890")
+    lead.preferred_language = "ru"
+    db_session.add(lead)
+    await db_session.flush()
+
+    out = await _svc(db_session, bid).enqueue_reply(
+        tid, _decision(needs_manager=True, manager_question="Когда позвонят?",
+                       reply="Хорошо, передаю менеджеру.", reply_language="id"))
+
+    assert out is not None
+    assert out.text == manager_closing("ru", has_phone=True)
 
 
 async def test_needs_manager_without_phone_asks_for_it(db_session) -> None:
@@ -402,27 +445,27 @@ async def test_needs_manager_without_phone_asks_for_it(db_session) -> None:
     genuinely ready to commit got muted and handed off with no contact for a manager to call.
     The closing line is the only remaining chance to ask, since the bot goes silent right
     after (ingest's own phone miner still runs on a muted thread's later reply, though)."""
-    from app.modules.conversation.delivery import _MANAGER_HANDOFF_CLOSING_NO_PHONE
+    from app.modules.conversation.canned import manager_closing
 
     bid, tid, _lead = await _world(db_session, phone=None)
     out = await _svc(db_session, bid).enqueue_reply(
         tid, _decision(needs_manager=True, manager_question="Ready to book Skill Booster"),
     )
-    assert out is not None and out.text == _MANAGER_HANDOFF_CLOSING_NO_PHONE
+    assert out is not None and out.text == manager_closing("id", has_phone=False)
     assert "nomor telepon" in out.text.lower()
 
 
 async def test_no_closing_line_when_already_in_manager_stage(db_session) -> None:
     """Don't re-append the closing line on every subsequent needs_manager turn once the
     lead is already muted — only the turn that FLIPS the stage gets it."""
-    from app.modules.conversation.delivery import _MANAGER_HANDOFF_CLOSING
+    from app.modules.conversation.canned import manager_closing
 
     bid, tid, _lead = await _world(db_session, phone="+6281234567890", stage=Stage.MANAGER)
     await _svc(db_session, bid).enqueue_reply(
         tid, _decision(needs_manager=True, manager_question="Another question?"),
     )
     rows = (await db_session.exec(select(Outbox).where(Outbox.thread_id == tid))).all()
-    assert all(r.text != _MANAGER_HANDOFF_CLOSING for r in rows)
+    assert all(r.text != manager_closing("id", has_phone=True) for r in rows)
 
 
 async def test_openhouse_rsvp_notifies_without_muting_bot(db_session) -> None:

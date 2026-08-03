@@ -220,6 +220,9 @@ class FollowupService:
         branch = await self.session.get(Branch, self.branch_id)
         return branch.lang if branch is not None else "id"
 
+    def _country_code(self) -> str:
+        return (self.settings.phone_country_code if self.settings else "62") or "62"
+
     async def _entry_block(self, product_slug: str | None) -> str | None:
         """Which product this lead actually came for. The thread has carried the ad→product
         mapping all along, but the nudge never put it in the prompt: a lead who tapped an SMM
@@ -284,7 +287,8 @@ class FollowupService:
 
         decision, meta = await generate(
             engine, ctx, messages, thread_id, workflow="followup",
-            capability=capability, branch_id=self.branch_id)
+            capability=capability, branch_id=self.branch_id,
+            country_code=self._country_code(), money_lang=lang)
         if decision is None:
             return False
         # Every one of the three ad prefills asks about cost. The opener may not answer it (a
@@ -293,7 +297,8 @@ class FollowupService:
         first_in = next((m for m in ctx.dialog if m.direction == "in"), None)
         ad_promised_price = bool(
             first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
-        if uninvited_price(decision.reply, stored, ad_promised_price=ad_promised_price):
+        if uninvited_price(decision.reply, stored, ad_promised_price=ad_promised_price,
+                           money_lang=lang):
             # A nudge is never a reply to a fresh question — a price in one is always
             # volunteered (thread 4849). One rewrite, same as reply.py's money gate; if it
             # still quotes a figure, drop the nudge rather than send it.
@@ -302,9 +307,11 @@ class FollowupService:
             regen_messages = [*messages, {"role": "user", "content": PITCH_CORRECTION}]
             fixed, meta = await generate(
                 engine, ctx, regen_messages, thread_id, workflow="followup",
-                capability=SMART, branch_id=self.branch_id)
+                capability=SMART, branch_id=self.branch_id,
+                country_code=self._country_code(), money_lang=lang)
             if fixed is None or uninvited_price(
-                    fixed.reply, stored, ad_promised_price=ad_promised_price):
+                    fixed.reply, stored, ad_promised_price=ad_promised_price,
+                    money_lang=lang):
                 logger.warning("followup pitch gate unfixable branch=%d thread=%d — dropped",
                                 self.branch_id, thread_id)
                 await self._burn_dry_step(thread_id, now)
@@ -318,7 +325,7 @@ class FollowupService:
                         self.branch_id, thread_id)
             await self._burn_dry_step(thread_id, now)
             return False
-        issues = money_issues(decision.reply, context)
+        issues = money_issues(decision.reply, context, lang)
         if issues:
             # Nobody asked, so there is nothing to escalate — just don't send a wrong number.
             logger.warning("followup: branch=%d thread=%d ungrounded money claim (%s) — dropped",
