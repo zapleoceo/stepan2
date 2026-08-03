@@ -54,6 +54,7 @@ from ._query import (
     log_window_keys,
 )
 from ._routes_chat import _actor_name
+from ._ui_html import pick_branch_html
 from ._ui_panels import (
     admap_cell_inner,
     broker_log_panel_html,
@@ -426,7 +427,7 @@ async def settings_panel(request: Request) -> HTMLResponse:
         # key→value map and the panel showed whichever branch won the ORDER BY — an
         # operator could read Indonesia's alert group while thinking they saw the test
         # branch's. No branch on screen → no values, not a blend.
-        return HTMLResponse(_pick_branch_html())
+        return HTMLResponse(pick_branch_html())
     async with session_scope() as session:
         rows = (await session.execute(
             text("SELECT key, value FROM app_setting"
@@ -435,11 +436,6 @@ async def settings_panel(request: Request) -> HTMLResponse:
     # Anti-ban caps moved to the per-connector editor (with a per-channel live-usage badge),
     # so the branch panel no longer shows or computes them.
     return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
-
-
-def _pick_branch_html() -> str:
-    return f'<div class="emp" style="padding:1rem">{_h.escape(t("branch.pick_one"))}</div>'
-
 
 
 
@@ -498,7 +494,7 @@ async def settings_save_by_key(
         # else 1` sent every setting saved from any branch's panel to branch 1 (Indonesia).
         target = writable_selected_branch_id(request)
         if target is None:
-            return HTMLResponse(_pick_branch_html(), status_code=403)
+            return HTMLResponse(pick_branch_html(), status_code=403)
         bid = target
     val = value.strip()
     async with session_scope() as session:
@@ -661,14 +657,18 @@ def _comment_toggle_html(branch_id: int | None, on: bool | None) -> str:
     if branch_id is None or on is None:
         return f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
     return _switch(
-        "comments", branch_id, t("bot.comments"), on,
+        "comments", t("bot.comments"), on,
         post_url="/ui/comment-toggle", target="#comment-tog-wrap")
 
 
 def _switch(
-    scope: str, branch_id: int, label: str, on: bool, *,
+    scope: str, label: str, on: bool, *,
     post_url: str = "/ui/agent-toggle", target: str = "#bot-tog-wrap",
 ) -> str:
+    """No branch_id travels with the form. The toggle acts on the branch the SERVER sees in
+    the view filter; a hidden field would only offer a stale or forged value to ignore, and
+    leaving it in the markup after the handlers stopped reading it told the next reader the
+    opposite of the truth."""
     knob = "translateX(1.05rem)" if on else "translateX(0)"
     track = "#51cf66" if on else "#4a5568"
     status = _h.escape(t("bot.on" if on else "bot.off"))
@@ -676,7 +676,6 @@ def _switch(
     return (
         f'<form hx-post="{post_url}" hx-target="{target}" hx-swap="innerHTML"'
         f' class="tgl-row"><input type="hidden" name="scope" value="{scope}">'
-        f'<input type="hidden" name="branch_id" value="{branch_id}">'
         f'<button type="submit" class="tgl-btn" title="{_h.escape(label)}">'
         f'<span class="tgl-lbl">{_h.escape(label)}</span>'
         f'<span class="tgl-status" style="color:{st_color}">{status}</span>'
@@ -689,13 +688,13 @@ def _switch(
 def _agent_toggles_html(
     branch_id: int | None, platform_on: bool, branch_on: bool | None, is_super: bool = True,
 ) -> str:
-    platform_switch = _switch("platform", branch_id or 0, t("bot.platform"), platform_on)
+    platform_switch = _switch("platform", t("bot.platform"), platform_on)
     if branch_id is None or branch_on is None:
         hint = f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
         return (platform_switch if is_super else "") + hint
     return (
         (platform_switch if is_super else "")
-        + _switch("branch", branch_id, t("bot.branch"), branch_on)
+        + _switch("branch", t("bot.branch"), branch_on)
     )
 
 
@@ -706,7 +705,7 @@ def _sending_toggle_html(branch_id: int | None, sending_on: bool | None) -> str:
     if branch_id is None or sending_on is None:
         return f'<div class="tgl-hint">{_h.escape(t("bot.pick_branch"))}</div>'
     return _switch(
-        "sending", branch_id, t("bot.sending"), sending_on,
+        "sending", t("bot.sending"), sending_on,
         post_url="/ui/sending-toggle", target="#sending-tog-wrap")
 
 

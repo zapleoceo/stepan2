@@ -19,7 +19,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request, is_super_admin
+from app.admin._branch import (
+    branch_ids_from_request,
+    is_super_admin,
+    writable_selected_branch_id,
+)
 from app.domain.enums import ChannelKind
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
@@ -43,7 +47,6 @@ from ._routes_admin import router as _admin_router
 from ._routes_branches import router as _branches_router
 from ._routes_channels import router as _channels_router
 from ._routes_chat import router as _chat_router
-from ._routes_coach import coach_branch
 from ._routes_coach import router as _coach_router
 from ._routes_comments import router as _comments_router
 from ._routes_knowledge import router as _knowledge_router
@@ -54,6 +57,7 @@ from ._routes_products import router as _products_router
 from ._ui_html import (
     app_shell,
     funnel_html,
+    pick_branch_html,
     set_render_tz,
     thread_list_html,
     viewer_tz_offset,
@@ -171,10 +175,9 @@ async def coach_page(request: Request) -> HTMLResponse:
     # Same resolver as the coach partial and its write routes, so the page can't show one
     # branch's coaching history while the writes land on another (it showed branch 1's for
     # every super_admin with no filter, and coached branch 1 to match).
-    branch_id = coach_branch(request)
+    branch_id = writable_selected_branch_id(request)
     if branch_id is None:
-        panel = f'<div class="emp" style="padding:1rem">{_h.escape(t("branch.pick_one"))}</div>'
-        return HTMLResponse(app_shell(lang, panel, active_nav="coach",
+        return HTMLResponse(app_shell(lang, pick_branch_html(), active_nav="coach",
                                       is_super=is_super_admin(request)))
     async with session_scope() as session:
         edits, notes = await fetch_coach_data(session, branch_id)

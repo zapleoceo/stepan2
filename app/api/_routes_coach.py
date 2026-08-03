@@ -26,8 +26,9 @@ from app.modules.conversation.coach_service import (
     revert_edit,
 )
 
-from ._i18n import apply_lang, t
+from ._i18n import apply_lang
 from ._query import fetch_coach_data
+from ._ui_html import pick_branch_html
 from ._ui_panels import _coach_response, coach_chat_html
 
 router = APIRouter()
@@ -63,24 +64,24 @@ def _spawn_coach_generation(branch_id: int, edit_id: int) -> None:
     task.add_done_callback(_COACH_TASKS.discard)
 
 
-def coach_branch(request: Request) -> int | None:
-    """The branch the operator is VIEWING, if they may WRITE to it — the coach edits that
-    branch's knowledge base, so there is no such thing as a default target. The last
-    fallback here used to be `writable[0] if writable else (target or 1)`: for a super_admin
-    with no branch filter that is branch 1, so a coaching session opened from an
-    all-branches view rewrote live Indonesia's KB."""
-    return writable_selected_branch_id(request)
+# Every route below resolves its target with writable_selected_branch_id: the branch the
+# operator is VIEWING, if they may WRITE to it. The coach rewrites that branch's knowledge
+# base, so there is no such thing as a default target. The last fallback here used to be
+# `writable[0] if writable else (target or 1)` — for a super_admin with no branch filter that
+# is branch 1, so a coaching session opened from an all-branches view rewrote live
+# Indonesia's KB. There was a local `coach_branch()` wrapper around the shared resolver; it
+# existed only so ui.py could import it, which made the page import a helper out of a sibling
+# ROUTE module. Both now call app.admin._branch directly.
 
 
 def _pick_branch(status: int = 400) -> HTMLResponse:
-    return HTMLResponse(
-        f'<div class="emp" style="padding:1rem">{t("branch.pick_one")}</div>', status_code=status)
+    return HTMLResponse(pick_branch_html(), status_code=status)
 
 
 @router.get("/coach/panel", response_class=HTMLResponse)
 async def coach_panel_partial(request: Request) -> HTMLResponse:
     apply_lang(request)
-    branch_id = coach_branch(request)  # same branch the write routes use → panel and writes agree
+    branch_id = writable_selected_branch_id(request)  # same branch the writes use → they agree
     if branch_id is None:
         return _pick_branch(status=200)  # a panel, not an error — nothing to show yet
     async with session_scope() as session:
@@ -97,7 +98,7 @@ async def coach_say(
     # hidden branch_id field is never trusted (a client could submit any branch it likes).
     # Scoped by WRITE right (viewer can't coach); middleware already blocks a pure viewer.
     apply_lang(request)
-    branch_id = coach_branch(request)
+    branch_id = writable_selected_branch_id(request)
     if branch_id is None:
         return _pick_branch()
     text_val = request_text.strip()
@@ -135,7 +136,7 @@ async def coach_edit_poll(edit_id: int, request: Request) -> HTMLResponse:
 
 @router.post("/coach/apply/{edit_id}")
 async def coach_apply(edit_id: int, request: Request) -> RedirectResponse:
-    branch_id = coach_branch(request)  # viewed branch, constrained to writable
+    branch_id = writable_selected_branch_id(request)  # viewed branch, constrained to writable
     if branch_id is None:  # the panel it lands on states why nothing happened
         return RedirectResponse("/ui/coach", status_code=303)
     async with session_scope() as session:
@@ -145,7 +146,7 @@ async def coach_apply(edit_id: int, request: Request) -> RedirectResponse:
 
 @router.post("/coach/cancel/{edit_id}")
 async def coach_cancel(edit_id: int, request: Request) -> RedirectResponse:
-    branch_id = coach_branch(request)  # viewed branch, constrained to writable
+    branch_id = writable_selected_branch_id(request)  # viewed branch, constrained to writable
     if branch_id is None:
         return RedirectResponse("/ui/coach", status_code=303)
     async with session_scope() as session:
@@ -155,7 +156,7 @@ async def coach_cancel(edit_id: int, request: Request) -> RedirectResponse:
 
 @router.post("/coach/revert/{edit_id}")
 async def coach_revert(edit_id: int, request: Request) -> RedirectResponse:
-    branch_id = coach_branch(request)  # viewed branch, constrained to writable
+    branch_id = writable_selected_branch_id(request)  # viewed branch, constrained to writable
     if branch_id is None:
         return RedirectResponse("/ui/coach", status_code=303)
     async with session_scope() as session:
