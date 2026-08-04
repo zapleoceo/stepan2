@@ -6,46 +6,12 @@ feature exposes a parameter by adding ONE field here (no scattering across UI/i1
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from .fields import I18n, SettingField, SettingSection
+from .fields import i18n as _l
+from .fields import setting as _f
+from .schema_crm import CRM_SECTION
 
-type I18n = dict[str, str]
-
-
-@dataclass(frozen=True)
-class SettingField:
-    key: str
-    kind: str  # bool | int | text | secret
-    default: str
-    label: I18n
-    placeholder: I18n | None = None
-    help: I18n | None = None
-    width: str = "120px"
-    hidden: bool = False  # in defaults() but never rendered (vestigial/internal keys)
-    choices: list[tuple[str, I18n]] | None = None  # text field → dropdown of fixed options
-    # "branch" renders in the branch panel and applies to the whole branch; "channel" renders
-    # in the per-connector editor and resolves per channel (falling back to branch → platform).
-    scope: str = "branch"
-
-
-@dataclass(frozen=True)
-class SettingSection:
-    icon: str
-    title: I18n
-    fields: list[SettingField]
-
-
-def _l(ru: str, en: str, id_: str) -> I18n:
-    return {"ru": ru, "en": en, "id": id_}
-
-
-def _f(
-    key: str, kind: str, default: str, label: I18n, *,
-    ph: I18n | None = None, help: I18n | None = None, width: str = "120px",
-    hidden: bool = False, choices: list[tuple[str, I18n]] | None = None,
-    scope: str = "branch",
-) -> SettingField:
-    return SettingField(key, kind, default, label, ph, help, width, hidden, choices, scope)
-
+__all__ = ["I18n", "SettingField", "SettingSection"]
 
 _UNLIMITED = _l("0 = без лимита", "0 = unlimited", "0 = tanpa batas")
 
@@ -254,15 +220,7 @@ SCHEMA: list[SettingSection] = [
         _f("meta_pixel_id", "text", "", _l("Pixel ID", "Pixel ID", "Pixel ID"),
            ph=_l("1234567890", "1234567890", "1234567890"), width="220px", scope="channel"),
     ]),
-    SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [
-        _f("crm_enabled", "bool", "false",
-           _l("Слать лиды в CRM", "Send leads to CRM", "Kirim lead ke CRM"), width="130px"),
-        _f("crm_webhook_url", "secret", "",
-           _l("CRM webhook URL", "CRM webhook URL", "CRM webhook URL"),
-           ph=_l("https://…", "https://…", "https://…"),
-           help=_l("POST manager_alert на этот URL", "POST manager_alert here",
-                   "POST manager_alert ke URL"), width="340px"),
-    ]),
+    CRM_SECTION,
 ]
 
 

@@ -98,8 +98,7 @@ async def _branch_with_mcp(s) -> int:
     s.add(b)
     await s.flush()
     s.add(AppSetting(branch_id=b.id, key="crm_read_enabled", value="true"))
-    # platform-level row (branch_id NULL) — the branch inherits it, like prod
-    s.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_MCP_URL))
+    s.add(AppSetting(branch_id=b.id, key="crm_mcp_url", value=_MCP_URL))
     await s.flush()
     invalidate(b.id)
     return b.id

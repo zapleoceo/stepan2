@@ -50,8 +50,8 @@ class CrmReaderPort:
 
 
 def crm_read_url(cfg) -> str:  # noqa: ANN001
-    """The state-source URL: the branch REST contract wins when set, else the CRM's own
-    MCP server (platform-level setting the branches inherit)."""
+    """The state-source URL: the branch REST contract wins when set, else the branch's own
+    CRM MCP server. Both are branch-tier only — see settings.tenant_keys."""
     return (cfg.crm_state_url or "").strip() or (cfg.crm_mcp_url or "").strip()
 
 

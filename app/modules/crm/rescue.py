@@ -26,6 +26,7 @@ from app.domain.clock import branch_now, utc_now
 from app.modules.crm.gate import build_crm_reader, crm_read_url
 from app.modules.crm.policy import policy_for
 from app.modules.leads import ops
+from app.modules.leads.lookup import AmbiguousPhone, find_lead, mask
 from app.modules.settings.service import get_settings
 from app.ports.llm import LLMPort
 
@@ -128,7 +129,14 @@ class CrmRescueService:
         return row is not None
 
     async def _rescue_one(self, phone: str, missed_at: str) -> bool:
-        lead = await ops.find_lead(self.session, phone, self.branch_id)
+        try:
+            lead = await find_lead(self.session, phone, self.branch_id)
+        except AmbiguousPhone:
+            # Two of this branch's leads share the number's national digits. Picking one
+            # would DM a stranger about a call they never got — skip and let a human sort it.
+            logger.warning("crm rescue branch=%d: phone %s matches several leads, skipped",
+                           self.branch_id, mask(phone))
+            return False
         if lead is None or lead.is_blocked or not lead.agent_enabled:
             return False  # unknown to Stepan, or a human explicitly owns/stopped it
         if await self._recently_rescued(lead.id):

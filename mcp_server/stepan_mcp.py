@@ -56,32 +56,48 @@ def _unwrap(r: httpx.Response) -> dict:
 async def find_lead(phone: str, branch_id: int | None = None) -> dict:
     """Look up a lead by phone number (E.164, e.g. +6281234567890). Returns the lead's
     id, name, Instagram username, branch, current funnel stage and whether the bot is on.
-    Use this first to confirm the lead exists before moving them."""
+    Use this first to confirm the lead exists before moving them. Pass branch_id when the
+    number may exist in more than one branch — an ambiguous phone comes back as an error
+    listing the candidate leads instead of being guessed."""
     return await _get("/mcp/find_lead", {"phone": phone, "branch_id": branch_id})
 
 
 @mcp.tool()
-async def close_deal(phone: str, note: str | None = None) -> dict:
+async def close_deal(
+    phone: str, note: str | None = None, branch_id: int | None = None,
+) -> dict:
     """Mark a lead's deal as WON. Hands the lead off (stage → handed_off) and stops the
-    bot from messaging them further. `note` is journaled on the funnel event."""
-    return await _post("/mcp/close_deal", {"phone": phone, "note": note})
+    bot from messaging them further. `note` is journaled on the funnel event. `branch_id`
+    names the branch and is REQUIRED unless the token is limited to one — this is not
+    undoable, so it never guesses which tenant's lead a phone means."""
+    return await _post(
+        "/mcp/close_deal", {"phone": phone, "note": note, "branch_id": branch_id})
 
 
 @mcp.tool()
-async def call_failed(phone: str, note: str | None = None) -> dict:
+async def call_failed(
+    phone: str, note: str | None = None, branch_id: int | None = None,
+) -> dict:
     """Report that a phone call to the lead did NOT connect. Journals the failed call,
     re-enables the bot, and Stepan proactively messages the lead to continue in chat.
     A lead already handed off / dormant is pulled back to `qualifying` so the bot works
-    them again. `note` (e.g. 'no answer', 'wrong number') is journaled."""
-    return await _post("/mcp/call_failed", {"phone": phone, "note": note})
+    them again. `note` (e.g. 'no answer', 'wrong number') is journaled. `branch_id` names
+    the branch and is REQUIRED unless the token is limited to one."""
+    return await _post(
+        "/mcp/call_failed", {"phone": phone, "note": note, "branch_id": branch_id})
 
 
 @mcp.tool()
-async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
+async def move_lead(
+    phone: str, stage: str, note: str | None = None, branch_id: int | None = None,
+) -> dict:
     """Move a lead to an explicit funnel stage. Valid stages: new, nurturing, qualifying,
     presenting, objection, ready, handed_off, dormant, manager. `manager` turns the bot
-    off (human takeover); an active stage turns it back on. `note` is journaled."""
-    return await _post("/mcp/move_lead", {"phone": phone, "stage": stage, "note": note})
+    off (human takeover); an active stage turns it back on. `note` is journaled.
+    `branch_id` names the branch and is REQUIRED unless the token is limited to one."""
+    return await _post(
+        "/mcp/move_lead",
+        {"phone": phone, "stage": stage, "note": note, "branch_id": branch_id})
 
 
 @mcp.tool()

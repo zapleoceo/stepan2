@@ -15,7 +15,7 @@ from sqlalchemy import text
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.api._mcp_auth import token_guard
-from app.modules.leads import ops
+from app.modules.leads.lookup import AmbiguousPhone, find_lead
 from app.modules.mcp.tokens import mcp_effective_branch
 
 _LANG_NAME = {"ru": "Russian", "en": "English", "id": "Indonesian"}
@@ -35,7 +35,9 @@ async def _resolve_thread(session, phone: str | None, thread_id: int | None):  #
                  " WHERE ct.id = :t"), {"t": thread_id})).first()
         return tuple(row) if row else None
     if phone:
-        lead = await ops.find_lead(session, phone)
+        # The token's own branch first — a reader scoped to one tenant must not even scan
+        # another's leads, and a universal reader gets an AmbiguousPhone rather than a guess.
+        lead = await find_lead(session, phone, mcp_effective_branch(None))
         if lead is None:
             return None
         row = (await session.execute(
@@ -87,7 +89,10 @@ async def get_chat(phone: str | None = None, thread_id: int | None = None,
     timestamp and text (the lead's original language)."""
     limit = max(1, min(limit, 1000))
     async with session_scope() as session:
-        resolved = await _resolve_thread(session, phone, thread_id)
+        try:
+            resolved = await _resolve_thread(session, phone, thread_id)
+        except AmbiguousPhone as exc:
+            return {"ok": False, "detail": str(exc), "candidates": exc.candidates}
         if resolved is None:
             return {"ok": False, "detail": "chat not found"}
         tid, branch_id, name, ph = resolved
@@ -114,7 +119,10 @@ async def analyze_chat(phone: str | None = None, thread_id: int | None = None,
     by phone or thread_id. `lang` is the report language (ru|en|id)."""
     from app.modules.conversation.coach_service import analyze_chat as _analyze  # noqa: PLC0415
     async with session_scope() as session:
-        resolved = await _resolve_thread(session, phone, thread_id)
+        try:
+            resolved = await _resolve_thread(session, phone, thread_id)
+        except AmbiguousPhone as exc:
+            return {"ok": False, "detail": str(exc), "candidates": exc.candidates}
         if resolved is None:
             return {"ok": False, "detail": "chat not found"}
         tid, branch_id, _name, _ph = resolved
