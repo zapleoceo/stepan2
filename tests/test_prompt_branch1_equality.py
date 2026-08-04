@@ -15,6 +15,11 @@ Today the two pipelines do NOT agree, and this file states each disagreement as 
 assertion so the work list is readable rather than a wall of diff. When one of them starts
 passing the wrong way round, the tests below fail — that is the intended alarm, not a nuisance:
 each is a claim about production that stopped being true.
+
+What this file can see is bounded by its own fixture: copying branch 1's rows can only reveal a
+difference those rows already express. The assemblers differ in four further ways that branch
+1's data happens to hide, and the block order below is read by a consumer that truncates —
+tests/test_prompt_pipeline_divergence.py pins both.
 """
 from __future__ import annotations
 
@@ -91,7 +96,7 @@ async def _composed_prefix(session, branch_id: int) -> str:  # noqa: ANN001
     return knowledge.rstrip() + "\n\n" + craft_contract(language_name("id"))
 
 
-@pytest.mark.xfail(strict=True, reason="branch 1 is not movable yet — see the four tests below")
+@pytest.mark.xfail(strict=True, reason="branch 1 is not movable yet — see the five tests below")
 @pytest.mark.asyncio
 async def test_branch_one_assembles_to_the_same_bytes_both_ways(db_session) -> None:  # noqa: ANN001
     """The acceptance gate for the move, written as the thing that must become true.
@@ -111,9 +116,13 @@ async def test_branch_one_assembles_to_the_same_bytes_both_ways(db_session) -> N
 
 @pytest.mark.asyncio
 async def test_the_persona_header_names_the_slug_only_under_the_composer(db_session) -> None:  # noqa: ANN001
-    """Difference 1, in the header line. Legacy injects ONE identity doc under a header that
-    names no slug; the composer emits every persona-category doc and names each. Purely
-    mechanical, and the only one of the four that composer code alone could close."""
+    """Difference 1, visible in the header line — but the header is not what differs.
+
+    Legacy injects ONE identity doc, found by SLUG (persona_core, then persona), under a header
+    that names no slug. The composer emits every doc whose CATEGORY is persona, and names each.
+    Two selection rules, not two spellings; they agree on branch 1 only because its single
+    persona-category doc is also called persona_core. The header alone is what composer code
+    could close on its own — the selection rule is pinned in test_prompt_pipeline_divergence."""
     bid = await _branch_one(db_session)
     legacy = await KnowledgeService(db_session, bid).full_knowledge_context()
     composed = await compose_context(db_session, bid, "id")
@@ -183,9 +192,17 @@ def test_the_indonesian_style_block_exists_only_in_the_legacy_contract() -> None
     the ban on calling the place a "kampus" are Indonesian-only rules S4 deliberately withheld
     from CRAFT. Under the composer branch 1 would lose all three at once — the forms of address
     it has used across 37 000 messages, and a word choice the owner treats as a compliance
-    matter. That is a behaviour change, not an architecture change."""
+    matter. That is a behaviour change, not an architecture change.
+
+    The last two assertions bound the claim, because "branch 1 loses its guardrails" is easy to
+    overstate: the RULE against quoting a salary figure or a success story is in BOTH contracts,
+    written once in CRAFT. What is legacy-only is the Jakarta EVIDENCE behind it — that this
+    branch has no local success story and no local salary range at all, so the model must offer
+    to ask rather than relay. The rule survives a flip; the local facts behind it do not."""
     legacy = free_contract("id")
     craft = craft_contract(language_name("id"))
     for token in ("Kak/Kakak", "kampus", "aku"):
         assert token in legacy
         assert token not in craft
+    assert "salary figure" in craft  # the rule is shared…
+    assert "no local SMM salary data" in legacy  # …the Jakarta evidence for it is not
