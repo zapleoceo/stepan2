@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.adapters.db.models import Branch  # noqa: E402
 from app.api.main import app  # noqa: E402
 from app.modules.persona import service as P  # noqa: E402
+from tests.test_infra import _alembic_config  # noqa: E402
 
 
 def test_sections_parses_headings() -> None:
@@ -40,6 +41,57 @@ async def test_the_library_ships_empty_and_holds_only_what_branches_import(db_se
     assert not hasattr(P, "SEED_PERSONAS")
     assert not hasattr(P, "ensure_seeded")
     assert await P.list_personas(db_session) == []
+
+
+def test_the_migration_takes_the_old_website_demo_row_off_the_grid(tmp_path, monkeypatch):
+    """Deleting the seeder does not delete its rows.
+
+    `ensure_seeded` ran on every persona-library page view, so every install where anybody
+    opened that page holds "website-demo". The test above runs on an empty database and is
+    therefore silent about exactly the case that matters: after deploy the operator's library
+    would show the stale "Stepan (website demo)" v1.2 next to the S6 prompt-library entry the
+    site now really sells with — the drifted duplicate this release exists to remove.
+
+    So this one seeds the row the way production has it, at the revision production is at, and
+    upgrades over it. Retired rather than deleted: `list_personas` filters on `published`, so
+    the card goes away, while an operator who rewrote that text keeps it."""
+    from alembic import command
+    from sqlalchemy import create_engine, text
+
+    from app.config import settings
+
+    db_file = tmp_path / "persona.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    monkeypatch.setenv("STEPAN2_DATABASE_URL", db_url)
+    settings.cache_clear()
+    cfg = _alembic_config(db_url)
+
+    command.upgrade(cfg, "plib000001")  # where a live install stands before this release
+    engine = create_engine(f"sqlite:///{db_file}")
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO persona (slug, name, version, lang, country, summary, content,"
+                " changelog, author_name, author_contact, status, created_at, updated_at)"
+                " VALUES ('website-demo', 'Stepan (website demo)', '1.2', 'en', '', '', 'x',"
+                " '', 'Zapleo', 'https://t.me/zapleosoft', 'published', '2026-07-01',"
+                " '2026-07-01')"))
+            conn.execute(text(
+                "INSERT INTO persona (slug, name, version, lang, country, summary, content,"
+                " changelog, author_name, author_contact, status, created_at, updated_at)"
+                " VALUES ('indonesia-persona', 'Indonesia', '1.0', 'id', '', '', 'y',"
+                " '', 'Zapleo', 'https://t.me/zapleosoft', 'published', '2026-07-01',"
+                " '2026-07-01')"))
+
+        command.upgrade(cfg, "head")
+
+        with engine.begin() as conn:
+            rows = dict(conn.execute(text("SELECT slug, status FROM persona")).all())
+    finally:
+        engine.dispose()
+        settings.cache_clear()
+
+    assert rows == {"website-demo": "retired", "indonesia-persona": "published"}
 
 
 async def test_an_imported_branch_persona_is_listed(db_session) -> None:
