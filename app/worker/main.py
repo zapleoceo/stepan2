@@ -23,7 +23,9 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
-from app.domain.enums import ChannelKind, SessionStatus
+from app.connectors.registry import supports
+from app.connectors.spec import Capability
+from app.domain.enums import SessionStatus
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reactivation import ReactivationService
@@ -654,15 +656,21 @@ async def _send_thread(
 _DELETION_THREAD_CAP = settings().deletion_thread_cap
 
 
-async def _try_build_port(session: AsyncSession, channel: Channel, capability: str):  # noqa: ANN202
-    """Build the channel port, or None (logged) when it can't be built or lacks `capability`
-    — the shared skip path for the maintenance crons (deletions/profiles/media)."""
+async def _try_build_port(session: AsyncSession, channel: Channel, capability: Capability):  # noqa: ANN202
+    """Build the channel port, or None (logged) when it can't be built or its connector does
+    not declare `capability` — the shared skip path for the maintenance crons
+    (deletions/profiles/media).
+
+    The capability is asked of the CONNECTOR SPEC, not of the object: this used to be
+    hasattr(port, "<method name as a string>"), where a mistyped name meant "unsupported"
+    forever and no test could see it."""
+    if not supports(channel.kind, capability):
+        return None
     try:
-        port = await wiring.build_channel_port(session, channel)
+        return await wiring.build_channel_port(session, channel)
     except (NotImplementedError, KeyError, RuntimeError) as exc:
         logger.warning("skip channel %s: %s", channel.id, exc)
         return None
-    return port if hasattr(port, capability) else None
 
 
 async def process_deletions(ctx: dict[str, Any]) -> int:
@@ -723,7 +731,7 @@ async def _process_one_deletion(branch_id: int, channel: Channel, ext_thread: st
     from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
     try:
         async with session_scope() as session:
-            port = await _try_build_port(session, channel, "revoke")
+            port = await _try_build_port(session, channel, Capability.REVOKE)
             if port is None:
                 return 0  # can't build / channel doesn't support unsend
             return await DeletionService(session, branch_id).process(
@@ -825,8 +833,8 @@ async def ingest_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
     async with session_scope() as session:
         channels = await wiring.active_channels(session, branch_id)
     for channel in channels:
-        if channel.kind != ChannelKind.INSTAGRAM:
-            continue
+        if not supports(channel.kind, Capability.COMMENTS):
+            continue  # no public comment surface on this connector — nothing to ingest
         try:
             async with session_scope() as session:
                 ch_cfg = await get_channel_settings(session, branch_id, channel.id)
@@ -923,7 +931,7 @@ async def refresh_profiles_branch(ctx: dict[str, Any], branch_id: int) -> int:
         async with session_scope() as session:
             svc = ProfileService(session, branch_id)
             for channel in await wiring.active_channels(session, branch_id):
-                port = await _try_build_port(session, channel, "fetch_profile")
+                port = await _try_build_port(session, channel, Capability.FETCH_PROFILE)
                 if port is None:
                     continue  # can't build / channel kind has no profile stats
                 refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
@@ -954,7 +962,7 @@ async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
                 assert channel.id is not None
                 if not await svc.pending(channel.id, limit=1):
                     continue  # nothing flagged — skip building the port
-                port = await _try_build_port(session, channel, "download_media")
+                port = await _try_build_port(session, channel, Capability.DOWNLOAD_MEDIA)
                 if port is None:
                     continue  # can't build / channel kind can't download media
                 broker = BrokerLLM()

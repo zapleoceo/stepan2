@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 
+from app.connectors.registry import all_specs
+
 from ._i18n import t
 
 # Viewer-local time moved to _ui_fmt on 2026-07-28. Imported back so every existing
@@ -241,11 +243,7 @@ def _source_bar(
     return f'<div class="srcbar">{thumb}{lbl}</div>'
 
 
-_CHANNEL_ICON = {
-    "instagram": ("fa-brands fa-instagram", "#e1306c"),
-    "meta_business": ("fa-brands fa-facebook", "#1877f2"),
-    "whatsapp": ("fa-brands fa-whatsapp", "#25d366"),
-}
+_CHANNEL_ICON = {s.kind.value: (s.icon_class, s.icon_color) for s in all_specs()}
 
 
 def _is_instagram_thread(external_thread_id: str | None) -> bool:
@@ -1542,7 +1540,11 @@ def app_shell(
         # is the UNION of the ON channels. `kind` is a comma-list of ON channels (''=all on,
         # 'none'=all off). kindChip() (client JS) toggles the chip, recomputes the list from the
         # DOM, and reloads only #tl — the server filters by the set.
-        _all_kinds = ("instagram", "meta_business", "whatsapp")
+        # One chip per REGISTERED connector — the chips used to be a literal 3-tuple here
+        # while the route that reads `kind` derived its allowed values from ChannelKind, so a
+        # new connector was filterable by URL and invisible in the UI.
+        _specs = all_specs()
+        _all_kinds = tuple(s.kind.value for s in _specs)
         if kind == "none":
             _sel_kinds: set[str] = set()
         elif kind:
@@ -1561,11 +1563,7 @@ def app_shell(
             )
 
         _kind_chips = "".join(
-            _kind_chip(k, *_CHANNEL_ICON[k], lbl) for k, lbl in (
-                ("instagram", "Instagram"),
-                ("meta_business", "Meta Business"),
-                ("whatsapp", "WhatsApp"),
-            )
+            _kind_chip(s.kind.value, s.icon_class, s.icon_color, s.label) for s in _specs
         )
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'

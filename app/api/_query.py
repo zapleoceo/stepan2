@@ -1,6 +1,7 @@
 """Shared SQL query helpers for UI route handlers."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 
 from sqlalchemy import case, func, or_, select, text
@@ -17,6 +18,8 @@ from app.adapters.db.models import (
     StageEvent,
 )
 from app.config import settings
+from app.connectors.registry import all_specs
+from app.connectors.spec import ConnectorSpec
 from app.domain.clock import utc_now
 
 _PIPELINE_STAGES = ("qualifying", "presenting", "objection", "nurturing")
@@ -46,9 +49,30 @@ DEAL_WON = (
     " AND (cs.deal_won_at IS NULL OR cs.deal_won_at >= l.created_at))"
 )
 
-# Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked,
-# on a WORKING connector (Meta Business is excluded until its connector is finished — those
-# chats just hang, they don't count). IN_QUEUE = the chats Stepan actively works: bot on AND in
+def awaiting_kind_sql(specs: Iterable[ConnectorSpec]) -> str:
+    """The connector filter of AWAITING_BASE, derived from the specs.
+
+    Which connectors are silenced is each connector's own declaration
+    (ConnectorSpec.counts_as_awaiting). It was a literal `c.kind <> 'meta_business'` here,
+    invisible from the connector it silences: a branch whose ONLY connector is Meta Business
+    has an inbox where nothing is ever "awaiting reply", and nobody reading either file would
+    know whose decision that was.
+
+    Values are inlined, not bound: AWAITING_BASE is a SQL FRAGMENT that callers paste into
+    larger strings, so it carries no parameters of its own. They are ChannelKind members — a
+    closed enum from our own source, never anything a request supplies."""
+    excluded = [s.kind.value for s in specs if not s.counts_as_awaiting]
+    if not excluded:
+        return ""
+    kinds = ", ".join(f"'{k}'" for k in excluded)
+    return (" AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"  # noqa: S608
+            "             AND c.kind NOT IN (" + kinds + "))")
+
+
+_AWAITING_KIND_SQL = awaiting_kind_sql(all_specs())
+
+# Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked, on
+# a connector that counts (awaiting_kind_sql). IN_QUEUE = the chats Stepan works: bot on AND in
 # a funnel stage where Stepan participates (new/nurturing/qualifying/presenting/objection). The
 # complement is everything else unanswered — dormant, ready, or bot off. SETTLED (below) is
 # carved out FIRST: those need no reply at all. The three partition AWAITING_BASE and sum to
@@ -58,8 +82,7 @@ AWAITING_BASE = (
     "ct.last_in_at IS NOT NULL"
     " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
     " AND l.is_blocked = false"
-    " AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
-    "             AND c.kind <> 'meta_business')"
+    + _AWAITING_KIND_SQL
 )
 IN_QUEUE_EXTRA = (
     "l.agent_enabled = true"

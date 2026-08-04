@@ -10,11 +10,11 @@ from typing import Any
 import pytest
 
 from app.adapters.channels import (
-    REGISTRY,
     InstagramAdapter,
     MetaBusinessAdapter,
     WhatsAppAdapter,
 )
+from app.connectors.registry import REGISTRY
 from app.domain.enums import ChannelKind, SessionStatus
 from app.ports.channel import InboundMessage, SendResult
 
@@ -773,13 +773,13 @@ def test_transport_skips_item_with_no_user_id() -> None:
 
 
 def test_registry_maps_every_kind_to_its_adapter() -> None:
-    assert REGISTRY == {
+    assert {k: s.adapter for k, s in REGISTRY.items()} == {
         ChannelKind.INSTAGRAM: InstagramAdapter,
         ChannelKind.WHATSAPP: WhatsAppAdapter,
         ChannelKind.META_BUSINESS: MetaBusinessAdapter,
     }
-    for kind, cls in REGISTRY.items():
-        assert cls.kind is kind  # class advertises the kind it is registered under
+    for kind, spec in REGISTRY.items():
+        assert spec.adapter.kind is kind  # class advertises the kind it is registered under
 
 
 def test_two_factor_classification_is_logged_at_a_readable_level(

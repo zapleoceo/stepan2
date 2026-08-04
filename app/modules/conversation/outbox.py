@@ -16,8 +16,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Lead, Message, Outbox
 from app.config import settings
+from app.connectors.registry import spec_for
 from app.domain.clock import branch_day_start_utc
-from app.domain.enums import ChannelKind, Stage
+from app.domain.enums import Stage
 from app.modules.settings.service import get_channel_settings
 from app.ports.channel import ChannelPort
 
@@ -25,9 +26,6 @@ from .dormancy import park_dormant
 from .repository import MessageRepo, OutboxRepo, ThreadRepo
 
 logger = logging.getLogger(__name__)
-
-
-
 
 # IG/WA soft blocks (challenge, rate limit, transient) — retry later, don't drop the line.
 _SOFT_BLOCK = (
@@ -124,13 +122,19 @@ class OutboxSender:
             )
             return None  # hourly/daily send cap hit — leave queued for a later tick
 
-        # Meta closes the standard messaging window ~24h after the lead's last message; an
-        # AUTOMATED send into a closed window is rejected by Graph, so skip the doomed API call
-        # and mark it skipped (not failed — it's expected, not a manager-facing error; the
+        # A platform that closes its messaging window (~24h after the lead's last message on
+        # Meta) rejects an AUTOMATED send into a closed one, so skip the doomed API call and
+        # mark it skipped (not failed — it's expected, not a manager-facing error; the
         # follow-up cycle resumes when the lead writes again and ingest re-opens the window).
         # A MANAGER send still attempts: a human agent may deliver via the 7-day human_agent tag,
         # and the real result surfaces to them (see the failed-send bubble).
-        if (getattr(self.channel, "kind", None) == ChannelKind.META_BUSINESS
+        #
+        # Whether a connector HAS a window is the connector's own declaration
+        # (ConnectorSpec.enforces_send_window) — this is the shared send path, and hardcoding
+        # one kind here meant every future connector with a window had to edit this file.
+        # window_until is written for every kind by ingest; only the rule was Meta-specific.
+        spec = spec_for(getattr(self.channel, "kind", None))
+        if (spec is not None and spec.enforces_send_window
                 and row.source != "manager"
                 and thread.window_until is not None and thread.window_until < now):
             row.status = "skipped"
@@ -140,8 +144,8 @@ class OutboxSender:
             # regenerating a reply every tick is pure token burn (see _pause_dormant).
             await self._pause_dormant(thread, "Meta 24h window closed — paused until lead writes")
             await self.session.flush()
-            logger.info("outbox skip branch=%d thread=%d: Meta 24h window closed",
-                        self.branch_id, thread_id)
+            logger.info("outbox skip branch=%d thread=%d: %s send window closed",
+                        self.branch_id, thread_id, spec.label)
             return row
 
         if cfg.crm_read_enabled and row.source != "manager":

@@ -70,5 +70,12 @@ def test_awaiting_queue_is_active_funnel_only_and_excludes_meta() -> None:
     # human-owned / done / dormant are NOT the active queue
     for st in ("dormant", "handed_off", "ready", "manager"):
         assert f"'{st}'" not in IN_QUEUE_EXTRA
-    # Meta Business is excluded from the whole unanswered set (connector not finished)
-    assert "meta_business" in AWAITING_BASE and "<>" in AWAITING_BASE
+    # Meta Business is excluded from the whole unanswered set (connector not finished) — and
+    # the exclusion now comes from that connector's own spec, so this asserts the SQL and the
+    # spec agree instead of re-typing the kind next to the query.
+    from app.connectors.registry import all_specs
+    excluded = [s.kind.value for s in all_specs() if not s.counts_as_awaiting]
+    assert excluded == ["meta_business"]
+    for spec in all_specs():
+        present = f"'{spec.kind.value}'" in AWAITING_BASE
+        assert present is (spec.kind.value in excluded)

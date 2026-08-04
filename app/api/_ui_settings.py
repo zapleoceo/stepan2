@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import html as _h
 
+from app.connectors.registry import all_specs
 from app.modules.settings import schema as S
 
 _INP = (
@@ -221,11 +222,15 @@ def settings_form_html(
 
 
 def _field_for_kind(f: S.SettingField, kind: str) -> bool:
-    """A connector-scope field shows in a channel's editor unless it's Meta-specific (key
-    prefixed meta_/fb_), which only makes sense on a meta_business connector."""
-    if f.key.startswith(("meta_", "fb_")):
-        return kind == "meta_business"
-    return True
+    """A connector-scope field shows in a channel's editor unless another connector owns its
+    key prefix (ConnectorSpec.settings_prefixes) — app_setting is one shared table, so the
+    editor has to know whose fields it is showing. Was a hardcoded meta_/fb_ → meta_business
+    pair here, which meant a new connector with its own keys had to edit this file."""
+    owners = [s for s in all_specs()
+              if s.settings_prefixes and f.key.startswith(s.settings_prefixes)]
+    if not owners:
+        return True
+    return any(s.kind.value == kind for s in owners)
 
 
 def channel_settings_html(
