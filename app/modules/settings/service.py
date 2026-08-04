@@ -50,11 +50,12 @@ class BranchSettings:
     crm_read_enabled: bool = False
     crm_state_url: str = ""
     crm_read_secret: str = ""
-    # The CRM's own MCP server (platform-level app_setting, branches inherit; a branch may
-    # override the alias). When crm_state_url is empty and this is set, the read-gate
-    # sources lead state from the CRM MCP instead of the REST contract.
+    # The CRM's own MCP server. Per branch and NEVER inherited (see schema_crm) — the URL
+    # carries its own bearer token, and it used to sit at the platform tier where every
+    # tenant resolved the first client's CRM as its own. When crm_state_url is empty and
+    # this is set, the read-gate sources lead state from the CRM MCP, not the REST contract.
     crm_mcp_url: str = ""
-    crm_mcp_city_alias: str = "jakarta"
+    crm_mcp_city_alias: str = ""
     # Rescue of CRM missed-call leads (Stepan DMs leads the phone couldn't reach) — off
     # until a branch explicitly opts in.
     crm_rescue_enabled: bool = False
@@ -210,7 +211,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_state_url=raw.get("crm_state_url", ""),
         crm_read_secret=raw.get("crm_read_secret", ""),
         crm_mcp_url=raw.get("crm_mcp_url", ""),
-        crm_mcp_city_alias=raw.get("crm_mcp_city_alias", "jakarta"),
+        crm_mcp_city_alias=raw.get("crm_mcp_city_alias", ""),
         crm_rescue_enabled=_b(raw, "crm_rescue_enabled"),
         crm_writeback_enabled=_b(raw, "crm_writeback_enabled"),
         meta_pixel_id=raw.get("meta_pixel_id", ""),

@@ -59,11 +59,8 @@ async def _branch(s, *, enabled: bool = True) -> int:
     s.add(AppSetting(branch_id=b.id, key="crm_rescue_enabled",
                      value="true" if enabled else "false"))
     s.add(AppSetting(branch_id=b.id, key="agent_enabled_global", value="true"))
-    import sqlalchemy as sa
-    have = (await s.execute(sa.select(AppSetting).where(
-        AppSetting.branch_id.is_(None), AppSetting.key == "crm_mcp_url"))).first()
-    if have is None:  # platform row is shared across branches — insert once
-        s.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_MCP_URL))
+    # The CRM link is the branch's own — a platform-tier row is ignored on purpose now.
+    s.add(AppSetting(branch_id=b.id, key="crm_mcp_url", value=_MCP_URL))
     await s.flush()
     invalidate(b.id)
     return b.id

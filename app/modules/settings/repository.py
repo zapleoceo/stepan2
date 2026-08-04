@@ -6,6 +6,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import AppSetting
 
+from .schema_crm import TENANT_ONLY_KEYS
+
 # One portable upsert for every app_setting write. The conflict target matches the
 # COALESCE-based unique index (uq_setting_scope), so it upserts correctly at all three
 # tiers — platform (NULL,NULL), branch (bid,NULL), connector (bid,cid) — on SQLite and
@@ -35,6 +37,8 @@ class SettingRepo:
 
         Without channel_id this is the branch view (connector tier skipped). With it, a
         per-connector override wins over the branch value, which wins over the platform value.
+
+        TENANT_ONLY_KEYS never take the platform tier at all — see schema_crm.
         """
         result = await self._s.execute(
             select(AppSetting).where(
@@ -46,6 +50,8 @@ class SettingRepo:
         connector: dict[str, str] = {}
         for row in result.scalars().all():
             if row.branch_id is None:
+                if row.key in TENANT_ONLY_KEYS:
+                    continue
                 platform[row.key] = row.value
             elif row.channel_id is None:
                 branch[row.key] = row.value
