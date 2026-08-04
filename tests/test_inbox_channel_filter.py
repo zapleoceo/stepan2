@@ -39,25 +39,32 @@ def test_kind_chips_are_independent_toggles_reloading_tl_server_side() -> None:
     assert 'onclick="kindChip(this)"' in html
     assert "htmx.ajax('GET','/ui/threads'" in html   # the toggle reloads #tl server-side
     assert "toggleKind" not in html                  # the old client-side hide is gone
-    # default (no kind param) = every chip ON, none struck off
-    assert html.count('class="chk-kind on"') == 3
+    # default (no kind param) = every chip ON, none struck off. Counted off the registry, not
+    # off a number: a connector added later must not need this line edited to stay honest.
+    from app.connectors.registry import all_specs
+    assert html.count('class="chk-kind on"') == len(all_specs())
     assert 'class="chk-kind off"' not in html
 
 
 def test_kind_chips_reflect_active_subset_and_tl_loader_preserves_filters() -> None:
+    from app.connectors.registry import all_specs
+
     html = app_shell("en", "", active_nav="inbox", kind="meta_business", stage="qualifying")
-    # only meta_business is ON; the other two are struck-through OFF (independent toggles)
+    # only meta_business is ON; every other connector is struck-through OFF (independent
+    # toggles, one per registered spec)
     assert html.count('class="chk-kind on"') == 1
-    assert html.count('class="chk-kind off"') == 2
+    assert html.count('class="chk-kind off"') == len(all_specs()) - 1
     # the #tl loader (and its 30s poll, which mirrors the address bar) requests the active
     # subset AND carries the stage filter along
     assert 'hx-get="/ui/threads?stage=qualifying&kind=meta_business"' in html
 
 
 def test_kind_multi_subset_shows_union() -> None:
+    from app.connectors.registry import all_specs
+
     html = app_shell("en", "", active_nav="inbox", kind="instagram,whatsapp")
     assert html.count('class="chk-kind on"') == 2       # IG + WA on
-    assert html.count('class="chk-kind off"') == 1       # Meta off
+    assert html.count('class="chk-kind off"') == len(all_specs()) - 2
     assert 'hx-get="/ui/threads?kind=instagram,whatsapp"' in html
 
 
@@ -70,12 +77,14 @@ def test_awaiting_queue_is_active_funnel_only_and_excludes_meta() -> None:
     # human-owned / done / dormant are NOT the active queue
     for st in ("dormant", "handed_off", "ready", "manager"):
         assert f"'{st}'" not in IN_QUEUE_EXTRA
-    # Meta Business is excluded from the whole unanswered set (connector not finished) — and
-    # the exclusion now comes from that connector's own spec, so this asserts the SQL and the
-    # spec agree instead of re-typing the kind next to the query.
+    # Two connectors are excluded from the unanswered set, for opposite reasons: Meta Business
+    # because that connector is unfinished, and the website chat because an unanswered turn
+    # cannot exist there (the answer goes back in the same HTTP request and nothing is
+    # stored). Both exclusions come from the connector's own spec, so this asserts the SQL and
+    # the specs agree instead of re-typing the kinds next to the query.
     from app.connectors.registry import all_specs
-    excluded = [s.kind.value for s in all_specs() if not s.counts_as_awaiting]
-    assert excluded == ["meta_business"]
+    excluded = sorted(s.kind.value for s in all_specs() if not s.counts_as_awaiting)
+    assert excluded == ["meta_business", "website"]
     base = awaiting_base()
     for spec in all_specs():
         present = f"'{spec.kind.value}'" in base

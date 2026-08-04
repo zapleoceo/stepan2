@@ -92,7 +92,10 @@ _DEMO_TG = "https://t.me/zapleosoft"
 _DEMO_FB = "https://www.facebook.com/zapleo.ceo"
 
 _WIDGET_JS = r"""
-var STP={msgs:[],busy:false};
+/* STP.sid is the server's session token: the transcript lives on the server, the browser
+   posts only the line the visitor just typed. Sending the history back used to let anyone
+   forge Stepan's half of it. STP.msgs stays purely for what is drawn on screen. */
+var STP={msgs:[],busy:false,sid:null};
 var STP_GREET="Hey! I'm Stepan. Quick one: what do you sell, and where do most of your leads come from (Instagram, WhatsApp, ads)?";
 function stpAdd(role,text){
   STP.msgs.push({role:role,content:text});
@@ -123,8 +126,8 @@ async function sendStepan(){
   if(window.fbq&&!STP.contacted){STP.contacted=1;fbq('track','Contact',{content_name:'demo_message'});}
   inp.value='';inp.style.height='auto';stpAdd('user',text);STP.busy=true;stpTyping(true);
   try{
-    var r=await fetch('/demo/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:STP.msgs})});
-    var j=await r.json();stpTyping(false);stpAdd('assistant',(j&&j.reply)||'…');
+    var r=await fetch('/demo/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session:STP.sid,message:text})});
+    var j=await r.json();stpTyping(false);if(j&&j.session)STP.sid=j.session;stpAdd('assistant',(j&&j.reply)||'…');
   }catch(e){stpTyping(false);stpAdd('assistant','Connection hiccup. Try again?');}
   STP.busy=false;inp.focus();
 }

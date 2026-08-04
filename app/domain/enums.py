@@ -8,6 +8,7 @@ class ChannelKind(StrEnum):
     META_BUSINESS = "meta_business"  # чтение всех сообщений (официальный Graph)
     INSTAGRAM = "instagram"          # фолоап (instagrapi, приватный)
     WHATSAPP = "whatsapp"            # фолоап (Evolution API, приватный)
+    WEBSITE = "website"              # чат на сайте: синхронный HTTP, обратного канала нет
 
 
 class Role(StrEnum):

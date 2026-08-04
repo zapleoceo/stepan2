@@ -30,22 +30,19 @@ async def _branch(s) -> int:
     return b.id
 
 
-async def test_seed_is_idempotent_and_has_sections(db_session) -> None:
-    await P.ensure_seeded(db_session)
-    await P.ensure_seeded(db_session)                 # second call must not duplicate
-    personas = await P.list_personas(db_session)
-    assert len(personas) == len(P.SEED_PERSONAS) == 1
-    assert all(len(P.sections(p.content)) == 5 for p in personas)
-    # the built-in persona is the live website-demo agent, not the old placeholder junk
-    assert any(p.slug == "website-demo" for p in personas)
-    assert not any(p.slug in ("consultative-closer", "warm-advisor", "fast-mover")
-                   for p in personas)
-    assert all(p.author_name and p.author_contact for p in personas)   # author + contact set
+async def test_the_library_ships_empty_and_holds_only_what_branches_import(db_session) -> None:
+    """No built-in persona since S6. The one that used to be here, "website-demo", was a
+    browsable copy of the landing chat's hardcoded prompt — two texts for one agent, already
+    drifting. The site is a branch now and its persona is a prompt-library row it cloned.
+
+    Nothing in the app may re-seed this table: a built-in reappearing is the duplicate coming
+    back."""
+    assert not hasattr(P, "SEED_PERSONAS")
+    assert not hasattr(P, "ensure_seeded")
+    assert await P.list_personas(db_session) == []
 
 
-async def test_ensure_seeded_adds_the_builtin_next_to_an_imported_persona(db_session) -> None:
-    """Slug-scoped seed: a library that already holds a branch import must still get the
-    built-in website-demo persona (the old 'seed only when empty' skipped it)."""
+async def test_an_imported_branch_persona_is_listed(db_session) -> None:
     from app.adapters.db.models import KnowledgeDoc
 
     bid = await _branch(db_session)
@@ -54,14 +51,19 @@ async def test_ensure_seeded_adds_the_builtin_next_to_an_imported_persona(db_ses
     await db_session.flush()
     await P.import_from_branch(db_session, bid, "Indonesia persona", lang="id", country="ID")
 
-    await P.ensure_seeded(db_session)
-    slugs = {p.slug for p in await P.list_personas(db_session)}
-    assert "website-demo" in slugs and "indonesia-persona" in slugs
+    listed = await P.list_personas(db_session)
+    assert {p.slug for p in listed} == {"indonesia-persona"}
+    assert all(p.author_name and p.author_contact for p in listed)
 
 
 async def test_select_favorite_and_addendum_roundtrip(db_session) -> None:
-    await P.ensure_seeded(db_session)
+    from app.adapters.db.models import KnowledgeDoc
+
     bid = await _branch(db_session)
+    db_session.add(KnowledgeDoc(branch_id=bid, slug="persona_core", category="persona",
+                                content="## Voice\nwarm"))
+    await db_session.flush()
+    await P.import_from_branch(db_session, bid, "Indonesia persona", lang="id", country="ID")
     pid = (await P.list_personas(db_session))[0].id
 
     # nothing selected → draft

@@ -968,6 +968,17 @@ _TR: dict[str, dict[str, str]] = {
                     "en": "Meta Business (Graph API)", "id": "Meta Business"},
     "ch.kind_wa":  {"ru": "WhatsApp (Evolution API)",
                     "en": "WhatsApp (Evolution API)", "id": "WhatsApp"},
+    "ch.kind_web": {"ru": "Чат на сайте", "en": "Website chat", "id": "Chat di situs"},
+    "ch.web_step": {"ru": "Без подключения", "en": "Nothing to connect",
+                    "id": "Tidak perlu koneksi"},
+    "ch.web_hint": {"ru": "Чат на сайте не требует ключей: посетитель пишет прямо в страницу, "
+                          "ответ уходит в том же запросе. Написать первым сюда нельзя.",
+                    "en": "The site chat needs no credentials: the visitor writes into the "
+                          "page and the answer goes back in the same request. Nothing can "
+                          "write to them first.",
+                    "id": "Chat situs tidak butuh kredensial: pengunjung menulis di halaman "
+                          "dan jawaban dikirim dalam permintaan yang sama."},
+    "ch.web_open": {"ru": "Открыть страницу", "en": "Open the page", "id": "Buka halaman"},
     "ch.st_active":{"ru": "активен",           "en": "active",            "id": "aktif"},
     "ch.st_exp":   {"ru": "истёк",             "en": "expired",           "id": "kedaluwarsa"},
     "ch.st_chal":  {"ru": "требует входа",     "en": "challenge",         "id": "perlu login"},

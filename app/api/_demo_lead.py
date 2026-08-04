@@ -2,6 +2,11 @@
 Telegram. No DB (product owner's choice) — in-process dedup by contact; a duplicate ping after
 a worker restart is acceptable, a MISSED ping is not.
 
+`history` is the SERVER's transcript (app/modules/website/session.py), never the request body.
+It used to be whatever the browser posted, `assistant` turns included, so a visitor could type
+Stepan's half of the conversation, add a contact, and have the forgery arrive here as a real
+lead card in the owner's Telegram.
+
 The contact is found by regex and the alert is sent on that alone. Buy-intent and a summary
 are added by a model afterwards, purely as labels on the card. It used to be the other way
 round — the model decided whether the owner heard about the lead at all — and on 28.07.2026

@@ -26,6 +26,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
+from .outreach import unreachable_channels
 from .repository import (
     CoachingNoteRepo,
     DossierRepo,
@@ -146,7 +147,11 @@ class FollowupService:
         Follow-up enablement and the step-count bound are per-connector: a thread's schedule
         comes from its channel (Meta's shorter cadence vs Instagram's). The branch agent
         kill-switch still gates everything. Quiet hours do NOT filter this list — only the
-        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end."""
+        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end.
+
+        A connector that declares no proactive outreach is dropped before its settings are
+        even read: a nudge for an anonymous website visitor has no recipient, so generating
+        one is broker spend on text nobody can ever be shown."""
         if not self.settings.agent_enabled:
             return []  # branch global OFF: no generation at all
         rows = (
@@ -155,8 +160,11 @@ class FollowupService:
                 {"bid": self.branch_id, "now": now, "on": True},
             )
         ).all()
+        unreachable = await unreachable_channels(self.session, self.branch_id)
         due: list[tuple[int, str | None, int]] = []
         for tid, product_slug, followups_sent, channel_id in rows:
+            if channel_id in unreachable:
+                continue
             ch = await get_channel_settings(self.session, self.branch_id, channel_id)
             if not ch.followup_enabled or not ch.followup_schedule_h:
                 continue

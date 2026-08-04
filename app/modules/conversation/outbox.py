@@ -16,7 +16,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Lead, Message, Outbox
 from app.config import settings
-from app.connectors.registry import spec_for
+from app.connectors.registry import does_proactive_outreach, spec_for
 from app.domain.clock import branch_day_start_utc
 from app.domain.enums import Stage
 from app.modules.settings.service import get_channel_settings
@@ -290,8 +290,16 @@ class OutboxSender:
 
         S1 semantics — the timer counts from the bot's last message, indexed by
         followups_sent; the last follow-up of the schedule puts the lead to dormant.
-        Manager sends do not touch the cycle."""
+        Manager sends do not touch the cycle.
+
+        A connector that cannot write to a silent lead gets neither half: no timer, and so no
+        wind-down to DORMANT either, since that only ever fires when the ladder the timer
+        drives runs out. Arming a schedule nobody can execute would park the lead as dormant
+        days later for a reason ("followup schedule exhausted") that never happened."""
         if row.source not in ("agent", "followup"):
+            return
+        if not does_proactive_outreach(getattr(self.channel, "kind", None)):
+            thread.next_followup_at = None
             return
         lead = await self.session.get(Lead, thread.lead_id)
         if lead is not None and (not lead.agent_enabled or lead.stage == Stage.DORMANT):

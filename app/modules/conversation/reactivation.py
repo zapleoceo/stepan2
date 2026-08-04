@@ -32,6 +32,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import money_issues
+from .outreach import unreachable_channels
 from .prompt import lead_name_hint
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import SALES
@@ -72,7 +73,7 @@ _REASON = "reactivation"
 # nothing picked it up after. Any non-terminal stage that's been quiet long enough is eligible;
 # 'ready'/'handed_off'/'manager' are the only stages where the bot is deliberately silent.
 _DUE_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug, l.id"
+    "SELECT ct.id, ct.product_slug, l.id, ct.channel_id"
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid AND l.stage NOT IN ('ready', 'handed_off', 'manager')"
     "   AND l.is_blocked = false"
@@ -168,6 +169,11 @@ class ReactivationService:
         self.outbox = OutboxRepo(session, branch_id)
 
     async def due(self, now: datetime) -> list[tuple[int, str | None, int]]:
+        """Dormant leads worth one more touch.
+
+        Threads on a connector that declares no proactive outreach are dropped: a website
+        visitor left no address, so "re-engage them" is not a slow or risky operation, it is
+        an impossible one."""
         if not self.settings.agent_enabled or not self.settings.reactivation_enabled:
             return []
         rows = (await self.session.execute(text(_DUE_Q), {
@@ -177,7 +183,9 @@ class ReactivationService:
             "gap_cutoff": now - timedelta(days=REACTIVATION_GAP_DAYS),
             "reason": _REASON, "cap": REACTIVATION_CAP, "batch": BATCH_PER_RUN,
         })).all()
-        return [(tid, slug, lid) for tid, slug, lid in rows]
+        unreachable = await unreachable_channels(self.session, self.branch_id)
+        return [(tid, slug, lid) for tid, slug, lid, chid in rows
+                if chid not in unreachable]
 
     async def reactivate_one(self, thread_id: int, lead_id: int) -> bool:
         now = datetime.now(UTC).replace(tzinfo=None)

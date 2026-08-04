@@ -773,10 +773,13 @@ def test_transport_skips_item_with_no_user_id() -> None:
 
 
 def test_registry_maps_every_kind_to_its_adapter() -> None:
+    from app.adapters.channels.website import WebsiteAdapter
+
     assert {k: s.adapter for k, s in REGISTRY.items()} == {
         ChannelKind.INSTAGRAM: InstagramAdapter,
         ChannelKind.WHATSAPP: WhatsAppAdapter,
         ChannelKind.META_BUSINESS: MetaBusinessAdapter,
+        ChannelKind.WEBSITE: WebsiteAdapter,
     }
     for kind, spec in REGISTRY.items():
         assert spec.adapter.kind is kind  # class advertises the kind it is registered under

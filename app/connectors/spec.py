@@ -85,6 +85,17 @@ class ConnectorSpec:
     settings_prefixes: tuple[str, ...] = ()
     # None = sends are never refused for being late (see OutboxSender.send_next).
     send_window: SendWindow | None = None
+    # May this connector write to someone who is NOT writing to us right now?
+    #
+    # False is not a policy switch an operator flips — it is a fact about the correspondent.
+    # A website visitor exists for the length of one HTTP request and has no address of any
+    # kind afterwards, so every piece of proactive machinery is downstream of that one fact:
+    # follow-up timers, dormant reactivation, the wind-down to DORMANT that ends the follow-up
+    # ladder, the quiet-hour hold and the anti-ban send caps all shape messages we send
+    # UNPROMPTED, and there is nobody to send them to. The owner's S6 decision was to isolate
+    # the site as its own branch precisely because "нет фолоапов" — so the fact lives here and
+    # the harvests ask the connector, instead of every worker growing an `if branch_id == N`.
+    proactive_outreach: bool = True
     # Whether an unanswered thread on this connector belongs in the inbox "awaiting reply"
     # split. False = its chats are counted nowhere.
     counts_as_awaiting: bool = True
