@@ -11,7 +11,7 @@ import logging
 import random
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from arq import cron, func
 from arq.connections import RedisSettings
@@ -23,7 +23,9 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
-from app.domain.enums import ChannelKind, SessionStatus
+from app.connectors.registry import supports
+from app.connectors.spec import Capability
+from app.domain.enums import SessionStatus
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reactivation import ReactivationService
@@ -33,6 +35,7 @@ from app.modules.knowledge.service import KnowledgeService
 from app.modules.knowledge.source import effective_kb_branch
 from app.modules.leads.ingest import IngestService
 from app.modules.settings.service import get_channel_settings, get_settings
+from app.ports.channel import ChannelPort
 from app.ports.notify import NotifierPort
 
 from . import breaker, wiring
@@ -654,15 +657,23 @@ async def _send_thread(
 _DELETION_THREAD_CAP = settings().deletion_thread_cap
 
 
-async def _try_build_port(session: AsyncSession, channel: Channel, capability: str):  # noqa: ANN202
-    """Build the channel port, or None (logged) when it can't be built or lacks `capability`
-    — the shared skip path for the maintenance crons (deletions/profiles/media)."""
+async def _try_build_port(
+    session: AsyncSession, channel: Channel, capability: Capability,
+) -> ChannelPort | None:
+    """Build the channel port, or None (logged) when it can't be built or its connector does
+    not declare `capability` — the shared skip path for the maintenance crons
+    (deletions/profiles/media).
+
+    The capability is asked of the CONNECTOR SPEC, not of the object: this used to be
+    hasattr(port, "<method name as a string>"), where a mistyped name meant "unsupported"
+    forever and no test could see it."""
+    if not supports(channel.kind, capability):
+        return None
     try:
-        port = await wiring.build_channel_port(session, channel)
+        return await wiring.build_channel_port(session, channel)
     except (NotImplementedError, KeyError, RuntimeError) as exc:
         logger.warning("skip channel %s: %s", channel.id, exc)
         return None
-    return port if hasattr(port, capability) else None
 
 
 async def process_deletions(ctx: dict[str, Any]) -> int:
@@ -720,14 +731,19 @@ async def process_deletions_branch(ctx: dict[str, Any], branch_id: int) -> int:
 async def _process_one_deletion(branch_id: int, channel: Channel, ext_thread: str) -> int:
     """One thread's unsend in its own transaction — a failure or job-timeout kill can't
     roll back unsends already committed for other threads this tick."""
-    from app.modules.conversation.deletions import DeletionService  # noqa: PLC0415
+    from app.modules.conversation.deletions import (  # noqa: PLC0415
+        DeletionService,
+        Revoker,
+    )
     try:
         async with session_scope() as session:
-            port = await _try_build_port(session, channel, "revoke")
+            port = await _try_build_port(session, channel, Capability.REVOKE)
             if port is None:
                 return 0  # can't build / channel doesn't support unsend
+            # supports(REVOKE) was already checked; the contract test proves the adapter
+            # really has the method the capability names.
             return await DeletionService(session, branch_id).process(
-                channel.id, ext_thread, port)  # type: ignore[arg-type]
+                channel.id, ext_thread, cast(Revoker, port))
     except Exception:
         logger.exception(
             "unsend failed branch=%d channel=%s thread=%s", branch_id, channel.id, ext_thread)
@@ -825,8 +841,8 @@ async def ingest_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
     async with session_scope() as session:
         channels = await wiring.active_channels(session, branch_id)
     for channel in channels:
-        if channel.kind != ChannelKind.INSTAGRAM:
-            continue
+        if not supports(channel.kind, Capability.COMMENTS):
+            continue  # no public comment surface on this connector — nothing to ingest
         try:
             async with session_scope() as session:
                 ch_cfg = await get_channel_settings(session, branch_id, channel.id)
@@ -917,16 +933,16 @@ async def refresh_profiles(ctx: dict[str, Any]) -> int:
 async def refresh_profiles_branch(ctx: dict[str, Any], branch_id: int) -> int:
     """One branch's IG follower/following refresh for stale active-funnel leads (TTL ~6h).
     Heavy private-API call (ban surface); capped per branch, its own transaction."""
-    from app.modules.leads.profiles import ProfileService  # noqa: PLC0415
+    from app.modules.leads.profiles import ProfileFetcher, ProfileService  # noqa: PLC0415
     refreshed = 0
     try:
         async with session_scope() as session:
             svc = ProfileService(session, branch_id)
             for channel in await wiring.active_channels(session, branch_id):
-                port = await _try_build_port(session, channel, "fetch_profile")
+                port = await _try_build_port(session, channel, Capability.FETCH_PROFILE)
                 if port is None:
                     continue  # can't build / channel kind has no profile stats
-                refreshed += await svc.refresh(port, limit=20)  # type: ignore[arg-type]
+                refreshed += await svc.refresh(cast(ProfileFetcher, port), limit=20)
     except Exception:
         logger.exception("refresh_profiles: branch=%s failed", branch_id)
     return refreshed
@@ -945,7 +961,7 @@ async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
     """One branch's media backfill: download items flagged pending at ingest and attach a
     MediaAsset (capped batch). Hits the IG private API; a download failure keeps the flag set
     so the next tick retries."""
-    from app.modules.media.service import MediaService  # noqa: PLC0415
+    from app.modules.media.service import MediaDownloader, MediaService  # noqa: PLC0415
     done = 0
     try:
         async with session_scope() as session:
@@ -954,12 +970,12 @@ async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
                 assert channel.id is not None
                 if not await svc.pending(channel.id, limit=1):
                     continue  # nothing flagged — skip building the port
-                port = await _try_build_port(session, channel, "download_media")
+                port = await _try_build_port(session, channel, Capability.DOWNLOAD_MEDIA)
                 if port is None:
                     continue  # can't build / channel kind can't download media
                 broker = BrokerLLM()
                 done += await svc.backfill(
-                    channel.id, port, limit=20,
+                    channel.id, cast(MediaDownloader, port), limit=20,
                     transcriber=broker, describer=broker, translator=broker)
     except Exception:
         logger.exception("backfill_media: branch=%s failed", branch_id)

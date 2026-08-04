@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 
+from app.connectors.registry import all_specs, spec_for
+
 from ._i18n import t
 
 # Viewer-local time moved to _ui_fmt on 2026-07-28. Imported back so every existing
@@ -241,13 +243,6 @@ def _source_bar(
     return f'<div class="srcbar">{thumb}{lbl}</div>'
 
 
-_CHANNEL_ICON = {
-    "instagram": ("fa-brands fa-instagram", "#e1306c"),
-    "meta_business": ("fa-brands fa-facebook", "#1877f2"),
-    "whatsapp": ("fa-brands fa-whatsapp", "#25d366"),
-}
-
-
 def _is_instagram_thread(external_thread_id: str | None) -> bool:
     """Graph conversation ids tell the platforms apart: Messenger is "t_<digits>", Instagram is
     base64 beginning with "aWdf" (the encoded "ig_")."""
@@ -260,11 +255,17 @@ def _channel_badge(kind: str | None, external_thread_id: str | None = None) -> s
     The channel kind alone stopped being enough the moment one meta_business channel began
     serving BOTH Messenger and Instagram Direct: every Instagram conversation showed a Facebook
     mark. The conversation id already on the row settles it — no extra query, no new column.
+
+    The icon is read off the spec HERE, per badge, not lifted into a module-level dict at
+    import: a dict built once is indistinguishable from a hardcoded one — nothing can change
+    the registry after import, so no test could tell whether this still follows the specs.
     """
     key = str(kind or "")
     if key == "meta_business" and _is_instagram_thread(external_thread_id):
         key = "instagram"
-    icon, color = _CHANNEL_ICON.get(key, ("fa-solid fa-comment", "#8a94a6"))
+    spec = spec_for(key)
+    icon, color = ((spec.icon_class, spec.icon_color) if spec is not None
+                   else ("fa-solid fa-comment", "#8a94a6"))
     return f'<i class="{icon}" style="color:{color}" title="{_h.escape(key)}"></i>'
 
 
@@ -1542,7 +1543,11 @@ def app_shell(
         # is the UNION of the ON channels. `kind` is a comma-list of ON channels (''=all on,
         # 'none'=all off). kindChip() (client JS) toggles the chip, recomputes the list from the
         # DOM, and reloads only #tl — the server filters by the set.
-        _all_kinds = ("instagram", "meta_business", "whatsapp")
+        # One chip per REGISTERED connector — the chips used to be a literal 3-tuple here
+        # while the route that reads `kind` derived its allowed values from ChannelKind, so a
+        # new connector was filterable by URL and invisible in the UI.
+        _specs = all_specs()
+        _all_kinds = tuple(s.kind.value for s in _specs)
         if kind == "none":
             _sel_kinds: set[str] = set()
         elif kind:
@@ -1561,11 +1566,7 @@ def app_shell(
             )
 
         _kind_chips = "".join(
-            _kind_chip(k, *_CHANNEL_ICON[k], lbl) for k, lbl in (
-                ("instagram", "Instagram"),
-                ("meta_business", "Meta Business"),
-                ("whatsapp", "WhatsApp"),
-            )
+            _kind_chip(s.kind.value, s.icon_class, s.icon_color, s.label) for s in _specs
         )
         _thr_inner = (
             f'<div id="fnl-wrap" data-help="{_h.escape(t("hint.funnel"))}"'

@@ -1,5 +1,5 @@
 """Третья корзина «ответ не нужен» и её свойства."""
-from app.api._query import AWAITING_BASE, IN_QUEUE_EXTRA, SETTLED_EXTRA
+from app.api._query import IN_QUEUE_EXTRA, SETTLED_EXTRA, awaiting_base
 
 
 def test_settled_keys_on_events_not_on_the_crm_verdict() -> None:
@@ -18,9 +18,10 @@ def test_a_refused_send_only_counts_after_the_last_inbound() -> None:
 
 def test_three_buckets_partition_the_base() -> None:
     """Три корзины должны в сумме давать total, иначе бейдж соврёт."""
-    settled = f"({AWAITING_BASE}) AND {SETTLED_EXTRA}"
-    queue = f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})"
-    off = f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})"
+    base = awaiting_base()
+    settled = f"({base}) AND {SETTLED_EXTRA}"
+    queue = f"({base}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})"
+    off = f"({base}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})"
     for clause in (settled, queue, off):
         assert clause.count("(") == clause.count(")")
     assert "NOT " + SETTLED_EXTRA in queue

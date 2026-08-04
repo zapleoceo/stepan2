@@ -13,13 +13,15 @@ from __future__ import annotations
 import logging
 
 from app.adapters.db.models import Branch, Channel, PostComment
+from app.connectors.registry import supports
+from app.connectors.spec import Capability
 from app.domain.clock import utc_now
 from app.modules.conversation import guard
 from app.modules.conversation.canned import comment_fallback, comment_persona
 from app.modules.conversation.delivery import guard_prompt
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import BranchSettings
-from app.ports.channel import ChannelPort
+from app.ports.channel import CommentPort
 from app.ports.llm import LLMPort
 
 from .filter import classify_comment, is_warm
@@ -68,11 +70,11 @@ class CommentService:
         self.settings = settings
         self.repo = CommentRepo(session, branch_id)
 
-    async def ingest(self, channel: Channel, port: ChannelPort) -> int:
+    async def ingest(self, channel: Channel, port: CommentPort) -> int:
         """Pull new comments under our posts and store them pending. Dedup by native comment
         id (unique constraint is the backstop for two overlapping runs). Returns rows stored."""
-        if not hasattr(port, "fetch_comments"):
-            return 0
+        if not supports(channel.kind, Capability.COMMENTS):
+            return 0  # declared by the connector spec — never sniffed off the port object
         since = await self.repo.latest_comment_time(channel.id or 0)
         comments = await port.fetch_comments(since=since)
         stored = 0
@@ -88,7 +90,7 @@ class CommentService:
             stored += 1
         return stored
 
-    async def process(self, channel: Channel, port: ChannelPort) -> int:
+    async def process(self, channel: Channel, port: CommentPort) -> int:
         """Triage pending comments and reply to the ones worth it, within the caps. Returns
         replies actually posted."""
         hourly_cap = self.settings.comment_hourly_cap
@@ -121,7 +123,7 @@ class CommentService:
                 posted += 1
         return posted
 
-    async def _hide(self, c: PostComment, port: ChannelPort, reason: str) -> None:
+    async def _hide(self, c: PostComment, port: CommentPort, reason: str) -> None:
         """Delete a spam/abuse comment under our post. If the delete fails (transport hiccup),
         leave it pending so the next run retries rather than marking it hidden when it isn't."""
         result = await port.hide_comment(f"{c.media_id}:{c.external_id}")
@@ -135,7 +137,7 @@ class CommentService:
             c.attempts += 1  # stays pending → retried next run
         self.session.add(c)
 
-    async def _reply(self, c: PostComment, port: ChannelPort) -> bool:
+    async def _reply(self, c: PostComment, port: CommentPort) -> bool:
         text, meta = await self._draft(c)
         # Composite id the transport needs: media pk + replied-to comment pk.
         target = f"{c.media_id}:{c.external_id}"

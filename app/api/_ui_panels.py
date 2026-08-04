@@ -5,6 +5,8 @@ import html as _h
 import json as _json
 from datetime import UTC, datetime, timedelta
 
+from app.connectors.registry import all_specs, spec_for
+
 from ._i18n import current_lang, t
 from ._ui_html import (
     _ago,
@@ -749,12 +751,15 @@ def _channels_section(bid: int) -> str:
     )
 
 
+def _kind_label(kind: str) -> str:
+    """Display name of a connector — from its spec, so one connector has one name."""
+    spec = spec_for(kind)
+    return spec.label if spec is not None else kind
+
+
 def channel_list_partial_html(channels: list, sessions: list, branch_id: int) -> str:
     """HTMX-loaded channel table for #ch-list inside branch edit."""
     session_map = {r[0]: r[1] for r in sessions}
-    _kind_lbl = {
-        "instagram": "Instagram", "meta_business": "Meta Business", "whatsapp": "WhatsApp",
-    }
     _st_cls = {"active": "p-ok", "expired": "p-off", "challenge": "p-off", "none": "p-off"}
     _st_i18n = {
         "active": "ch.st_active", "expired": "ch.st_exp",
@@ -780,7 +785,7 @@ def channel_list_partial_html(channels: list, sessions: list, branch_id: int) ->
         rows += (
             f'<tr>'
             f'<td style="color:#4da6ff;font-size:.77rem">'
-            f'{_kind_lbl.get(kind, kind)}</td>'
+            f'{_kind_label(kind)}</td>'
             f'<td style="font-family:ui-monospace,monospace;font-size:.75rem">'
             f'{_h.escape(handle or acct or "—")}</td>'
             f'<td>{st_pill}</td>'
@@ -814,12 +819,8 @@ def channel_new_form_html(branch_id: int) -> str:
     """Form to create a new channel (kind selector + metadata)."""
     title = _h.escape(t("ch.new"))
     kind_opts = "".join(
-        f'<option value="{v}">{_h.escape(t(k))}</option>'
-        for v, k in (
-            ("instagram", "ch.kind_ig"),
-            ("meta_business", "ch.kind_meta"),
-            ("whatsapp", "ch.kind_wa"),
-        )
+        f'<option value="{s.kind.value}">{_h.escape(t(s.label_key))}</option>'
+        for s in all_specs()
     )
     save_lbl = _h.escape(t("ch.save"))
     handle_lbl = _h.escape(t("ch.handle"))
@@ -854,14 +855,11 @@ def channel_edit_form_html(
     ch_id: int, kind: str, handle: str, account_id: str, is_active: bool,
 ) -> str:
     """Form to edit channel metadata (handle, account_id, active)."""
-    _kind_lbl = {
-        "instagram": "Instagram", "meta_business": "Meta Business", "whatsapp": "WhatsApp",
-    }
     checked = "checked" if is_active else ""
     save_lbl = _h.escape(t("ch.save"))
     return (
         f'<div style="font-weight:600;color:#4da6ff;font-size:.8rem;margin-bottom:.55rem">'
-        f'{_kind_lbl.get(kind, kind)} #{ch_id}</div>'
+        f'{_kind_label(kind)} #{ch_id}</div>'
         f'<form hx-post="/ui/channels/{ch_id}/save"'
         f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
         f'<div class="frm-grp">'
@@ -900,13 +898,14 @@ def channel_credential_html(ch_id: int, kind: str, status: str) -> str:
 
 
 def _ch_form_for(ch_id: int, kind: str) -> str:
-    if kind == "instagram":
-        return _ch_ig_form(ch_id)
-    if kind == "meta_business":
-        return _ch_meta_form(ch_id)
-    if kind == "whatsapp":
-        return _ch_wa_form(ch_id)
-    return '<div class="emp">Unknown channel kind</div>'
+    """The connector's own credential panel — looked up, not branched on.
+
+    The panel lives with its connector (app/connectors/<kind>_ui.py) and is reached through
+    ConnectorSpec.credential_panel, so adding one does not touch this file."""
+    spec = spec_for(kind)
+    if spec is None:
+        return '<div class="emp">Unknown channel kind</div>'
+    return spec.credential_panel(ch_id)
 
 
 def _ch_connected(ch_id: int) -> str:
@@ -917,274 +916,6 @@ def _ch_connected(ch_id: int) -> str:
         f'<button class="btn-sm" hx-get="/ui/channels/{ch_id}/form"'
         f' hx-target="#ch-form" hx-swap="innerHTML">'
         f'{_h.escape(t("ch.reconnect"))}</button>'
-    )
-
-
-def _ch_err(error: str) -> str:
-    if not error:
-        return ""
-    return (
-        f'<div style="color:#f03e3e;font-size:.76rem;margin-bottom:.4rem">'
-        f'{_h.escape(error)}</div>'
-    )
-
-
-def _ch_step(label: str) -> str:
-    return (
-        f'<div style="font-size:.68rem;color:#6b7685;letter-spacing:.04em;'
-        f'text-transform:uppercase;margin-bottom:.5rem">{_h.escape(label)}</div>'
-    )
-
-
-def _ch_hint(text_: str) -> str:
-    return (
-        f'<div style="font-size:.72rem;color:#8a94a6;line-height:1.4;margin:-.25rem 0 .6rem">'
-        f'{_h.escape(text_)}</div>'
-    )
-
-
-# Seconds to wait before each automatic re-attempt of a phone-approved login. Every entry
-# costs one real Instagram login call, so this backs off instead of polling on a fixed tick,
-# and its length is the attempt cap (~2.5 min total) after which we stop and hand the
-# operator a button. Never make this tighter: repeated logins are a checkpoint/ban vector.
-_IG_POLL_DELAYS = (8, 15, 25, 40, 60)
-
-
-def _ch_ig_form(
-    ch_id: int, step: str = "login", flow_id: str = "", error: str = "",
-    kind: str = "", username: str = "", attempt: int = 0,
-) -> str:
-    """Two-step Instagram connect flow: (1) credentials, (2) resolving whatever Instagram
-    asked for. Step 2's content switches on `kind` — instagrapi hits FOUR unrelated
-    Instagram mechanisms that all land here:
-    - `kind='2fa'` — real 2FA where a TYPED code exists (authenticator app / SMS, detected via
-      two_factor_info's totp_two_factor_on / sms_two_factor_on), resolved by re-login.
-    - `kind='device'` — a login-approval PUSH to the user's other device: no code exists, the
-      user taps Approve in the Instagram notification, then we re-login on the same client. No
-      code field — only a "I approved on my phone → continue" button (the itstep.kl bug: a push
-      approval was shown a code field that never accepts anything).
-    - `kind='challenge'` — a security "is this really you" check, code emailed/texted,
-      resolved via challenge_resolve.
-    - `kind='manual'` — a checkpoint instagrapi flags as NOT resolvable by any text code at
-      all (Bloks redirect / native in-app approval) — no code field; only a "confirm in the
-      real Instagram app, then retry" button, reusing the same client/device fingerprint.
-    Showing all three as a bare "2FA code" field used to make a challenge/manual checkpoint
-    look like a missing-2FA problem, so turning 2FA off didn't stop the prompt (real
-    report, 2026-07-08).
-
-    IMPORTANT — hx-disabled-elt/hx-indicator on the <form> ITSELF, not per-button:
-    htmx 1.9.12 has a real bug (confirmed empirically, not documented) where an element
-    with hx-disabled-elt="find button" and/or hx-indicator="find .htmx-indicator" on an
-    ANCESTOR <form> silently swallows the click of any OTHER descendant that has its own
-    independent hx-get/hx-post — the request never leaves the browser, no console error.
-    This broke "Start over" and the app-confirm button from day one (real report,
-    2026-07-09: clicking either did visibly nothing). Fix: never put these two attributes
-    on a <form> that contains more than one independently-triggering element — set
-    hx-disabled-elt="this" and hx-indicator="#<id>" on each button individually instead."""
-    err = _ch_err(error)
-    if step == "2fa":
-        spin_id = f"ig-spin-{ch_id}"
-        spin = (
-            f'<span id="{spin_id}" class="htmx-indicator" style="margin-left:.5rem;'
-            f'color:#8b98a5;font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
-        )
-        who = (
-            f'<div style="font-size:.76rem;color:#9aa5b1;margin-bottom:.6rem">'
-            f'{_h.escape(t("ch.for_account"))} <b>@{_h.escape(username)}</b></div>'
-            if username else ""
-        )
-        if kind in ("manual", "device"):
-            # No code to type — the login is approved on the phone. 'device' = a login-approval
-            # push to another device; 'manual' = an in-app checkpoint instagrapi flags as
-            # code-unresolvable. Either way the operator approves in the Instagram app and we
-            # just re-attempt on the same client, so there is nothing for them to click: poll
-            # for them. Each poll is a REAL login attempt, so the delay grows (_IG_POLL_DELAYS)
-            # and stops at the cap — hammering login is a checkpoint/ban vector, and the
-            # operator may simply not have reached their phone yet. Past the cap we fall back
-            # to the manual button so they stay in control and Instagram is left alone.
-            hint = t("ch.hint_device") if kind == "device" else t("ch.hint_manual")
-            back = (
-                f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
-                f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
-                f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
-                f'{_h.escape(t("ch.start_over"))}</button>'
-            )
-            if attempt < len(_IG_POLL_DELAYS):
-                delay = _IG_POLL_DELAYS[attempt]
-                vals = (f'{{"flow_id":"{_h.escape(flow_id)}","attempt":"{attempt + 1}"}}')
-                return (
-                    f'{_ch_step(t("ch.step2"))}{who}{err}'
-                    f'{_ch_hint(hint)}'
-                    f'<div style="max-width:340px">'
-                    f'<div id="ig-poll-{ch_id}" hx-post="/ui/channels/{ch_id}/ig/verify"'
-                    f" hx-trigger=\"load delay:{delay}s\" hx-target=\"#ch-form\""
-                    f' hx-swap="innerHTML" hx-vals=\'{vals}\''
-                    f' style="font-size:.76rem;color:#8b98a5;margin-bottom:.5rem">'
-                    f'<span class="spin" style="margin-right:.4rem;vertical-align:middle"></span>'
-                    f'{_h.escape(t("ch.waiting_approve"))}</div>'
-                    f'{back}</div>'
-                )
-            btn = t("ch.continue_device") if kind == "device" else t("ch.retry_manual")
-            return (
-                f'{_ch_step(t("ch.step2"))}{who}{err}'
-                f'{_ch_hint(hint)}{_ch_hint(t("ch.poll_gave_up"))}'
-                f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
-                f' hx-swap="innerHTML" style="max-width:340px">'
-                f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
-                f'<button type="submit" class="btn-sm btn-p" hx-disabled-elt="this"'
-                f' hx-indicator="#{spin_id}">{_h.escape(btn)}</button>'
-                f'{back}{spin}'
-                f'</form>'
-            )
-        is_challenge = kind == "challenge"
-        code_lbl = t("ch.code_challenge") if is_challenge else t("ch.code_2fa")
-        hint = t("ch.hint_challenge") if is_challenge else t("ch.hint_2fa")
-        # Instagram can fire the 2FA code prompt AND an in-app "was this you?" push for
-        # the SAME login attempt at once. If the operator already approved the push,
-        # making them type a code that isn't even needed just to reach the eventual
-        # manual-retry step is pointless — this button skips straight to a plain retry.
-        app_confirm_btn = (
-            f'<div style="margin-top:.4rem">'
-            f'<button type="button" class="btn-sm btn-g"'
-            f' hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
-            f' hx-swap="innerHTML" hx-include="closest form" hx-vals=\'{{"skip_code":"1"}}\''
-            f' hx-disabled-elt="this" hx-indicator="#{spin_id}">'
-            f'{_h.escape(t("ch.already_confirmed"))}</button></div>'
-            if not is_challenge else ""
-        )
-        return (
-            f'{_ch_step(t("ch.step2"))}{who}{err}'
-            f'<form hx-post="/ui/channels/{ch_id}/ig/verify" hx-target="#ch-form"'
-            f' hx-swap="innerHTML" style="max-width:340px">'
-            f'<input type="hidden" name="flow_id" value="{_h.escape(flow_id)}">'
-            f'<div class="frm-grp">'
-            f'<label class="frm-lbl">{_h.escape(code_lbl)}</label>'
-            f'<input class="frm-inp" name="code" autocomplete="one-time-code" autofocus></div>'
-            f'{_ch_hint(hint)}'
-            f'<button type="submit" class="btn-sm btn-p" hx-disabled-elt="this"'
-            f' hx-indicator="#{spin_id}">{_h.escape(t("ch.verify"))}</button>'
-            f'{app_confirm_btn}'
-            f'<button type="button" class="btn-sm btn-g" style="margin-left:.4rem"'
-            f' hx-disabled-elt="this" hx-indicator="#{spin_id}"'
-            f' hx-get="/ui/channels/{ch_id}/form" hx-target="#ch-form" hx-swap="innerHTML">'
-            f'{_h.escape(t("ch.start_over"))}</button>{spin}'
-            f'</form>'
-        )
-    spin = (
-        f'<span class="htmx-indicator" style="margin-left:.5rem;color:#8b98a5;'
-        f'font-size:.72rem">⏳ {_h.escape(t("ch.logging_in"))}</span>'
-    )
-    return (
-        f'{_ch_step(t("ch.step1"))}{err}'
-        f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
-        f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-        f' hx-indicator="find .htmx-indicator" style="max-width:360px">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.username"))}</label>'
-        f'<input class="frm-inp" name="username" autocomplete="username"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.password"))}</label>'
-        f'<input class="frm-inp" name="password" type="password"'
-        f' autocomplete="current-password"></div>'
-        f'{_ch_hint(t("ch.hint_login"))}'
-        f'<button type="submit" class="btn-sm btn-p">'
-        f'{_h.escape(t("ch.ig_login"))}</button>{spin}'
-        f'</form>'
-        # Sign in with a sessionid taken from a browser that is ALREADY logged in. Not hidden
-        # away: Instagram moved 2FA onto its Bloks endpoints and instagrapi still calls the
-        # legacy accounts/two_factor_login/ (subzeroid/instagrapi#2231, #2109), so for an
-        # account with 2FA on this is the only path through this panel that works at all —
-        # it carries an existing session and never touches the login/2FA flow.
-        f'<div style="margin-top:.9rem;border-top:1px solid #2d3748;padding-top:.7rem">'
-        f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
-        f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-        f' hx-indicator="find .htmx-indicator" style="max-width:360px">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.sessionid"))}</label>'
-        # type=password: this grants full account access, so it must not sit in plain view
-        # on a shared screen, and it must never be offered to a password manager.
-        f'<input class="frm-inp" name="sessionid" type="password" autocomplete="off"></div>'
-        f'{_ch_hint(t("ch.hint_sessionid"))}'
-        f'<button type="submit" class="btn-sm btn-p">'
-        f'{_h.escape(t("ch.connect_sessionid"))}</button>{spin}'
-        f'</form></div>'
-        # Session-JSON import is a power-user escape hatch (paste an already-logged-in
-        # instagrapi session, skip the login/2FA dance entirely) — collapsed by default so
-        # it doesn't compete with the normal path for attention.
-        f'<details style="margin-top:.7rem">'
-        f'<summary style="font-size:.72rem;color:#6b7685;cursor:pointer">'
-        f'{_h.escape(t("ch.advanced_json"))}</summary>'
-        f'<form hx-post="/ui/channels/{ch_id}/ig/start" hx-target="#ch-form"'
-        f' hx-swap="innerHTML" hx-disabled-elt="find button"'
-        f' hx-indicator="find .htmx-indicator" style="max-width:360px;margin-top:.5rem">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.ig_json"))}</label>'
-        f'<textarea class="frm-ta" name="session_json" rows="3"'
-        f' placeholder=\'{{"device_settings":...}}\' style="min-height:4rem"></textarea></div>'
-        f'{_ch_hint(t("ch.hint_json"))}'
-        f'<button type="submit" class="btn-sm">{_h.escape(t("ch.save"))}</button>{spin}'
-        f'</form></details>'
-    )
-
-
-def _ch_meta_form(ch_id: int, error: str = "") -> str:
-    # The button first, the paste form second: a client cannot obtain a System User token, and
-    # Meta's App Review needs a recording of someone granting the permissions — which only the
-    # consent screen behind this button can show. The manual form stays for our own channels
-    # and as the fallback when the app is not configured yet.
-    return (
-        f'{_ch_err(error)}'
-        f'<a class="btn-sm btn-p" href="/connect/meta/{ch_id}/start" target="_blank"'
-        f' rel="noopener" style="display:inline-block;text-decoration:none;margin-bottom:.6rem">'
-        f'{_h.escape(t("ch.connect_fb"))}</a>'
-        f'<div style="font-size:.7rem;color:#8a94a6;margin:-.35rem 0 .8rem">'
-        f'{_h.escape(t("ch.connect_fb_hint"))}</div>'
-        f'<details style="margin-bottom:.6rem"><summary style="cursor:pointer;'
-        f'font-size:.75rem;color:#8a94a6">{_h.escape(t("ch.connect_manual"))}</summary>'
-        f'<div style="height:.5rem"></div>'
-        f'<form hx-post="/ui/channels/{ch_id}/meta/connect"'
-        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">Платформа</label>'
-        f'<select class="act-sel" name="platform" style="width:100%;padding:.3rem .35rem">'
-        f'<option value="facebook_page">Facebook Page (Messenger)</option>'
-        f'<option value="instagram_graph">Instagram Graph API</option>'
-        f'</select></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.page_id"))}</label>'
-        f'<input class="frm-inp" name="page_id" placeholder="123456789"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.token"))}'
-        f' <span style="color:#4a5568;font-size:.7rem">(Graph API)</span></label>'
-        f'<input class="frm-inp" name="token" placeholder="EAAxx...">'
-        f'<div style="font-size:.7rem;color:#8a94a6;margin-top:.2rem">'
-        f'Пусто + Facebook Page = токен выведется из System User токена коннектора '
-        f'(настройки филиала → meta_system_user_token)</div></div>'
-        f'<button type="submit" class="btn-sm btn-p">'
-        f'{_h.escape(t("ch.connect"))}</button>'
-        f'</form></details>'
-    )
-
-
-def _ch_wa_form(ch_id: int, error: str = "") -> str:
-    return (
-        f'{_ch_err(error)}'
-        f'<form hx-post="/ui/channels/{ch_id}/wa/connect"'
-        f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.wa_url"))}</label>'
-        f'<input class="frm-inp" name="base_url"'
-        f' placeholder="https://evolution.example.com"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.wa_inst"))}</label>'
-        f'<input class="frm-inp" name="instance"'
-        f' placeholder="my-instance"></div>'
-        f'<div class="frm-grp">'
-        f'<label class="frm-lbl">{_h.escape(t("ch.wa_key"))}</label>'
-        f'<input class="frm-inp" name="api_key"></div>'
-        f'<button type="submit" class="btn-sm btn-p">'
-        f'{_h.escape(t("ch.connect"))}</button>'
-        f'</form>'
     )
 
 
@@ -1221,10 +952,19 @@ def settings_panel_html(settings: list) -> str:
     )
 
 
-# The reports page moved to _ui_reports on 2026-07-28. Re-exported here so the move stayed a
-# move: no call site changed in the same commit that relocated 1295 lines, which is what keeps
-# a bisect readable if something surfaces later. The noqa is load-bearing — without it the
-# linter reads these as unused imports and deletes the bridge.
+# Two relocations bridged from here, for the same reason both times: the move changed no call
+# site and no test import in the commit that performed it, which is what keeps a bisect
+# readable if something surfaces later. The noqa is load-bearing — without it the linter reads
+# these as unused imports and deletes the bridge.
+#   2026-08-04 — the per-kind credential panels went to app/connectors/, one per connector.
+#   2026-07-28 — the reports page went to _ui_reports (1295 lines).
+from app.connectors.instagram_ui import (  # noqa: F401,E402 — re-export, see above
+    _IG_POLL_DELAYS,
+    _ch_ig_form,
+)
+from app.connectors.meta_business_ui import _ch_meta_form  # noqa: F401,E402
+from app.connectors.whatsapp_ui import _ch_wa_form  # noqa: F401,E402
+
 from ._ui_reports import (  # noqa: F401,E402 — re-export, see above
     _FLOW_SPINE,
     _FUNNEL_PIPELINE,

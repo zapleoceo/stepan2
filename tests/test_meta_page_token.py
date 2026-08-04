@@ -13,6 +13,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from app.connectors import meta_business
 from app.worker import wiring
 
 _SU = "SU-TOKEN"  # noqa: S105
@@ -21,9 +22,9 @@ _PAGE = "207513496325789"
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    wiring._PAGE_TOKENS.clear()
+    meta_business._PAGE_TOKENS.clear()
     yield
-    wiring._PAGE_TOKENS.clear()
+    meta_business._PAGE_TOKENS.clear()
 
 
 @pytest.mark.asyncio
@@ -34,8 +35,8 @@ async def test_system_user_token_is_exchanged_for_a_page_token(monkeypatch) -> N
         calls.append((su, page))
         return "PAGE-TOKEN"
 
-    monkeypatch.setattr(wiring, "page_access_token", fake)
-    assert await wiring._page_token_cached(_SU, _PAGE, 16) == "PAGE-TOKEN"
+    monkeypatch.setattr(meta_business, "page_access_token", fake)
+    assert await meta_business._page_token_cached(_SU, _PAGE, 16) == "PAGE-TOKEN"
     assert calls == [(_SU, _PAGE)]
 
 
@@ -50,9 +51,9 @@ async def test_exchange_runs_once_not_on_every_tick(monkeypatch) -> None:
         calls += 1
         return "PAGE-TOKEN"
 
-    monkeypatch.setattr(wiring, "page_access_token", fake)
+    monkeypatch.setattr(meta_business, "page_access_token", fake)
     for _ in range(5):
-        await wiring._page_token_cached(_SU, _PAGE, 16)
+        await meta_business._page_token_cached(_SU, _PAGE, 16)
     assert calls == 1
 
 
@@ -65,9 +66,9 @@ async def test_rotating_the_source_token_invalidates_the_cache(monkeypatch) -> N
         seen.append(su)
         return f"PAGE-FOR-{su}"
 
-    monkeypatch.setattr(wiring, "page_access_token", fake)
-    first = await wiring._page_token_cached("SU-OLD", _PAGE, 16)
-    second = await wiring._page_token_cached("SU-NEW", _PAGE, 16)
+    monkeypatch.setattr(meta_business, "page_access_token", fake)
+    first = await meta_business._page_token_cached("SU-OLD", _PAGE, 16)
+    second = await meta_business._page_token_cached("SU-NEW", _PAGE, 16)
     assert first != second
     assert seen == ["SU-OLD", "SU-NEW"]
 
@@ -77,8 +78,8 @@ async def test_failed_exchange_degrades_instead_of_killing_the_channel(monkeypat
     async def boom(su: str, page: str) -> str:
         raise httpx.ConnectError("down")
 
-    monkeypatch.setattr(wiring, "page_access_token", boom)
-    assert await wiring._page_token_cached(_SU, _PAGE, 16) == _SU
+    monkeypatch.setattr(meta_business, "page_access_token", boom)
+    assert await meta_business._page_token_cached(_SU, _PAGE, 16) == _SU
 
 
 @pytest.mark.asyncio
@@ -86,8 +87,8 @@ async def test_no_page_id_means_no_graph_call(monkeypatch) -> None:
     async def fail(su: str, page: str) -> str:
         raise AssertionError("must not call Graph without a page id")
 
-    monkeypatch.setattr(wiring, "page_access_token", fail)
-    assert await wiring._page_token_cached(_SU, "", 16) == _SU
+    monkeypatch.setattr(meta_business, "page_access_token", fail)
+    assert await meta_business._page_token_cached(_SU, "", 16) == _SU
 
 
 @pytest.mark.asyncio
@@ -99,7 +100,7 @@ async def test_instagram_channels_never_reach_the_exchange(monkeypatch, db_sessi
     async def fail(su: str, page: str) -> str:
         raise AssertionError("Instagram must not go through the Page-token exchange")
 
-    monkeypatch.setattr(wiring, "page_access_token", fail)
+    monkeypatch.setattr(meta_business, "page_access_token", fail)
 
     branch = Branch(name="IG branch", tz_offset=7)
     db_session.add(branch)

@@ -6,24 +6,12 @@ construction (per-channel secrets) is isolated here so the task bodies stay pure
 orchestration and the wiring can be swapped/faked in one place."""
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 
-import httpx
 from sqlalchemy import case, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.channels import REGISTRY
-from app.adapters.channels.instagram import InstagramAdapter
-from app.adapters.channels.meta_business import MetaBusinessAdapter
-from app.adapters.channels.transports import (
-    EvolutionTransport,
-    GraphTransportHTTP,
-    InstagrapiTransport,
-)
-from app.adapters.channels.whatsapp import WhatsAppAdapter
-from app.adapters.crypto import decrypt
 from app.adapters.db.models import (
     Branch,
     Channel,
@@ -33,9 +21,8 @@ from app.adapters.db.models import (
     Outbox,
 )
 from app.config import settings
-from app.domain.enums import BOT_SILENT_STAGES, ChannelKind, SessionStatus
-from app.modules.meta.tokens import page_access_token
-from app.modules.settings.service import get_channel_settings
+from app.connectors.registry import spec_for
+from app.domain.enums import BOT_SILENT_STAGES, SessionStatus
 from app.ports.channel import ChannelPort
 
 _log = logging.getLogger(__name__)
@@ -244,103 +231,15 @@ async def mark_session_status(
     return True
 
 
-async def _active_session_settings(session: AsyncSession, channel_id: int) -> dict | None:
-    """Decrypt the channel's active session secret (instagrapi dump) — or None."""
-    rows = await session.exec(
-        select(ChannelSession).where(
-            ChannelSession.channel_id == channel_id,
-            ChannelSession.status == SessionStatus.ACTIVE,
-        )
-    )
-    row = rows.scalars().first()
-    return json.loads(decrypt(row.secret_enc)) if row else None
-
-
-# channel_id -> (source System User token, page id, derived Page token). Keyed on the source
-# token so rotating it in settings invalidates the entry instead of serving a revoked Page
-# token until the worker restarts.
-_PAGE_TOKENS: dict[int, tuple[str, str, str]] = {}
-
-
-async def _page_token_cached(system_user_token: str, page_id: str, channel_id: int) -> str:
-    """Page token for `page_id`, derived once per (channel, source token, page).
-
-    Meta Business only. /{page-id}/conversations and /messages answer
-    "(#190) This method must be called with a Page Access Token" for a System User token, and
-    the System User token is the one the operator can actually obtain — so the exchange belongs
-    here rather than in their hands.
-
-    A failed exchange returns the original token: Graph's own error on the real call names the
-    problem better than an exception raised one layer away from it, and the channel keeps
-    behaving exactly as it did before this function existed.
-    """
-    cached = _PAGE_TOKENS.get(channel_id)
-    if cached and cached[0] == system_user_token and cached[1] == page_id:
-        return cached[2]
-    if not page_id:
-        return system_user_token
-    try:
-        derived = await page_access_token(system_user_token, page_id)
-    except (httpx.HTTPError, ValueError) as exc:
-        _log.warning("page token exchange failed for channel %s: %s", channel_id, exc)
-        return system_user_token
-    _PAGE_TOKENS[channel_id] = (system_user_token, page_id, derived)
-    return derived
-
-
 async def build_channel_port(session: AsyncSession, channel: Channel) -> ChannelPort:
-    """Resolve a live ChannelPort from the channel's Fernet-encrypted ChannelSession.
+    """Resolve a live ChannelPort from the channel's stored credentials.
 
-    Instagram is wired (instagrapi via the stored session dump + geo-matched proxy);
-    WhatsApp/MetaBusiness raise NotImplementedError until their sessions are connected.
+    A one-line dispatch on purpose: which secrets a connector needs, and how it turns them
+    into a transport, is the connector's own business (app/connectors/<kind>.py). This was a
+    50-line if-chain here, which is why adding a connector meant editing the worker.
+
     Callers guard with try/except and skip a channel that isn't ready (logged)."""
-    if channel.kind not in REGISTRY:
-        raise KeyError(f"no adapter for channel kind {channel.kind}")
-    if channel.kind == ChannelKind.INSTAGRAM:
-        dump = await _active_session_settings(session, channel.id or 0)
-        if dump is None:
-            raise RuntimeError(f"no active session for channel {channel.id}")
-        proxy = dump.pop("proxy", None) or settings().ig_proxy  # per-channel proxy first
-        branch = await session.get(Branch, channel.branch_id)
-        transport = InstagrapiTransport(
-            username=channel.handle or "", session_settings=dump, proxy=proxy,
-            lang=branch.lang if branch else "", tz_offset_h=branch.tz_offset_h if branch else None)
-        return InstagramAdapter(transport, handle=channel.handle or "")
-    if channel.kind == ChannelKind.META_BUSINESS:
-        # The token comes from the per-channel SETTING the connector editor writes
-        # (app_setting meta_system_user_token). It used to be read from ChannelSession only —
-        # but nothing in the codebase ever writes a ChannelSession for this kind, so an
-        # operator could paste a valid token, see it saved, and still get
-        # "no active token" forever. ChannelSession stays as a fallback for anything that
-        # populates it later.
-        dump = await _active_session_settings(session, channel.id or 0) or {}
-        cfg = await get_channel_settings(session, channel.branch_id, channel.id or 0)
-        token = dump.get("token") or cfg.meta_system_user_token
-        if not token:
-            raise RuntimeError(f"no active token for Meta Business channel {channel.id}")
-        account_id = (dump.get("account_id") or cfg.meta_page_id
-                      or channel.account_id or "")
-        # Only when the token came from settings: a token stored in a ChannelSession was put
-        # there by the connect form, which already exchanged it.
-        if not dump.get("token"):
-            token = await _page_token_cached(token, account_id, channel.id or 0)
-        transport = GraphTransportHTTP(
-            base_url=dump.get("base_url",
-                              f"https://graph.facebook.com/{settings().ig_graph_version}"),
-            account_id=account_id,
-            token=token,
-        )
-        return MetaBusinessAdapter(transport, account_id=account_id)
-    if channel.kind == ChannelKind.WHATSAPP:
-        dump = await _active_session_settings(session, channel.id or 0)
-        if dump is None:
-            raise RuntimeError(f"no WhatsApp config for channel {channel.id}")
-        transport = EvolutionTransport(
-            base_url=dump["base_url"],
-            instance=dump["instance"],
-            api_key=dump["api_key"],
-        )
-        return WhatsAppAdapter(transport, instance=dump["instance"])
-    raise NotImplementedError(
-        f"transport wiring for {channel.kind} channel {channel.id} is not configured yet"
-    )
+    spec = spec_for(channel.kind)
+    if spec is None:
+        raise KeyError(f"no connector registered for channel kind {channel.kind}")
+    return await spec.build_port(session, channel)
