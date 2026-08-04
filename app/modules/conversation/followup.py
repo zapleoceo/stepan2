@@ -26,7 +26,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
-from .outreach import unreachable_channels
+from .outreach import NO_OUTREACH_SQL, no_outreach_param
 from .repository import (
     CoachingNoteRepo,
     DossierRepo,
@@ -98,8 +98,8 @@ def followup_framing(attempt: int, total: int, refusal: str) -> str:
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
 # `new` is excluded: an untouched lead gets a live reply, not a nudge).
-_FOLLOWUP_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"
+_FOLLOWUP_Q = (
+    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"  # noqa: S608
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid"
     "   AND l.stage IN ('qualifying', 'presenting', 'objection', 'nurturing')"
@@ -114,6 +114,7 @@ _FOLLOWUP_Q = (  # noqa: S608
     "   AND (ct.last_in_at IS NULL OR ct.last_in_at <= ct.last_out_at)"
     "   AND NOT EXISTS (SELECT 1 FROM outbox o"
     "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
+    + NO_OUTREACH_SQL
 )
 
 
@@ -156,15 +157,12 @@ class FollowupService:
             return []  # branch global OFF: no generation at all
         rows = (
             await self.session.execute(
-                text(_FOLLOWUP_Q),
+                text(_FOLLOWUP_Q).bindparams(no_outreach_param()),
                 {"bid": self.branch_id, "now": now, "on": True},
             )
         ).all()
-        unreachable = await unreachable_channels(self.session, self.branch_id)
         due: list[tuple[int, str | None, int]] = []
         for tid, product_slug, followups_sent, channel_id in rows:
-            if channel_id in unreachable:
-                continue
             ch = await get_channel_settings(self.session, self.branch_id, channel_id)
             if not ch.followup_enabled or not ch.followup_schedule_h:
                 continue
