@@ -207,7 +207,9 @@ async def test_agent_toggle_platform_scope_ignored_for_non_super(db_session, mon
         headers: dict = {}
         state = type("S", (), {"allowed_branch_ids": [7]})()
 
-    await agent_toggle(_Req(), scope="platform", branch_id=7)  # type: ignore[arg-type]
+    # No branch_id argument any more: the toggle resolves its target from the server-side
+    # view, so a client-supplied branch can't aim it at another tenant.
+    await agent_toggle(_Req(), scope="platform")  # type: ignore[arg-type]
     after = (await db_session.execute(
         _text("SELECT value FROM app_setting WHERE key='agent_enabled_platform'"))).first()
     assert after == before  # a non-super-admin's platform toggle must be a no-op
@@ -506,7 +508,10 @@ def test_webhook_post_rejects_unsigned_and_forged(monkeypatch) -> None:
         headers={"X-Hub-Signature-256": f"sha256={sig}"},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"accepted": 1}
+    # This entry carries no messaging[], so there is nothing ingestible in it — `accepted`
+    # counts MESSAGES queued for ingest, not entries. What this test guards is the signature
+    # gate: a correctly signed body gets past it, a forged one never does.
+    assert resp.json() == {"accepted": 0}
 
 
 def test_webhook_unconfigured_branch_rejected(monkeypatch) -> None:

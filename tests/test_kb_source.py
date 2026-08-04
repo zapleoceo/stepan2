@@ -73,3 +73,26 @@ async def test_copy_to_self_is_noop(db_session) -> None:
         select(func.count()).select_from(KnowledgeDoc).where(
             KnowledgeDoc.branch_id == src))).scalar()
     assert n == 2  # untouched
+
+
+async def test_copy_kb_carries_in_prompt_with_the_doc(db_session) -> None:
+    """A doc switched OUT of the prompt must arrive switched out.
+
+    The INSERT…SELECT enumerates its columns, so a column added to knowledge_doc is one this
+    silently leaves at the server default — and in_prompt defaults to true. Copying a branch
+    would have put straight back into the prompt exactly the playbooks an operator had turned
+    off to get that branch under the context budget, which is the documented remediation for
+    branches 9 and 10."""
+    src = await _src(db_session)
+    dst = await _empty(db_session)
+    retired = (await db_session.execute(select(KnowledgeDoc).where(
+        KnowledgeDoc.branch_id == src, KnowledgeDoc.slug == "playbook_price"))).scalars().one()
+    retired.in_prompt = False
+    db_session.add(retired)
+    await db_session.flush()
+
+    await copy_kb(db_session, dst, src)
+
+    copied = {d.slug: d.in_prompt for d in (await db_session.execute(select(KnowledgeDoc).where(
+        KnowledgeDoc.branch_id == dst))).scalars()}
+    assert copied == {"persona_core": True, "playbook_price": False}

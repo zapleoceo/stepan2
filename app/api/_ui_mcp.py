@@ -132,7 +132,17 @@ def _incoming(
         '</form>')
 
 
-def _outgoing(enabled: bool, url: str, has_secret: bool) -> str:
+def _outgoing(enabled: bool, url: str, has_secret: bool, *, branch_selected: bool) -> str:
+    if not branch_selected:
+        # Not a blank form: with no branch in view there is no CRM config to show, and the
+        # form used to render its checkbox UNCHECKED — a positive claim that the gate is off
+        # for a branch nobody named. Say what's missing instead.
+        from app.api._i18n import t  # noqa: PLC0415
+
+        return _card(
+            _h3("Исходящее подключение — Степан читает CRM (перед контактом)")
+            + f'<div style="color:{_C_MUTE};font-size:.82rem">{_h.escape(t("branch.pick_one"))}'
+            '</div>')
     chk = "checked" if enabled else ""
     secret_ph = ("секрет задан — оставьте пустым, чтобы не менять" if has_secret
                  else "Bearer-токен CRM")
@@ -156,10 +166,15 @@ def _outgoing(enabled: bool, url: str, has_secret: bool) -> str:
         '</form>')
 
 
+def _notice(msg: str) -> str:
+    return _card(f'<div style="color:{_C_ACCENT};font-size:.85rem">{_h.escape(msg)}</div>')
+
+
 def mcp_page_html(
     base_url: str, tokens: list[McpToken], *, crm_enabled: bool, crm_url: str,
     crm_has_secret: bool, new_token: str | None = None,
     branches: list[tuple[int, str]] | None = None,
+    crm_branch_selected: bool = True, notice: str | None = None,
 ) -> str:
     from app.api._i18n import t  # noqa: PLC0415
     return (
@@ -169,8 +184,10 @@ def mcp_page_html(
         'MCP — подключения и токены</div>'
         f'<div style="color:{_C_MUTE};font-size:.82rem;margin-bottom:1rem">Управление доступом'
         ' к Степану по MCP: входящие коннекторы (внешние клиенты) и исходящая связь с CRM.</div>'
+        + (_notice(notice) if notice else "")
         + _incoming(base_url, tokens, new_token, branches or [])
-        + _outgoing(crm_enabled, crm_url, crm_has_secret)
+        + _outgoing(crm_enabled, crm_url, crm_has_secret,
+                    branch_selected=crm_branch_selected)
         + f'<a href="/ui/mcp/docs" style="display:inline-block;color:{_C_ACCENT};'
         'font-size:.85rem;text-decoration:none;border:1px solid #3a4150;border-radius:6px;'
         'padding:.4rem .8rem">⬇ Скачать документацию по подключению</a>'

@@ -16,7 +16,7 @@ from app.modules.mcp.tokens import McpTokenService, authorize_mcp, hash_token  #
 
 
 async def test_create_stores_only_hash_and_prefix(db_session) -> None:
-    raw, row = await McpTokenService(db_session).create("director", "read")
+    raw, row = await McpTokenService(db_session).create("director", "read", None)
     assert row.scope == "read" and row.label == "director"
     assert row.token_hash == hash_token(raw) and raw != row.token_hash  # hash, not plaintext
     assert row.prefix == raw[:6] and row.revoked_at is None
@@ -24,9 +24,9 @@ async def test_create_stores_only_hash_and_prefix(db_session) -> None:
 
 async def test_match_active_excludes_revoked_and_other_scope(db_session) -> None:
     svc = McpTokenService(db_session)
-    raw_r, _ = await svc.create("reviewer", "read")
-    raw_w, _ = await svc.create("partner", "write")
-    revoked_raw, revoked = await svc.create("old", "read")
+    raw_r, _ = await svc.create("reviewer", "read", None)
+    raw_w, _ = await svc.create("partner", "write", None)
+    revoked_raw, revoked = await svc.create("old", "read", None)
     await svc.revoke(revoked.id)
 
     assert (await svc.match_active(hash_token(raw_r), "read")) is not None
@@ -37,7 +37,7 @@ async def test_match_active_excludes_revoked_and_other_scope(db_session) -> None
 async def test_authorize_stamps_last_used(monkeypatch, db_session) -> None:
     monkeypatch.setattr(settings(), "mcp_read_secret", "")
     _patch_scope(monkeypatch, db_session)
-    raw, row = await McpTokenService(db_session).create("director", "read")
+    raw, row = await McpTokenService(db_session).create("director", "read", None)
     assert row.last_used_at is None
     await authorize_mcp(raw, "read")
     assert row.last_used_at is not None   # stamped on use
@@ -45,7 +45,7 @@ async def test_authorize_stamps_last_used(monkeypatch, db_session) -> None:
 
 async def test_revoke_is_idempotent(db_session) -> None:
     svc = McpTokenService(db_session)
-    _, row = await svc.create("x", "write")
+    _, row = await svc.create("x", "write", None)
     assert await svc.revoke(row.id) is True
     assert await svc.revoke(row.id) is False   # already revoked
     assert await svc.revoke(999999) is False   # unknown id
@@ -68,7 +68,7 @@ async def test_authorize_accepts_active_db_token(monkeypatch, db_session) -> Non
     monkeypatch.setattr(settings(), "mcp_secret", "")
     monkeypatch.setattr(settings(), "mcp_read_secret", "")
     _patch_scope(monkeypatch, db_session)
-    raw, row = await McpTokenService(db_session).create("director", "read")
+    raw, row = await McpTokenService(db_session).create("director", "read", None)
     authz = await authorize_mcp(raw, "read")
     assert authz is not None and authz.branch_id is None      # universal token
     assert await authorize_mcp(raw, "write") is None          # read token can't do write
@@ -81,7 +81,7 @@ async def test_authorize_carries_branch_scope(monkeypatch, db_session) -> None:
     monkeypatch.setattr(settings(), "mcp_secret", "")
     monkeypatch.setattr(settings(), "mcp_read_secret", "")
     _patch_scope(monkeypatch, db_session)
-    raw, _ = await McpTokenService(db_session).create("branch2", "write", branch_id=2)
+    raw, _ = await McpTokenService(db_session).create("branch2", "write", 2)
     authz = await authorize_mcp(raw, "write")
     assert authz is not None and authz.branch_id == 2
 

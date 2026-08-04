@@ -283,7 +283,7 @@ async def test_an_invented_price_is_rewritten_before_it_reaches_the_lead(db_sess
 async def test_a_price_that_stays_invented_escalates_rather_than_shipping(db_session) -> None:  # noqa: ANN001
     """The one place the pipeline escalates on its own — and the offending draft is replaced
     by the hold-line, never shipped with only a flag attached."""
-    from app.modules.conversation.reply import ESCALATION_HOLD_REPLY
+    from app.modules.conversation.canned import escalation_hold
 
     bid, tid, _ = await _thread(db_session)
     llm = _LLM(_answer(reply="Investasinya Rp 26.000.000 kak"))
@@ -291,7 +291,7 @@ async def test_a_price_that_stays_invented_escalates_rather_than_shipping(db_ses
 
     assert decision is not None
     assert decision.needs_manager is True
-    assert decision.reply == ESCALATION_HOLD_REPLY
+    assert decision.reply == escalation_hold("id")
     assert "базе знаний" in (decision.manager_question or "")
 
 

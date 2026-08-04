@@ -42,6 +42,26 @@ def test_effective_branch_scoped_token_pins_and_rejects() -> None:
     assert exc.value.status_code == 403
 
 
+def test_write_branch_makes_a_universal_token_name_the_branch() -> None:
+    """A read may span tenants; a move/close/call_failed may not be aimed at 'whichever
+    branch the phone lands in' — that is how another tenant's lead got handed off."""
+    universal = McpAuthz(branch_id=None)
+    assert routes._write_branch(universal, 7) == 7
+    with pytest.raises(routes.HTTPException) as exc:
+        routes._write_branch(universal, None)
+    assert exc.value.status_code == 400          # allowed everywhere, just has to say where
+    assert routes._effective_branch(universal, None) is None   # reads stay permissive
+
+
+def test_write_branch_leaves_a_scoped_token_alone() -> None:
+    scoped = McpAuthz(branch_id=3)
+    assert routes._write_branch(scoped, None) == 3    # its branch is already named
+    assert routes._write_branch(scoped, 3) == 3
+    with pytest.raises(routes.HTTPException) as exc:
+        routes._write_branch(scoped, 9)
+    assert exc.value.status_code == 403
+
+
 def test_guard_lead_branch_blocks_cross_branch_lead() -> None:
     scoped = McpAuthz(branch_id=3)
     routes._guard_lead_branch(scoped, SimpleNamespace(branch_id=3))       # ok

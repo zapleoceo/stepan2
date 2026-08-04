@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Index, LargeBinary, String, UniqueConstraint, text
+from sqlalchemy import BigInteger, Index, LargeBinary, String, UniqueConstraint, func, text
 from sqlmodel import Field, SQLModel
 
 from app.domain.clock import utc_now as _utcnow
@@ -31,8 +31,19 @@ class Branch(SQLModel, table=True):
 
 
 class Channel(SQLModel, table=True):
-    """Аккаунт канала филиала (MBS/IG/WA)."""
+    """Аккаунт канала филиала (MBS/IG/WA/сайт)."""
     __tablename__ = "channel"
+    # There is ONE landing page, so there is one website channel, and which branch owns it is
+    # what app/modules/website/branch.website_branch_id resolves. The process lock there cannot
+    # span two uvicorn workers, and a duplicate is not a cosmetic row: it is a second active
+    # branch with a full prompt-library clone, shown in the operator UI and walked by every
+    # per-branch cron. Enforced in the schema so the answer cannot depend on who committed
+    # first. Partial, so the DM connectors keep as many channels as they like.
+    __table_args__ = (
+        Index("uq_channel_one_website", "kind", unique=True,
+              sqlite_where=text("kind = 'website'"),
+              postgresql_where=text("kind = 'website'")),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     branch_id: int = Field(foreign_key="branch.id", index=True)
@@ -175,6 +186,12 @@ class KnowledgeDoc(SQLModel, table=True):
     category: str | None = Field(default=None, description="группа дерева: persona/playbook/…")
     sort_order: int = Field(default=0)
     content: str = Field(default="")
+    # Whether the composer pipeline puts this doc in the prompt. It is DATA because the
+    # previous answer was a hardcoded tuple of slugs in knowledge.service: branch 7 held 31k
+    # chars of its own knowledge under names that tuple had never heard of, and not one
+    # character of it ever reached the model. Defaults true — a doc a branch wrote is a doc
+    # the branch meant. The legacy pipeline ignores this column entirely.
+    in_prompt: bool = Field(default=True, sa_column_kwargs={"server_default": text("true")})
     # onupdate bumps this on ANY ORM edit so the KB-revision history and edit-tracking see the
     # change; the reply prompt reads the live content directly (no index to rebuild).
     updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
@@ -193,8 +210,17 @@ class Product(SQLModel, table=True):
     content: str = Field(default="")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0)
-    kind: str = Field(default="course", description="course | event — event = RSVP not enrolment")
-    updated_at: datetime = Field(default_factory=_utcnow, sa_column_kwargs={"onupdate": _utcnow})
+    # server_default mirrors what the migrations put in the PRODUCTION DDL (kind DEFAULT
+    # 'course', updated_at DEFAULT now() — read off prod 2026-08-03). Declared here so the
+    # metadata-generated schema the tests run on is the same schema, and a raw INSERT that
+    # omits these columns behaves identically on both. Without it the create route had to
+    # spell the values out in application code, duplicating the migration's default where it
+    # could drift unnoticed.
+    kind: str = Field(default="course", description="course | event — event = RSVP not enrolment",
+                      sa_column_kwargs={"server_default": "course"})
+    updated_at: datetime = Field(
+        default_factory=_utcnow,
+        sa_column_kwargs={"onupdate": _utcnow, "server_default": func.now()})
     updated_by: str | None = Field(default=None)
 
 
@@ -703,3 +729,52 @@ class PersonaFavorite(SQLModel, table=True):
     branch_id: int = Field(primary_key=True, foreign_key="branch.id")
     persona_id: int = Field(primary_key=True, foreign_key="persona.id")
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class PromptLibraryItem(SQLModel, table=True):
+    """One versioned, branch-agnostic thing a branch can CLONE into itself.
+
+    Three kinds, deliberately separate rows rather than one bundle: a branch takes a persona
+    from one author, a selling method from another, and its catalogue is its own. Bundling
+    them is how the Indonesian persona travelled with the Indonesian price list.
+
+      persona    — who the seller is: name, voice, what they refuse to do. Markdown.
+      method     — HOW to sell in this market: objection ladder, price objections, question
+                   order, tone. Markdown. Measurements belong here, never in code.
+      catalogue  — a set of product cards. `body` is a JSON list of
+                   {slug, title, content, kind, sort_order}, one entry per card.
+
+    The library is read-only to a branch: cloning COPIES into knowledge_doc / product, so the
+    branch edits its own rows and a later library version never rewrites a live prompt."""
+    __tablename__ = "prompt_library_item"
+    __table_args__ = (
+        UniqueConstraint("kind", "slug", "version", name="uq_plib_kind_slug_version"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(index=True, description="persona | method | catalogue")
+    slug: str = Field(index=True)
+    version: str = Field(default="1.0")
+    title: str = Field(default="")
+    lang: str = Field(default="en", description="язык, на котором написан body")
+    summary: str = Field(default="")
+    body: str = Field(default="", description="markdown; для catalogue — JSON-список карточек")
+    status: str = Field(default="published", description="published|draft|retired")
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class BranchPromptSource(SQLModel, table=True):
+    """Provenance of one cloned layer: what this branch took, from where, at which version.
+
+    Without it a cloned prompt is indistinguishable from a hand-written one, and "which
+    branches are still on method 1.0" has no answer. It records the clone; it does not bind
+    the branch to it — the copied rows are the branch's own from the moment they land."""
+    __tablename__ = "branch_prompt_source"
+
+    branch_id: int = Field(primary_key=True, foreign_key="branch.id")
+    layer: str = Field(primary_key=True, description="persona | method | catalogue")
+    library_item_id: int | None = Field(default=None, foreign_key="prompt_library_item.id")
+    library_slug: str = Field(default="")
+    library_version: str = Field(default="")
+    cloned_at: datetime = Field(default_factory=_utcnow)

@@ -59,11 +59,8 @@ async def _branch(s, *, enabled: bool = True) -> int:
     s.add(AppSetting(branch_id=b.id, key="crm_rescue_enabled",
                      value="true" if enabled else "false"))
     s.add(AppSetting(branch_id=b.id, key="agent_enabled_global", value="true"))
-    import sqlalchemy as sa
-    have = (await s.execute(sa.select(AppSetting).where(
-        AppSetting.branch_id.is_(None), AppSetting.key == "crm_mcp_url"))).first()
-    if have is None:  # platform row is shared across branches — insert once
-        s.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_MCP_URL))
+    # The CRM link is the branch's own — a platform-tier row is ignored on purpose now.
+    s.add(AppSetting(branch_id=b.id, key="crm_mcp_url", value=_MCP_URL))
     await s.flush()
     invalidate(b.id)
     return b.id
@@ -103,6 +100,30 @@ async def test_rescues_matched_lead_and_respects_cap(monkeypatch, db_session) ->
     assert {c[0] for c in calls} == {l1.id, l2.id}         # newest missed first
     assert all("CRM missed call" in c[1] for c in calls)
     assert l3.id not in {c[0] for c in calls}
+
+
+async def test_ambiguous_missed_number_is_skipped_not_guessed(
+        monkeypatch, db_session) -> None:
+    """Two of this branch's leads share the number's national digits, so the CRM's missed
+    call cannot be pinned to one of them — DMing the wrong one about a call they never got
+    is the outcome to avoid. Driven through _rescue_one directly because run() catches every
+    exception: from the outside a crash and a decision look identical."""
+    bid = await _branch(db_session)
+    await _lead(db_session, bid, "+628123456789")
+    await _lead(db_session, bid, "+618123456789")
+    calls: list = []
+    _patch(monkeypatch, _FakeReader([]), calls)
+    # Spy the module logger: another test in the full suite calls logging.disable(), so
+    # caplog sees nothing when the whole suite runs.
+    warnings: list[str] = []
+    monkeypatch.setattr(rescue_mod.logger, "warning",
+                        lambda msg, *a, **k: warnings.append(msg % a if a else msg))
+    svc = CrmRescueService(db_session, bid, llm=None)
+    assert await svc._rescue_one("08123456789", "2026-07-17") is False  # noqa: SLF001
+    assert calls == []
+    text = " ".join(warnings)
+    assert "matches several leads" in text
+    assert "…6789" in text and "08123456789" not in text  # masked, not quoted back
 
 
 async def test_skips_human_owned_active_and_cooldown(monkeypatch, db_session) -> None:

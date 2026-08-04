@@ -18,7 +18,12 @@ from app.config import settings
 from app.domain.enums import ChannelKind, Stage
 from app.modules.notifications.escalation import EscalationService, _within_hours
 
-_NOW = datetime.now(UTC).replace(tzinfo=None)
+
+def _now() -> datetime:
+    """Read the clock per test, not once at import. Every age below is relative to "now",
+    and EscalationService compares against the real clock — a frozen import-time stamp made
+    a 2-minute-old alert look 5 minutes old once the suite ran longer than the SLA."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class _FakeNotifier:
@@ -56,7 +61,7 @@ async def _ready_alert(s, *, age_min: int = 10, phone: str = "+628123", kind="re
     s.add(th)
     await s.flush()
     a = ManagerAlert(branch_id=b.id, lead_id=lead.id, thread_id=th.id, kind=kind,
-                     created_at=_NOW - timedelta(minutes=age_min))
+                     created_at=_now() - timedelta(minutes=age_min))
     s.add(a)
     await s.flush()
     return b.id, th.id, a, ch.id
@@ -114,7 +119,7 @@ async def test_manager_reply_suppresses_reping(db_session) -> None:
     bid, tid, alert, cid = await _ready_alert(db_session)
     db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=cid, external_id="mgr-1",
                            direction="out", sent_by="manager", text="halo Kak, saya bantu ya",
-                           occurred_at=_NOW - timedelta(minutes=1)))
+                           occurred_at=_now() - timedelta(minutes=1)))
     await db_session.flush()
     notifier = _FakeNotifier()
     assert await EscalationService(db_session, bid, notifier).run() == 0

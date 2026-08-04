@@ -17,8 +17,13 @@ from mcp.server.transport_security import TransportSecuritySettings
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.api._mcp_auth import token_guard
-from app.modules.leads import ops
-from app.modules.mcp.tokens import mcp_effective_branch, mcp_guard_lead_branch
+from app.modules.leads import lookup, ops
+from app.modules.mcp.tokens import (
+    McpBranchRequired,
+    mcp_effective_branch,
+    mcp_guard_lead_branch,
+    mcp_write_branch,
+)
 
 # DNS-rebinding protection guards browser attacks on localhost dev servers by pinning
 # the Host header; it's the wrong tool for a public server behind Cloudflare/nginx (the
@@ -37,25 +42,44 @@ def _fmt(res: ops.LeadOpResult) -> dict:
     }
 
 
-async def _resolve_scoped(session, phone: str):  # noqa: ANN001, ANN202
-    """find_lead honouring the current token's branch scope, or None. Guards the resolved
-    lead's branch too (a phone can resolve cross-branch)."""
-    lead = await ops.find_lead(session, phone, mcp_effective_branch(None))
-    if lead is not None:
-        mcp_guard_lead_branch(lead)
-    return lead
+async def _resolve_scoped(  # noqa: ANN202
+    session,  # noqa: ANN001
+    phone: str,
+    branch_id: int | None,
+    *,
+    mutating: bool,
+):
+    """(lead, error_payload) — the lookup honouring the current token's branch scope.
+
+    The write tools used to ignore branch_id entirely and take the first cross-branch hit,
+    so a universal token calling close_deal could hand off a lead belonging to a different
+    tenant. Two rules now stand between a phone and someone else's funnel: a universal token
+    must NAME the branch before it mutates anything (`mutating`), and a phone that still
+    matches more than one lead comes back as a refusal listing the candidates."""
+    try:
+        eff = mcp_write_branch(branch_id) if mutating else mcp_effective_branch(branch_id)
+        lead = await lookup.find_lead(session, phone, eff)
+    except McpBranchRequired as exc:
+        return None, {"ok": False, "detail": str(exc)}
+    except lookup.AmbiguousPhone as exc:
+        return None, {"ok": False, "detail": str(exc), "candidates": exc.candidates}
+    if lead is None:
+        return None, {"ok": False, "detail": f"no lead with phone {phone}"}
+    mcp_guard_lead_branch(lead)
+    return lead, None
 
 
 @mcp.tool()
 async def find_lead(phone: str, branch_id: int | None = None) -> dict:
     """Look up a lead by phone number (E.164, e.g. +6281234567890). Returns id, name,
     Instagram username, branch, current funnel stage and whether the bot is on. Call
-    this first to confirm the lead exists before moving them."""
+    this first to confirm the lead exists before moving them. Pass branch_id when the same
+    number could exist in more than one branch — without it an ambiguous phone is refused
+    with the matching candidates rather than guessed."""
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone, mcp_effective_branch(branch_id))
-        if lead is None:
-            return {"ok": False, "detail": f"no lead with phone {phone}"}
-        mcp_guard_lead_branch(lead)
+        lead, err = await _resolve_scoped(session, phone, branch_id, mutating=False)
+        if err is not None:
+            return err
         return {
             "ok": True, "lead_id": lead.id, "name": lead.display_name,
             "phone": lead.phone_e164, "ig_username": lead.ig_username,
@@ -65,38 +89,49 @@ async def find_lead(phone: str, branch_id: int | None = None) -> dict:
 
 
 @mcp.tool()
-async def close_deal(phone: str, note: str | None = None) -> dict:
+async def close_deal(
+    phone: str, note: str | None = None, branch_id: int | None = None,
+) -> dict:
     """Mark a lead's deal as WON: hand the lead off (stage → handed_off) and stop the
-    bot messaging them. `note` is journaled on the funnel event."""
+    bot messaging them. `note` is journaled on the funnel event. `branch_id` names the
+    branch and is REQUIRED unless the token is already limited to one — this call is not
+    undoable, so it never guesses which tenant's lead a phone means."""
     async with session_scope() as session:
-        lead = await _resolve_scoped(session, phone)
-        if lead is None:
-            return {"ok": False, "detail": f"no lead with phone {phone}"}
+        lead, err = await _resolve_scoped(session, phone, branch_id, mutating=True)
+        if err is not None:
+            return err
         return _fmt(await ops.close_deal(session, lead, note))
 
 
 @mcp.tool()
-async def call_failed(phone: str, note: str | None = None) -> dict:
+async def call_failed(
+    phone: str, note: str | None = None, branch_id: int | None = None,
+) -> dict:
     """Report that a phone call to the lead did NOT connect. Journals the failed call,
     re-enables the bot, and Stepan proactively messages the lead to continue in chat.
     A lead already handed off / dormant is pulled back to `qualifying`. `note` (e.g.
-    'no answer', 'wrong number') is journaled."""
+    'no answer', 'wrong number') is journaled. `branch_id` names the branch and is
+    REQUIRED unless the token is already limited to one."""
     async with session_scope() as session:
-        lead = await _resolve_scoped(session, phone)
-        if lead is None:
-            return {"ok": False, "detail": f"no lead with phone {phone}"}
+        lead, err = await _resolve_scoped(session, phone, branch_id, mutating=True)
+        if err is not None:
+            return err
         return _fmt(await ops.call_failed(session, lead, note, BrokerLLM()))
 
 
 @mcp.tool()
-async def move_lead(phone: str, stage: str, note: str | None = None) -> dict:
+async def move_lead(
+    phone: str, stage: str, note: str | None = None, branch_id: int | None = None,
+) -> dict:
     """Move a lead to an explicit funnel stage. Valid: new, nurturing, qualifying,
     presenting, objection, ready, handed_off, dormant, manager. `manager` turns the bot
-    off (human takeover); an active stage turns it back on. `note` is journaled."""
+    off (human takeover); an active stage turns it back on. `note` is journaled.
+    `branch_id` names the branch and is REQUIRED unless the token is already limited
+    to one."""
     async with session_scope() as session:
-        lead = await _resolve_scoped(session, phone)
-        if lead is None:
-            return {"ok": False, "detail": f"no lead with phone {phone}"}
+        lead, err = await _resolve_scoped(session, phone, branch_id, mutating=True)
+        if err is not None:
+            return err
         return _fmt(await ops.move_lead(session, lead, stage, note))
 
 

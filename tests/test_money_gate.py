@@ -7,7 +7,7 @@ exist, an invented income claim.
 """
 from __future__ import annotations
 
-from app.modules.conversation.money_gate import MONEY_CORRECTION, money_issues
+from app.modules.conversation.money_gate import money_correction, money_issues
 
 _KB = ("Vibe Coding: durasi 6 bulan · harga Rp 13.360.000, DP Rp 500.000, "
        "cicilan Rp 2.226.000 per bulan. Info: https://itstep.id")
@@ -78,7 +78,7 @@ def test_every_issue_is_reported_not_just_the_first() -> None:
 def test_the_correction_demands_a_rewrite_never_a_retreat() -> None:
     """v2's corrections let the model fall back to 'I'll check with the team', which is how it
     learned to go quiet on answerable questions."""
-    text = MONEY_CORRECTION.format(issues="x")
+    text = money_correction("id").format(issues="x")
     assert "do not go silent" in text and "do not hand the lead off" in text
 
 

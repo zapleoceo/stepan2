@@ -38,6 +38,10 @@ class McpBranchForbidden(Exception):
     """A branch-scoped MCP token tried to reach a branch it isn't allowed to."""
 
 
+class McpBranchRequired(Exception):
+    """A universal token tried to MUTATE a lead without naming the branch it meant."""
+
+
 # ── the ONE scope rule — both surfaces (HTTP routes + FastMCP tools) wrap these ─────
 def scope_effective_branch(authz_branch: int | None, requested: int | None) -> int | None:
     """The branch a request may act on. Universal (authz_branch=None) → honour `requested`;
@@ -68,6 +72,26 @@ def mcp_effective_branch(requested: int | None) -> int | None:
     return scope_effective_branch(authz.branch_id, requested)
 
 
+def _require_named_branch(effective: int | None) -> int:
+    """Turn 'every branch' into a refusal. Scoping a read across tenants is a nuisance;
+    scoping a WRITE across tenants hands off, silences or DMs a stranger's lead and there
+    is no undo — so the mutating tools never accept 'whichever branch the phone lands in'."""
+    if effective is None:
+        raise McpBranchRequired(
+            "this token can reach every branch — pass branch_id to name the one you mean")
+    return effective
+
+
+def scope_write_branch(authz_branch: int | None, requested: int | None) -> int:
+    """scope_effective_branch for a mutating call: the branch must be named, not inferred."""
+    return _require_named_branch(scope_effective_branch(authz_branch, requested))
+
+
+def mcp_write_branch(requested: int | None) -> int:
+    """scope_write_branch for the CURRENT MCP request (authz from the contextvar)."""
+    return _require_named_branch(mcp_effective_branch(requested))
+
+
 def mcp_guard_lead_branch(lead: object) -> None:
     """Defence in depth for the FastMCP tools: a branch-scoped token must never act on a
     lead from another branch (a phone can resolve cross-branch). Fail-closed on missing authz."""
@@ -87,10 +111,13 @@ class McpTokenService:
         self.session = session
 
     async def create(
-        self, label: str, scope: str, branch_id: int | None = None,
+        self, label: str, scope: str, branch_id: int | None,
     ) -> tuple[str, McpToken]:
         """Mint a token; returns the plaintext (shown once) and the stored row (hash only).
-        branch_id=None → universal token (all branches); else scoped to that branch."""
+
+        branch_id is mandatory and positional: None still means universal, but only by
+        being written down. Defaulting it is how all sixteen live tokens ended up universal,
+        including a read token held outside the company."""
         if scope not in SCOPES:
             raise ValueError(f"scope must be one of {SCOPES}")
         raw = secrets.token_hex(32)

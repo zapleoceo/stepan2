@@ -1,6 +1,7 @@
 """Shared SQL query helpers for UI route handlers."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 
 from sqlalchemy import case, func, or_, select, text
@@ -17,6 +18,8 @@ from app.adapters.db.models import (
     StageEvent,
 )
 from app.config import settings
+from app.connectors.registry import all_specs
+from app.connectors.spec import ConnectorSpec
 from app.domain.clock import utc_now
 
 _PIPELINE_STAGES = ("qualifying", "presenting", "objection", "nurturing")
@@ -46,21 +49,50 @@ DEAL_WON = (
     " AND (cs.deal_won_at IS NULL OR cs.deal_won_at >= l.created_at))"
 )
 
-# Inbox "unanswered" split. AWAITING_BASE = lead spoke last, no reply out yet, not blocked,
-# on a WORKING connector (Meta Business is excluded until its connector is finished — those
-# chats just hang, they don't count). IN_QUEUE = the chats Stepan actively works: bot on AND in
-# a funnel stage where Stepan participates (new/nurturing/qualifying/presenting/objection). The
-# complement is everything else unanswered — dormant, ready, or bot off. SETTLED (below) is
-# carved out FIRST: those need no reply at all. The three partition AWAITING_BASE and sum to
+def awaiting_kind_sql(specs: Iterable[ConnectorSpec]) -> str:
+    """The connector filter of awaiting_base(), derived from the specs.
+
+    Which connectors are silenced is each connector's own declaration
+    (ConnectorSpec.counts_as_awaiting). It was a literal `c.kind <> 'meta_business'` here,
+    invisible from the connector it silences: a branch whose ONLY connector is Meta Business
+    has an inbox where nothing is ever "awaiting reply", and nobody reading either file would
+    know whose decision that was.
+
+    The EXISTS is emitted even when nobody opts out, because the kind test rode along with a
+    second predicate — the channel row must EXIST. Returning "" for an empty exclusion list
+    (exactly what flipping Meta's counts_as_awaiting to True produces) would also start
+    counting threads whose channel is gone, hidden inside a change meant to be about Meta.
+
+    Values are inlined, not bound: this is a SQL FRAGMENT that callers paste into larger
+    strings, so it carries no parameters of its own. They are ChannelKind members — a closed
+    enum from our own source, never anything a request supplies."""
+    excluded = [s.kind.value for s in specs if not s.counts_as_awaiting]
+    exists = " AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
+    if not excluded:
+        return exists + ")"
+    kinds = ", ".join(f"'{k}'" for k in excluded)
+    return exists + "             AND c.kind NOT IN (" + kinds + "))"  # noqa: S608
+
+
+# Inbox "unanswered" split. awaiting_base() = lead spoke last, no reply out yet, not blocked,
+# on a connector that counts (awaiting_kind_sql). IN_QUEUE = the chats Stepan works: bot on AND
+# in a funnel stage where Stepan participates (new/nurturing/qualifying/presenting/objection).
+# The complement is everything else unanswered — dormant, ready, or bot off. SETTLED (below) is
+# carved out FIRST: those need no reply at all. The three partition awaiting_base() and sum to
 # the total. Settled rows stay VISIBLE rather than being filtered away, because a lead the CRM
 # held by mistake would otherwise vanish from the only list where anyone would notice.
-AWAITING_BASE = (
+_LEAD_SPOKE_LAST = (
     "ct.last_in_at IS NOT NULL"
     " AND (ct.last_out_at IS NULL OR ct.last_out_at < ct.last_in_at)"
     " AND l.is_blocked = false"
-    " AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
-    "             AND c.kind <> 'meta_business')"
 )
+
+
+def awaiting_base() -> str:
+    """Built per call rather than snapshotted into a module constant at import: a constant
+    froze the registry as it stood when this module first loaded, and no test could then tell
+    the derivation apart from a literal re-pasted at the routes that build the SQL."""
+    return _LEAD_SPOKE_LAST + awaiting_kind_sql(all_specs())
 IN_QUEUE_EXTRA = (
     "l.agent_enabled = true"
     " AND l.stage IN ('new', 'nurturing', 'qualifying', 'presenting', 'objection')"

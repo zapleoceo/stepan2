@@ -201,7 +201,7 @@ async def test_bare_ack_first_message_from_ad_reaches_the_model(db_session):
 async def test_bare_ack_first_message_without_ad_gets_the_clarify_template(db_session):
     """'iyaaaa' with no ad context says nothing a generation could build on — the neutral
     clarify template answers it deterministically, at zero broker cost (opener.Entry.JUNK)."""
-    from app.modules.conversation.opener import JUNK_OPENER
+    from app.modules.conversation.opener import junk_opener
 
     s = db_session
     branch_id = await _branch(s)
@@ -210,7 +210,7 @@ async def test_bare_ack_first_message_without_ad_gets_the_clarify_template(db_se
 
     decision = await _reply_service(s, branch_id, llm).decide(thread_id)
 
-    assert decision is not None and decision.reply == JUNK_OPENER
+    assert decision is not None and decision.reply == junk_opener(None, "id")
     assert llm.calls_seen == []  # deterministic — no broker call
 
 

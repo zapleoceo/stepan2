@@ -193,6 +193,9 @@ def test_cap_usage_badge_absent_without_data() -> None:
 # ─── save-by-key route (smoke) ──────────────────────────────────────────────────
 
 def test_settings_save_by_key_route(client: TestClient) -> None:
+    # A branch has to be selected: a save with no branch on screen is refused rather than
+    # aimed at branch 1 (see test_branch_isolation).
+    client.cookies.set("stepan2_branch", "3")
     resp = client.post("/ui/settings/save", data={"key": "hourly_cap", "value": "99"})
     assert resp.status_code in (200, 500)
 

@@ -171,7 +171,8 @@ def _stage_from(d: LeadDossier, *, ready: bool) -> Stage:
 
 async def generate(  # noqa: PLR0913
     engine: object, ctx: object, messages: list[dict], thread_id: int, *,
-    workflow: str, capability: str, branch_id: int,
+    workflow: str, capability: str, branch_id: int, country_code: str = "62",
+    money_lang: str = "id",
 ) -> tuple[TurnDecision | None, dict]:
     """One generation, with a single escalation when the cheap model returns broken JSON.
 
@@ -183,7 +184,8 @@ async def generate(  # noqa: PLR0913
     raw, meta = await engine.run(ctx, messages, thread_id,
                                  workflow=workflow, capability=capability)
     try:
-        return parse_turn_decision(raw), meta
+        return parse_turn_decision(raw, country_code=country_code,
+                                   money_lang=money_lang), meta
     except ValueError:
         if capability != FAST:
             logger.warning("%s: unparseable decision branch=%d thread=%d — skip",
@@ -194,15 +196,23 @@ async def generate(  # noqa: PLR0913
     raw, meta = await engine.run(ctx, messages, thread_id,
                                  workflow=workflow, capability=SMART)
     try:
-        return parse_turn_decision(raw), meta
+        return parse_turn_decision(raw, country_code=country_code,
+                                   money_lang=money_lang), meta
     except ValueError:
         logger.warning("%s: unparseable on both tiers branch=%d thread=%d — skip",
                        workflow, branch_id, thread_id)
         return None, meta
 
 
-def parse_turn_decision(raw_json: str) -> TurnDecision:
-    """Parse the model's JSON; raises ValueError on a broken contract."""
+def parse_turn_decision(
+    raw_json: str, *, country_code: str = "62", money_lang: str = "id",
+) -> TurnDecision:
+    """Parse the model's JSON; raises ValueError on a broken contract.
+
+    `country_code` reaches clean_reply, which deletes invented phone numbers — and a phone
+    number only has a shape once you know the country. `money_lang` reaches the price reader,
+    for the same reason one step over — and it is the BRANCH's language, not the language this
+    reply happens to be written in: currency belongs to the market. Both default to branch 1's."""
     try:
         data = json.loads(_strip_fences(raw_json))
     except json.JSONDecodeError as exc:
@@ -214,8 +224,11 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
     if not isinstance(reply, str):
         raise ValueError("decision missing a string 'reply'")
 
-    text = clean_reply(reply)
-    lang = str(data.get("reply_language") or "").lower().strip()
+    text = clean_reply(reply, country_code)
+    # The model's own claim about which language it answered in — a self-report that live
+    # threads showed drifting back to the branch default mid-conversation, which is why nothing
+    # upstream trusts it. Named apart from `money_lang` so the two can never be swapped.
+    reported = str(data.get("reply_language") or "").lower().strip()
     # stage / product_slug / ready are still READ when present — a reply generated just before
     # the 2026-07-26 deploy, or the occasional model that volunteers them anyway, loses
     # nothing — but nothing asks for them any more, and to_legacy prefers the dossier's answer.
@@ -226,7 +239,8 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
         # Both a full `dossier` and an explicit `prices_quoted` are still accepted, so a reply
         # generated just before the 2026-07-25 deploy loses nothing.
         dossier=_dossier(data.get("dossier"),
-                         prices=str_list(data.get("prices_quoted")) or _prices_in(text)),
+                         prices=str_list(data.get("prices_quoted"))
+                         or _prices_in(text, money_lang)),
         product_slug=str(data.get("product_slug") or "").strip() or None,
         ready=bool(data.get("ready", False)),
         # Kept for replies still in flight from the old schema — the live path takes the number
@@ -234,17 +248,22 @@ def parse_turn_decision(raw_json: str) -> TurnDecision:
         phone=str(data.get("phone") or "").strip() or None,
         needs_human=bool(data.get("needs_human", False)),
         human_reason=str(data.get("human_reason") or "").strip()[:300] or None,
-        reply_language=lang if lang.isalpha() and 2 <= len(lang) <= 5 else None,
+        reply_language=reported if reported.isalpha() and 2 <= len(reported) <= 5 else None,
     )
 
 
-def _prices_in(reply: str) -> list[str]:
+def _prices_in(reply: str, money_lang: str = "id") -> list[str]:
     """Figures quoted in the reply, read off the text instead of asked for. A price already
     given is a commitment the next turn must not contradict, so it still has to be recorded —
-    but the model that wrote the sentence is the least efficient way to find out."""
+    but the model that wrote the sentence is the least efficient way to find out.
+
+    Reads the reply's own currency vocabulary: on a branch selling in dollars this list came
+    back empty every turn, so the dossier never learned a figure had been given and the
+    follow-up gate's ad-promised-price exemption never closed."""
     from .guard import canonical_prices  # noqa: PLC0415 — guard imports nothing from here
 
-    return [f"{value:,}".replace(",", ".") for value in sorted(canonical_prices(reply or ""))]
+    return [f"{value:,}".replace(",", ".")
+            for value in sorted(canonical_prices(reply or "", money_lang=money_lang))]
 
 
 # ── internal helpers ──────────────────────────────────────────────────────────

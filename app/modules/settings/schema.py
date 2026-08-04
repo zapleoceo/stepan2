@@ -6,46 +6,12 @@ feature exposes a parameter by adding ONE field here (no scattering across UI/i1
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from .fields import I18n, SettingField, SettingSection
+from .fields import i18n as _l
+from .fields import setting as _f
+from .schema_crm import CRM_SECTION
 
-type I18n = dict[str, str]
-
-
-@dataclass(frozen=True)
-class SettingField:
-    key: str
-    kind: str  # bool | int | text | secret
-    default: str
-    label: I18n
-    placeholder: I18n | None = None
-    help: I18n | None = None
-    width: str = "120px"
-    hidden: bool = False  # in defaults() but never rendered (vestigial/internal keys)
-    choices: list[tuple[str, I18n]] | None = None  # text field → dropdown of fixed options
-    # "branch" renders in the branch panel and applies to the whole branch; "channel" renders
-    # in the per-connector editor and resolves per channel (falling back to branch → platform).
-    scope: str = "branch"
-
-
-@dataclass(frozen=True)
-class SettingSection:
-    icon: str
-    title: I18n
-    fields: list[SettingField]
-
-
-def _l(ru: str, en: str, id_: str) -> I18n:
-    return {"ru": ru, "en": en, "id": id_}
-
-
-def _f(
-    key: str, kind: str, default: str, label: I18n, *,
-    ph: I18n | None = None, help: I18n | None = None, width: str = "120px",
-    hidden: bool = False, choices: list[tuple[str, I18n]] | None = None,
-    scope: str = "branch",
-) -> SettingField:
-    return SettingField(key, kind, default, label, ph, help, width, hidden, choices, scope)
-
+__all__ = ["I18n", "SettingField", "SettingSection"]
 
 _UNLIMITED = _l("0 = без лимита", "0 = unlimited", "0 = tanpa batas")
 
@@ -84,6 +50,38 @@ SCHEMA: list[SettingSection] = [
                    "Satu-satunya balasan yang bukan dari model: lead kirim emoji atau sapaan "
                    "kosong. Kosong = kalimat netral tanpa nama perusahaan"),
            width="100%"),
+    ]),
+    SettingSection("fa-solid fa-layer-group", _l("Промт", "Prompt", "Prompt"), [
+        # Default legacy on purpose: a branch nobody has touched keeps exactly today's prompt,
+        # byte for byte. Branch 1 is 37k live messages behind a pinned fingerprint and moves
+        # in its own step, deliberately, never as a side effect of somebody else's change.
+        #
+        # hidden=True — NOT rendered as a dropdown, and that is the whole point. Switching a
+        # branch replaces messages[0] wholesale: for branch 1 it would drop 5115 characters of
+        # its own selling layer (forms of address, the kampus rule, the MAHAL method, the local
+        # evidence the shared no-salary rule leans on), swap which fact document the public
+        # fabrication verifier reads, reorder the catalogue, and cold-bust a prompt cache
+        # running at a 91% hit rate. Recovery is a second click; the replies sent in between
+        # are already on Instagram. That is not a settings toggle, it is a migration with a
+        # fingerprint check either side — scripts/prompt_snapshot.py before and after.
+        _f("prompt_pipeline", "text", "legacy",
+           _l("Сборка промта", "Prompt pipeline", "Perakitan prompt"),
+           choices=[("legacy", _l("Наследуемая (общий контракт)", "Legacy (shared contract)",
+                                  "Lama (kontrak bersama)")),
+                    ("composer", _l("Композер (свои документы + CRAFT)",
+                                    "Composer (own docs + CRAFT)",
+                                    "Composer (dokumen sendiri + CRAFT)"))],
+           help=_l("Композер собирает промт из ДОКУМЕНТОВ филиала (все с флагом «в промт»), "
+                   "метод продаж живёт в базе знаний и правится здесь. Наследуемая берёт "
+                   "документы по жёсткому списку слагов и общий контракт с индонезийскими "
+                   "измерениями",
+                   "Composer builds the prompt from the BRANCH's documents (every one flagged "
+                   "in-prompt), with the selling method in the knowledge base where it can be "
+                   "edited. Legacy loads documents by a hardcoded slug list and ships the "
+                   "shared contract with its Indonesian measurements",
+                   "Composer menyusun prompt dari DOKUMEN cabang ini; Legacy memakai daftar "
+                   "slug tetap dan kontrak bersama"),
+           width="200px", hidden=True),
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [
@@ -231,15 +229,7 @@ SCHEMA: list[SettingSection] = [
         _f("meta_pixel_id", "text", "", _l("Pixel ID", "Pixel ID", "Pixel ID"),
            ph=_l("1234567890", "1234567890", "1234567890"), width="220px", scope="channel"),
     ]),
-    SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [
-        _f("crm_enabled", "bool", "false",
-           _l("Слать лиды в CRM", "Send leads to CRM", "Kirim lead ke CRM"), width="130px"),
-        _f("crm_webhook_url", "secret", "",
-           _l("CRM webhook URL", "CRM webhook URL", "CRM webhook URL"),
-           ph=_l("https://…", "https://…", "https://…"),
-           help=_l("POST manager_alert на этот URL", "POST manager_alert here",
-                   "POST manager_alert ke URL"), width="340px"),
-    ]),
+    CRM_SECTION,
 ]
 
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from sqlalchemy import func, or_
+from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import ChannelThread, Lead, Message
+from app.adapters.db.models import ChannelThread, Lead, MediaAsset, Message
 from app.adapters.db.repository import BranchScoped
 
 _DEDUP_WINDOW = timedelta(seconds=2)
@@ -35,8 +37,6 @@ class ThreadRepo(BranchScoped[ChannelThread]):
         super().__init__(session, branch_id)
 
     def _q(self):  # type: ignore[override] — thread carries no branch_id; scope via Lead
-        from sqlmodel import select
-
         return (
             select(ChannelThread)
             .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
@@ -100,6 +100,54 @@ class MessageRepo(BranchScoped[Message]):
             Message.occurred_at <= occurred_at + window,
         ).limit(1)
         return (await self.session.exec(q)).first() is not None
+
+    async def attachment_inbound_at(
+        self, thread_id: int, occurred_at: datetime, window: timedelta = _DEDUP_WINDOW,
+    ) -> Message | None:
+        """The webhook's rich copy of an attachment, if it is already in this thread at ±window.
+
+        The webhook describes a photo as '🖼 media' + a MediaAsset and a share as '🔗 …' with a
+        link_url; the poll's copy of that same message is an empty Graph `message` with no
+        attachment. No text compare can match those two, so the instant is the only thing they
+        share — but "any inbound within 2s" would then let a plain text row swallow a real photo
+        the poll delivers a second later. Carrying an attachment is what makes the neighbour a
+        plausible other description of THIS message rather than a different one."""
+        q = self._q().where(
+            Message.thread_id == thread_id,
+            Message.direction == "in",
+            Message.occurred_at >= occurred_at - window,
+            Message.occurred_at <= occurred_at + window,
+            or_(col(Message.link_url).is_not(None), col(Message.id).in_(self._with_media())),
+        ).limit(1)
+        return (await self.session.exec(q)).first()
+
+    async def contentless_inbound_at(
+        self, thread_id: int, occurred_at: datetime, window: timedelta = _DEDUP_WINDOW,
+    ) -> Message | None:
+        """The poll's blank copy of an attachment, if it is already in this thread at ±window.
+
+        Mirror of attachment_inbound_at, and needed because the race has no favourite: the poll
+        runs every two minutes while the webhook job queues behind whatever the arq worker is
+        already doing, so the poll landing first is ordinary. Whichever copy loses, the pair has
+        to collapse onto one row."""
+        q = self._q().where(
+            Message.thread_id == thread_id,
+            Message.direction == "in",
+            Message.occurred_at >= occurred_at - window,
+            func.trim(func.coalesce(Message.text, "")) == "",
+            Message.occurred_at <= occurred_at + window,
+            col(Message.link_url).is_(None),
+            col(Message.id).not_in(self._with_media()),
+        ).limit(1)
+        return (await self.session.exec(q)).first()
+
+    def _with_media(self):
+        """Ids of this branch's messages that have a MediaAsset. NULL message_ids are excluded
+        because a NOT IN over a NULL-bearing subquery matches nothing at all."""
+        return select(MediaAsset.message_id).where(
+            MediaAsset.branch_id == self.branch_id,
+            col(MediaAsset.message_id).is_not(None),
+        )
 
     async def echo_of_our_own(
         self, thread_id: int, text: str, occurred_at: datetime

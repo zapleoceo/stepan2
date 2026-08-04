@@ -21,11 +21,12 @@ from datetime import timedelta
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Lead
+from app.adapters.db.models import Branch, Lead
 from app.domain.clock import branch_now, utc_now
 from app.modules.crm.gate import build_crm_reader, crm_read_url
 from app.modules.crm.policy import policy_for
 from app.modules.leads import ops
+from app.modules.leads.lookup import AmbiguousPhone, find_lead, mask
 from app.modules.settings.service import get_settings
 from app.ports.llm import LLMPort
 
@@ -84,6 +85,8 @@ class CrmRescueService:
             return 0
         if not _WORK_START_H <= branch_now(cfg.tz_offset_h).hour < _WORK_END_H:
             return 0
+        branch = await self.session.get(Branch, self.branch_id)
+        lang = (branch.lang if branch is not None else "id") or "id"
         rows = (await self.session.execute(text(
             "SELECT s.lead_id, s.status FROM crm_lead_state s"
             " JOIN lead l ON l.id = s.lead_id"
@@ -106,7 +109,7 @@ class CrmRescueService:
                 continue
             try:
                 res = await ops.crm_followthrough(
-                    self.session, lead, status, policy.goal, self.llm)
+                    self.session, lead, status, policy.goal(lang), self.llm)
             except Exception:
                 logger.exception("crm followthrough failed branch=%d lead=%s",
                                  self.branch_id, lead_id)
@@ -126,7 +129,14 @@ class CrmRescueService:
         return row is not None
 
     async def _rescue_one(self, phone: str, missed_at: str) -> bool:
-        lead = await ops.find_lead(self.session, phone, self.branch_id)
+        try:
+            lead = await find_lead(self.session, phone, self.branch_id)
+        except AmbiguousPhone:
+            # Two of this branch's leads share the number's national digits. Picking one
+            # would DM a stranger about a call they never got — skip and let a human sort it.
+            logger.warning("crm rescue branch=%d: phone %s matches several leads, skipped",
+                           self.branch_id, mask(phone))
+            return False
         if lead is None or lead.is_blocked or not lead.agent_enabled:
             return False  # unknown to Stepan, or a human explicitly owns/stopped it
         if await self._recently_rescued(lead.id):

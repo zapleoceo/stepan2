@@ -19,17 +19,21 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 
 from app.adapters.db.session import session_scope
-from app.admin._branch import branch_ids_from_request, is_super_admin
+from app.admin._branch import (
+    branch_ids_from_request,
+    is_super_admin,
+    writable_selected_branch_id,
+)
 from app.domain.enums import ChannelKind
 
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     AD_FUNNEL_GROUPS,
-    AWAITING_BASE,
     DEAL_WON,
     IN_QUEUE_EXTRA,
     SETTLED_EXTRA,
     _branch_where,
+    awaiting_base,
     awaiting_cutoff,
     fetch_blocked_count,
     fetch_bot_enabled_count,
@@ -53,6 +57,7 @@ from ._routes_products import router as _products_router
 from ._ui_html import (
     app_shell,
     funnel_html,
+    pick_branch_html,
     set_render_tz,
     thread_list_html,
     viewer_tz_offset,
@@ -167,8 +172,13 @@ async def knowledge_page(request: Request) -> HTMLResponse:
 @router.get("/coach", response_class=HTMLResponse)
 async def coach_page(request: Request) -> HTMLResponse:
     lang = apply_lang(request)
-    branch_ids = branch_ids_from_request(request)
-    branch_id = branch_ids[0] if branch_ids else 1
+    # Same resolver as the coach partial and its write routes, so the page can't show one
+    # branch's coaching history while the writes land on another (it showed branch 1's for
+    # every super_admin with no filter, and coached branch 1 to match).
+    branch_id = writable_selected_branch_id(request)
+    if branch_id is None:
+        return HTMLResponse(app_shell(lang, pick_branch_html(), active_nav="coach",
+                                      is_super=is_super_admin(request)))
     async with session_scope() as session:
         edits, notes = await fetch_coach_data(session, branch_id)
     panel = coach_chat_html(branch_id, edits, notes)
@@ -288,18 +298,18 @@ async def threads_partial(
     # gate already refused a send), 'queue' = Stepan will reply, 'off' = he won't, else = all.
     if aw:
         if aw == "settled":
-            conditions.append(f"({AWAITING_BASE}) AND {SETTLED_EXTRA}")
+            conditions.append(f"({awaiting_base()}) AND {SETTLED_EXTRA}")
             params["awaiting_cutoff"] = awaiting_cutoff()
         elif aw == "queue":
             conditions.append(
-                f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})")
+                f"({awaiting_base()}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})")
             params["awaiting_cutoff"] = awaiting_cutoff()
         elif aw == "off":
             conditions.append(
-                f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})")
+                f"({awaiting_base()}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})")
             params["awaiting_cutoff"] = awaiting_cutoff()
         else:
-            conditions.append(AWAITING_BASE)
+            conditions.append(awaiting_base())
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (

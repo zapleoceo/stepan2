@@ -39,6 +39,38 @@ async def list_revisions(
     return list(rows.all())
 
 
+async def restore_revision_scoped(
+    session: AsyncSession, rev_id: int, *, writable: list[int] | None, actor: str | None,
+) -> tuple[str, tuple[str, str, int] | None]:
+    """Restore a revision into ITS OWN branch, once the caller is shown to have WRITE there.
+
+    Returns ("ok", (entity_type, slug, branch_id)) | ("missing", None) | ("forbidden", None)
+    so the route can answer 404 and 403 honestly, and can read the restored row back scoped
+    to the branch it landed in — slug is unique per branch only. Callers used to pass
+    `writable[0]` as the scope, which for a multi-branch admin scoped every restore to
+    whichever branch sorted first — silently "not found" for the branch they were actually
+    looking at, and one membership change away from restoring into the wrong tenant.
+    """
+    row = (await session.execute(
+        text("SELECT branch_id FROM knowledge_revision WHERE id=:id"), {"id": rev_id})).first()
+    if row is None:
+        return "missing", None
+    owner = row[0]
+    if owner is None:
+        # A revision written before revisions carried a branch. restore_revision reads a NULL
+        # branch as "no predicate at all", so restoring one would UPDATE the doc with that slug
+        # in EVERY tenant, live Indonesia included — and `writable is None` (super_admin, the
+        # owner's normal state) used to walk straight past the ownership check into exactly
+        # that. Production carries no such rows (knowledge_revision: 78 on branch 1, 9 on
+        # branch 8, zero NULL — checked 2026-08-03) and nothing mints new ones any more, so
+        # refusing costs nothing real and removes a cross-tenant overwrite.
+        return "forbidden", None
+    if writable is not None and owner not in writable:
+        return "forbidden", None
+    out = await restore_revision(session, owner, rev_id, actor)
+    return ("ok", (out[0], out[1], owner)) if out is not None else ("missing", None)
+
+
 async def restore_revision(
     session: AsyncSession, branch_id: int | None, rev_id: int, actor: str | None,
 ) -> tuple[str, str] | None:

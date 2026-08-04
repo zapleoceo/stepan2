@@ -20,6 +20,7 @@ from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
 from app.adapters.db.models import Lead
 from app.modules.settings.service import get_settings
 
+from .canned import escalation_hold
 from .decision import Decision, TurnDecision, generate
 from .delivery import ReplyDelivery, _script_lang
 from .discovery import extract_discovery
@@ -29,8 +30,8 @@ from .free_mode import ad_tap_note, build_messages_free
 from .guard import quotes_price
 from .money_gate import (
     AD_TAP_PRICE_CORRECTION,
-    MONEY_CORRECTION,
     MONEY_ESCALATION_REASON,
+    money_correction,
     money_issues,
 )
 from .opener import Entry, junk_opener
@@ -47,24 +48,16 @@ from .signals import AD_TEMPLATE_RE
 
 logger = logging.getLogger(__name__)
 
-# Sent instead of the offending draft whenever the money gate escalates — thread 5019 showed
-# that flagging needs_human without replacing `.reply` protected the CRM record but still
-# shipped the bad draft to the lead. Content-free and consistent with the tone of
-# _MANAGER_HANDOFF_CLOSING so the lead doesn't get two conflicting "our team will help" lines.
-ESCALATION_HOLD_REPLY = (
-    "Kakak, bentar ya - aku cek dulu ke tim supaya infonya pas dan akurat. "
-    "Nanti dibantu langsung di jam kerja (Senin-Jumat, 09.00-18.00 WIB) 🙏"
-)
-
 # Threads opened before 2026-07-25 carry a retired ad-tap template as their only outbound;
 # the turn after it is still the first REAL generation and belongs on the strong chain.
 _LEGACY_TAP_PREFIX = "Halo, aku MinStep dari IT STEP Academy"
 
 
-def _escalate(decision: TurnDecision, reason: str) -> TurnDecision:
+def _escalate(decision: TurnDecision, reason: str, lang: str) -> TurnDecision:
     """Never ship the draft that triggered the escalation — only the reason and the dossier it
-    already learned survive; the reply the lead actually sees is always the safe hold-line."""
-    return replace(decision, reply=ESCALATION_HOLD_REPLY, needs_human=True, human_reason=reason)
+    already learned survive; the reply the lead actually sees is always the safe hold-line,
+    written in the language this conversation is being held in (canned.py)."""
+    return replace(decision, reply=escalation_hold(lang), needs_human=True, human_reason=reason)
 
 
 class ReplyService(ReplyDelivery):
@@ -75,7 +68,7 @@ class ReplyService(ReplyDelivery):
         self.dossiers = DossierRepo(self.session, self.branch_id)
         self.last_decision: TurnDecision | None = None  # the raw answer, for logging/tests
 
-    async def _crm_block(self, lead: object | None) -> str | None:
+    async def _crm_block(self, lead: object | None, lang: str = "id") -> str | None:
         """Что менеджер сделал с этим лидом в CRM — в промт каждый ход.
 
         Читается из уже закэшированной строки crm_lead_state, без похода в CRM: гейт и
@@ -97,7 +90,8 @@ class ReplyService(ReplyDelivery):
         raw = json.loads(row.raw) if row.raw else {}
         return crm_state_block(
             row.status, manager=raw.get("last_result_by"),
-            when=raw.get("last_result_at"), next_contact_at=raw.get("next_contact_at"))
+            when=raw.get("last_result_at"), next_contact_at=raw.get("next_contact_at"),
+            lang=lang)
 
     async def decide(self, thread_id: int, workflow: str = "reply") -> Decision | None:
         """Run one turn. None when the thread is foreign, silent, or waiting on media."""
@@ -116,6 +110,13 @@ class ReplyService(ReplyDelivery):
         last_in = next((m for m in reversed(ctx.dialog) if m.direction == "in"), None)
         script_lang = _script_lang(last_in.text if last_in is not None else "")
         lang = script_lang or await self._lang(lead)
+        # Two different questions, and conflating them is what the money parser got wrong:
+        # `lang` is what we WRITE in (the lead's own script wins), `branch_lang` is what this
+        # branch SELLS in and which catalogue it has. A Cyrillic-writing lead on branch 1 is
+        # answered in Russian and still quoted rupiah out of an Indonesian knowledge base —
+        # read with another market's rules, "Rp2,5 juta" canonicalises to twenty-five million
+        # and a grounded price gets escalated as invented.
+        branch_lang = await engine.branch_lang()
         if script_lang and lead is not None and lead.preferred_language != script_lang:
             lead.preferred_language = script_lang
             self.session.add(lead)
@@ -138,7 +139,7 @@ class ReplyService(ReplyDelivery):
             fc = classify_entry(ctx.dialog, ctx.thread.lead_source, ctx.thread.ad_id)
             if fc.entry is Entry.JUNK:
                 cfg = await get_settings(self.session, self.branch_id)
-                decision = TurnDecision(reply=junk_opener(cfg.junk_opener))
+                decision = TurnDecision(reply=junk_opener(cfg.junk_opener, lang))
                 self.last_decision = decision
                 self._last_llm_meta = TEMPLATED_META
                 logger.info("reply branch=%d thread=%d tier=templated first=True",
@@ -170,10 +171,11 @@ class ReplyService(ReplyDelivery):
             source_block=None if first_note else _entry_hint(ctx, ad_product),
             name_block=lead_name_hint(lead.display_name if lead is not None else None),
             manager_note=lead.manager_note if lead is not None else None,
-            crm_block=await self._crm_block(lead),
+            crm_block=await self._crm_block(lead, lang),
             now_block=await engine._now_block(ctx.thread),  # noqa: SLF001 — engine owns the clock
             is_first_reply=is_first_reply,
             first_turn_note=first_note,
+            contract=await engine.reply_contract(lang),
         )
         if messages[-1]["role"] == "assistant":
             # A re-triggered tick can reach here with the bot's own last message trailing.
@@ -182,12 +184,14 @@ class ReplyService(ReplyDelivery):
             messages.append({"role": "user", "content": _ASSISTANT_LAST_NUDGE})
 
         decision, _meta = await self._generate(
-            engine, ctx, messages, thread_id, workflow=workflow, capability=capability)
+            engine, ctx, messages, thread_id, workflow=workflow, capability=capability,
+            money_lang=branch_lang)
         if decision is None:
             return None
-        if first_note is not None and quotes_price(decision.reply):
+        if first_note is not None and quotes_price(decision.reply, branch_lang):
             decision = await self._strip_first_turn_price(
-                engine, ctx, messages, thread_id, decision, workflow=workflow)
+                engine, ctx, messages, thread_id, decision, workflow=workflow,
+                money_lang=branch_lang)
         merged = merge_dossier(stored, decision.dossier)
         # Reading the lead is its own call now, and it runs every turn — not only when the
         # dossier looks empty. The selling model used to own this and filled it for ~5% of
@@ -199,7 +203,8 @@ class ReplyService(ReplyDelivery):
         if lead is not None and not stored.has_intent() and merged.has_intent():
             self._report_qualified(lead)
         decision = await self._vet(
-            engine, ctx, messages, thread_id, decision, workflow=workflow, context=context)
+            engine, ctx, messages, thread_id, decision, workflow=workflow, context=context,
+            lang=lang, branch_lang=branch_lang)
         await self.dossiers.save(lead.id if lead is not None else None, merged)
         self.last_decision = decision
         logger.info("reply branch=%d thread=%d tier=%s first=%s",
@@ -208,7 +213,7 @@ class ReplyService(ReplyDelivery):
 
     async def _generate(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int, *,  # noqa: ANN001
-        workflow: str, capability: str,
+        workflow: str, capability: str, money_lang: str = "id",
     ) -> tuple[TurnDecision | None, dict]:
         """One generation, falling back to chat:smart when the chat:sales chain is down,
         capped, or returns an unparseable body — degrade to the cheaper chain's quality,
@@ -216,7 +221,8 @@ class ReplyService(ReplyDelivery):
         try:
             decision, meta = await generate(
                 engine, ctx, messages, thread_id, workflow=workflow,
-                capability=capability, branch_id=self.branch_id)
+                capability=capability, branch_id=self.branch_id,
+                country_code=self._country_code(), money_lang=money_lang)
         except Exception as exc:  # noqa: BLE001 — transport-level; the fallback chain owns it
             if capability != SALES:
                 raise
@@ -225,7 +231,8 @@ class ReplyService(ReplyDelivery):
                 self.branch_id, thread_id, exc)
             decision, meta = await generate(
                 engine, ctx, messages, thread_id, workflow=workflow,
-                capability=SMART, branch_id=self.branch_id)
+                capability=SMART, branch_id=self.branch_id,
+                country_code=self._country_code(), money_lang=money_lang)
         else:
             if decision is None and capability == SALES:
                 logger.warning(
@@ -233,7 +240,8 @@ class ReplyService(ReplyDelivery):
                     self.branch_id, thread_id)
                 decision, meta = await generate(
                     engine, ctx, messages, thread_id, workflow=workflow,
-                    capability=SMART, branch_id=self.branch_id)
+                    capability=SMART, branch_id=self.branch_id,
+                    country_code=self._country_code(), money_lang=money_lang)
         # enqueue_reply stamps this on every bubble — the only place the broker line reaches
         # the chat. Assigning it at the single exit is what keeps the fallback chains honest:
         # the chip must name the model that actually wrote the text the lead sees.
@@ -242,7 +250,7 @@ class ReplyService(ReplyDelivery):
 
     async def _strip_first_turn_price(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
-        decision: TurnDecision, *, workflow: str,
+        decision: TurnDecision, *, workflow: str, money_lang: str = "id",
     ) -> TurnDecision:
         """One rewrite when the opening message to a silent ad tap quotes a figure.
 
@@ -259,24 +267,31 @@ class ReplyService(ReplyDelivery):
             fixed, meta = await generate(
                 engine, ctx,
                 [*messages, {"role": "user", "content": AD_TAP_PRICE_CORRECTION}],
-                thread_id, workflow=workflow, capability=SALES, branch_id=self.branch_id)
+                thread_id, workflow=workflow, capability=SALES, branch_id=self.branch_id,
+                country_code=self._country_code(), money_lang=money_lang)
         except Exception as exc:  # noqa: BLE001 — an opener still beats no opener
             logger.warning("ad-tap price rewrite failed branch=%d thread=%d: %s",
                            self.branch_id, thread_id, exc)
             return decision
-        if fixed is None or not fixed.reply.strip() or quotes_price(fixed.reply):
+        if fixed is None or not fixed.reply.strip() or quotes_price(fixed.reply, money_lang):
             return decision
         self._last_llm_meta = meta
         return fixed
 
     async def _vet(  # noqa: PLR0913
         self, engine: DecisionEngine, ctx, messages: list[dict], thread_id: int,  # noqa: ANN001
-        decision: TurnDecision, *, workflow: str, context: str,
+        decision: TurnDecision, *, workflow: str, context: str, lang: str = "id",
+        branch_lang: str = "id",
     ) -> TurnDecision:
         """The one gate that fails closed — the money gate: a price, link, income figure or
         service not in the KB never ships. One rewrite on the strong chain, then the safe
-        hold-line + escalation. Everything else about the reply is the model's own call."""
-        issues = money_issues(decision.reply, context)
+        hold-line + escalation. Everything else about the reply is the model's own call.
+
+        `branch_lang` is what makes the gate see a sum at all: a figure is recognised by the
+        currency vocabulary of the branch's MARKET, and the catalogue reminder in the rewrite
+        is that tenant's catalogue (prices.py, money_gate.money_correction). `lang` is only
+        what the hold-line the lead reads is written in."""
+        issues = money_issues(decision.reply, context, branch_lang)
         if not issues:
             return decision
         logger.warning("money gate branch=%d thread=%d: %s",
@@ -285,17 +300,19 @@ class ReplyService(ReplyDelivery):
             fixed, meta = await generate(
                 engine, ctx,
                 [*messages, {"role": "user",
-                             "content": MONEY_CORRECTION.format(issues="; ".join(issues))}],
-                thread_id, workflow=workflow, capability=SALES, branch_id=self.branch_id)
+                             "content": money_correction(branch_lang).format(
+                                 issues="; ".join(issues))}],
+                thread_id, workflow=workflow, capability=SALES, branch_id=self.branch_id,
+                country_code=self._country_code(), money_lang=branch_lang)
             self._last_llm_meta = meta  # the rewrite is what ships — its cost is the turn's
         except Exception as exc:  # noqa: BLE001 — a failed rewrite means the hold-line ships
             logger.warning("money rewrite failed branch=%d thread=%d: %s",
                            self.branch_id, thread_id, exc)
             fixed = None
-        if fixed is None or money_issues(fixed.reply, context):
+        if fixed is None or money_issues(fixed.reply, context, branch_lang):
             logger.error("money gate unfixable branch=%d thread=%d — escalating",
                          self.branch_id, thread_id)
-            return _escalate(fixed or decision, MONEY_ESCALATION_REASON)
+            return _escalate(fixed or decision, MONEY_ESCALATION_REASON, lang)
         return fixed
 
     def _report_qualified(self, lead: Lead) -> None:
@@ -373,7 +390,14 @@ _CLOSING_WORDS = frozenset("""
     gue min mimin kak kakak ya deh dong nya lah kok aja juga banyak sekali
     selamat malam siang sore dan hari
 """.split())
-_WORD_RE = re.compile(r"[a-zA-ZÀ-ɏ]+")
+# Any Unicode letter, not just Latin. The old class was [a-zA-ZÀ-ɏ] — Latin Extended-B and
+# below — so a message written entirely in Cyrillic, Arabic, Chinese, Thai or Greek produced
+# ZERO words, and _is_closing_only took its "nothing was said at all" branch, the one meant for
+# a lone emoji. With our previous reply also non-Latin, _goodbye_loop concluded both sides had
+# said goodbye, decide() returned None, and the thread went silent for good — logging a line
+# that reads like correct behaviour. Branch 1 carries 85 all-Cyrillic inbound messages in the
+# last 90 days, hard price objections among them. A no-op for Latin and Indonesian text.
+_WORD_RE = re.compile(r"[^\W\d_]+")
 
 
 def _is_closing_only(text: str, extra: frozenset[str] = frozenset()) -> bool:

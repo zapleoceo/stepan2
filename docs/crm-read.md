@@ -1,7 +1,7 @@
 # CRM read-gate (Степан не трогает лида, которого уже ведёт менеджер)
 
 > **2026-07-17: источник = MCP самой CRM.** REST-контракт ниже больше не обязателен:
-> когда `crm_state_url` пуст, а платформенная настройка `crm_mcp_url` задана, гейт
+> когда `crm_state_url` пуст, а настройка филиала `crm_mcp_url` задана, гейт
 > читает состояние через MCP CRM (`app/adapters/crm_mcp.py`): `crm_client_search`
 > (телефон → id_uniq) + `crm_client_history`. Вердикт: `contract` в истории →
 > hold (deal won); успешный дозвон менеджера свежее `crm_manager_call_hold_h`

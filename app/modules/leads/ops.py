@@ -1,6 +1,8 @@
 """Lead funnel operations driven by an external system through the MCP connector.
 
-find_lead   → locate a lead by phone (the cross-channel key)
+Resolving the phone to a lead lives in leads.lookup — these ops all take a Lead the
+caller already pinned down to one branch.
+
 move_lead   → set the funnel stage + journal a StageEvent
 close_deal  → deal won: hand off, stop the bot
 call_failed → couldn't reach by phone: journal it, re-arm the bot, and have
@@ -12,10 +14,10 @@ No LLM work happens inside a stage move — only call_failed generates a message
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
@@ -39,15 +41,6 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _match_key(phone: str) -> str:
-    """Country/format-agnostic lookup key: the trailing national digits. Stored phones are
-    canonical '+<cc>…' E.164 (the only writers are phone.to_e164 / phone.extract_phone), but
-    a find_lead query may arrive as '0812…', '62…' or '+62…' — comparing the last 9 significant
-    digits matches all of those within a branch without re-hardcoding a country prefix here."""
-    digits = "".join(c for c in phone if c.isdigit())
-    return digits[-9:] if len(digits) >= 9 else digits
-
-
 @dataclass
 class LeadOpResult:
     ok: bool
@@ -58,25 +51,6 @@ class LeadOpResult:
     stage: str | None = None
     from_stage: str | None = None
     message_queued: bool = False
-    candidates: list[dict] = field(default_factory=list)
-
-
-async def find_lead(
-    session: AsyncSession, phone: str, branch_id: int | None = None,
-) -> Lead | None:
-    """Match a lead by phone across channels. Phone is the cross-channel identity key;
-    branch_id narrows the search when the caller knows it, else searches every branch."""
-    norm = _match_key(phone)
-    if not norm:
-        return None
-    stmt = select(Lead).where(Lead.phone_e164.is_not(None))
-    if branch_id is not None:
-        stmt = stmt.where(Lead.branch_id == branch_id)
-    leads = (await session.execute(stmt)).scalars().all()
-    for lead in leads:  # match BOTH sides on the national number — formats/country prefixes vary
-        if _match_key(lead.phone_e164 or "") == norm:
-            return lead
-    return None
 
 
 async def _journal(
@@ -248,6 +222,7 @@ async def _queue_call_failed_message(
         messages = build_messages_free(
             await engine.free_kb_context(),
             ctx.dialog, lang, stored,
+            contract=await engine.reply_contract(lang),
             now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": nudge.format(lang=lang)})
         # A lead we already tried to phone is well past small talk — worth the strong model.

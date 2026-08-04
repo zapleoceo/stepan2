@@ -26,6 +26,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
+from .outreach import NO_OUTREACH_SQL, no_outreach_param
 from .repository import (
     CoachingNoteRepo,
     DossierRepo,
@@ -97,8 +98,8 @@ def followup_framing(attempt: int, total: int, refusal: str) -> str:
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
 # `new` is excluded: an untouched lead gets a live reply, not a nudge).
-_FOLLOWUP_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"
+_FOLLOWUP_Q = (
+    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"  # noqa: S608
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid"
     "   AND l.stage IN ('qualifying', 'presenting', 'objection', 'nurturing')"
@@ -113,6 +114,7 @@ _FOLLOWUP_Q = (  # noqa: S608
     "   AND (ct.last_in_at IS NULL OR ct.last_in_at <= ct.last_out_at)"
     "   AND NOT EXISTS (SELECT 1 FROM outbox o"
     "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
+    + NO_OUTREACH_SQL
 )
 
 
@@ -146,12 +148,16 @@ class FollowupService:
         Follow-up enablement and the step-count bound are per-connector: a thread's schedule
         comes from its channel (Meta's shorter cadence vs Instagram's). The branch agent
         kill-switch still gates everything. Quiet hours do NOT filter this list — only the
-        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end."""
+        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end.
+
+        A connector that declares no proactive outreach is dropped before its settings are
+        even read: a nudge for an anonymous website visitor has no recipient, so generating
+        one is broker spend on text nobody can ever be shown."""
         if not self.settings.agent_enabled:
             return []  # branch global OFF: no generation at all
         rows = (
             await self.session.execute(
-                text(_FOLLOWUP_Q),
+                text(_FOLLOWUP_Q).bindparams(no_outreach_param()),
                 {"bid": self.branch_id, "now": now, "on": True},
             )
         ).all()
@@ -220,6 +226,9 @@ class FollowupService:
         branch = await self.session.get(Branch, self.branch_id)
         return branch.lang if branch is not None else "id"
 
+    def _country_code(self) -> str:
+        return (self.settings.phone_country_code if self.settings else "62") or "62"
+
     async def _entry_block(self, product_slug: str | None) -> str | None:
         """Which product this lead actually came for. The thread has carried the ad→product
         mapping all along, but the nudge never put it in the prompt: a lead who tapped an SMM
@@ -270,6 +279,7 @@ class FollowupService:
             coaching_notes=await self.coaching.active_manager_notes(),
             source_block=await self._entry_block(product_slug),
             manager_note=ctx.lead.manager_note if ctx.lead is not None else None,
+            contract=await engine.reply_contract(lang),
             now_block=await engine._now_block(ctx.thread))  # noqa: SLF001 — engine owns the clock
         messages.append({"role": "user", "content": followup_framing(
             sent_so_far + 1, len(self.settings.followup_schedule_h), stored.refusal)})
@@ -284,7 +294,8 @@ class FollowupService:
 
         decision, meta = await generate(
             engine, ctx, messages, thread_id, workflow="followup",
-            capability=capability, branch_id=self.branch_id)
+            capability=capability, branch_id=self.branch_id,
+            country_code=self._country_code(), money_lang=lang)
         if decision is None:
             return False
         # Every one of the three ad prefills asks about cost. The opener may not answer it (a
@@ -293,7 +304,8 @@ class FollowupService:
         first_in = next((m for m in ctx.dialog if m.direction == "in"), None)
         ad_promised_price = bool(
             first_in and AD_TEMPLATE_RE.match((first_in.text or "").strip()))
-        if uninvited_price(decision.reply, stored, ad_promised_price=ad_promised_price):
+        if uninvited_price(decision.reply, stored, ad_promised_price=ad_promised_price,
+                           money_lang=lang):
             # A nudge is never a reply to a fresh question — a price in one is always
             # volunteered (thread 4849). One rewrite, same as reply.py's money gate; if it
             # still quotes a figure, drop the nudge rather than send it.
@@ -302,9 +314,11 @@ class FollowupService:
             regen_messages = [*messages, {"role": "user", "content": PITCH_CORRECTION}]
             fixed, meta = await generate(
                 engine, ctx, regen_messages, thread_id, workflow="followup",
-                capability=SMART, branch_id=self.branch_id)
+                capability=SMART, branch_id=self.branch_id,
+                country_code=self._country_code(), money_lang=lang)
             if fixed is None or uninvited_price(
-                    fixed.reply, stored, ad_promised_price=ad_promised_price):
+                    fixed.reply, stored, ad_promised_price=ad_promised_price,
+                    money_lang=lang):
                 logger.warning("followup pitch gate unfixable branch=%d thread=%d — dropped",
                                 self.branch_id, thread_id)
                 await self._burn_dry_step(thread_id, now)
@@ -318,7 +332,7 @@ class FollowupService:
                         self.branch_id, thread_id)
             await self._burn_dry_step(thread_id, now)
             return False
-        issues = money_issues(decision.reply, context)
+        issues = money_issues(decision.reply, context, lang)
         if issues:
             # Nobody asked, so there is nothing to escalate — just don't send a wrong number.
             logger.warning("followup: branch=%d thread=%d ungrounded money claim (%s) — dropped",

@@ -14,6 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, ChannelThread, Lead
 from app.modules.budget import BudgetService
+from app.modules.promptlib.pipeline import prompt_contract, prompt_knowledge
 
 from .dates import annotate_dates
 from .needs import NeedsProfile, parse_needs
@@ -108,13 +109,29 @@ class DecisionEngine:
         self.last_context = ""  # KB context of the most recent turn — the money gate's ground
         self._free_ctx: str | None = None  # full KB surface, memoized per turn
         self._tz_offset_h: int | None = None  # branch tz, lazily loaded for the now-hint
+        self._lang: str | None = None  # branch language, for the date annotations in the prefix
+
+    async def _branch(self) -> Branch | None:
+        return await self.session.get(Branch, self.branch_id)
 
     async def _now_local(self) -> datetime:
         """Branch-local now; tz is loaded once per engine (one lead-turn)."""
         if self._tz_offset_h is None:
-            branch = await self.session.get(Branch, self.branch_id)
+            branch = await self._branch()
             self._tz_offset_h = int(branch.tz_offset_h or 0) if branch is not None else 0
         return datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=self._tz_offset_h)
+
+    async def branch_lang(self) -> str:
+        """The BRANCH's language, never the lead's — two callers, one reason.
+
+        The date annotations feed the cached prefix, which must stay byte-identical across
+        every lead of a branch or the broker's prompt cache dies. The money gate reads it
+        because currency belongs to the market, not to the sentence: a lead who writes to
+        branch 1 in Russian is still quoted rupiah out of an Indonesian knowledge base."""
+        if self._lang is None:
+            branch = await self._branch()
+            self._lang = (branch.lang if branch is not None else "id") or "id"
+        return self._lang
 
     async def _now_block(self, thread: ChannelThread | None = None) -> str:
         """Branch-local 'today is …' line for the prompt, so the model never offers a past
@@ -159,12 +176,21 @@ class DecisionEngine:
     async def free_kb_context(self) -> str:
         """The reply prompt's stable prefix: the whole fact surface, date-annotated, memoized
         per turn. Stable within a branch-local day (annotate_dates is the only date-dependent
-        input), which is what keeps the broker's prompt cache warm across leads."""
+        input), which is what keeps the broker's prompt cache warm across leads.
+
+        Which assembler produces it is the branch's own setting — see promptlib.pipeline."""
         if self._free_ctx is None:
-            context = await self.knowledge.full_knowledge_context()
-            self._free_ctx = annotate_dates(context, (await self._now_local()).date())
+            context = await prompt_knowledge(self.session, self.branch_id, self.knowledge)
+            self._free_ctx = annotate_dates(
+                context, (await self._now_local()).date(), await self.branch_lang())
         self.last_context = self._free_ctx  # the money gate checks the draft against this
         return self._free_ctx
+
+    async def reply_contract(self, lang: str) -> str:
+        """The selling contract that follows the fact surface in messages[0]. `lang` is the
+        fallback language for a lead whose own is unreadable — the same value the caller
+        passes to build_messages_free, so the prefix and the contract cannot disagree."""
+        return await prompt_contract(self.session, self.branch_id, lang)
 
     async def run(
         self, ctx: DecisionContext, messages: list[dict], thread_id: int, *,

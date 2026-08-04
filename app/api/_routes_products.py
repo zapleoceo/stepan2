@@ -12,11 +12,17 @@ from app.admin._branch import (
     is_branch_forbidden,
     is_branch_write_forbidden,
     writable_branch_ids,
+    writable_selected_branch_id,
 )
-from app.modules.knowledge.history import list_revisions, record_revision, restore_revision
+from app.modules.knowledge.history import (
+    list_revisions,
+    record_revision,
+    restore_revision_scoped,
+)
 
 from ._i18n import apply_lang
 from ._query import _branch_where
+from ._ui_html import pick_branch_html
 from ._ui_kb import kb_history_html
 from ._ui_panels import product_edit_html, products_panel_html
 
@@ -128,10 +134,12 @@ async def products_create(
     sort_order: int = Form(default=0),
 ) -> HTMLResponse:
     apply_lang(request)
-    # Create in a branch the caller may WRITE (super: None → default branch 1). The
-    # WriteGuardMiddleware already blocks a pure viewer, so `writable` is never [] here.
-    writable = writable_branch_ids(request)
-    branch_id = writable[0] if writable else 1
+    # The product lands in the branch ON SCREEN. The old `writable[0] if writable else 1`
+    # made every super_admin's new product a branch-1 (Indonesia) product regardless of the
+    # branch filter — and branch 1 is the one tenant whose catalogue must not grow by accident.
+    branch_id = writable_selected_branch_id(request)
+    if branch_id is None:
+        return HTMLResponse(pick_branch_html(), status_code=403)
     slug = slug.strip().lower().replace(" ", "_")
     if not slug:
         return HTMLResponse(
@@ -141,10 +149,13 @@ async def products_create(
     async with session_scope() as session:
         await session.execute(
             text(
-                "INSERT INTO product (branch_id, slug, title, content, is_active, sort_order)"
+                "INSERT INTO product"
+                " (branch_id, slug, title, content, is_active, sort_order)"
                 " VALUES (:bid, :slug, :t, :c, :a, :s)"
                 " ON CONFLICT (branch_id, slug) DO NOTHING"
             ),
+            # kind and updated_at are left to their DDL server_defaults, which Product now
+            # declares (see models.py) so the same statement runs the same way in tests.
             {"bid": branch_id, "slug": slug, "t": title.strip(),
              "c": content.strip(), "a": active, "s": sort_order},
         )
@@ -189,15 +200,23 @@ async def products_history(prod_id: int, request: Request) -> HTMLResponse:
 @router.post("/products/restore", response_class=HTMLResponse)
 async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLResponse:
     apply_lang(request)
-    writable = writable_branch_ids(request)  # scope by WRITE right, not view (viewer can't)
-    bid = writable[0] if writable else None
+    # Scope by WRITE right on the REVISION'S OWN branch — never on a positional pick out of
+    # the writable set, which restored into (or 404'd on) the wrong tenant.
+    writable = writable_branch_ids(request)
     async with session_scope() as session:
-        out = await restore_revision(session, bid, rev_id, actor=actor_from_request(request))
+        status, out = await restore_revision_scoped(
+            session, rev_id, writable=writable, actor=actor_from_request(request))
+        if status == "forbidden":
+            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
         if out is None:
             return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        # Scoped read-back: slug is unique per branch only (uq_product_branch_slug), so the
+        # old `WHERE slug=:s` handed the editor an arbitrary tenant's row — and its id, which
+        # product_edit_html wires straight into the /save and /delete buttons.
         row = (await session.execute(
             text("SELECT id, slug, title, content, is_active, sort_order"
-                 " FROM product WHERE slug=:s"), {"s": out[1]})).first()
+                 " FROM product WHERE slug=:s AND branch_id=:b"),
+            {"s": out[1], "b": out[2]})).first()
     if not row:
         return HTMLResponse('<div class="emp">Restored</div>')
     return HTMLResponse(product_edit_html(
@@ -208,14 +227,17 @@ async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLRes
 async def products_delete(prod_id: int, request: Request) -> RedirectResponse:
     writable = writable_branch_ids(request)  # delete only from a branch the caller may WRITE
     async with session_scope() as session:
-        if writable:
-            await session.execute(
-                text("DELETE FROM product WHERE id=:id AND branch_id=ANY(:bids)"),  # noqa: S608
-                {"id": prod_id, "bids": writable},
-            )
-        else:
+        if writable is None:  # super_admin / auth off — may delete in any branch
             await session.execute(
                 text("DELETE FROM product WHERE id=:id"),  # noqa: S608
                 {"id": prod_id},
             )
+        elif writable:
+            await session.execute(
+                text("DELETE FROM product WHERE id=:id AND branch_id=ANY(:bids)"),  # noqa: S608
+                {"id": prod_id, "bids": writable},
+            )
+        # writable == [] is a read-only caller: `if writable:` used to send them down the
+        # UNSCOPED branch and delete any product by id. WriteGuardMiddleware stops a pure
+        # viewer earlier, but the empty list must not be the permissive case here either.
     return RedirectResponse("/ui/products/panel", status_code=303)

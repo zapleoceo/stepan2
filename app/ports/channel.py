@@ -58,6 +58,16 @@ class InboundComment:
 
 
 class ChannelPort(Protocol):
+    """The baseline every connector honours: read, send, and say whether it is alive.
+
+    Nothing optional lives here. It used to also declare fetch_comments/reply_to_comment/
+    hide_comment, which only the Instagram adapter implements — so the Protocol described a
+    port that two of three adapters were not, and callers had to hasattr() their way back to
+    the truth. An optional power is DECLARED per connector in app/connectors/spec.py
+    (Capability) and typed where it is consumed — deletions.Revoker, profiles.ProfileFetcher,
+    media.MediaDownloader. Only CommentPort lives here, because CommentService takes the whole
+    port and calls three of its methods."""
+
     kind: ChannelKind
 
     async def fetch_inbound(self) -> list[InboundMessage]:
@@ -69,12 +79,15 @@ class ChannelPort(Protocol):
         ...
 
     async def session_status(self) -> SessionStatus:
-        """Жива ли сессия / открыто ли окно ответа."""
+        """Жива ли сессия / окно ответа."""
         ...
 
+
+class CommentPort(ChannelPort, Protocol):
+    """Capability.COMMENTS — public comments under our own posts (IG private API)."""
+
     async def fetch_comments(self, *, since: datetime | None = None) -> list[InboundComment]:
-        """Новые комментарии под НАШИМИ постами (public channel). Не все адаптеры это умеют —
-        дефолт пустой список, поддержка только у IG private."""
+        """Новые комментарии под НАШИМИ постами (public channel)."""
         ...
 
     async def reply_to_comment(self, comment_external_id: str, text: str) -> SendResult:
