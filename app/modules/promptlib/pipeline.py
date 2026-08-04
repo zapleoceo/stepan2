@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.modules.conversation.free_mode import free_contract, language_name
 from app.modules.knowledge.service import KnowledgeService
 from app.modules.settings.service import get_settings
 
@@ -49,6 +48,12 @@ async def prompt_knowledge(
 async def prompt_contract(session: AsyncSession, branch_id: int, lang: str) -> str:
     """The selling contract for this branch's pipeline. `lang` is the language to fall back
     to when the lead's is unreadable, not the language to write the contract in."""
+    # Imported here, not at module scope: app.modules.conversation.__init__ pulls in
+    # ReplyService -> delivery -> engine, and engine imports THIS module. At module scope that
+    # cycle only survives because every existing entry point happens to import conversation
+    # first; anything that reaches pipeline first (a script, a test) died on a partially
+    # initialised module. Deferring the leaf import removes the ordering dependency entirely.
+    from app.modules.conversation.free_mode import free_contract, language_name
     if await branch_pipeline(session, branch_id) == COMPOSER:
         return craft_contract(language_name(lang))
     return free_contract(lang)

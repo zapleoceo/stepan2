@@ -67,14 +67,21 @@ async def compose_context(session: AsyncSession, branch_id: int, lang: str) -> s
     catalogue on purpose. A branch that outgrows the budget loses a product card, which costs
     the leads asking about that one course; losing the payment policy or the prohibitions
     instead would cost every lead. The real answer to an overrun is an operator turning
-    in_prompt off, which is why the drop is logged with the names of what fell out."""
+    in_prompt off, which is why the drop is logged with the names of what fell out.
+
+    Because the catalogue IS the drop tail, its order decides which card survives an overrun.
+    So it follows the branch's own sort_order, the same field the KB editor already exposes,
+    with the slug only as the tie-break that keeps the bytes stable. Sorting by slug alone —
+    what this did first — made alphabetical position the operator's only lever, and a
+    flagship card called zzz_* the first thing to fall out."""
     docs = [d for d in await KnowledgeRepo(session, branch_id).all()
             if d.in_prompt and d.content.strip()]
     persona = sorted((d for d in docs if d.category == PERSONA_CATEGORY), key=_doc_key)
     method = sorted((d for d in docs if d.category == METHOD_CATEGORY), key=_doc_key)
     special = {PERSONA_CATEGORY, METHOD_CATEGORY}
     facts = sorted((d for d in docs if d.category not in special), key=_doc_key)
-    products = sorted(await ProductRepo(session, branch_id).active(), key=lambda p: p.slug)
+    products = sorted(await ProductRepo(session, branch_id).active(),
+                      key=lambda p: (p.sort_order, p.slug))
 
     blocks = [
         *_persona_block(persona, lang),

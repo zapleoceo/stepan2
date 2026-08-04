@@ -14,10 +14,11 @@ Three things land together because separately none of them is usable:
 3. The switch to the composer pipeline for the branches the hardcoded list was truncating,
    and branch 7 rebuilt from the library so it inherits nothing from the previous occupant.
 
-Branch 1 is excluded BY NAME and stays on the legacy assembler: 37 000 live messages behind a
-pinned fingerprint, migrated in its own step and never as a side effect of this one. Branch 8
-is not selected either — every document it holds is one the legacy list already loads, and it
-is branch 1's sim proxy, so it must keep assembling the same way branch 1 does.
+Branch 1 is excluded BY ID and stays on the legacy assembler: 37 000 live messages behind a
+pinned fingerprint, migrated in its own step and never as a side effect of this one. By id and
+not by name, because a rename in the branch panel must not be able to arm this. Branch 8 is
+not selected either — every document it holds is one the legacy list already loads, and it is
+branch 1's sim proxy, so it must keep assembling the same way branch 1 does.
 
 The seed text is IMPORTED from app.modules.promptlib.library_seed rather than copied in here.
 That is the opposite of the usual rule for migrations, and deliberate: this is content, not
@@ -26,8 +27,17 @@ NEW version instead of rewriting a row somebody has already cloned from, and two
 four kilobytes of prose would silently disagree within a month.
 
 Reversible: nothing is deleted on the way in. Branch 7's own rows are only flagged out of the
-prompt, and downgrade flags them back. Every statement is portable — the migration suite runs
-head-to-head on SQLite, so no now(), no ANY(), no btrim().
+prompt, and downgrade flags them back.
+
+Every statement has to be portable BOTH ways: the migration suite runs head-to-head on SQLite
+while production is Postgres, so no now(), no ANY(), no btrim() — and, the trap that is
+invisible on SQLite, never an integer in a boolean column. `knowledge_doc.in_prompt` and
+`product.is_active` are Boolean; SQLite takes `= 1` happily, Postgres registers int4→bool as
+an EXPLICIT-only cast and aborts with "column is of type boolean but expression is of type
+integer". Deploy runs migrate-first, so that abort is the whole release. Every flag below is
+therefore a bound Python bool, and
+tests/test_prompt_library_migration.py::test_no_boolean_column_is_ever_given_an_integer reads
+back the SQL this module actually executes to keep it that way.
 
 Revision ID: plib000001
 Revises: dossbf00001
@@ -66,6 +76,14 @@ _FRESH_START_NAME = "TEST"
 # imported: what a branch fitted into is a fact about this migration, and a later raise of the
 # ceiling must not retroactively change which branches this switched.
 _CTX_BUDGET_ON_THE_DAY = 104000
+
+# What composer.compose_context WRAPS each block in, on top of the content: a header line
+# ("[persona <slug> lang=xx]\n" / "[method <slug>]\n" / "[<slug>]\n" — 20 chars of furniture
+# around the slug at worst) plus the "\n\n" the blocks are joined with. Counting raw content
+# alone would let a branch pass the gate at 103 900 and then lose catalogue cards on its very
+# first reply — the exact silent loss the gate exists to prevent. Product blocks also carry
+# the title on its own line, which is why they are measured separately.
+_BLOCK_OVERHEAD = 22
 
 _CATALOGUE_SLUGS = tuple(
     card["slug"]
@@ -112,21 +130,29 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     conn = op.get_bind()
-    b = _FRESH_START_BRANCH
-    conn.execute(sa.text("UPDATE knowledge_doc SET in_prompt = 1 WHERE branch_id = :b"), {"b": b})
-    conn.execute(_expanding(
-        "DELETE FROM knowledge_doc WHERE branch_id = :b AND slug IN :slugs", "slugs"),
-        {"b": b, "slugs": list(_DOC_SLUGS)})
-    conn.execute(_expanding(
-        "UPDATE product SET is_active = 1 WHERE branch_id = :b AND slug NOT IN :slugs",
-        "slugs"), {"b": b, "slugs": list(_CATALOGUE_SLUGS)})
-    conn.execute(_expanding(
-        "DELETE FROM product WHERE branch_id = :b AND slug IN :slugs", "slugs"),
-        {"b": b, "slugs": list(_CATALOGUE_SLUGS)})
+    _undo_fresh_start(conn)
     conn.execute(sa.text("DELETE FROM app_setting WHERE key = 'prompt_pipeline'"))
     op.drop_table("branch_prompt_source")
     op.drop_table("prompt_library_item")
     op.drop_column("knowledge_doc", "in_prompt")
+
+
+def _undo_fresh_start(conn: sa.engine.Connection) -> None:
+    """Branch 7 back to what it carried: the cloned rows go, its own products come back on.
+
+    Its documents need no un-flagging — in_prompt is dropped three statements later, so
+    restoring it would be work nobody can observe. is_active is a column that SURVIVES the
+    downgrade, so that one genuinely has to be put back."""
+    b = _FRESH_START_BRANCH
+    conn.execute(_expanding(
+        "DELETE FROM knowledge_doc WHERE branch_id = :b AND slug IN :slugs", "slugs"),
+        {"b": b, "slugs": list(_DOC_SLUGS)})
+    conn.execute(_expanding(
+        "UPDATE product SET is_active = :on WHERE branch_id = :b AND slug NOT IN :slugs",
+        "slugs"), {"b": b, "on": True, "slugs": list(_CATALOGUE_SLUGS)})
+    conn.execute(_expanding(
+        "DELETE FROM product WHERE branch_id = :b AND slug IN :slugs", "slugs"),
+        {"b": b, "slugs": list(_CATALOGUE_SLUGS)})
 
 
 def _expanding(sql: str, name: str) -> sa.TextClause:
@@ -151,20 +177,28 @@ def _switch_truncated_branches(conn: sa.engine.Connection) -> None:
     10 carry ~98k of documents and ~66k of product cards against a 104k ceiling, so switching
     them blind would trade one silent loss for a bigger one. They stay on legacy until
     somebody turns in_prompt off on the playbooks they no longer use; the setting is one
-    dropdown in the branch panel."""
+    dropdown in the branch panel.
+
+    The sums mirror what the composer actually assembles, not what the rows contain: only
+    in-prompt documents with real content, and every block's header and separator counted —
+    see _BLOCK_OVERHEAD."""
     conn.execute(_expanding(
         "INSERT INTO app_setting (branch_id, channel_id, key, value) "
         "SELECT b.id, NULL, 'prompt_pipeline', 'composer' FROM branch b "
         "WHERE b.id <> 1 "
         "AND EXISTS (SELECT 1 FROM knowledge_doc d WHERE d.branch_id = b.id "
         "            AND d.slug NOT IN :legacy AND length(trim(d.content)) > 0) "
-        "AND ((SELECT coalesce(sum(length(d.content)), 0) FROM knowledge_doc d "
-        "        WHERE d.branch_id = b.id) "
-        "   + (SELECT coalesce(sum(length(p.content)), 0) FROM product p "
-        "        WHERE p.branch_id = b.id AND p.is_active)) < :budget "
+        "AND ((SELECT coalesce(sum(length(d.content) + length(d.slug) + :pad), 0) "
+        "        FROM knowledge_doc d WHERE d.branch_id = b.id AND d.in_prompt "
+        "          AND length(trim(d.content)) > 0) "
+        "   + (SELECT coalesce(sum(length(p.content) + length(p.slug) "
+        "                          + length(p.title) + :pad), 0) FROM product p "
+        "        WHERE p.branch_id = b.id AND p.is_active "
+        "          AND length(trim(p.content)) > 0)) < :budget "
         "AND NOT EXISTS (SELECT 1 FROM app_setting s WHERE s.branch_id = b.id "
         "                AND s.channel_id IS NULL AND s.key = 'prompt_pipeline')", "legacy"),
-        {"legacy": list(_LEGACY_SLUGS), "budget": _CTX_BUDGET_ON_THE_DAY})
+        {"legacy": list(_LEGACY_SLUGS), "budget": _CTX_BUDGET_ON_THE_DAY,
+         "pad": _BLOCK_OVERHEAD})
 
 
 def _fresh_start(conn: sa.engine.Connection, now: datetime) -> None:
@@ -175,9 +209,10 @@ def _fresh_start(conn: sa.engine.Connection, now: datetime) -> None:
     if row is None:
         return
     bid = _FRESH_START_BRANCH
-    conn.execute(sa.text("UPDATE knowledge_doc SET in_prompt = 0 WHERE branch_id = :b"),
-                 {"b": bid})
-    conn.execute(sa.text("UPDATE product SET is_active = 0 WHERE branch_id = :b"), {"b": bid})
+    conn.execute(sa.text("UPDATE knowledge_doc SET in_prompt = :off WHERE branch_id = :b"),
+                 {"b": bid, "off": False})
+    conn.execute(sa.text("UPDATE product SET is_active = :off WHERE branch_id = :b"),
+                 {"b": bid, "off": False})
     for item in SEED_ITEMS:
         lib = conn.execute(sa.text(
             "SELECT id FROM prompt_library_item WHERE kind = :kind AND slug = :slug "
@@ -202,10 +237,11 @@ def _clone_doc(conn: sa.engine.Connection, branch_id: int, item: dict[str, str],
     category = "persona" if item["kind"] == "persona" else "method"
     conn.execute(sa.text(
         "INSERT INTO knowledge_doc (branch_id, slug, title, category, sort_order, content, "
-        "in_prompt, updated_at) VALUES (:b, :slug, :title, :cat, :ord, :body, 1, :ts) "
+        "in_prompt, updated_at) VALUES (:b, :slug, :title, :cat, :ord, :body, :on, :ts) "
         "ON CONFLICT (branch_id, slug) DO NOTHING"),
         {"b": branch_id, "slug": item["slug"], "title": item["title"], "cat": category,
-         "ord": 0 if category == "persona" else 50, "body": item["body"], "ts": now})
+         "ord": 0 if category == "persona" else 50, "body": item["body"], "on": True,
+         "ts": now})
 
 
 def _clone_catalogue(conn: sa.engine.Connection, branch_id: int, body: str,
@@ -213,8 +249,8 @@ def _clone_catalogue(conn: sa.engine.Connection, branch_id: int, body: str,
     for card in json.loads(body or "[]"):
         conn.execute(sa.text(
             "INSERT INTO product (branch_id, slug, title, content, is_active, sort_order, "
-            "kind, updated_at) VALUES (:b, :slug, :title, :content, 1, :ord, :kind, :ts) "
+            "kind, updated_at) VALUES (:b, :slug, :title, :content, :on, :ord, :kind, :ts) "
             "ON CONFLICT (branch_id, slug) DO NOTHING"),
             {"b": branch_id, "slug": card["slug"], "title": card["title"],
              "content": card.get("content", ""), "ord": int(card.get("sort_order", 0)),
-             "kind": card.get("kind", "course"), "ts": now})
+             "kind": card.get("kind", "course"), "on": True, "ts": now})

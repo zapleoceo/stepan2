@@ -19,7 +19,6 @@ from app.domain.clock import utc_now
 PERSONA = "persona"
 METHOD = "method"
 CATALOGUE = "catalogue"
-LAYERS = (PERSONA, METHOD, CATALOGUE)
 
 _PERSONA_BODY = """\
 ## Identity

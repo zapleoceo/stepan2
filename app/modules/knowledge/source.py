@@ -30,10 +30,15 @@ async def copy_kb(session: AsyncSession, dst_branch_id: int, src_branch_id: int)
         text("DELETE FROM knowledge_doc WHERE branch_id=:d"), {"d": dst_branch_id})
     await session.execute(
         text("DELETE FROM product WHERE branch_id=:d"), {"d": dst_branch_id})
+    # in_prompt has to travel with the doc. The column list is enumerated, so a column added
+    # to the table is one silently left at its server default here — and this one defaults to
+    # true, which would put straight back into the prompt the playbooks an operator had
+    # switched off to get the branch under the context budget.
     docs = (await session.execute(text(
         "INSERT INTO knowledge_doc (branch_id, slug, title, category, sort_order, content,"
-        " updated_at, updated_by)"
-        " SELECT :d, slug, title, category, sort_order, content, updated_at, updated_by"
+        " in_prompt, updated_at, updated_by)"
+        " SELECT :d, slug, title, category, sort_order, content, in_prompt, updated_at,"
+        " updated_by"
         " FROM knowledge_doc WHERE branch_id=:s"), {"d": dst_branch_id, "s": src_branch_id}))
     prods = (await session.execute(text(
         "INSERT INTO product (branch_id, slug, title, content, is_active, kind, sort_order,"

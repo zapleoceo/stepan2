@@ -15,11 +15,14 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+import argparse  # noqa: E402
 import json  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
 
 import pytest  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
+import scripts.clone_prompt_library as cli  # noqa: E402
 from app.adapters.db.models import (  # noqa: E402
     Branch,
     BranchPromptSource,
@@ -218,3 +221,145 @@ async def test_a_rebuilt_branch_carries_nothing_from_the_previous_occupant(db_se
     assert "[persona neutral_consultant lang=en]" in composed
     assert "[method consultative_chat_sales]" in composed
     assert "[product example_course lang=en]" in composed
+
+
+@pytest.mark.asyncio
+async def test_a_conflicting_clone_leaves_the_branch_exactly_as_it_was(db_session) -> None:  # noqa: ANN001
+    """A refused clone must change NOTHING.
+
+    The retirement loop used to run before the conflict check, so a --replace clone onto a
+    slug the branch already held stood the incumbent persona down and then raised: the branch
+    was left selling with no persona in its prompt at all, reported as a failure. Silent
+    half-destruction is worse than either outcome the operator asked for."""
+    await ensure_library(db_session)
+    bid = await _occupied_branch(db_session)
+    item = await library_item(db_session, PERSONA, "neutral_consultant")
+    await clone_into_branch(db_session, bid, item)  # the branch now holds it, unretired
+    incumbent = await KnowledgeRepo(db_session, bid).by_slug("persona_core")
+    assert incumbent.in_prompt is True
+
+    with pytest.raises(CloneConflict):
+        await clone_into_branch(db_session, bid, item, replace_existing=True)
+
+    db_session.expire_all()
+    still = await KnowledgeRepo(db_session, bid).by_slug("persona_core")
+    assert still.in_prompt is True, "the incumbent persona was retired by a clone that failed"
+    composed = await compose_context(db_session, bid, "en")
+    assert "[persona persona_core lang=en]" in composed
+
+
+@pytest.mark.asyncio
+async def test_a_catalogue_that_clashes_on_one_card_stands_nothing_down(db_session) -> None:  # noqa: ANN001
+    """Same property one layer over, and the harder half: the clash is on the LAST thing the
+    loop touches, so a per-card check that ran as it went would already have deactivated the
+    branch's own cards by the time it fired."""
+    await ensure_library(db_session)
+    bid = await _branch(db_session, "Shop")
+    item = await library_item(db_session, CATALOGUE, "starter_catalogue")
+    clashing = json.loads(item.body)[0]["slug"]
+    db_session.add(Product(branch_id=bid, slug="own_course", title="Ours",
+                           content="Ours", is_active=True))
+    db_session.add(Product(branch_id=bid, slug=clashing, title="Ours too",
+                           content="Ours too", is_active=True))
+    await db_session.flush()
+
+    with pytest.raises(CloneConflict):
+        await clone_into_branch(db_session, bid, item, replace_existing=True)
+
+    db_session.expire_all()
+    active = {p.slug for p in await ProductRepo(db_session, bid).active()}
+    assert active == {"own_course", clashing}, "a failed clone deactivated the branch's cards"
+
+
+@pytest.mark.asyncio
+async def test_a_named_version_is_taken_as_asked_a_browse_is_published_only(db_session) -> None:  # noqa: ANN001
+    """A retired method must not walk into a live branch's prompt just because it is the only
+    row under that slug. Naming the version is an operator saying so out loud; not naming one
+    is a browse, and a browse gets published or nothing."""
+    await ensure_library(db_session)
+    item = await library_item(db_session, METHOD, "consultative_chat_sales")
+    item.status = "retired"
+    db_session.add(item)
+    await db_session.flush()
+    assert await library_item(db_session, METHOD, "consultative_chat_sales") is None
+    named = await library_item(db_session, METHOD, "consultative_chat_sales", item.version)
+    assert named is not None and named.status == "retired"
+
+
+@pytest.mark.asyncio
+async def test_a_newer_published_version_wins_a_browse(db_session) -> None:  # noqa: ANN001
+    await ensure_library(db_session)
+    one = await library_item(db_session, METHOD, "consultative_chat_sales")
+    db_session.add(PromptLibraryItem(kind=METHOD, slug="consultative_chat_sales",
+                                     version="1.10", title="Newer", body="newer body",
+                                     status="published"))
+    await db_session.flush()
+    # 1.10 > 1.9 > 1.0 numerically; string order would put "1.10" before "1.9".
+    db_session.add(PromptLibraryItem(kind=METHOD, slug="consultative_chat_sales",
+                                     version="1.9", title="Older", body="older body",
+                                     status="published"))
+    await db_session.flush()
+    assert one.version == "1.0"
+    assert (await library_item(db_session, METHOD, "consultative_chat_sales")).version == "1.10"
+
+
+class _RecordingScope:
+    """A stand-in for db.session_scope with its real semantics: commit on the way out,
+    rollback and re-raise on an exception. A fake that swallowed the exception would prove
+    nothing about the property under test — which is exactly that one escapes."""
+
+    def __init__(self, session) -> None:  # noqa: ANN001
+        self.session = session
+        self.committed = False
+        self.rolled_back = False
+
+    @asynccontextmanager
+    async def __call__(self):  # noqa: ANN202
+        try:
+            yield self.session
+            self.committed = True
+        except Exception:
+            self.rolled_back = True
+            raise
+
+
+@pytest.mark.asyncio
+async def test_the_script_unwinds_the_whole_clone_when_one_layer_fails(  # noqa: ANN201
+    db_session, monkeypatch,  # noqa: ANN001
+):
+    """Every layer or none.
+
+    session_scope COMMITS on the way out, so a failure reported with `return 1` from inside it
+    persisted the layers that had already succeeded — the persona clone landing for real while
+    the command printed an error about the method. The failure has to leave by raising."""
+    await ensure_library(db_session)
+    bid = await _branch(db_session, "Fresh")
+    scope = _RecordingScope(db_session)
+    monkeypatch.setattr(cli, "session_scope", scope)
+
+    args = argparse.Namespace(branch_id=bid, persona="neutral_consultant",
+                              method="no_such_method", catalogue=None, version=None,
+                              replace=True, overwrite=False)
+    assert await cli._clone(args) == 1  # noqa: SLF001
+
+    assert scope.rolled_back and not scope.committed
+    # And the first layer really had landed in the session the scope was asked to unwind:
+    # without that, "nothing committed" would be true for an uninteresting reason.
+    assert await KnowledgeRepo(db_session, bid).by_slug("neutral_consultant") is not None
+
+
+@pytest.mark.asyncio
+async def test_the_source_report_says_which_branch_cloned_what(db_session) -> None:  # noqa: ANN001
+    """branch_prompt_source is only worth writing if something reads it back — the question
+    it was created for ('who is still on method 1.0') needs an answer inside the product."""
+    await ensure_library(db_session)
+    plain = await _branch(db_session, "Untouched")
+    cloned = await _branch(db_session, "Rebuilt")
+    item = await library_item(db_session, METHOD, "consultative_chat_sales")
+    await clone_into_branch(db_session, cloned, item)
+
+    lines = await cli.source_report(db_session)
+    assert len(lines) == 2
+    assert f"consultative_chat_sales@{item.version}" in lines[1]
+    assert "legacy" in lines[1]  # cloned, but nobody switched the pipeline — say so
+    assert str(plain) in lines[0] and "(nothing cloned)" in lines[0]

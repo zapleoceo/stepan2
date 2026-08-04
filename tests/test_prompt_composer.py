@@ -18,9 +18,14 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+import pathlib  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+
 import pytest  # noqa: E402
 
 from app.adapters.db.models import AppSetting, Branch, KnowledgeDoc, Product  # noqa: E402
+from app.config import settings  # noqa: E402
 from app.modules.conversation.dossier import LeadDossier  # noqa: E402
 from app.modules.conversation.free_mode import (  # noqa: E402
     build_messages_free,
@@ -199,3 +204,72 @@ async def test_craft_still_states_the_machine_contract(db_session) -> None:  # n
     assert "At most 3 bubbles, split with '|||'" in craft
     assert "needs_human=true ONLY when" in craft
     assert "Bahasa Melayu" in craft  # the fallback language, named as a person would name it
+
+
+@pytest.mark.asyncio
+async def test_the_catalogue_follows_the_branchs_own_order(db_session) -> None:  # noqa: ANN001
+    """sort_order decides which card survives an overrun, so it has to reach the assembly.
+
+    The catalogue is the composer's declared drop tail: whatever sits last is what a branch
+    loses first. Ordering it by slug alone made alphabetical position the operator's only
+    lever — a flagship called zzz_* fell out before a minor course called aaa_*, and the
+    sort_order the KB editor exposes did nothing at all."""
+    bid = await _branch(db_session)
+    db_session.add(Product(branch_id=bid, slug="zzz_flagship", title="Flagship",
+                           content="the one that pays for the branch", sort_order=0,
+                           is_active=True))
+    db_session.add(Product(branch_id=bid, slug="aaa_minor", title="Minor",
+                           content="a small evening course", sort_order=99, is_active=True))
+    await db_session.flush()
+    composed = await compose_context(db_session, bid, "en")
+    assert composed.index("[product zzz_flagship") < composed.index("[product aaa_minor")
+
+
+@pytest.mark.asyncio
+async def test_the_legacy_assembler_drops_a_whole_card_not_a_slice(db_session) -> None:  # noqa: ANN001
+    """The path the golden cannot see, and the one branch 1 is actually on.
+
+    tests/test_prompt_golden.py pins the CONTRACT hashes; it never hashes an assembled KB, and
+    its fixture is four tiny docs, so full_knowledge_context's over-budget branch never runs
+    there. That branch is the one the 30.07.2026 incident lived in: the cap was a character
+    slice that landed inside a product card, the prompt ended '## PRI', and the price section
+    was never read on any reply. So it gets its own test with real over-budget content."""
+    budget = settings().free_context_char_budget
+    b = Branch(name="Big", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    db_session.add(KnowledgeDoc(branch_id=b.id, slug="persona_core", category="persona",
+                                title="Persona", content="I sell here."))
+    db_session.add(KnowledgeDoc(branch_id=b.id, slug="facts_policy", title="Policy",
+                                content="P" * (budget - 10_000)))
+    for slug in ("card_a", "card_b", "card_c"):
+        db_session.add(Product(branch_id=b.id, slug=slug, title=slug.upper(), is_active=True,
+                               content=f"QUICK FACTS: {slug}\n" + "C" * 4_000))
+    await db_session.flush()
+
+    assembled = await KnowledgeService(db_session, b.id).full_knowledge_context()
+
+    assert len(assembled) <= budget
+    assert "[facts_policy]" in assembled
+    assert "[product card_a" in assembled and "[product card_b" in assembled
+    # Gone entirely — header, title and body. A slice would have left the header behind and
+    # the model would read a card that stops mid-sentence as a card that says nothing more.
+    assert "card_c" not in assembled and "CARD_C" not in assembled
+
+
+def test_promptlib_can_be_imported_before_anything_else() -> None:
+    """app.modules.conversation.__init__ imports ReplyService -> delivery -> engine, and
+    engine imports promptlib.pipeline. At module scope pipeline importing conversation closed
+    that ring, and it only ever worked because every existing entry point happened to import
+    conversation first. A script or a test that reached pipeline first died on a partially
+    initialised module — so import it first, in a clean interpreter, and see."""
+    root = pathlib.Path(__file__).parents[1]
+    proc = subprocess.run(  # noqa: S603
+        [sys.executable, "-c",
+         "import app.modules.promptlib.pipeline as p; print(p.COMPOSER)"],
+        capture_output=True, text=True, cwd=str(root),
+        env={**os.environ, "PYTHONPATH": str(root),
+             "STEPAN2_DATABASE_URL": "sqlite+aiosqlite://",
+             "STEPAN2_SECRET_KEY": Fernet.generate_key().decode()})
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "composer"

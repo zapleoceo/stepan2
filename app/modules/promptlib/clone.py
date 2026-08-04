@@ -33,7 +33,12 @@ _CATEGORY_OF = {PERSONA: PERSONA_CATEGORY, METHOD: METHOD_CATEGORY}
 
 class CloneConflict(Exception):
     """The branch already holds a row the clone would overwrite. Raised rather than merged:
-    the branch's copy is the one that has been edited by the people who sell there."""
+    the branch's copy is the one that has been edited by the people who sell there.
+
+    Detected BEFORE anything is written. The first version ran the `replace_existing`
+    retirement loop first, so a conflict left the branch with its incumbent persona already
+    flagged out of the prompt and no replacement written — a branch selling with no persona
+    at all, from a command that printed an error and exited."""
 
 
 @dataclass(frozen=True)
@@ -46,13 +51,18 @@ class CloneResult:
 async def library_item(
     session: AsyncSession, kind: str, slug: str, version: str | None = None,
 ) -> PromptLibraryItem | None:
-    """One library entry; without a version, the highest-sorting published one for that slug."""
+    """One library entry: the exact `version` if asked for, else the highest PUBLISHED one.
+
+    Naming a version is an operator saying which row they want, draft or retired included.
+    Not naming one is a browse, and a browse must never land a retired method in a live
+    branch's prompt just because nothing published exists under that slug — returning None
+    makes the caller say the version out loud."""
     q = select(PromptLibraryItem).where(
         PromptLibraryItem.kind == kind, PromptLibraryItem.slug == slug)
     if version is not None:
-        q = q.where(PromptLibraryItem.version == version)
-    rows = list((await session.execute(q)).scalars())
-    published = [r for r in rows if r.status == "published"] or rows
+        return (await session.execute(q.where(
+            PromptLibraryItem.version == version))).scalars().first()
+    published = [r for r in (await session.execute(q)).scalars() if r.status == "published"]
     return max(published, key=lambda r: _ver_key(r.version)) if published else None
 
 
@@ -98,6 +108,10 @@ async def _clone_doc(
     category = _CATEGORY_OF[item.kind]
     repo = KnowledgeRepo(session, branch_id)
     docs = await repo.all()
+    existing = next((d for d in docs if d.slug == item.slug), None)
+    if existing is not None and not overwrite:
+        raise CloneConflict(
+            f"branch {branch_id} already has doc '{item.slug}' — pass overwrite to replace it")
     retired = 0
     if replace_existing:
         for doc in docs:
@@ -105,10 +119,6 @@ async def _clone_doc(
                 doc.in_prompt = False
                 session.add(doc)
                 retired += 1
-    existing = next((d for d in docs if d.slug == item.slug), None)
-    if existing is not None and not overwrite:
-        raise CloneConflict(
-            f"branch {branch_id} already has doc '{item.slug}' — pass overwrite to replace it")
     if existing is not None:
         existing.title, existing.content = item.title, item.body
         existing.category, existing.in_prompt = category, True
@@ -129,6 +139,14 @@ async def _clone_catalogue(
         raise ValueError(f"catalogue '{item.slug}' body is not a JSON list of cards")
     repo = ProductRepo(session, branch_id)
     incoming = {c["slug"] for c in cards}
+    # Every card is checked before the first one is written: a catalogue that clashes on its
+    # third card must not leave the branch with two new cards and its own ones stood down.
+    held = {c["slug"]: await repo.by_slug(c["slug"]) for c in cards}
+    if not overwrite:
+        clash = next((s for s, p in held.items() if p is not None), None)
+        if clash is not None:
+            raise CloneConflict(
+                f"branch {branch_id} already has product '{clash}' — pass overwrite")
     retired = 0
     if replace_existing:
         for p in await repo.active():
@@ -138,10 +156,7 @@ async def _clone_catalogue(
                 retired += 1
     created = 0
     for card in cards:
-        existing = await repo.by_slug(card["slug"])
-        if existing is not None and not overwrite:
-            raise CloneConflict(
-                f"branch {branch_id} already has product '{card['slug']}' — pass overwrite")
+        existing = held[card["slug"]]
         if existing is not None:
             existing.title, existing.content = card["title"], card.get("content", "")
             existing.is_active = True
