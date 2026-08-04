@@ -1,32 +1,15 @@
-"""CRM settings — the section, plus the rule that they are never inherited.
+"""The CRM settings section.
 
-The first client's CRM endpoint and the bearer token embedded in its URL lived at the
-PLATFORM tier (app_setting rows with branch_id NULL), so every branch resolved them as its
-own: any tenant that switched the CRM read-gate on would have started asking a stranger's
-CRM about its leads, and any operator with access to a branch could read the token. On top
-of that, four of the keys had no editor anywhere in the product, so a branch could not have
-overridden them even knowing.
-
-TENANT_ONLY_KEYS is what fixes the first half: SettingRepo drops platform-tier rows for
-these keys, so a CRM link only ever comes from the branch that configured it. The fields
-below fix the second half. Migration crmtnt00001 moved the two platform rows onto branch 1,
-which is the branch that actually uses them (crm_rescue, writeback and the read gate are
-all on there) — so branch 1 resolves exactly the same values as before.
+Four of these keys had no editor anywhere in the product, so a branch could not override
+the platform-tier CRM link it was silently inheriting even if it knew about it. The
+inheritance itself is stopped in tenant_keys/repository; these fields are what let a branch
+name its own CRM instead. The city alias no longer defaults to the first client's city.
 """
 from __future__ import annotations
 
 from .fields import SettingSection
 from .fields import i18n as _l
 from .fields import setting as _f
-
-# Every key naming or authenticating a tenant's CRM. Platform-tier (branch_id NULL) rows
-# for these are ignored by the resolver — a CRM belongs to one tenant, never to everyone.
-TENANT_ONLY_KEYS: frozenset[str] = frozenset({
-    "crm_enabled", "crm_webhook_url",
-    "crm_read_enabled", "crm_state_url", "crm_read_secret",
-    "crm_mcp_url", "crm_mcp_city_alias",
-    "crm_rescue_enabled", "crm_writeback_enabled",
-})
 
 CRM_SECTION = SettingSection("fa-solid fa-database", _l("CRM", "CRM", "CRM"), [
     _f("crm_enabled", "bool", "false",

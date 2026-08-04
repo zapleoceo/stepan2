@@ -1,5 +1,6 @@
 """A CRM link belongs to one tenant: never inherited from the platform tier, always
-editable by the branch, and the platform rows that existed move onto branch 1.
+editable by the branch, and the platform rows that existed move onto the branch that
+actually uses that CRM — never onto an id the migration merely assumed.
 """
 from __future__ import annotations
 
@@ -108,25 +109,56 @@ async def _platform_keys(session) -> set[str]:  # noqa: ANN001
     return {r[0] for r in rows}
 
 
-async def test_migration_moves_the_platform_rows_onto_branch_one(db_session) -> None:
+async def _crm_owner(session, bid: int) -> None:  # noqa: ANN001
+    """What makes a branch the CRM's owner on production: the read gate switched on."""
+    session.add(AppSetting(branch_id=bid, key="crm_read_enabled", value="true"))
+    await session.flush()
+
+
+async def test_migration_moves_the_platform_rows_onto_the_owning_branch(db_session) -> None:
     bid = await _branch(db_session, "Indonesia")
-    assert bid == 1, "the migration targets branch 1 by id"
+    await _crm_owner(db_session, bid)
     db_session.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_URL))
     db_session.add(AppSetting(branch_id=None, key="crm_mcp_city_alias", value="jakarta"))
     await db_session.flush()
     await _run_migration(db_session)
     invalidate(bid)
     cfg = await get_settings(db_session, bid)
-    assert cfg.crm_mcp_url == _URL          # branch 1 reads exactly what it read before
+    assert cfg.crm_mcp_url == _URL          # the owner reads exactly what it read before
     assert cfg.crm_mcp_city_alias == "jakarta"
     assert await _platform_keys(db_session) == set()
 
 
+async def test_migration_does_not_hand_the_token_to_an_unrelated_branch(db_session) -> None:
+    """The whole point, on a restored snapshot or a staging copy: branch 1 exists but is
+    somebody else, so the credentials must NOT land on it. TENANT_ONLY_KEYS already makes
+    the rows inert; moving them onto a stranger would not be recoverable."""
+    bid = await _branch(db_session, "SomeoneElse")
+    assert bid == 1, "the id the migration used to hardcode"
+    db_session.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_URL))
+    await db_session.flush()
+    await _run_migration(db_session)
+    invalidate(bid)
+    assert (await get_settings(db_session, bid)).crm_mcp_url == ""
+    assert await _platform_keys(db_session) == {"crm_mcp_url"}
+
+
+async def test_migration_will_not_choose_between_two_crm_owners(db_session) -> None:
+    first = await _branch(db_session, "Indonesia")
+    second = await _branch(db_session, "Malaysia")
+    await _crm_owner(db_session, first)
+    await _crm_owner(db_session, second)
+    db_session.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_URL))
+    await db_session.flush()
+    await _run_migration(db_session)
+    assert await _platform_keys(db_session) == {"crm_mcp_url"}
+
+
 async def test_migration_keeps_an_existing_branch_value(db_session) -> None:
-    """Branch 1 already has crm_read_enabled=true; the platform row must not overwrite it,
+    """The owner already has crm_read_enabled=true; the platform row must not overwrite it,
     and must not collide with the uq_setting_scope unique index either."""
     bid = await _branch(db_session, "Indonesia")
-    db_session.add(AppSetting(branch_id=bid, key="crm_read_enabled", value="true"))
+    await _crm_owner(db_session, bid)
     db_session.add(AppSetting(branch_id=None, key="crm_read_enabled", value="false"))
     await db_session.flush()
     await _run_migration(db_session)
@@ -135,8 +167,24 @@ async def test_migration_keeps_an_existing_branch_value(db_session) -> None:
     assert await _platform_keys(db_session) == set()
 
 
-async def test_migration_is_a_noop_without_branch_one(db_session) -> None:
+async def test_migration_is_a_noop_on_a_fresh_install(db_session) -> None:
     db_session.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_URL))
     await db_session.flush()
-    await _run_migration(db_session)  # fresh install: no branch 1 to move anything onto
+    await _run_migration(db_session)  # no branch talks to a CRM: nothing to move it onto
     assert await _platform_keys(db_session) == {"crm_mcp_url"}
+
+
+async def test_migration_never_deletes_a_row_it_would_not_re_parent(db_session) -> None:
+    """DELETE and UPDATE must share their predicate. A connector-tier platform row is
+    nonsense today, but deleting one the UPDATE would skip is unrecoverable — downgrade()
+    cannot put it back."""
+    bid = await _branch(db_session, "Indonesia")
+    await _crm_owner(db_session, bid)
+    db_session.add(AppSetting(branch_id=bid, key="crm_mcp_url", value=_URL))
+    db_session.add(AppSetting(branch_id=None, channel_id=4, key="crm_mcp_url", value=_URL))
+    await db_session.flush()
+    await _run_migration(db_session)
+    rows = (await db_session.execute(text(
+        "SELECT channel_id FROM app_setting WHERE branch_id IS NULL AND key = 'crm_mcp_url'"
+    ))).all()
+    assert [r[0] for r in rows] == [4]
