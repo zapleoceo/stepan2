@@ -29,14 +29,25 @@ router = APIRouter()
 _log = logging.getLogger(__name__)
 
 # Abuse guard: this endpoint is PUBLIC (no auth) and calls a paid-capable broker capability,
-# so an open loop could burn provider quota / drive spend (see the burn incidents). Cap the
-# per-caller rate AND the total concurrent broker calls from the demo. In-process (per uvicorn
-# worker) — enough to stop a flood without standing up Redis for a landing gimmick.
+# so an open loop could burn provider quota / drive spend (see the burn incidents). Three
+# separate bounds, because they fail differently:
+#
+#   _RATE_MAX             per caller — FAIRNESS. Its key comes from a header (see _rate_key),
+#                         so it is only as good as the proxy in front of us.
+#   _GLOBAL_RATE_MAX      per window across every caller — the SPEND bound. Nothing in the
+#                         request can move a caller out of this bucket, so it holds even if
+#                         the per-caller key turns out to be forgeable in some deployment.
+#   _GLOBAL_INFLIGHT_MAX  concurrent broker calls — the CONCURRENCY bound.
+#
+# In-process (per uvicorn worker) — enough to stop a flood without standing up Redis for a
+# landing gimmick.
 _RATE_WINDOW_S = 60.0
 _RATE_MAX = 20                # requests per caller per window
+_GLOBAL_RATE_MAX = 120        # demo turns per window from everyone (this worker)
 _GLOBAL_INFLIGHT_MAX = 8      # concurrent demo broker calls across all callers (this worker)
 _MAX_DISTINCT_KEYS = 5000
 _hits: dict[str, deque[float]] = defaultdict(deque)
+_global_hits: deque[float] = deque()
 _inflight = 0
 
 _BUSY = "One sec — a lot of people are chatting with me right now. Try again in a moment. 🎩"
@@ -44,15 +55,21 @@ _FALLBACK = "Sorry, I glitched for a second — say that again?"
 
 
 def _rate_key(request: Request) -> str:
-    """The one address in this request a browser cannot choose.
+    """The per-caller bucket: the hop our own reverse proxy appended.
 
-    X-Forwarded-For is a LIST, and only its tail is ours. Our reverse proxy APPENDS the peer
-    it actually accepted the connection from, so the last element is written by us and the
-    earlier ones are whatever the client typed into the header. The previous key was
-    `xff.split(",")[0]` — the FIRST element — i.e. a string the attacker supplies, so a fresh
-    "IP" per request defeated the limiter completely on a public endpoint that calls a paid
-    capability. Take the last hop instead; with no proxy in front there is no header and the
-    socket peer is already the truth."""
+    X-Forwarded-For is a LIST and only its tail is ours — the proxy APPENDS the peer it
+    accepted the connection from, so everything to the left of the last element is whatever
+    the client typed. The previous key was `xff.split(",")[0]`, the FIRST element, i.e. a
+    string the attacker supplies: a fresh "IP" per request defeated the limiter completely.
+
+    What this is NOT is a guarantee, and it is worth being exact about why, because the
+    fallback below reads like one and is not. The container runs uvicorn with
+    `--forwarded-allow-ips=*`, so ProxyHeadersMiddleware rewrites `request.client.host` from
+    the LEFTMOST XFF element whenever the header is present — the fallback is then derived
+    from the attacker's string too. And `rsplit` is correct for EXACTLY ONE appending hop: put
+    a CDN in front and the last element becomes the CDN edge, which shares one bucket between
+    everybody. So this key is fairness between callers under the deployment we run, and the
+    bound on SPEND is _GLOBAL_RATE_MAX + _GLOBAL_INFLIGHT_MAX, which no header can move."""
     xff = request.headers.get("x-forwarded-for", "")
     if xff:
         last = xff.rsplit(",", 1)[-1].strip()
@@ -79,9 +96,23 @@ def _rate_ok(key: str) -> bool:
     return True
 
 
+def _global_rate_ok() -> bool:
+    """One bucket for the whole endpoint. Keyed on nothing, so nothing in the request can
+    escape it — this is what actually bounds broker spend when the per-caller key is
+    forgeable, which under some proxy topology it is."""
+    now = time.monotonic()
+    while _global_hits and now - _global_hits[0] > _RATE_WINDOW_S:
+        _global_hits.popleft()
+    if len(_global_hits) >= _GLOBAL_RATE_MAX:
+        return False
+    _global_hits.append(now)
+    return True
+
+
 @router.post("/demo/chat")
 async def demo_chat(request: Request) -> JSONResponse:
-    if not _rate_ok(_rate_key(request)):
+    # Per-caller first: a caller already over their own limit must not consume a global slot.
+    if not _rate_ok(_rate_key(request)) or not _global_rate_ok():
         return JSONResponse({"reply": _BUSY}, status_code=429)
     try:
         payload = await request.json()
