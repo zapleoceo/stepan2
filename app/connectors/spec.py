@@ -50,15 +50,17 @@ BASELINE_METHODS: tuple[str, ...] = ("fetch_inbound", "send_text", "session_stat
 
 
 @dataclass(frozen=True)
-class CredentialField:
-    """One value the operator supplies to connect this channel.
+class SendWindow:
+    """A platform that rejects automated sends some time after the lead's last message.
 
-    `name` is the form field name AND the key the stored secret dict is read back by, so the
-    connect route and the port builder can no longer disagree about a literal string."""
+    The two strings live here with the flag because the gate in OutboxSender is shared: it
+    used to be `if kind == META_BUSINESS`, and generalising only the condition would have let
+    the next connector write Meta's name into its own outbox rows and into the dormancy reason
+    an operator reads. `error_code` is stored in outbox.error and matched by the inbox queries
+    and the failed-send bubble, so an existing connector's code can never be re-worded."""
 
-    name: str
-    label: str
-    secret: bool = False
+    error_code: str
+    dormant_reason: str
 
 
 # (session, channel) -> a live port. Untyped session/channel: typing them here would drag
@@ -77,14 +79,12 @@ class ConnectorSpec:
     adapter: type
     build_port: PortBuilder
     credential_panel: CredentialPanel
-    credential_fields: tuple[CredentialField, ...] = ()
     capabilities: frozenset[Capability] = frozenset()
     # Setting keys with these prefixes only make sense on this connector (app_setting is
     # shared, so the channel editor has to know whose fields it is showing).
     settings_prefixes: tuple[str, ...] = ()
-    # The platform closes its messaging window some time after the lead's last message and
-    # rejects automated sends into a closed one — see OutboxSender.send_next.
-    enforces_send_window: bool = False
+    # None = sends are never refused for being late (see OutboxSender.send_next).
+    send_window: SendWindow | None = None
     # Whether an unanswered thread on this connector belongs in the inbox "awaiting reply"
     # split. False = its chats are counted nowhere.
     counts_as_awaiting: bool = True

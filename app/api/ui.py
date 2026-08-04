@@ -29,11 +29,11 @@ from app.domain.enums import ChannelKind
 from ._i18n import LANG_COOKIE, LANGS, apply_lang, t
 from ._query import (
     AD_FUNNEL_GROUPS,
-    AWAITING_BASE,
     DEAL_WON,
     IN_QUEUE_EXTRA,
     SETTLED_EXTRA,
     _branch_where,
+    awaiting_base,
     awaiting_cutoff,
     fetch_blocked_count,
     fetch_bot_enabled_count,
@@ -298,18 +298,18 @@ async def threads_partial(
     # gate already refused a send), 'queue' = Stepan will reply, 'off' = he won't, else = all.
     if aw:
         if aw == "settled":
-            conditions.append(f"({AWAITING_BASE}) AND {SETTLED_EXTRA}")
+            conditions.append(f"({awaiting_base()}) AND {SETTLED_EXTRA}")
             params["awaiting_cutoff"] = awaiting_cutoff()
         elif aw == "queue":
             conditions.append(
-                f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})")
+                f"({awaiting_base()}) AND NOT {SETTLED_EXTRA} AND ({IN_QUEUE_EXTRA})")
             params["awaiting_cutoff"] = awaiting_cutoff()
         elif aw == "off":
             conditions.append(
-                f"({AWAITING_BASE}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})")
+                f"({awaiting_base()}) AND NOT {SETTLED_EXTRA} AND NOT ({IN_QUEUE_EXTRA})")
             params["awaiting_cutoff"] = awaiting_cutoff()
         else:
-            conditions.append(AWAITING_BASE)
+            conditions.append(awaiting_base())
     where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = (

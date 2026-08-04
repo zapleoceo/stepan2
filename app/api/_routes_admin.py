@@ -29,10 +29,10 @@ from app.modules.settings.service import get_settings, invalidate
 from ._i18n import apply_lang, t
 from ._ig_preview import fetch_creative_bytes
 from ._query import (
-    AWAITING_BASE,
     IN_QUEUE_EXTRA,
     SETTLED_EXTRA,
     _branch_where,
+    awaiting_base,
     awaiting_cutoff,
     fetch_ad_funnel,
     fetch_ad_spend,
@@ -117,7 +117,7 @@ async def inbox_awaiting_count(request: Request) -> HTMLResponse:
         row = (await session.execute(text(
             f"SELECT count(*) FILTER (WHERE NOT {SETTLED_EXTRA} AND {IN_QUEUE_EXTRA})"  # noqa: S608
             " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-            f" {where} {cond} {AWAITING_BASE}"), params)).first()
+            f" {where} {cond} {awaiting_base()}"), params)).first()
     return HTMLResponse(inbox_awaiting_badge_html(int(row[0] or 0)))
 
 

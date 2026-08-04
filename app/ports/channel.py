@@ -63,8 +63,10 @@ class ChannelPort(Protocol):
     Nothing optional lives here. It used to also declare fetch_comments/reply_to_comment/
     hide_comment, which only the Instagram adapter implements — so the Protocol described a
     port that two of three adapters were not, and callers had to hasattr() their way back to
-    the truth. Optional powers are their own Protocols below and are DECLARED per connector
-    in app/connectors/spec.py (Capability)."""
+    the truth. An optional power is DECLARED per connector in app/connectors/spec.py
+    (Capability) and typed where it is consumed — deletions.Revoker, profiles.ProfileFetcher,
+    media.MediaDownloader. Only CommentPort lives here, because CommentService takes the whole
+    port and calls three of its methods."""
 
     kind: ChannelKind
 
@@ -94,32 +96,4 @@ class CommentPort(ChannelPort, Protocol):
 
     async def hide_comment(self, comment_external_id: str) -> SendResult:
         """Удалить спам/оскорбление под нашим постом (private API: delete владельцем)."""
-        ...
-
-
-class RevocablePort(ChannelPort, Protocol):
-    """Capability.REVOKE — unsend a message we already delivered."""
-
-    async def revoke(self, external_thread_id: str, external_message_id: str) -> bool:
-        ...
-
-
-class SeenPort(ChannelPort, Protocol):
-    """Capability.MARK_SEEN — a read receipt (the anti-ban 'open the chat' step)."""
-
-    async def mark_seen(self, external_thread_id: str) -> None:
-        ...
-
-
-class ProfilePort(ChannelPort, Protocol):
-    """Capability.FETCH_PROFILE — the lead's public profile (name, avatar, follower counts)."""
-
-    async def fetch_profile(self, ig_user_id: str) -> dict | None:
-        ...
-
-
-class MediaPort(ChannelPort, Protocol):
-    """Capability.DOWNLOAD_MEDIA — fetch in-DM media bytes from the platform CDN."""
-
-    async def download_media(self, url: str) -> bytes:
         ...

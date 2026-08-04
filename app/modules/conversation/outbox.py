@@ -129,20 +129,23 @@ class OutboxSender:
         # A MANAGER send still attempts: a human agent may deliver via the 7-day human_agent tag,
         # and the real result surfaces to them (see the failed-send bubble).
         #
-        # Whether a connector HAS a window is the connector's own declaration
-        # (ConnectorSpec.enforces_send_window) — this is the shared send path, and hardcoding
-        # one kind here meant every future connector with a window had to edit this file.
+        # Whether a connector HAS a window — and what it calls a send refused by one — is the
+        # connector's own declaration (ConnectorSpec.send_window). This is the shared send
+        # path: hardcoding one kind here meant every future connector with a window had to
+        # edit this file, and hardcoding the strings would have made the next one write Meta's
+        # name into its own outbox rows and into the reason an operator reads on the thread.
         # window_until is written for every kind by ingest; only the rule was Meta-specific.
         spec = spec_for(getattr(self.channel, "kind", None))
-        if (spec is not None and spec.enforces_send_window
+        window = spec.send_window if spec is not None else None
+        if (spec is not None and window is not None
                 and row.source != "manager"
                 and thread.window_until is not None and thread.window_until < now):
             row.status = "skipped"
-            row.error = "meta_window_closed"
+            row.error = window.error_code
             self.session.add(row)
             # Pause the thread — the window won't reopen until the lead writes again, so
             # regenerating a reply every tick is pure token burn (see _pause_dormant).
-            await self._pause_dormant(thread, "Meta 24h window closed — paused until lead writes")
+            await self._pause_dormant(thread, window.dormant_reason)
             await self.session.flush()
             logger.info("outbox skip branch=%d thread=%d: %s send window closed",
                         self.branch_id, thread_id, spec.label)

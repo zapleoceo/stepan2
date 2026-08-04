@@ -16,7 +16,7 @@ from app.ports.channel import ChannelPort
 
 from .instagram_ui import _ch_ig_form
 from .session_store import active_session_settings
-from .spec import Capability, ConnectorSpec, CredentialField
+from .spec import Capability, ConnectorSpec
 
 
 async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
@@ -40,12 +40,6 @@ SPEC = ConnectorSpec(
     adapter=InstagramAdapter,
     build_port=build_port,
     credential_panel=_ch_ig_form,
-    credential_fields=(
-        CredentialField("username", "ch.username"),
-        CredentialField("password", "ch.password", secret=True),
-        CredentialField("sessionid", "ch.sessionid", secret=True),
-        CredentialField("session_json", "ch.ig_json", secret=True),
-    ),
     capabilities=frozenset({
         Capability.REVOKE,
         Capability.MARK_SEEN,

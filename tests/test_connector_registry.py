@@ -98,10 +98,16 @@ def test_port_builder_is_an_async_two_arg_callable(spec: ConnectorSpec) -> None:
 
 
 @pytest.mark.parametrize("spec", _SPECS, ids=lambda s: s.kind.value)
-def test_credential_field_names_are_unique_within_a_connector(spec: ConnectorSpec) -> None:
-    names = [f.name for f in spec.credential_fields]
-    assert len(names) == len(set(names))
-    assert all(f.name and f.label for f in spec.credential_fields)
+def test_a_declared_send_window_names_its_own_strings(spec: ConnectorSpec) -> None:
+    """A connector with a window owns both operator-visible strings. Blank ones would write an
+    empty outbox.error (the inbox queries match on it) and an empty dormancy reason — and
+    borrowing another connector's would put Meta's name on a thread that is not Meta's."""
+    window = spec.send_window
+    if window is None:
+        return
+    assert window.error_code.strip() and window.dormant_reason.strip()
+    others = [s.send_window for s in _SPECS if s is not spec and s.send_window is not None]
+    assert window.error_code not in [w.error_code for w in others]
 
 
 @pytest.mark.parametrize("spec", _SPECS, ids=lambda s: s.kind.value)

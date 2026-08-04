@@ -17,7 +17,7 @@ from app.ports.channel import ChannelPort
 
 from .meta_business_ui import _ch_meta_form
 from .session_store import active_session_settings
-from .spec import Capability, ConnectorSpec, CredentialField
+from .spec import Capability, ConnectorSpec, SendWindow
 
 _log = logging.getLogger(__name__)
 
@@ -87,16 +87,16 @@ SPEC = ConnectorSpec(
     adapter=MetaBusinessAdapter,
     build_port=build_port,
     credential_panel=_ch_meta_form,
-    credential_fields=(
-        CredentialField("platform", "ch.kind_meta"),
-        CredentialField("page_id", "ch.page_id"),
-        CredentialField("token", "ch.token", secret=True),
-    ),
     capabilities=frozenset({Capability.DOWNLOAD_MEDIA}),
     settings_prefixes=("meta_", "fb_"),
     # Meta closes the standard messaging window ~24h after the lead's last message and
-    # rejects an AUTOMATED send into a closed one.
-    enforces_send_window=True,
+    # rejects an AUTOMATED send into a closed one. Both strings are load-bearing history:
+    # `meta_window_closed` is what every row written since this gate existed carries and what
+    # the inbox queries match on, and the reason is what an operator reads on a paused thread.
+    send_window=SendWindow(
+        error_code="meta_window_closed",
+        dormant_reason="Meta 24h window closed — paused until lead writes",
+    ),
     # The connector is not finished, so its unanswered chats just hang — counting them in the
     # inbox "awaiting reply" split would put work in the queue nobody can act on. Flip this to
     # True the day it is finished; nothing else has to change.

@@ -10,7 +10,7 @@ from app.domain.enums import ChannelKind
 from app.ports.channel import ChannelPort
 
 from .session_store import active_session_settings
-from .spec import ConnectorSpec, CredentialField
+from .spec import ConnectorSpec
 from .whatsapp_ui import _ch_wa_form
 
 
@@ -35,9 +35,4 @@ SPEC = ConnectorSpec(
     adapter=WhatsAppAdapter,
     build_port=build_port,
     credential_panel=_ch_wa_form,
-    credential_fields=(
-        CredentialField("base_url", "ch.wa_url"),
-        CredentialField("instance", "ch.wa_inst"),
-        CredentialField("api_key", "ch.wa_key", secret=True),
-    ),
 )

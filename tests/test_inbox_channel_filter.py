@@ -62,7 +62,7 @@ def test_kind_multi_subset_shows_union() -> None:
 
 
 def test_awaiting_queue_is_active_funnel_only_and_excludes_meta() -> None:
-    from app.api._query import AWAITING_BASE, IN_QUEUE_EXTRA
+    from app.api._query import IN_QUEUE_EXTRA, awaiting_base
     # the "queue" = bot on AND a funnel stage where Stepan participates
     assert "agent_enabled = true" in IN_QUEUE_EXTRA
     for st in ("new", "nurturing", "qualifying", "presenting", "objection"):
@@ -76,6 +76,7 @@ def test_awaiting_queue_is_active_funnel_only_and_excludes_meta() -> None:
     from app.connectors.registry import all_specs
     excluded = [s.kind.value for s in all_specs() if not s.counts_as_awaiting]
     assert excluded == ["meta_business"]
+    base = awaiting_base()
     for spec in all_specs():
-        present = f"'{spec.kind.value}'" in AWAITING_BASE
+        present = f"'{spec.kind.value}'" in base
         assert present is (spec.kind.value in excluded)

@@ -1,7 +1,7 @@
 """Instagram credential panel — the two-step login/checkpoint flow.
 
 Moved out of app/api/_ui_panels so the Instagram connector owns its own panel; the
-panel is reached through ConnectorSpec.credential_form, never by an if-chain on kind.
+panel is reached through ConnectorSpec.credential_panel, never by an if-chain on kind.
 """
 from __future__ import annotations
 

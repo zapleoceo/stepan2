@@ -21,7 +21,7 @@ from typing import Any  # noqa: E402
 import pytest  # noqa: E402
 
 from app.api._query import awaiting_kind_sql  # noqa: E402
-from app.api._ui_html import _CHANNEL_ICON, app_shell  # noqa: E402
+from app.api._ui_html import _channel_badge, app_shell  # noqa: E402
 from app.api._ui_panels import (  # noqa: E402
     channel_edit_form_html,
     channel_list_partial_html,
@@ -78,11 +78,31 @@ def test_inbox_filter_chips_are_one_per_spec(monkeypatch: pytest.MonkeyPatch) ->
     assert "#3a76f0" in flipped
 
 
-def test_thread_badge_icons_are_the_registry_not_a_second_copy() -> None:
-    """_CHANNEL_ICON is built from the specs — a re-hardcoded copy that drifts fails here."""
-    assert _CHANNEL_ICON == {
-        s.kind.value: (s.icon_class, s.icon_color) for s in all_specs()
-    }
+def test_thread_badge_icon_follows_the_spec_at_render_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The badge reads the spec per render. It used to read a module-level dict built at
+    import, which no test could tell apart from a hardcoded one — nothing can change the
+    registry after import, so the flip below was structurally impossible."""
+    assert "fa-brands fa-whatsapp" in _channel_badge("whatsapp")
+
+    _respec(monkeypatch, ChannelKind.WHATSAPP,
+            icon_class="fa-brands fa-signal-messenger", icon_color="#3a76f0")
+    badge = _channel_badge("whatsapp")
+    assert "fa-brands fa-signal-messenger" in badge and "#3a76f0" in badge
+    assert "fa-whatsapp" not in badge
+
+
+def test_thread_badge_keeps_the_meta_carrying_instagram_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One meta_business channel serves BOTH Messenger and Instagram Direct, so a Graph
+    conversation id beginning "aWdf" wears the Instagram mark — and it must be INSTAGRAM's
+    registered icon, not a literal that survived the switch to spec lookup."""
+    _respec(monkeypatch, ChannelKind.INSTAGRAM, icon_class="fa-solid fa-camera")
+    assert "fa-solid fa-camera" in _channel_badge("meta_business", "aWdfdGhyZWFk")
+    assert "fa-brands fa-facebook" in _channel_badge("meta_business", "t_123")
+    assert "fa-solid fa-comment" in _channel_badge("tiktok")  # unregistered → the fallback
 
 
 def test_credential_panel_is_the_spec_s_panel(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,10 +131,35 @@ def test_awaiting_sql_excludes_exactly_the_specs_that_opt_out() -> None:
     counting = dataclasses.replace(REGISTRY[ChannelKind.INSTAGRAM], counts_as_awaiting=True)
     silent = dataclasses.replace(REGISTRY[ChannelKind.WHATSAPP], counts_as_awaiting=False)
 
-    assert awaiting_kind_sql([counting]) == ""  # nobody opted out → no filter at all
     sql = awaiting_kind_sql([counting, silent])
     assert "'whatsapp'" in sql and "'instagram'" not in sql
     assert "NOT IN" in sql
+
+
+def test_awaiting_sql_still_requires_the_channel_row_when_nobody_opts_out() -> None:
+    """The kind test rode along with "the channel row must EXIST". Dropping the whole EXISTS
+    on an empty exclusion list would make flipping Meta's counts_as_awaiting to True ALSO
+    start counting threads whose channel is gone — a second change, invisible in that diff."""
+    counting = dataclasses.replace(REGISTRY[ChannelKind.INSTAGRAM], counts_as_awaiting=True)
+    sql = awaiting_kind_sql([counting])
+    assert "EXISTS" in sql and "c.id = ct.channel_id" in sql
+    assert "NOT IN" not in sql and "c.kind" not in sql
+
+
+def test_awaiting_base_is_derived_at_every_call_not_frozen_at_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """awaiting_base() is what the inbox routes paste into their SQL. Silencing a different
+    connector must move it — a constant computed once at import, or a literal re-pasted at a
+    route, would keep answering with yesterday's registry."""
+    from app.api._query import awaiting_base
+
+    assert "'meta_business'" in awaiting_base()
+
+    _respec(monkeypatch, ChannelKind.META_BUSINESS, counts_as_awaiting=True)
+    _respec(monkeypatch, ChannelKind.INSTAGRAM, counts_as_awaiting=False)
+    flipped = awaiting_base()
+    assert "'instagram'" in flipped and "'meta_business'" not in flipped
 
 
 class _FakeField:

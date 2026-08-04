@@ -963,7 +963,6 @@ from app.connectors.instagram_ui import (  # noqa: F401,E402 — re-export, see 
     _ch_ig_form,
 )
 from app.connectors.meta_business_ui import _ch_meta_form  # noqa: F401,E402
-from app.connectors.ui_bits import _ch_err  # noqa: F401,E402
 from app.connectors.whatsapp_ui import _ch_wa_form  # noqa: F401,E402
 
 from ._ui_reports import (  # noqa: F401,E402 — re-export, see above
