@@ -1,11 +1,19 @@
 """One turn of the site chat, assembled by the branch prompt pipeline.
 
-Nothing about the prompt is special here. The stable prefix comes out of DecisionEngine —
-the same object the DM reply and the follow-up build theirs with — so `messages[0]` for the
-site branch is the branch's own documents through the composer followed by CRAFT, byte for
-byte what a DM turn on this branch would carry. That is the point of S6: the selling contract
-is the shared one, and what is peculiar to a web page lives in the branch's method document
-where a person can read it and edit it.
+Nothing about the PROMPT is special here. The stable prefix comes out of DecisionEngine — the
+same object the DM reply and the follow-up build theirs with — so `messages[0]` for the site
+branch is the branch's own documents through the composer followed by CRAFT, byte for byte
+what a DM turn on this branch would carry. That is the point of S6: the selling contract is
+the shared one, and what is peculiar to a web page lives in the branch's method document where
+a person can read it and edit it.
+
+The GENERATION loop below is this module's own, and smaller than reply.py's. It shares the
+prompt, not the pipeline: no `chat:sales -> chat:smart` capability fallback, and none of
+guard.py's grounding or link verification, so an invented figure on the public page is caught
+by the persona's own rules and nothing else. Same as before S6 — the old hardcoded route had
+neither — and the reason it is not wired here is that both hang off a thread, a lead and a
+dossier, none of which a demo turn has. Written down in docs/website-branch.md rather than
+left to be rediscovered.
 
 No thread, no lead, no dossier: the dialog is the in-memory transcript (see session.py) and
 the LeadDossier is empty, so build_messages_free emits the shape it does on turn one of any
@@ -45,28 +53,22 @@ def _as_dialog(branch_id: int, turns: list[tuple[str, str]]) -> list[Message]:
             for i, (role, text) in enumerate(turns)]
 
 
-def _engine(
-    session: AsyncSession, branch_id: int, llm: BrokerLLM | None,
+def engine_for(
+    session: AsyncSession, branch_id: int, llm: BrokerLLM | None = None,
 ) -> DecisionEngine:
+    """The branch's prompt assembler — the DM path's own class, not a subclass of it."""
     return DecisionEngine(session, branch_id, llm, KnowledgeService(session, branch_id, llm))
 
 
-async def _messages_from(
+async def build_messages(
     engine: DecisionEngine, branch_id: int, turns: list[tuple[str, str]],
 ) -> list[dict]:
+    """The chat `messages` for this turn, through the branch's own prompt pipeline."""
     lang = await engine.branch_lang()
     return build_messages_free(
         await engine.free_kb_context(), _as_dialog(branch_id, turns), lang, LeadDossier(),
         contract=await engine.reply_contract(lang),
         now_block=await engine._now_block())  # noqa: SLF001 — engine owns the clock
-
-
-async def build_messages(
-    session: AsyncSession, branch_id: int, turns: list[tuple[str, str]],
-    llm: BrokerLLM | None = None,
-) -> list[dict]:
-    """The chat `messages` for this turn, through the branch's own prompt pipeline."""
-    return await _messages_from(_engine(session, branch_id, llm), branch_id, turns)
 
 
 async def generate_reply(
@@ -78,8 +80,8 @@ async def generate_reply(
     Empty rather than a canned apology, so the caller decides what a failed turn looks like
     and a failed turn never enters the transcript as something Stepan said."""
     broker = llm or BrokerLLM()
-    engine = _engine(session, branch_id, broker)
-    messages = await _messages_from(engine, branch_id, turns)
+    engine = engine_for(session, branch_id, broker)
+    messages = await build_messages(engine, branch_id, turns)
     lang = await engine.branch_lang()
     cfg = await get_settings(session, branch_id)
     for attempt in range(_ATTEMPTS):

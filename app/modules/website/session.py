@@ -27,8 +27,13 @@ MAX_AGE_S = 2 * 3600
 # single entry without limit.
 MAX_TURNS = 24
 # Live conversations held at once, oldest evicted first. Bounds the memory a public endpoint
-# can be made to allocate.
-MAX_SESSIONS = 2000
+# can be made to allocate — and the bound is the product of all three constants, so it is
+# written out: 500 x 24 x 2000 = 24M characters, about 24 MB of str payload (plus per-object
+# overhead) resident in the API container in the worst case, for a landing-page widget. It was
+# 2000 sessions, i.e. ~96 MB, a number nobody had multiplied out. 500 concurrent live
+# conversations on this page is already far beyond anything it has seen; a visitor evicted
+# early loses context and is handed a fresh token, not an error.
+MAX_SESSIONS = 500
 MAX_CHARS = 2000  # per message
 
 
