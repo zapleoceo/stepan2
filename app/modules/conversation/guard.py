@@ -593,6 +593,13 @@ _VERIFY_SYSTEM = (
     "Output ONE unsupported claim per line (a short quote or description), nothing else — no "
     "numbering, no JSON, no prose. If everything is grounded, reply with the single word CLEAN.")
 
+# The verifier reads a PREFIX of the assembled fact surface, not all of it. Branch 1 assembles
+# 94 064 chars, so the checker judges a draft against the first 13% — which makes the ORDER of
+# the assembled blocks part of this gate's behaviour, not a layout detail. Named rather than
+# inlined so a test can straddle the cut deliberately; changing the number changes which
+# documents the fabrication gate can see.
+VERIFY_KB_CHARS = 12000
+
 _CLEAN_TOKENS = frozenset({"clean", "none", "ok", "grounded", "[]", "-", "n/a", "kosong"})
 # a leading list marker only: "- ", "* ", "• ", "1. ", "2) " — not digits inside the claim
 _LIST_MARKER_RE = re.compile(r"^\s*(?:[-•*]|\d+[.)])\s+")
@@ -691,7 +698,8 @@ async def verify_grounding(
     (a BudgetService, duck-typed) records this call's cost so the daily cap counts it."""
     messages = [
         {"role": "system", "content": system or _VERIFY_SYSTEM},
-        {"role": "user", "content": f"KNOWLEDGE BASE:\n{context[:12000]}\n\nDRAFT:\n{reply}"},
+        {"role": "user",
+         "content": f"KNOWLEDGE BASE:\n{context[:VERIFY_KB_CHARS]}\n\nDRAFT:\n{reply}"},
     ]
     try:
         # No require_json_schema: the verifier answers in plain lines, so the broker isn't
