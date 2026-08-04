@@ -18,6 +18,7 @@ from app.modules.conversation import guard
 from app.modules.conversation.canned import comment_fallback, comment_persona
 from app.modules.conversation.delivery import guard_prompt
 from app.modules.knowledge.service import KnowledgeService
+from app.modules.promptlib.pipeline import prompt_knowledge
 from app.modules.settings.service import BranchSettings
 from app.ports.channel import ChannelPort
 from app.ports.llm import LLMPort
@@ -170,8 +171,10 @@ class CommentService:
         # or how long it runs had no answer to ground on and degraded to the DM invite: three
         # of six live replies in a week were the canned "DM aku ya". A public reply that
         # answers the question is worth far more than one that redirects, and the identical
-        # prefix rides the broker's prompt cache the DM path already keeps warm.
-        context = await self.knowledge.full_knowledge_context()
+        # prefix rides the broker's prompt cache the DM path already keeps warm. Through the
+        # pipeline for the same reason: reading the legacy assembler directly would give a
+        # composer branch two different truths, and the public one is the one strangers see.
+        context = await prompt_knowledge(self.session, self.branch_id, self.knowledge)
         prompt = _COMMENT_PROMPT.format(
             persona=comment_persona(lang), lang=lang, kb=context,
             caption=(c.media_caption or "")[:400], comment=c.text,

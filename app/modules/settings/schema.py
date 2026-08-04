@@ -85,6 +85,29 @@ SCHEMA: list[SettingSection] = [
                    "kosong. Kosong = kalimat netral tanpa nama perusahaan"),
            width="100%"),
     ]),
+    SettingSection("fa-solid fa-layer-group", _l("Промт", "Prompt", "Prompt"), [
+        # Default legacy on purpose: a branch nobody has touched keeps exactly today's prompt,
+        # byte for byte. Branch 1 is 37k live messages behind a pinned fingerprint and moves
+        # in its own step, deliberately, never as a side effect of somebody else's change.
+        _f("prompt_pipeline", "text", "legacy",
+           _l("Сборка промта", "Prompt pipeline", "Perakitan prompt"),
+           choices=[("legacy", _l("Наследуемая (общий контракт)", "Legacy (shared contract)",
+                                  "Lama (kontrak bersama)")),
+                    ("composer", _l("Композер (свои документы + CRAFT)",
+                                    "Composer (own docs + CRAFT)",
+                                    "Composer (dokumen sendiri + CRAFT)"))],
+           help=_l("Композер собирает промт из ДОКУМЕНТОВ филиала (все с флагом «в промт»), "
+                   "метод продаж живёт в базе знаний и правится здесь. Наследуемая берёт "
+                   "документы по жёсткому списку слагов и общий контракт с индонезийскими "
+                   "измерениями",
+                   "Composer builds the prompt from the BRANCH's documents (every one flagged "
+                   "in-prompt), with the selling method in the knowledge base where it can be "
+                   "edited. Legacy loads documents by a hardcoded slug list and ships the "
+                   "shared contract with its Indonesian measurements",
+                   "Composer menyusun prompt dari DOKUMEN cabang ini; Legacy memakai daftar "
+                   "slug tetap dan kontrak bersama"),
+           width="200px"),
+    ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [
         # Defaults sized as a runaway-bug backstop, not a precise anti-ban dial: IG/WhatsApp

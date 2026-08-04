@@ -14,6 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, ChannelThread, Lead
 from app.modules.budget import BudgetService
+from app.modules.promptlib.pipeline import prompt_contract, prompt_knowledge
 
 from .dates import annotate_dates
 from .needs import NeedsProfile, parse_needs
@@ -175,13 +176,21 @@ class DecisionEngine:
     async def free_kb_context(self) -> str:
         """The reply prompt's stable prefix: the whole fact surface, date-annotated, memoized
         per turn. Stable within a branch-local day (annotate_dates is the only date-dependent
-        input), which is what keeps the broker's prompt cache warm across leads."""
+        input), which is what keeps the broker's prompt cache warm across leads.
+
+        Which assembler produces it is the branch's own setting — see promptlib.pipeline."""
         if self._free_ctx is None:
-            context = await self.knowledge.full_knowledge_context()
+            context = await prompt_knowledge(self.session, self.branch_id, self.knowledge)
             self._free_ctx = annotate_dates(
                 context, (await self._now_local()).date(), await self.branch_lang())
         self.last_context = self._free_ctx  # the money gate checks the draft against this
         return self._free_ctx
+
+    async def reply_contract(self, lang: str) -> str:
+        """The selling contract that follows the fact surface in messages[0]. `lang` is the
+        fallback language for a lead whose own is unreadable — the same value the caller
+        passes to build_messages_free, so the prefix and the contract cannot disagree."""
+        return await prompt_contract(self.session, self.branch_id, lang)
 
     async def run(
         self, ctx: DecisionContext, messages: list[dict], thread_id: int, *,

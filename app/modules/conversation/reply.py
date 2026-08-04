@@ -175,6 +175,7 @@ class ReplyService(ReplyDelivery):
             now_block=await engine._now_block(ctx.thread),  # noqa: SLF001 — engine owns the clock
             is_first_reply=is_first_reply,
             first_turn_note=first_note,
+            contract=await engine.reply_contract(lang),
         )
         if messages[-1]["role"] == "assistant":
             # A re-triggered tick can reach here with the bot's own last message trailing.

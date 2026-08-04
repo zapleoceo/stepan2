@@ -93,6 +93,10 @@ class BranchSettings:
     # Add-on toggle on top of the connector above — pixel CAPI sends stay off until a branch
     # explicitly opts in, even if the connector fields are already filled in.
     meta_pixel_send_enabled: bool = False
+    # Which assembler builds messages[0]: "legacy" (hardcoded slug list + the shared fused
+    # contract) or "composer" (the branch's own in_prompt docs + CRAFT). Default legacy so an
+    # untouched branch keeps today's prompt byte for byte — see promptlib.pipeline.
+    prompt_pipeline: str = "legacy"
 
     def is_quiet_hour(self) -> bool:
         """True if the local branch time is inside the quiet window."""
@@ -222,4 +226,5 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         meta_page_id=raw.get("meta_page_id", ""),
         meta_system_user_token=raw.get("meta_system_user_token", ""),
         meta_pixel_send_enabled=_b(raw, "meta_pixel_send_enabled"),
+        prompt_pipeline=raw.get("prompt_pipeline", _DEFAULTS.get("prompt_pipeline", "legacy")),
     )

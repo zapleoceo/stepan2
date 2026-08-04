@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.adapters.db.models import Message
+from app.modules.promptlib.craft import REPLY_JSON_SCHEMA
 
 from .dossier import LeadDossier
 from .prompt import _role_of, manager_note_block
@@ -308,13 +309,10 @@ AND THE THINGS YOU ARE ALLOWED TO DO, which sellers given a rulebook tend to for
 # What remains is judgement no amount of parsing recovers: what to say, where the funnel now
 # stands, which course this actually became about, whether they are ready, whether a human is
 # needed. Attention spent on bookkeeping is attention not spent on the person.
-_FREE_SCHEMA = """\
-Return ONLY this JSON, no prose and no markdown fences:
-{{"reply": str, "needs_human": bool, "human_reason": str|null}}
-
-reply: what you send them — the whole of your work this turn.
-needs_human / human_reason: see the rule above.
-"""
+#
+# The text itself lives in promptlib.craft (REPLY_JSON_SCHEMA): the legacy contract and the
+# composer's CRAFT contract must ask for the SAME JSON, and two copies of a machine contract
+# drift. Byte-identical to what stood here — the golden pins it.
 
 
 # The last line before the dialogue starts. The contract that defines this JSON sits in the
@@ -358,7 +356,8 @@ _ID_STYLE_LANGS = frozenset({"id"})
 def free_contract(lang: str) -> str:
     named = language_name(lang)
     style = _ID_STYLE if (lang or "").lower() in _ID_STYLE_LANGS else ""
-    return _FREE_CONTRACT.format(lang=named, style=style) + "\n" + _FREE_SCHEMA.format(lang=named)
+    return _FREE_CONTRACT.format(lang=named, style=style) + "\n" \
+        + REPLY_JSON_SCHEMA.format(lang=named)
 
 
 def build_messages_free(  # noqa: PLR0913
@@ -374,6 +373,7 @@ def build_messages_free(  # noqa: PLR0913
     now_block: str | None = None,
     is_first_reply: bool = False,
     first_turn_note: str | None = None,
+    contract: str | None = None,
 ) -> list[dict[str, Any]]:
     """Stable cached prefix first, then one small per-lead system block, then the dialog.
 
@@ -381,8 +381,12 @@ def build_messages_free(  # noqa: PLR0913
     language) — it is the broker's prompt-cache anchor. A test pins this invariant.
 
     `first_turn_note` overrides the default opener note — a silent ad tap needs different
-    instructions from a lead who wrote something (see ad_tap_note)."""
-    stable = knowledge.rstrip() + "\n\n" + free_contract(lang)
+    instructions from a lead who wrote something (see ad_tap_note).
+
+    `contract` is the selling contract to use; None keeps the legacy fused one. Which of the
+    two a branch gets is a branch setting resolved by promptlib.pipeline, never by this
+    function — assembly does not decide policy."""
+    stable = knowledge.rstrip() + "\n\n" + (contract or free_contract(lang))
     variable = [block for block in (
         (now_block or "").strip(),
         _notes_block(coaching_notes),
