@@ -188,3 +188,38 @@ async def test_migration_never_deletes_a_row_it_would_not_re_parent(db_session) 
         "SELECT channel_id FROM app_setting WHERE branch_id IS NULL AND key = 'crm_mcp_url'"
     ))).all()
     assert [r[0] for r in rows] == [4]
+
+
+async def test_migration_seeds_the_alias_when_the_platform_never_had_one(db_session) -> None:  # noqa: ANN001
+    """The owner must not come out of the migration with a BLANK city alias.
+
+    The alias has never had an editor, so an install can legitimately reach this migration
+    with a crm_mcp_url row and no alias row at all. Per-branch, the schema default is now the
+    empty string — and empty is passed unguarded into crm_client_search, crm_lead_add_event
+    and the read gate, where the error is swallowed. The CRM would simply stop answering, with
+    nothing in the logs saying why."""
+    bid = await _branch(db_session, "Indonesia")
+    await _crm_owner(db_session, bid)
+    db_session.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_URL))
+    await db_session.flush()
+
+    await _run_migration(db_session)
+    invalidate(bid)
+
+    cfg = await get_settings(db_session, bid)
+    assert cfg.crm_mcp_url == _URL
+    assert cfg.crm_mcp_city_alias == "jakarta"
+
+
+async def test_migration_does_not_overwrite_an_alias_the_branch_already_chose(db_session) -> None:  # noqa: ANN001
+    """The seed is a floor, not a policy: a branch that set its own city keeps it."""
+    bid = await _branch(db_session, "Malaysia")
+    await _crm_owner(db_session, bid)
+    db_session.add(AppSetting(branch_id=bid, key="crm_mcp_city_alias", value="penang"))
+    db_session.add(AppSetting(branch_id=None, key="crm_mcp_url", value=_URL))
+    await db_session.flush()
+
+    await _run_migration(db_session)
+    invalidate(bid)
+
+    assert (await get_settings(db_session, bid)).crm_mcp_city_alias == "penang"

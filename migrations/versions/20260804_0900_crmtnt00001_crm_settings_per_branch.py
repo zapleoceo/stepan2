@@ -38,6 +38,13 @@ _KEYS = (
 # holding one of them is the branch whose credentials the platform rows are.
 _OWNERSHIP_KEYS = ("crm_read_enabled", "crm_rescue_enabled", "crm_writeback_enabled")
 
+# What the platform row carried before this migration. The alias has never had an editor, so
+# the only way a row exists is a hand-written INSERT; if the owner ends up without one it
+# inherits the schema default, which is now empty because a per-branch key cannot ship one
+# tenant's city. Empty flows unguarded into crm_client_search, crm_lead_add_event and the read
+# gate, and the resulting failure is swallowed — the CRM just stops answering, quietly.
+_ALIAS_FALLBACK = "jakarta"
+
 
 def _crm_owner(bind: sa.engine.Connection) -> int | None:
     rows = bind.execute(
@@ -72,6 +79,13 @@ def upgrade() -> None:
                 " WHERE branch_id IS NULL AND channel_id IS NULL AND key IN :keys"
                 ).bindparams(keys),
         {"keys": list(_KEYS), "owner": owner})
+    bind.execute(
+        sa.text("INSERT INTO app_setting (branch_id, channel_id, key, value)"
+                " SELECT :owner, NULL, 'crm_mcp_city_alias', :fallback"
+                " WHERE NOT EXISTS (SELECT 1 FROM app_setting"
+                "                   WHERE branch_id = :owner AND channel_id IS NULL"
+                "                     AND key = 'crm_mcp_city_alias')"),
+        {"owner": owner, "fallback": _ALIAS_FALLBACK})
 
 
 def downgrade() -> None:
