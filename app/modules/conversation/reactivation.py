@@ -224,6 +224,7 @@ class ReactivationService:
             source_block=await self._entry_block(ctx.thread.product_slug),
             name_block=lead_name_hint(lead_row.display_name if lead_row else None),
             manager_note=lead_row.manager_note if lead_row is not None else None,
+            contract=await engine.reply_contract(lang),
             now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": _REACTIVATION_FRAMING})
         # "Lowest-stakes, so draft cheap" had it backwards. This is at most two messages ever,

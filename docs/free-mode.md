@@ -19,11 +19,14 @@ LLM-критик, skeleton-opener) удалён 2026-07-25 после sim A/B н
 
 `build_messages_free` (`app/modules/conversation/free_mode.py`):
 
-- `messages[0]` (system) — **байт-стабильный префикс**: полная KB
-  (`KnowledgeService.full_knowledge_context`: persona_core + все facts-доки целиком + весь
-  objection_playbook + ВСЕ карточки продуктов, сортировка по slug) + контракт + JSON-схема.
+- `messages[0]` (system) — **байт-стабильный префикс**: полная KB + контракт + JSON-схема.
   Одинаков между ходами и между лидами одного филиала/языка — якорь prompt-кэша брокера.
   Стабилен в пределах локального дня (единственный датозависимый вход — `annotate_dates`).
+  Обе половины префикса выбирает `promptlib.pipeline` по настройке филиала `prompt_pipeline`
+  (см. [prompt-library.md](prompt-library.md)): `legacy` (по умолчанию, филиал 1) —
+  `KnowledgeService.full_knowledge_context` (persona_core + facts-доки целиком + весь
+  objection_playbook + ВСЕ карточки продуктов) и слитый контракт ниже; `composer` — свои
+  документы филиала (`in_prompt`) и общий CRAFT-контракт без индонезийских измерений.
 - `messages[1]` (system) — всё переменное: now-block, manager rules/note, entry-hint, имя,
   LEAD DOSSIER, first-turn note.
 - Дальше диалог.

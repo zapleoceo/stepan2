@@ -15,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Product
 from app.config import settings
+from app.modules.promptlib.fit import fit_blocks
 from app.ports.llm import LLMPort
 
 from .repository import KnowledgeRepo, ProductRepo
@@ -174,39 +175,15 @@ class KnowledgeService:
         return self._fit(blocks)
 
     def _fit(self, blocks: list[str]) -> str:
-        """Собрать под бюджет, выбрасывая блоки ЦЕЛИКОМ и называя выброшенное.
-
-        Было `text[:BUDGET]` — слепой срез по символу. 30.07.2026 он проходил внутри карточки
-        Vibe Coding Demo Event: промт заканчивался обрубком «## PRI», и последним, что модель
-        читала из всей базы, был сломанный заголовок. Раздел про цену она не видела никогда,
-        на каждом ответе, молча.
-
-        Оборванный блок строго хуже честно выброшенного: модель не отличает «этого нет» от
-        «это обрезали», и достраивает недостающее сама — ровно то, против чего написан весь
-        money-gate. Карточки идут по алфавиту, поэтому нож всегда падал на хвост (vibe_coding
-        и демо-событие) — на флагман, а не на что-то второстепенное.
-
-        Порядок блоков — приоритет: персона и общие документы идут первыми и не выбрасываются,
-        режется хвост карточек. Имя выброшенного пишем в лог, иначе рост базы снова окажется
-        невидимым."""
-        text = "\n\n".join(b for b in blocks if b)
-        if len(text) <= _FREE_CTX_CHAR_BUDGET:
-            return text
-        kept: list[str] = []
-        dropped: list[str] = []
-        size = 0
-        for block in (b for b in blocks if b):
-            add = len(block) + (2 if kept else 0)
-            if size + add > _FREE_CTX_CHAR_BUDGET:
-                dropped.append(block.split("\n", 1)[0][:60])
-                continue
-            kept.append(block)
-            size += add
-        logger.warning(
-            "full_knowledge_context branch=%d: %d chars > %d budget — dropped %d block(s): %s",
-            self.branch_id, len(text), _FREE_CTX_CHAR_BUDGET, len(dropped),
-            "; ".join(dropped))
-        return "\n\n".join(kept)
+        """Под бюджет целыми блоками (promptlib.fit) — персона и общие документы идут первыми
+        и не выбрасываются, режется хвост карточек."""
+        fitted = fit_blocks(blocks, _FREE_CTX_CHAR_BUDGET)
+        if fitted.dropped:
+            logger.warning(
+                "full_knowledge_context branch=%d: %d chars > %d budget — dropped %d "
+                "block(s): %s", self.branch_id, fitted.full_chars, _FREE_CTX_CHAR_BUDGET,
+                len(fitted.dropped), "; ".join(fitted.dropped))
+        return fitted.text
 
     async def _always_docs_block(self) -> str:
         parts = []

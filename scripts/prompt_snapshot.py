@@ -18,8 +18,8 @@ import hashlib
 import sys
 
 from app.adapters.db.session import session_scope
-from app.modules.conversation.free_mode import free_contract
 from app.modules.knowledge.service import KnowledgeService
+from app.modules.promptlib.pipeline import branch_pipeline, prompt_contract, prompt_knowledge
 
 
 def _h(text: str) -> str:
@@ -30,11 +30,14 @@ async def _snapshot(branch_id: int, *, sections: bool) -> int:
     async with session_scope() as session:
         knowledge = KnowledgeService(session, branch_id)
         lang = await knowledge._lang(None)  # noqa: SLF001 — the resolver the prompt itself uses
-        context = await knowledge.full_knowledge_context()
-        contract = free_contract(lang)
+        # Through the pipeline, not around it: a snapshot that always read the legacy
+        # assembler would print a hash of a prompt no lead on a composer branch ever sees.
+        pipeline = await branch_pipeline(session, branch_id)
+        context = await prompt_knowledge(session, branch_id, knowledge)
+        contract = await prompt_contract(session, branch_id, lang)
         prefix = context.rstrip() + "\n\n" + contract
 
-    print(f"branch={branch_id} lang={lang}")
+    print(f"branch={branch_id} lang={lang} pipeline={pipeline}")
     print(f"prefix   {_h(prefix)}  {len(prefix)} chars")
     if sections:
         print(f"  knowledge {_h(context)}  {len(context)} chars")

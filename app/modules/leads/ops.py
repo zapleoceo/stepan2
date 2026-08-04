@@ -248,6 +248,7 @@ async def _queue_call_failed_message(
         messages = build_messages_free(
             await engine.free_kb_context(),
             ctx.dialog, lang, stored,
+            contract=await engine.reply_contract(lang),
             now_block=await engine._now_block())  # noqa: SLF001
         messages.append({"role": "user", "content": nudge.format(lang=lang)})
         # A lead we already tried to phone is well past small talk — worth the strong model.
