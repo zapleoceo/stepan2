@@ -55,6 +55,15 @@ SCHEMA: list[SettingSection] = [
         # Default legacy on purpose: a branch nobody has touched keeps exactly today's prompt,
         # byte for byte. Branch 1 is 37k live messages behind a pinned fingerprint and moves
         # in its own step, deliberately, never as a side effect of somebody else's change.
+        #
+        # hidden=True — NOT rendered as a dropdown, and that is the whole point. Switching a
+        # branch replaces messages[0] wholesale: for branch 1 it would drop 5115 characters of
+        # its own selling layer (forms of address, the kampus rule, the MAHAL method, the local
+        # evidence the shared no-salary rule leans on), swap which fact document the public
+        # fabrication verifier reads, reorder the catalogue, and cold-bust a prompt cache
+        # running at a 91% hit rate. Recovery is a second click; the replies sent in between
+        # are already on Instagram. That is not a settings toggle, it is a migration with a
+        # fingerprint check either side — scripts/prompt_snapshot.py before and after.
         _f("prompt_pipeline", "text", "legacy",
            _l("Сборка промта", "Prompt pipeline", "Perakitan prompt"),
            choices=[("legacy", _l("Наследуемая (общий контракт)", "Legacy (shared contract)",
@@ -72,7 +81,7 @@ SCHEMA: list[SettingSection] = [
                    "shared contract with its Indonesian measurements",
                    "Composer menyusun prompt dari DOKUMEN cabang ini; Legacy memakai daftar "
                    "slug tetap dan kontrak bersama"),
-           width="200px"),
+           width="200px", hidden=True),
     ]),
     SettingSection("fa-solid fa-gauge-high",
                    _l("Лимиты · анти-бан", "Limits · anti-ban", "Batas · anti-ban"), [

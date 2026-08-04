@@ -220,3 +220,22 @@ async def test_the_fabrication_gate_reads_a_prefix_so_the_fact_order_changes_wha
     await verify_grounding(llm, "Rp 1.000.000", composed, branch_id=bid, thread_id=0, bill=False)
     assert "[facts_market]" in llm.seen
     assert "[facts_policy]" not in llm.seen
+
+
+def test_the_pipeline_switch_is_not_a_dropdown() -> None:
+    """Switching a branch's pipeline must not be one click in the settings panel.
+
+    The S7 gate's answer to "how does this hurt Jakarta if it ships tonight" was exactly this:
+    a plain two-option select, no confirmation, no fingerprint check. One save on branch 1
+    drops 5115 characters of its own selling layer, changes which fact document the public
+    fabrication verifier grounds against, reorders the catalogue and cold-busts a prompt cache
+    at a 91% hit rate. Recovery is a second click; the replies sent in between are already out.
+
+    hidden=True keeps the key resolvable — the composer branches read it every turn — while
+    taking it off the form. Moving a branch is a migration with scripts/prompt_snapshot.py run
+    either side, not a setting."""
+    from app.modules.settings.schema import SCHEMA
+
+    field = next(f for section in SCHEMA for f in section.fields if f.key == "prompt_pipeline")
+    assert field.hidden
+    assert field.default == "legacy"  # and a branch that was never migrated stays where it is
