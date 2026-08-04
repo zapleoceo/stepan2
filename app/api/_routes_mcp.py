@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
 from app.modules.conversation.sim import SimService
-from app.modules.leads import ops
+from app.modules.leads import lookup, ops
 from app.modules.mcp.tokens import (
     McpAuthz,
     McpBranchForbidden,
@@ -42,6 +42,17 @@ def _effective_branch(authz: McpAuthz, requested: int | None) -> int | None:
         return scope_effective_branch(authz.branch_id, requested)
     except McpBranchForbidden as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+async def _lookup(session, phone: str, eff_branch: int | None):  # noqa: ANN001, ANN202
+    """The branch-scoped phone lookup, turning an unpinnable phone into 409 + candidates.
+    Guessing which tenant's lead was meant is the one outcome this must never produce."""
+    try:
+        return await lookup.find_lead(session, phone, eff_branch)
+    except lookup.AmbiguousPhone as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": str(exc), "candidates": exc.candidates}) from exc
 
 
 def _guard_lead_branch(authz: McpAuthz, lead) -> None:  # noqa: ANN001
@@ -95,7 +106,7 @@ async def find_lead(
     authz = await _auth(authorization)
     eff_branch = _effective_branch(authz, branch_id)
     async with session_scope() as session:
-        lead = await ops.find_lead(session, phone, eff_branch)
+        lead = await _lookup(session, phone, eff_branch)
         if lead is None:
             raise HTTPException(status_code=404, detail=f"no lead with phone {phone}")
         _guard_lead_branch(authz, lead)
@@ -108,7 +119,7 @@ async def find_lead(
 
 
 async def _resolve(session, authz: McpAuthz, req: _PhoneReq):  # noqa: ANN001, ANN202
-    lead = await ops.find_lead(session, req.phone, _effective_branch(authz, req.branch_id))
+    lead = await _lookup(session, req.phone, _effective_branch(authz, req.branch_id))
     if lead is None:
         raise HTTPException(status_code=404, detail=f"no lead with phone {req.phone}")
     _guard_lead_branch(authz, lead)

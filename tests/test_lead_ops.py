@@ -1,4 +1,5 @@
-"""MCP lead-ops: phone matching, stage moves, close_deal hand-off, call_failed re-arm."""
+"""MCP lead-ops: stage moves, close_deal hand-off, call_failed re-arm.
+Phone → lead resolution lives in test_lead_lookup."""
 from __future__ import annotations
 
 import os
@@ -23,14 +24,6 @@ async def _seed(s, stage: Stage = Stage.PRESENTING, phone: str = "+62 812-3456")
     s.add(lead)
     await s.flush()
     return lead.id
-
-
-async def test_find_lead_normalizes_phone(db_session) -> None:
-    await _seed(db_session, phone="+62 812-3456")
-    # query with different spacing / no dashes still matches the stored number
-    lead = await ops.find_lead(db_session, "+628123456")
-    assert lead is not None and lead.display_name == "Budi"
-    assert await ops.find_lead(db_session, "+62999") is None
 
 
 async def test_move_lead_sets_stage_and_journals(db_session) -> None:
