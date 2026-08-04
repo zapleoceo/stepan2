@@ -54,7 +54,11 @@ from alembic import op
 from app.modules.promptlib.library_seed import SEED_ITEMS
 
 revision = "plib000001"
-down_revision = "dossbf00001"
+# Chained behind crmtnt00001, not beside it: both were written against dossbf00001 in parallel
+# worktrees, and two children of one parent are two alembic heads — `upgrade head` then refuses
+# to run at all. The two touch nothing in common (app_setting rows vs new tables plus a
+# knowledge_doc column), so the order between them is free; what is not free is having both.
+down_revision = "crmtnt00001"
 branch_labels = None
 depends_on = None
 
