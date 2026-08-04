@@ -65,6 +65,13 @@ Redis; правок инфры на филиал не нужно.
 `FollowupService.queue_one()` — генерация+запись одного треда, вызывается из своего
 `session_scope()` на каждый тред.
 
+**Коннектор может отказаться от проактива целиком.** `due_threads` и `ReactivationService.due`
+выбрасывают треды тех каналов, чья спека объявляет `proactive_outreach=False` (сейчас — чат на
+сайте: анонимному посетителю писать некуда). `OutboxSender._plan_followup` на таком коннекторе
+не ставит таймер, значит и до засыпания в `DORMANT` дело не доходит — оно случается только на
+исчерпании лестницы фолоапов. Это объявление коннектора, а не `if branch_id == N`:
+[connector-registry.md](connector-registry.md), [website-branch.md](website-branch.md).
+
 ## Outbox: капы и тихие часы
 
 Единственная точка выхода — `OutboxSender.send_next`

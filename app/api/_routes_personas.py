@@ -26,7 +26,6 @@ def _acting_branch(request: Request) -> int | None:
 async def _render_library(request: Request) -> str:
     bid = _acting_branch(request)
     async with session_scope() as session:
-        await P.ensure_seeded(session)
         personas = await P.list_personas(session)
         adopt = await P.adoption(session)
         active_id: int | None = None
@@ -50,7 +49,6 @@ async def persona_detail(pid: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     bid = _acting_branch(request)
     async with session_scope() as session:
-        await P.ensure_seeded(session)
         persona = await P.get_persona(session, pid)
         if persona is None:
             return HTMLResponse(f'<div class="emp">{t("pl.gone")}</div>', status_code=404)

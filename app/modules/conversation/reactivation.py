@@ -32,6 +32,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import money_issues
+from .outreach import NO_OUTREACH_SQL, no_outreach_param
 from .prompt import lead_name_hint
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import SALES
@@ -71,8 +72,8 @@ _REASON = "reactivation"
 # it dormant was invisible to this whole safety net — followups exhaust at 120h (5 days) and
 # nothing picked it up after. Any non-terminal stage that's been quiet long enough is eligible;
 # 'ready'/'handed_off'/'manager' are the only stages where the bot is deliberately silent.
-_DUE_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug, l.id"
+_DUE_Q = (
+    "SELECT ct.id, ct.product_slug, l.id"  # noqa: S608
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid AND l.stage NOT IN ('ready', 'handed_off', 'manager')"
     "   AND l.is_blocked = false"
@@ -103,6 +104,9 @@ _DUE_Q = (  # noqa: S608
     "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"
     "        AND se.reason = :reason AND se.created_at > :gap_cutoff)"
     "   AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.thread_id = ct.id AND o.status = 'pending')"
+    # Before the LIMIT, not after: a thread nobody can be written to still consumed one of the
+    # BATCH_PER_RUN slots a reachable lead was waiting for.
+    + NO_OUTREACH_SQL +
     # Best first, not newest first. Recency was the only ordering, and with a backlog of ~2700
     # threads draining at a small daily rate that meant the leads worth writing to sat behind
     # hundreds of one-word ad taps purely because those taps happened later. Read across the
@@ -168,9 +172,14 @@ class ReactivationService:
         self.outbox = OutboxRepo(session, branch_id)
 
     async def due(self, now: datetime) -> list[tuple[int, str | None, int]]:
+        """Dormant leads worth one more touch.
+
+        Threads on a connector that declares no proactive outreach never reach the LIMIT: a
+        website visitor left no address, so "re-engage them" is not a slow or risky operation,
+        it is an impossible one — and letting one into the batch would cost a slot."""
         if not self.settings.agent_enabled or not self.settings.reactivation_enabled:
             return []
-        rows = (await self.session.execute(text(_DUE_Q), {
+        rows = (await self.session.execute(text(_DUE_Q).bindparams(no_outreach_param()), {
             "bid": self.branch_id,
             "min_cutoff": now - timedelta(days=MIN_DORMANT_DAYS),
             "max_cutoff": now - timedelta(days=MAX_DORMANT_DAYS),

@@ -26,6 +26,7 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
+from .outreach import NO_OUTREACH_SQL, no_outreach_param
 from .repository import (
     CoachingNoteRepo,
     DossierRepo,
@@ -97,8 +98,8 @@ def followup_framing(attempt: int, total: int, refusal: str) -> str:
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
 # `new` is excluded: an untouched lead gets a live reply, not a nudge).
-_FOLLOWUP_Q = (  # noqa: S608
-    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"
+_FOLLOWUP_Q = (
+    "SELECT ct.id, ct.product_slug, ct.followups_sent, ct.channel_id"  # noqa: S608
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     " WHERE l.branch_id = :bid"
     "   AND l.stage IN ('qualifying', 'presenting', 'objection', 'nurturing')"
@@ -113,6 +114,7 @@ _FOLLOWUP_Q = (  # noqa: S608
     "   AND (ct.last_in_at IS NULL OR ct.last_in_at <= ct.last_out_at)"
     "   AND NOT EXISTS (SELECT 1 FROM outbox o"
     "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
+    + NO_OUTREACH_SQL
 )
 
 
@@ -146,12 +148,16 @@ class FollowupService:
         Follow-up enablement and the step-count bound are per-connector: a thread's schedule
         comes from its channel (Meta's shorter cadence vs Instagram's). The branch agent
         kill-switch still gates everything. Quiet hours do NOT filter this list — only the
-        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end."""
+        SEND (OutboxSender.send_next) holds a follow-up-sourced row until quiet hours end.
+
+        A connector that declares no proactive outreach is dropped before its settings are
+        even read: a nudge for an anonymous website visitor has no recipient, so generating
+        one is broker spend on text nobody can ever be shown."""
         if not self.settings.agent_enabled:
             return []  # branch global OFF: no generation at all
         rows = (
             await self.session.execute(
-                text(_FOLLOWUP_Q),
+                text(_FOLLOWUP_Q).bindparams(no_outreach_param()),
                 {"bid": self.branch_id, "now": now, "on": True},
             )
         ).all()

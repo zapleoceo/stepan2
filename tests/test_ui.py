@@ -1118,91 +1118,12 @@ def test_landing_states_telegram_and_any_api_messenger_as_architecture_not_roadm
     assert "Role-based access" in body
 
 
-def test_demo_chat_empty_returns_fallback_without_llm() -> None:
-    """No/blank messages → a graceful fallback and NO broker call."""
+def test_demo_chat_empty_message_returns_fallback_without_llm() -> None:
+    """A blank message → a graceful fallback, NO broker call and no DB touch. The turn tests
+    live in tests/test_website_demo.py, where the site branch exists."""
     client = TestClient(app, raise_server_exceptions=False)
-    resp = client.post("/demo/chat", json={"messages": []})
-    assert resp.status_code == 200
-    assert resp.json()["reply"]                     # some non-empty fallback
-
-
-def test_demo_chat_returns_stepan_reply(monkeypatch) -> None:
-    """A real turn calls the broker (chat:smart) and returns its text; the system prompt
-    positions Stepan as selling itself."""
-    import app.api._routes_demo as demo
-
-    captured = {}
-
-    class _FakeBroker:
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            captured["system"] = messages[0]["content"]
-            captured["cap"] = kw.get("capability")
-            return "Love it — what do you sell?", {}
-
-    monkeypatch.setattr(demo, "BrokerLLM", _FakeBroker)
-    client = TestClient(app, raise_server_exceptions=False)
-    resp = client.post("/demo/chat", json={"messages": [{"role": "user", "content": "hi"}]})
-    assert resp.json()["reply"] == "Love it — what do you sell?"
-    assert captured["cap"] == "chat:smart"          # full-strength model, no downgrade
-    sysp = captured["system"]
-    assert "sell YOURSELF" in sysp                   # demo persona: Stepan sells itself
-    assert "MCP connector" in sysp                   # answer bank covers CRM sync
-    # Channels, and the duty to say so BEFORE pitching: a visitor who opened with "I sell via
-    # TikTok" was told "great channel" and pitched to, though TikTok isn't connected.
-    assert "TikTok is on the roadmap and NOT connected yet" in sysp
-    assert "CHANNEL HONESTY" in sysp
-    assert "re-qualify a lead mid-chat" in sysp      # in-conversation re-qualification
-    low = sysp.lower()
-    assert "it step" not in low and "itstep" not in low  # never reveals the real client
-
-
-def test_demo_chat_retries_once_on_broker_failure(monkeypatch) -> None:
-    """A stuck provider (first attempt raises) is retried; the second attempt's reply wins,
-    so a transient broker timeout doesn't surface as the glitch fallback."""
-    import app.api._routes_demo as demo
-
-    calls = {"n": 0}
-
-    class _FlakyBroker:
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise TimeoutError("broker read timeout")
-            return "Back with you — what do you sell?", {}
-
-    monkeypatch.setattr(demo, "BrokerLLM", _FlakyBroker)
-    client = TestClient(app, raise_server_exceptions=False)
-    resp = client.post("/demo/chat", json={"messages": [{"role": "user", "content": "hi"}]})
-    assert calls["n"] == 2                              # retried after the first failure
-    assert resp.json()["reply"] == "Back with you — what do you sell?"
-
-
-def test_demo_chat_runs_owner_notify_as_background_task(monkeypatch) -> None:
-    """Regression: the owner-notify was a bare asyncio.create_task that the GC dropped before
-    it ran, so no lead ever pinged. It must run as a Starlette BackgroundTask (fires after the
-    response), with the assistant reply appended so the extractor sees the full turn."""
-    import app.api._routes_demo as demo
-
-    class _Broker:
-        async def chat(self, messages, **kw):  # noqa: ANN001, ANN003
-            return "Got it — I'll ping you on WhatsApp.", {}
-
-    seen: dict = {"n": 0, "hist": None}
-
-    async def _fake_notify(history):  # noqa: ANN001
-        seen["n"] += 1
-        seen["hist"] = history
-
-    monkeypatch.setattr(demo, "BrokerLLM", _Broker)
-    monkeypatch.setattr(demo, "maybe_notify", _fake_notify)
-    client = TestClient(app, raise_server_exceptions=False)
-    resp = client.post(
-        "/demo/chat",
-        json={"messages": [{"role": "user", "content": "buy it — my whatsapp +380994811889"}]},
-    )
-    assert resp.status_code == 200
-    assert seen["n"] == 1                               # background notify actually ran
-    assert seen["hist"][-1]["role"] == "assistant"      # reply appended for the extractor
+    assert client.post("/demo/chat", json={"message": "  "}).json()["reply"]
+    assert client.post("/demo/chat", json={"messages": []}).json()["reply"]
 
 
 # ─── lang switch: stay on the current view (path-only redirect) ────────────────
@@ -1658,23 +1579,6 @@ def test_nav_order_matches_requested_grouping() -> None:
               "Reports", "Leads", "Members", "Settings", "Branches", "Broker log"]
     positions = [html.index(f">{lbl}<") for lbl in labels]
     assert positions == sorted(positions)  # exact requested order, left to right
-
-
-def test_demo_persona_carries_the_current_sales_methodology() -> None:
-    """The site demo persona must carry the selling craft the branch pipeline learned that
-    TRANSFERS to a web page: budget -> risk-free first step, full multi-part answers, no
-    near-verbatim repeats, the privacy boundary. It is a separate hardcoded prompt, so
-    without this pin it silently falls behind every methodology upgrade.
-
-    Deliberately NOT pinned here: the DM-shaped pacing rules (gain-pull before pitching,
-    easing off on a soft no). Those assume a follow-up can recover the lead later; this page
-    has none, so easing off just loses them. See tests/test_demo_prompt_closing.py."""
-    from app.api._routes_demo import _SYSTEM
-
-    assert "free up to 10 leads a day" in _SYSTEM         # budget objection -> free tier
-    assert "EVERY part answered" in _SYSTEM               # multi-part questions
-    assert "near-verbatim" in _SYSTEM                     # anti-repeat
-    assert "Never mention or imply any specific real client" in _SYSTEM
 
 
 def test_the_funnel_line_holds_only_real_steps() -> None:

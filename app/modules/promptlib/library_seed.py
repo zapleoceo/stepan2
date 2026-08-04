@@ -9,6 +9,7 @@ the people who measured them — that is the whole reason the method is data.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -113,20 +114,28 @@ SEED_ITEMS: tuple[dict[str, str], ...] = (
 )
 
 
-async def ensure_library(session: AsyncSession) -> int:
+async def ensure_library(
+    session: AsyncSession, items: Sequence[dict[str, str]] = SEED_ITEMS,
+) -> int:
     """Install any built-in entry whose (kind, slug, version) is not in the library yet.
 
     Scoped by version rather than "seed when empty", for the same reason the persona library
     is: a library that already holds a branch's imported method must still receive a NEW
     version of a built-in, and an existing row is never clobbered — a branch may have cloned
-    from it, and rewriting history under a clone is how provenance stops meaning anything."""
+    from it, and rewriting history under a clone is how provenance stops meaning anything.
+
+    `items` is a parameter and defaults to the market-free starters because a second set
+    exists: the website agent's own persona/method/catalogue (app/modules/website/library.py).
+    They must NOT join SEED_ITEMS — migration plib000001 clones every member of that tuple
+    into branch 7, so appending to it would hand the TEST branch a second persona and a
+    second method the day the migration is replayed."""
     have = {
         (k, s, v) for k, s, v in (await session.execute(select(
             PromptLibraryItem.kind, PromptLibraryItem.slug, PromptLibraryItem.version))).all()
     }
     now = utc_now()
     added = 0
-    for item in SEED_ITEMS:
+    for item in items:
         if (item["kind"], item["slug"], item["version"]) in have:
             continue
         session.add(PromptLibraryItem(**item, status="published",
