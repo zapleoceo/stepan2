@@ -5,7 +5,7 @@ import html as _h
 import json as _json
 from datetime import UTC, datetime, timedelta
 
-from app.connectors.registry import all_specs, spec_for
+from app.connectors.registry import addable_specs, spec_for
 
 from ._i18n import current_lang, t
 from ._ui_html import (
@@ -816,11 +816,15 @@ def channel_list_partial_html(channels: list, sessions: list, branch_id: int) ->
 
 
 def channel_new_form_html(branch_id: int) -> str:
-    """Form to create a new channel (kind selector + metadata)."""
+    """Form to create a new channel (kind selector + metadata).
+
+    `addable_specs`, not `all_specs`: a connector the application owns must not be offerable
+    here. The create route refuses it too — this only keeps the form from showing a choice
+    that would be rejected."""
     title = _h.escape(t("ch.new"))
     kind_opts = "".join(
         f'<option value="{s.kind.value}">{_h.escape(t(s.label_key))}</option>'
-        for s in all_specs()
+        for s in addable_specs()
     )
     save_lbl = _h.escape(t("ch.save"))
     handle_lbl = _h.escape(t("ch.handle"))

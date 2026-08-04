@@ -22,6 +22,7 @@ from app.admin._branch import (
     writable_branch_ids,
 )
 from app.config import settings
+from app.connectors.registry import is_operator_addable
 from app.domain.enums import ChannelKind
 from app.modules.channels.service import ChannelService
 from app.modules.meta.tokens import page_access_token
@@ -114,6 +115,12 @@ async def channel_create(
     if is_branch_forbidden(branch_id, writable_branch_ids(request)):  # WRITE role required
         return HTMLResponse(_FORBIDDEN, status_code=403)
     kind_val = kind if kind in (k.value for k in ChannelKind) else ChannelKind.INSTAGRAM.value
+    # A branch-scoped WRITE must stay branch-scoped. The website channel row is what names the
+    # branch the PUBLIC landing page sells from, so accepting it here would let an operator on
+    # any tenant repoint that page at their own persona, prices and catalogue — the form does
+    # not offer the kind, and this is the half that a hand-rolled POST also meets.
+    if not is_operator_addable(kind_val):
+        return HTMLResponse(_FORBIDDEN, status_code=403)
     async with session_scope() as session:
         session.add(Channel(
             branch_id=branch_id,

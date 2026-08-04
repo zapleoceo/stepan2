@@ -40,6 +40,20 @@ def all_specs() -> tuple[ConnectorSpec, ...]:
     return tuple(REGISTRY.values())
 
 
+def addable_specs() -> tuple[ConnectorSpec, ...]:
+    """The connectors a branch panel may offer, in display order. See operator_addable."""
+    return tuple(s for s in REGISTRY.values() if s.operator_addable)
+
+
+def is_operator_addable(kind: ChannelKind | str | None) -> bool:
+    """May an operator create a channel of this kind? Unregistered kinds may not.
+
+    Stricter than `does_proactive_outreach` on purpose: this answers a WRITE request, and the
+    safe answer to "I do not recognise this kind" is no."""
+    spec = spec_for(kind)
+    return spec is not None and spec.operator_addable
+
+
 def supports(kind: ChannelKind | str | None, capability: Capability) -> bool:
     """Does this channel kind's connector do `capability`? Unregistered kinds do nothing."""
     spec = spec_for(kind)
@@ -56,3 +70,13 @@ def does_proactive_outreach(kind: ChannelKind | str | None) -> bool:
     than have its follow-ups silently switched off."""
     spec = spec_for(kind)
     return spec is None or spec.proactive_outreach
+
+
+def non_outreach_kinds() -> tuple[str, ...]:
+    """Kind values whose connector declares no proactive outreach — for the harvest queries.
+
+    Never empty: the harvests bind this into `ch.kind NOT IN (:kinds)` before their LIMIT, and
+    an empty list is a SQL hole rather than a portable no-op. The sentinel is a kind no row can
+    carry, so "every connector does outreach" reads as "exclude nothing"."""
+    kinds = tuple(s.kind.value for s in REGISTRY.values() if not s.proactive_outreach)
+    return kinds or ("",)

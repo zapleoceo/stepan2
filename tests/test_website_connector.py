@@ -53,8 +53,90 @@ def test_the_spec_declares_only_what_a_web_page_actually_has() -> None:
     assert _SPEC.send_window is None
     assert _SPEC.counts_as_awaiting is False
     assert _SPEC.proactive_outreach is False
+    assert _SPEC.operator_addable is False
     # every DM connector keeps the old behaviour; only the site opts out
     assert [s.kind.value for s in REGISTRY.values() if not s.proactive_outreach] == ["website"]
+    assert [s.kind.value for s in REGISTRY.values() if not s.operator_addable] == ["website"]
+
+
+# ─── who may create the channel ───────────────────────────────────────────────
+#
+# This row is not an account somebody connects. Its existence is what website_branch_id reads
+# to decide which branch the PUBLIC landing page sells from, so one operator adding one to
+# their own branch would repoint that page at their tenant's persona, prices and catalogue —
+# a branch-scoped write turning into a global, cross-tenant, publicly visible change.
+
+
+class _Req:
+    """The three things channel_create reads off a request."""
+
+    def __init__(self, writable: list[int] | None) -> None:
+        self.cookies: dict[str, str] = {}
+        self.state = type("S", (), {"writable_branch_ids": writable,
+                                    "allowed_branch_ids": writable})()
+
+
+@pytest.mark.asyncio
+async def test_the_create_route_refuses_a_website_channel_from_any_branch(
+    db_session, monkeypatch: pytest.MonkeyPatch,  # noqa: ANN001
+) -> None:
+    """Branch 1 is the live Indonesian tenant and has the lowest id there is, so it is the
+    worst case: its operator picking "website" would take the landing page over."""
+    import contextlib
+
+    from app.api import _routes_channels as routes
+
+    @contextlib.asynccontextmanager
+    async def _scope():  # noqa: ANN202
+        yield db_session
+
+    monkeypatch.setattr(routes, "session_scope", _scope)
+    # The channel table renders through a Postgres-only ANY() query; it is not what is under
+    # test here, and the insert it would render happens before it.
+    async def _rendered(session: Any, branch_id: int) -> str:
+        return "<table></table>"
+
+    monkeypatch.setattr(routes, "_ch_list_html", _rendered)
+    branch = Branch(name="Indonesia", lang="id")
+    db_session.add(branch)
+    await db_session.flush()
+    bid = int(branch.id or 0)
+    request = _Req([bid])  # a WRITE-role operator on their OWN branch
+
+    refused = await routes.channel_create(bid, request, kind="website", handle="site",
+                                          account_id="", is_active="on")
+
+    assert refused.status_code == 403
+    assert (await db_session.execute(
+        Channel.__table__.select().where(Channel.kind == ChannelKind.WEBSITE))).all() == []
+    # the same operator's ordinary connector still goes in — this is a kind gate, not a
+    # branch gate that happens to also block website
+    ok = await routes.channel_create(bid, request, kind="instagram", handle="@x",
+                                     account_id="", is_active="on")
+    assert ok.status_code == 200
+    kinds = (await db_session.execute(
+        Channel.__table__.select().where(Channel.branch_id == bid))).all()
+    assert [r.kind for r in kinds] == ["instagram"]
+
+
+@pytest.mark.asyncio
+async def test_the_schema_refuses_a_second_website_channel(db_session) -> None:  # noqa: ANN001
+    """The process lock in ensure_website_branch covers one uvicorn worker and is released
+    before the caller's transaction commits. This index is what actually makes "the branch the
+    site sells from" a single answer, whoever writes second."""
+    from sqlalchemy.exc import IntegrityError
+
+    for name in ("Website", "Impostor"):
+        branch = Branch(name=name, lang="en")
+        db_session.add(branch)
+        await db_session.flush()
+        db_session.add(Channel(branch_id=branch.id, kind=ChannelKind.WEBSITE, handle=name))
+        if name == "Website":
+            await db_session.flush()
+            continue
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+    await db_session.rollback()
 
 
 def test_an_unregistered_kind_still_gets_its_follow_ups() -> None:

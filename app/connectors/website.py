@@ -18,9 +18,8 @@ from .spec import ConnectorSpec
 from .website_ui import _ch_web_form
 
 
-async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
+async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:  # noqa: ARG001
     """No secrets to load: the transport is the HTTP request the visitor is already making."""
-    del session, channel
     return WebsiteAdapter()
 
 
@@ -44,4 +43,8 @@ SPEC = ConnectorSpec(
     # nothing is stored. Counting these in the inbox's "awaiting reply" split would show the
     # operator a queue they can neither see nor drain.
     counts_as_awaiting=False,
+    # The one channel row nobody adds by hand: this row IS the pointer to the branch the public
+    # landing page sells from, so offering it in a branch's "add channel" form would let a
+    # WRITE-role operator on any tenant repoint that page at their own persona and price list.
+    operator_addable=False,
 )

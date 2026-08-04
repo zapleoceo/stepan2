@@ -53,15 +53,26 @@ def test_channel_editor_title_comes_from_the_spec(monkeypatch: pytest.MonkeyPatc
     assert "Signal #7" in channel_edit_form_html(7, "whatsapp", "+62", "", True)
 
 
-def test_new_channel_selector_lists_every_registered_connector(
+def test_new_channel_selector_lists_every_connector_an_operator_may_add(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     html = channel_new_form_html(1)
     for spec in all_specs():
-        assert f'value="{spec.kind.value}"' in html
+        assert (f'value="{spec.kind.value}"' in html) is spec.operator_addable
     _respec(monkeypatch, ChannelKind.WHATSAPP, label_key="ch.kind_ig")
     # the option text follows the spec's i18n key, not a tuple copied next to the <select>
     assert channel_new_form_html(1).count("Instagram") == 2
+
+
+def test_the_selector_follows_the_spec_when_a_connector_becomes_addable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exclusion is the spec's word, not a name written next to the <select>. Flip the
+    declaration and the option appears — which is also what proves the assertion above is
+    reading `operator_addable` rather than agreeing with a hardcoded list by luck."""
+    assert 'value="website"' not in channel_new_form_html(1)
+    _respec(monkeypatch, ChannelKind.WEBSITE, operator_addable=True)
+    assert 'value="website"' in channel_new_form_html(1)
 
 
 def test_inbox_filter_chips_are_one_per_spec(monkeypatch: pytest.MonkeyPatch) -> None:

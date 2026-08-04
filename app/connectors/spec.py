@@ -99,6 +99,16 @@ class ConnectorSpec:
     # Whether an unanswered thread on this connector belongs in the inbox "awaiting reply"
     # split. False = its chats are counted nowhere.
     counts_as_awaiting: bool = True
+    # May an operator add a channel of this kind from a branch panel?
+    #
+    # False = the application owns these rows, and the "add channel" form must not offer the
+    # kind nor the create route accept it. The website channel is not an account somebody
+    # connects: its EXISTENCE is what names the branch the public landing page sells from
+    # (app/modules/website/branch.website_branch_id). Offered in the selector, any WRITE-role
+    # operator could add one to their own branch and repoint the public page at that tenant's
+    # persona, prices and catalogue — a branch-scoped write escalating into a global,
+    # cross-tenant, publicly visible change.
+    operator_addable: bool = True
 
     def supports(self, capability: Capability) -> bool:
         return capability in self.capabilities
