@@ -31,8 +31,19 @@ class Branch(SQLModel, table=True):
 
 
 class Channel(SQLModel, table=True):
-    """Аккаунт канала филиала (MBS/IG/WA)."""
+    """Аккаунт канала филиала (MBS/IG/WA/сайт)."""
     __tablename__ = "channel"
+    # There is ONE landing page, so there is one website channel, and which branch owns it is
+    # what app/modules/website/branch.website_branch_id resolves. The process lock there cannot
+    # span two uvicorn workers, and a duplicate is not a cosmetic row: it is a second active
+    # branch with a full prompt-library clone, shown in the operator UI and walked by every
+    # per-branch cron. Enforced in the schema so the answer cannot depend on who committed
+    # first. Partial, so the DM connectors keep as many channels as they like.
+    __table_args__ = (
+        Index("uq_channel_one_website", "kind", unique=True,
+              sqlite_where=text("kind = 'website'"),
+              postgresql_where=text("kind = 'website'")),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     branch_id: int = Field(foreign_key="branch.id", index=True)

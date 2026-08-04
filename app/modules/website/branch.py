@@ -12,6 +12,7 @@ import asyncio
 import logging
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import AppSetting, Branch, Channel
@@ -28,18 +29,24 @@ logger = logging.getLogger(__name__)
 BRANCH_NAME = "Website"
 BRANCH_LANG = "en"
 
-# One creator at a time. The site chat is a public endpoint and the first visitor after a
-# fresh deploy is easily two concurrent requests; both would find no branch and both would
-# create one, leaving two Website branches. The API container runs a single uvicorn worker
-# (see the Dockerfile CMD), so a process lock covers it — website_branch_id's lowest-id rule
-# is what keeps the answer stable if that ever stops being true.
+# One creator at a time WITHIN a process. The site chat is a public endpoint and the first two
+# visitors after a fresh deploy are easily concurrent; both would find no branch and both would
+# create one, leaving two Website branches.
+#
+# The lock alone is not the guarantee, and an earlier version of this comment claimed it was.
+# It has to be held across the COMMIT, not just the flush: the caller's transaction stays open
+# for the whole broker call (tens of seconds), so a lock released at flush time lets the next
+# visitor read a table that still has nothing in it. And it is per-process — a second uvicorn
+# worker never contends for it at all. The real guarantee is the partial unique index
+# uq_channel_one_website; the lock only keeps the common case off that error path.
 _seed_lock = asyncio.Lock()
 
 
 async def website_branch_id(session: AsyncSession) -> int | None:
     """The active branch owning an active website channel, or None if the site has no branch.
 
-    Lowest id wins if somebody has made two — an arbitrary but STABLE answer, so the demo
+    uq_channel_one_website makes two impossible from this build on; lowest id wins anyway, for
+    a database that predates the index or was edited by hand. Arbitrary but STABLE, so the demo
     does not switch prompts between requests while the duplicate is being cleaned up."""
     rows = (await session.execute(
         select(Channel.branch_id)
@@ -70,21 +77,41 @@ async def ensure_website_branch(session: AsyncSession) -> int:
         existing = await website_branch_id(session)
         if existing is not None:
             return existing
-        branch = Branch(name=BRANCH_NAME, lang=BRANCH_LANG, is_active=True)
-        session.add(branch)
-        await session.flush()
-        branch_id = int(branch.id or 0)
-        session.add(Channel(branch_id=branch_id, kind=ChannelKind.WEBSITE, handle=BRANCH_NAME))
-        # The composer pipeline, explicitly. The default is legacy, whose hardcoded slug list
-        # (facts_policy, objection_playbook, …) would load none of the cloned documents and
-        # leave the site selling with an empty knowledge surface.
-        session.add(AppSetting(branch_id=branch_id, channel_id=None,
-                               key="prompt_pipeline", value=COMPOSER))
-        await _clone_library(session, branch_id)
-        await session.flush()
+        try:
+            branch_id = await _create(session)
+            # Committed HERE, inside the lock, and not left to the caller's session_scope: the
+            # caller holds its transaction open across the broker call that answers this turn,
+            # so a branch that is only flushed stays invisible to the next visitor for as long
+            # as that call takes — which is exactly how two Website branches got created.
+            await session.commit()
+        except IntegrityError:
+            # Another worker won the unique index. Its row is committed by definition, so the
+            # only thing to do is adopt it.
+            await session.rollback()
+            adopted = await website_branch_id(session)
+            if adopted is None:
+                raise
+            logger.info("website branch %d created by another worker — adopted", adopted)
+            return adopted
         invalidate(branch_id)
         logger.info("website branch %d created and seeded from the prompt library", branch_id)
         return branch_id
+
+
+async def _create(session: AsyncSession) -> int:
+    branch = Branch(name=BRANCH_NAME, lang=BRANCH_LANG, is_active=True)
+    session.add(branch)
+    await session.flush()
+    branch_id = int(branch.id or 0)
+    session.add(Channel(branch_id=branch_id, kind=ChannelKind.WEBSITE, handle=BRANCH_NAME))
+    # The composer pipeline, explicitly. The default is legacy, whose hardcoded slug list
+    # (facts_policy, objection_playbook, …) would load none of the cloned documents and
+    # leave the site selling with an empty knowledge surface.
+    session.add(AppSetting(branch_id=branch_id, channel_id=None,
+                           key="prompt_pipeline", value=COMPOSER))
+    await _clone_library(session, branch_id)
+    await session.flush()
+    return branch_id
 
 
 async def _clone_library(session: AsyncSession, branch_id: int) -> None:
