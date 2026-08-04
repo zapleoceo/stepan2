@@ -17,9 +17,11 @@ from app.modules.leads import lookup, ops
 from app.modules.mcp.tokens import (
     McpAuthz,
     McpBranchForbidden,
+    McpBranchRequired,
     authorize_mcp,
     scope_effective_branch,
     scope_lead_allowed,
+    scope_write_branch,
 )
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -40,6 +42,17 @@ def _effective_branch(authz: McpAuthz, requested: int | None) -> int | None:
     translating its McpBranchForbidden into an HTTP 403 for this REST surface."""
     try:
         return scope_effective_branch(authz.branch_id, requested)
+    except McpBranchForbidden as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+def _write_branch(authz: McpAuthz, requested: int | None) -> int:
+    """_effective_branch for a MUTATING route: 'every branch' is not an answer here. 400,
+    not 403 — the caller is allowed everywhere, they just have to say where."""
+    try:
+        return scope_write_branch(authz.branch_id, requested)
+    except McpBranchRequired as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except McpBranchForbidden as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -119,7 +132,9 @@ async def find_lead(
 
 
 async def _resolve(session, authz: McpAuthz, req: _PhoneReq):  # noqa: ANN001, ANN202
-    lead = await _lookup(session, req.phone, _effective_branch(authz, req.branch_id))
+    """The lead a mutating route may touch. Unlike /find_lead this refuses a universal
+    token that did not name a branch — move/close/call_failed are not undoable."""
+    lead = await _lookup(session, req.phone, _write_branch(authz, req.branch_id))
     if lead is None:
         raise HTTPException(status_code=404, detail=f"no lead with phone {req.phone}")
     _guard_lead_branch(authz, lead)

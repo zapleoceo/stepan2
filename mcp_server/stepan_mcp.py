@@ -68,7 +68,8 @@ async def close_deal(
 ) -> dict:
     """Mark a lead's deal as WON. Hands the lead off (stage → handed_off) and stops the
     bot from messaging them further. `note` is journaled on the funnel event. `branch_id`
-    scopes the phone lookup."""
+    names the branch and is REQUIRED unless the token is limited to one — this is not
+    undoable, so it never guesses which tenant's lead a phone means."""
     return await _post(
         "/mcp/close_deal", {"phone": phone, "note": note, "branch_id": branch_id})
 
@@ -80,8 +81,8 @@ async def call_failed(
     """Report that a phone call to the lead did NOT connect. Journals the failed call,
     re-enables the bot, and Stepan proactively messages the lead to continue in chat.
     A lead already handed off / dormant is pulled back to `qualifying` so the bot works
-    them again. `note` (e.g. 'no answer', 'wrong number') is journaled. `branch_id`
-    scopes the phone lookup."""
+    them again. `note` (e.g. 'no answer', 'wrong number') is journaled. `branch_id` names
+    the branch and is REQUIRED unless the token is limited to one."""
     return await _post(
         "/mcp/call_failed", {"phone": phone, "note": note, "branch_id": branch_id})
 
@@ -93,7 +94,7 @@ async def move_lead(
     """Move a lead to an explicit funnel stage. Valid stages: new, nurturing, qualifying,
     presenting, objection, ready, handed_off, dormant, manager. `manager` turns the bot
     off (human takeover); an active stage turns it back on. `note` is journaled.
-    `branch_id` scopes the phone lookup."""
+    `branch_id` names the branch and is REQUIRED unless the token is limited to one."""
     return await _post(
         "/mcp/move_lead",
         {"phone": phone, "stage": stage, "note": note, "branch_id": branch_id})

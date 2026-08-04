@@ -76,6 +76,19 @@ async def test_candidates_leak_neither_name_nor_full_number(db_session) -> None:
     assert all(c["phone"] == "…6789" for c in exc.value.candidates)
 
 
+async def test_a_scoped_search_never_names_another_tenants_branch(db_session) -> None:
+    """The refusal must not become the leak it prevents: candidates come only from the
+    branch that was searched, so the caller learns nothing about who else holds the number."""
+    indo = await _branch(db_session, "Indonesia")
+    malay = await _branch(db_session, "Malaysia")
+    await _lead(db_session, indo, "+628123456789", "Budi")
+    await _lead(db_session, indo, "+618123456789", "Bagus")
+    await _lead(db_session, malay, "+608123456789", "Aisyah")
+    with pytest.raises(AmbiguousPhone) as exc:
+        await find_lead(db_session, "08123456789", indo)
+    assert {c["branch_id"] for c in exc.value.candidates} == {indo}
+
+
 async def test_two_leads_inside_one_branch_are_also_refused(db_session) -> None:
     """Same tenant, two rows sharing the tail — still nobody's call to make but a human's."""
     bid = await _branch(db_session, "Indonesia")

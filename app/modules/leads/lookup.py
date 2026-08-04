@@ -25,25 +25,25 @@ def _digits(phone: str) -> str:
     return "".join(c for c in phone if c.isdigit())
 
 
-def match_key(phone: str) -> str:
-    """Country/format-agnostic lookup key: the trailing national digits. Stored phones are
-    canonical '+<cc>…' E.164 (the only writers are phone.to_e164 / phone.extract_phone), but
-    a query may arrive as '0812…', '62…' or '+62…' — comparing the last 9 significant digits
-    matches all of those without re-hardcoding a country prefix here."""
+def _match_key(phone: str) -> str:
+    """Country/format-agnostic lookup key: the trailing national digits."""
+    # Stored phones are canonical '+<cc>…' E.164 (the only writers are phone.to_e164 /
+    # phone.extract_phone), but a query may arrive as '0812…', '62…' or '+62…' — comparing
+    # the last 9 significant digits matches all of those without hardcoding a country here.
     digits = _digits(phone)
     return digits[-_SUFFIX_LEN:] if len(digits) >= _SUFFIX_LEN else digits
 
 
 def mask(phone: str) -> str:
-    """Last four digits only — enough for a human to recognise their own lead, useless to
-    anyone reading another tenant's error message."""
+    """Last four digits only — recognisable to the number's owner, useless to anyone else."""
     digits = _digits(phone)
     return f"…{digits[-4:]}" if len(digits) > 4 else "…"
 
 
 def _summary(lead: Lead) -> dict:
-    # branch_id is what the caller needs to disambiguate; the full number and the display
-    # name belong to whichever tenant owns the lead, so they never travel in an error.
+    # branch_id is what the caller needs to disambiguate, and it never widens what they can
+    # already see: candidates only ever come from the branch scope that was searched. The
+    # full number and the display name belong to the lead's tenant, so they never travel.
     return {"lead_id": lead.id, "branch_id": lead.branch_id,
             "phone": mask(lead.phone_e164 or "")}
 
@@ -59,31 +59,27 @@ class AmbiguousPhone(Exception):
             " — repeat the call with an explicit branch_id")
 
 
-async def match_leads(
+async def _match_leads(
     session: AsyncSession, phone: str, branch_id: int | None,
 ) -> list[Lead]:
-    """Every lead whose national number equals this phone's, within `branch_id`
-    (None = every branch)."""
-    key = match_key(phone)
+    key = _match_key(phone)
     if not key:
         return []
     stmt = select(Lead).where(Lead.phone_e164.is_not(None))
     if branch_id is not None:
         stmt = stmt.where(Lead.branch_id == branch_id)
     leads = (await session.execute(stmt)).scalars().all()
-    return [lead for lead in leads if match_key(lead.phone_e164 or "") == key]
+    return [lead for lead in leads if _match_key(lead.phone_e164 or "") == key]
 
 
 async def find_lead(
     session: AsyncSession, phone: str, branch_id: int | None,
 ) -> Lead | None:
-    """The one lead in `branch_id` matching this phone, or None. Raises AmbiguousPhone when
-    the phone cannot be pinned to a single lead.
-
-    A full-number equality is preferred over the national-digits match, so two leads that
-    merely share a nine-digit tail (different country codes) still resolve when the caller
-    quoted the whole E.164 number."""
-    matches = await match_leads(session, phone, branch_id)
+    """The one lead in `branch_id` (None = every branch) matching this phone, or None."""
+    # A full-number equality beats the national-digits match, so two leads that merely share
+    # a nine-digit tail (different country codes) still resolve when the caller quoted the
+    # whole E.164 number. Anything still unresolved is AmbiguousPhone, never a guess.
+    matches = await _match_leads(session, phone, branch_id)
     if not matches:
         return None
     if len(matches) == 1:
