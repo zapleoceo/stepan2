@@ -89,8 +89,21 @@ def _parse_json(text: str) -> dict | None:
         return None
 
 
-# U+2028/U+2029 too: a renderer treats them as line breaks and str.split does not.
-_BREAKS = re.compile("[ \t]*[\r\n\u2028\u2029]+[ \t]*")
+# EVERY character str.splitlines() breaks on, not just the two obvious ones. The transcript is
+# read back line by line — by the owner's card and by the extraction prompt — so anything that
+# can open a line there can open one in Stepan's name. \v \f \x1c \x1d \x1e \x85 all split a
+# Python string and several render as breaks besides; a flattener that knew only \r\n and the
+# Unicode separators handed exactly that forgery through.
+_BREAKS = re.compile("[ \t]*[\r\n\v\f\x1c\x1d\x1e\x85\u2028\u2029]+[ \t]*")
+
+
+
+
+
+
+
+
+
 
 
 def _transcript(history: list[dict]) -> str:
