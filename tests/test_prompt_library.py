@@ -241,7 +241,8 @@ async def test_a_conflicting_clone_leaves_the_branch_exactly_as_it_was(db_sessio
     with pytest.raises(CloneConflict):
         await clone_into_branch(db_session, bid, item, replace_existing=True)
 
-    db_session.expire_all()
+    # Read the SESSION, not a re-fetched copy: expiring the instances first would discard the
+    # pending change and pass whatever the clone did. The damage lives in the unit of work.
     still = await KnowledgeRepo(db_session, bid).by_slug("persona_core")
     assert still.in_prompt is True, "the incumbent persona was retired by a clone that failed"
     composed = await compose_context(db_session, bid, "en")
@@ -266,7 +267,6 @@ async def test_a_catalogue_that_clashes_on_one_card_stands_nothing_down(db_sessi
     with pytest.raises(CloneConflict):
         await clone_into_branch(db_session, bid, item, replace_existing=True)
 
-    db_session.expire_all()
     active = {p.slug for p in await ProductRepo(db_session, bid).active()}
     assert active == {"own_course", clashing}, "a failed clone deactivated the branch's cards"
 
