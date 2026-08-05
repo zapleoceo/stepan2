@@ -134,3 +134,75 @@ async def test_cancellation_is_not_swallowed() -> None:
     s = _Session(boom=asyncio.CancelledError())
     with pytest.raises(asyncio.CancelledError):
         await call(s, "whatever", {})
+
+
+class _FakeTransport:
+    """streamablehttp_client's shape: yields (read, write, _) and blows up on teardown."""
+
+    def __init__(self, boom: Exception | None) -> None:
+        self.boom = boom
+
+    async def __aenter__(self):  # noqa: ANN204
+        return (None, None, None)
+
+    async def __aexit__(self, *exc) -> bool:  # noqa: ANN002
+        if self.boom:
+            raise self.boom
+        return False
+
+
+class _FakeClientSession(_Session):
+    """ClientSession's shape: __aenter__ returns SELF, so initialize() lives on what the
+    caller gets. A fake that hands back something without initialize() fails before the
+    yield, and the transport's teardown error then masks the AttributeError."""
+
+    def __init__(self, read, write) -> None:  # noqa: ANN001, ARG002
+        super().__init__(answer={"ok": True})
+
+    async def __aenter__(self) -> _FakeClientSession:
+        return self
+
+    async def __aexit__(self, *exc) -> bool:  # noqa: ANN002
+        return False
+
+    async def initialize(self) -> None:
+        pass
+
+
+def _patch_transport(monkeypatch, boom: Exception | None) -> None:
+    import mcp.client.session as _cs
+    import mcp.client.streamable_http as _sh
+
+    monkeypatch.setattr(_sh, "streamablehttp_client",
+                        lambda *a, **k: _FakeTransport(boom), raising=False)
+    monkeypatch.setattr(_cs, "ClientSession", _FakeClientSession, raising=False)
+
+
+async def test_a_teardown_failure_does_not_discard_a_completed_exchange(monkeypatch) -> None:
+    """The bug that silently killed the CRM read gate.
+
+    streamablehttp_client raises ClosedResourceError while closing a session whose work had
+    already finished. The handler caught every exception alike and turned that into
+    McpUnavailable, throwing away an answer already received and parsed. Because reads fail
+    open, nothing surfaced: 25 of 25 reads in a day were logged as failures against a server
+    that was healthy and answering, and leads simply never got their CRM state."""
+    from anyio import ClosedResourceError
+
+    _patch_transport(monkeypatch, ClosedResourceError())
+
+    got = await read("https://crm.example/mcp?token=x", timeout_s=5,
+                     using=lambda s: call(s, "crm_client_history", {}), what="crm")
+
+    assert got == {"ok": True}, "a completed exchange was discarded by teardown noise"
+
+
+async def test_a_failure_before_the_answer_still_fails(monkeypatch) -> None:
+    """The other half: only teardown is forgiven. A body that never produced an answer must
+    still fail open to None, or the fix would paper over real outages."""
+    _patch_transport(monkeypatch, None)
+
+    async def _boom(s):  # noqa: ANN001, ANN202
+        raise McpUnavailable("server said no")
+
+    assert await read("https://crm.example/mcp?token=x", timeout_s=5,
+                      using=_boom, what="crm") is None

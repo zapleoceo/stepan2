@@ -49,15 +49,28 @@ async def session(url: str, *, timeout_s: float) -> AsyncIterator[Any]:
     from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
 
     target, headers = connect_args(url)
+    delivered = False
     try:
         async with asyncio.timeout(timeout_s):
             async with streamablehttp_client(target, headers=headers) as (read, write, _):
                 async with ClientSession(read, write) as s:
                     await s.initialize()
                     yield s
+                    # Skipped when the body raised: that exception is thrown in at the yield.
+                    delivered = True
     except asyncio.CancelledError:
         raise
     except Exception as exc:
+        # A failure while CLOSING a session whose work already finished is not a failed
+        # exchange. streamablehttp_client raises ClosedResourceError on teardown, and this
+        # handler used to turn it into McpUnavailable, discarding an answer already received
+        # and parsed. That killed the CRM read gate outright — 25 of 25 reads in a day were
+        # logged as failures while the server was healthy and answering, and because reads
+        # fail open, nothing surfaced except leads quietly never getting their CRM state.
+        if delivered:
+            logger.debug("mcp session teardown after a completed exchange (%s): %s",
+                         redact(url), str(exc)[:200])
+            return
         raise McpUnavailable(f"{redact(url)}: {str(exc)[:200]}") from exc
 
 
