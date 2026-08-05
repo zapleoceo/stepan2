@@ -49,6 +49,13 @@ DEAL_WON = (
     " AND (cs.deal_won_at IS NULL OR cs.deal_won_at >= l.created_at))"
 )
 
+# Booked onto a CRM event that has not happened yet — the conversion BEFORE a contract, and
+# the same "not somebody else's" rule: a returning client carries bookings from earlier years.
+EVENT_BOOKED = (
+    "EXISTS (SELECT 1 FROM crm_lead_state cs WHERE cs.lead_id = l.id"
+    " AND cs.event_at IS NOT NULL AND cs.event_at >= l.created_at)"
+)
+
 def awaiting_kind_sql(specs: Iterable[ConnectorSpec]) -> str:
     """The connector filter of awaiting_base(), derived from the specs.
 
@@ -136,6 +143,28 @@ def deal_won_clause():  # noqa: ANN201 - SQLAlchemy expression
     )
 
 
+def event_booked_clause():  # noqa: ANN201 - SQLAlchemy expression
+    """Lead is registered on a CRM event that has not happened yet.
+
+    The conversion that lands BEFORE a contract, and the one the reports could not see.
+    Checked against the live CRM on 2026-08-05: eight leads Stepan worked through in July are
+    all booked onto "VIBE CODING DEMO 08/08/2026" and not one of them has a contract, so a
+    column counting deals alone reported those conversations as having achieved nothing.
+
+    Bounded by the lead's own start date for the same reason DEAL_WON is: a returning client
+    carries bookings from earlier years — one card here holds two from 2025 — and crediting
+    this conversation with a booking made before it began would flatter the numbers."""
+    return (
+        select(CrmLeadState.id)
+        .where(
+            CrmLeadState.lead_id == Lead.id,  # type: ignore[arg-type]
+            CrmLeadState.event_at.is_not(None),  # type: ignore[union-attr]
+            CrmLeadState.event_at >= Lead.created_at,  # type: ignore[operator]
+        )
+        .exists()
+    )
+
+
 AD_FUNNEL_GROUPS: dict[str, tuple[str, ...]] = {
     "pipeline": _PIPELINE_STAGES,
     "won": _WON_STAGES,
@@ -164,6 +193,7 @@ async def fetch_ad_funnel(
             won.label("won"),
             func.sum(case((Lead.stage == "dormant", 1), else_=0)).label("dormant"),
             func.sum(case((deal_won_clause(), 1), else_=0)).label("deals"),
+            func.sum(case((event_booked_clause(), 1), else_=0)).label("events"),
         )
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
         .where(ChannelThread.ad_id.is_not(None))  # type: ignore[union-attr]
@@ -182,8 +212,8 @@ async def fetch_ad_funnel(
 async def fetch_organic_funnel(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
-) -> tuple[int, int, int, int, int]:
-    """The same funnel for leads that came from NO ad: (total, pipeline, won, dormant, deals).
+) -> tuple[int, int, int, int, int, int]:
+    """Same funnel for leads from NO ad: (total, pipeline, won, dormant, deals, events).
 
     The ad tree filters on `ad_id IS NOT NULL`, so it silently omitted 2145 threads and read
     as a complete picture of the base. It is not — and the one confirmed sale we have is in
@@ -195,6 +225,7 @@ async def fetch_organic_funnel(
             func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0)).label("won"),
             func.sum(case((Lead.stage == "dormant", 1), else_=0)).label("dormant"),
             func.sum(case((deal_won_clause(), 1), else_=0)).label("deals"),
+            func.sum(case((event_booked_clause(), 1), else_=0)).label("events"),
         )
         .select_from(ChannelThread)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]

@@ -37,10 +37,11 @@ async def test_ad_funnel_buckets_by_stage(db_session) -> None:
 
     rows = {r[0]: r for r in await fetch_ad_funnel(db_session, [b.id])}
     assert set(rows) == {"adA", "adB"}  # organic excluded
-    _ad, _media, total, pipeline, won, dormant, deals = rows["adA"]
+    _ad, _media, total, pipeline, won, dormant, deals, events = rows["adA"]
     assert (total, pipeline, won, dormant) == (3, 2, 1, 0)
     assert deals == 0  # no CRM state at all — 'ready' is a hand-off, never a sale
-    assert rows["adB"][2:] == (1, 0, 0, 1, 0)
+    assert events == 0  # nor an event booking, for the same reason
+    assert rows["adB"][2:] == (1, 0, 0, 1, 0, 0)
 
 
 async def test_deals_come_from_the_crm_and_ignore_older_sales(db_session) -> None:
@@ -229,3 +230,64 @@ def test_reports_panel_drops_by_stage_table_and_shows_message_stats() -> None:
     assert ">10<" in html and ">8<" in html and ">18<" in html
     # hourly chart still present (in/out bars)
     assert "hchart" in html
+
+
+async def test_an_event_booking_counts_even_without_a_contract(db_session) -> None:
+    """The conversion that lands BEFORE a contract, and the one the reports could not see.
+
+    Checked against the live CRM on 2026-08-05: eight leads Stepan worked through in July are
+    all registered on "VIBE CODING DEMO 08/08/2026" and not one has a contract — so a column
+    counting deals alone reported those conversations as having achieved nothing."""
+    from datetime import timedelta
+
+    from app.adapters.db.models import Branch, Channel, ChannelThread, CrmLeadState, Lead
+    from app.domain.clock import utc_now
+    from app.domain.enums import ChannelKind, Stage
+
+    b = Branch(name="B", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING)
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    db_session.add(ChannelThread(branch_id=b.id, channel_id=ch.id, lead_id=lead.id,
+                                 external_thread_id="t1", ad_id="adA"))
+    db_session.add(CrmLeadState(
+        branch_id=b.id, lead_id=lead.id, exists_in_crm=True, deal_won=False,
+        event_name="VIBE CODING DEMO 08/08/2026", event_at=utc_now() + timedelta(days=3)))
+    await db_session.flush()
+
+    row = next(r for r in await fetch_ad_funnel(db_session, [b.id]) if r[0] == "adA")
+
+    assert row[6] == 0  # no contract
+    assert row[7] == 1  # but booked — the ad DID convert
+
+
+async def test_a_booking_made_before_the_conversation_is_not_ours(db_session) -> None:
+    """Same rule the deal column already follows. A returning client carries bookings from
+    earlier years — one live card here holds two from 2025 — and crediting this ad with one
+    of those would teach Meta to buy an audience that had already converted."""
+    from datetime import timedelta
+
+    from app.adapters.db.models import Branch, Channel, ChannelThread, CrmLeadState, Lead
+    from app.domain.clock import utc_now
+    from app.domain.enums import ChannelKind, Stage
+
+    b = Branch(name="B", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, created_at=utc_now())
+    db_session.add_all([ch, lead])
+    await db_session.flush()
+    db_session.add(ChannelThread(branch_id=b.id, channel_id=ch.id, lead_id=lead.id,
+                                 external_thread_id="t1", ad_id="adA"))
+    db_session.add(CrmLeadState(
+        branch_id=b.id, lead_id=lead.id, exists_in_crm=True, deal_won=False,
+        event_name="TL Python 06/14/2025", event_at=utc_now() - timedelta(days=400)))
+    await db_session.flush()
+
+    row = next(r for r in await fetch_ad_funnel(db_session, [b.id]) if r[0] == "adA")
+
+    assert row[7] == 0

@@ -142,10 +142,17 @@ class CrmMcpReader:
             and datetime.now(UTC) - last_ok_call < hold_window
         )
         result_name, result_at, result_by = self._latest_result(rows)
+        event_name, event_at = self._event_booked(rows)
         return {
             "exists": True,
             "crm_id": crm_id,
             "deal_won": deal_won,
+            # Booked onto an event — the outcome that comes BEFORE a contract, and the one the
+            # reports had no way to see. Eight leads worked in July are all registered on the
+            # 8 August demo with no contract signed, so "deals = 0" was reading as "nothing
+            # achieved" on chats that had in fact converted.
+            "event_name": event_name,
+            "event_at": event_at.isoformat() if event_at else None,
             # Что менеджер поставил последним контактом — сигнал, определяющий, о чём Степану
             # говорить дальше. Раньше отбрасывался.
             "last_result": result_name or None,
@@ -236,6 +243,34 @@ class CrmMcpReader:
             if latest is None or at > latest:
                 latest = at
         return latest
+
+    @staticmethod
+    def _event_booked(rows: list[dict]) -> tuple[str | None, datetime | None]:
+        """The soonest upcoming event this client is registered on, as (name, date).
+
+        A booking is the outcome BEFORE a contract: eight leads Stepan worked in July all sat
+        on "VIBE CODING DEMO 08/08/2026" with zero contracts, so a report that counts only
+        deals shows those chats as having achieved nothing. CRM attaches the booking to the
+        history row of whatever contact made it — usually the answered out-call — and rows
+        that group several contacts carry it on the members, so both levels are read.
+
+        Soonest rather than newest: a returning client has old events too (one card here
+        carries two from 2025), and what matters is the one they are expected at next."""
+        best: tuple[str, datetime] | None = None
+        now = datetime.now(UTC)
+        for row in rows:
+            for item in [row, *(row.get("group") or [])]:
+                if not isinstance(item, dict):
+                    continue
+                ev = item.get("events")
+                if not isinstance(ev, dict) or not ev.get("name_event"):
+                    continue
+                at = _as_dt(str(ev.get("date_event") or "").replace(" ", "T"))
+                if at is None or at < now:
+                    continue  # already happened — it is history, not a pending booking
+                if best is None or at < best[1]:
+                    best = (str(ev["name_event"]), at)
+        return (best[0], best[1]) if best else (None, None)
 
     @staticmethod
     def _last_answered_call(rows: list[dict]) -> datetime | None:

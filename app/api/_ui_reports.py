@@ -164,14 +164,27 @@ _AD_FUNNEL_JS = (
 )
 
 
-def _count_cell(aid: str, grp: str, n: int, color: str, no_ad: bool = False) -> str:
+def _count_cell(aid: str, grp: str, n: int, color: str, no_ad: bool = False,
+                extra: int = 0, extra_grp: str = "", extra_color: str = "") -> str:
     """A funnel count that links to the matching chat list (ad + stage group). grp '' =
     every chat of the ad; otherwise a group from AD_FUNNEL_GROUPS (pipeline|won|dormant|deal).
-    `no_ad` swaps the ad filter for "came from no ad", used by the organic row."""
+    `no_ad` swaps the ad filter for "came from no ad", used by the organic row.
+
+    `extra` puts a SECOND number in the same cell, with its own link. The deal column uses it
+    for event bookings, because a booking is the conversion that lands before a contract:
+    checked on 2026-08-05, eight leads worked in July are all registered on the same upcoming
+    demo and none has a contract, so a column showing deals alone reported those conversations
+    as having achieved nothing. Same cell rather than a new column — both numbers answer one
+    question, "did this ad convert", and the table already runs twelve columns wide."""
     style = f' style="color:{color}"' if color else ""
     base = "/ui/inbox?no_ad=1" if no_ad else f"/ui/inbox?ad_id={aid}"
     qs = base + (f"&grp={grp}" if grp else "")
-    return f'<td class="rep-n"{style}><a class="rep-lnk" href="{qs}">{n}</a></td>'
+    body = f'<a class="rep-lnk" href="{qs}">{n}</a>'
+    if extra:
+        eqs = base + (f"&grp={extra_grp}" if extra_grp else "")
+        body += (f'<span style="color:#5f6b78"> · </span>'
+                 f'<a class="rep-lnk" href="{eqs}" style="color:{extra_color}">{extra}</a>')
+    return f'<td class="rep-n"{style}>{body}</td>'
 
 
 def _col_hint(key: str) -> str:
@@ -397,11 +410,19 @@ def _ad_tree_html(
     def _ad_rows(items: list, with_spend: bool) -> str:
         out = ""
         for row, mapped in items:
-            ad_ids, ad_media_id, total, pipeline, won, dormant, deals = row
+            # `events` trails the tuple: the query always sends it, but the row shape is
+            # built by hand in several callers and tests, and a hard unpack would turn a
+            # missing new column into a 500 on the reports page rather than a zero.
+            ad_ids, ad_media_id, total, pipeline, won, dormant, deals, *rest = row
+            events = int(rest[0] or 0) if rest else 0
             total, won, deals = int(total or 0), int(won or 0), int(deals or 0)
             conv = round(won / total * 100, 1) if total else 0.0
             ad_id = ",".join(ad_ids)
             aid = _h.escape(ad_id)
+            # Deals and event bookings share one cell: both answer "did this ad convert", and
+            # a booking is what most leads reach before any contract exists.
+            deal_cell = _count_cell(aid, "deal", deals, "#ffd43b", extra=events,
+                                    extra_grp="event", extra_color="#4dabf7")
             # A merged row carries several Instagram ad ids; the product map is keyed by each
             # of them, so show the first one that is mapped and write back to all of them.
             cur = next((mappings.get(a) for a in ad_ids if mappings.get(a)), None)
@@ -438,7 +459,7 @@ def _ad_tree_html(
                 f'{_count_cell(aid, "", total, "")}'
                 f'{_count_cell(aid, "pipeline", int(pipeline or 0), "#9b7aff")}'
                 f'{_count_cell(aid, "won", won, "#51cf66")}'
-                f'{_count_cell(aid, "deal", deals, "#ffd43b")}'
+                f'{deal_cell}'
                 f'{_count_cell(aid, "dormant", int(dormant or 0), "#868e96")}'
                 f'<td class="rep-n" style="color:#ffa94d">{conv}%</td></tr>'
             )
@@ -496,7 +517,10 @@ def _ad_tree_html(
     # Leads that came from no ad at all. They were absent from this whole section, which made
     # it read as the full base — and put the one confirmed sale somewhere no table listed.
     if organic and organic[0]:
-        o_total, o_pipe, o_won, o_dorm, o_deals = organic
+        o_total, o_pipe, o_won, o_dorm, o_deals, *o_rest = organic
+        o_deal_cell = _count_cell("", "deal", o_deals, "#ffd43b", no_ad=True,
+                                  extra=int(o_rest[0] or 0) if o_rest else 0,
+                                  extra_grp="event", extra_color="#4dabf7")
         body += (
             f'<details class="adt-c adt-org"><summary>'
             f'<span class="adt-nm">{_h.escape(t("rep.ads_organic"))}</span>'
@@ -509,7 +533,7 @@ def _ad_tree_html(
             f'{_count_cell("", "", o_total, "", no_ad=True)}'
             f'{_count_cell("", "pipeline", o_pipe, "#9b7aff", no_ad=True)}'
             f'{_count_cell("", "won", o_won, "#51cf66", no_ad=True)}'
-            f'{_count_cell("", "deal", o_deals, "#ffd43b", no_ad=True)}'
+            f'{o_deal_cell}'
             f'{_count_cell("", "dormant", o_dorm, "#868e96", no_ad=True)}'
             f'</tr></tbody></table></details>'
         )

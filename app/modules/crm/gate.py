@@ -43,6 +43,11 @@ class CrmState:
     deal_won: bool = False
     manager_called: bool = False
     won_at: str | None = None
+    # Booked onto a CRM event — the conversion that lands BEFORE a contract, and the one the
+    # reports could not see. In July eight leads Stepan worked all sat on the same upcoming
+    # demo with no contract anywhere, so counting deals alone read as "achieved nothing".
+    event_name: str | None = None
+    event_at: str | None = None
 
 
 class CrmReaderPort:
@@ -157,6 +162,8 @@ def _parse(raw: dict) -> CrmState:
         manager_called=bool(raw.get("manager_called", False)),
         # Accepted under either name so the day the CRM adds it, nothing here has to change.
         won_at=raw.get("deal_won_at") or raw.get("won_at"),
+        event_name=raw.get("event_name"),
+        event_at=raw.get("event_at"),
     )
 
 
@@ -258,6 +265,8 @@ class CrmGate:
         row.raw = json.dumps(state.raw, ensure_ascii=False)
         row.deal_won = state.deal_won
         row.deal_won_at = parse_won_at(state.won_at)
+        row.event_name = state.event_name
+        row.event_at = parse_won_at(state.event_at)
         row.fetched_at = utc_now()
         self.session.add(row)
         await self.session.flush()

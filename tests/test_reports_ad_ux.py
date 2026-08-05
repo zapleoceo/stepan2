@@ -16,7 +16,10 @@ from app.api._ui_panels import _ad_tree_html, admap_cell_inner  # noqa: E402
 from app.api.main import app  # noqa: E402
 
 _PRODUCTS = [("vibe_coding", "Vibe Coding"), ("smm_intensive", "SMM Intensive")]
-_ROWS = [("AD1", "3932267938260790752", 10, 4, 3, 3, 1), ("AD2", None, 5, 2, 1, 2, 0)]
+# (ad_id, media_id, total, pipeline, won, dormant, deals, events) — `events` is the CRM
+# event-booking count sharing the deal cell. AD2 has a booking and no contract, which is the
+# common shape: checked live, eight July leads are booked onto one demo with zero contracts.
+_ROWS = [("AD1", "3932267938260790752", 10, 4, 3, 3, 1, 1), ("AD2", None, 5, 2, 1, 2, 0, 2)]
 
 
 def _set_lang(code: str = "en") -> None:
@@ -81,12 +84,16 @@ def test_ad_funnel_empty_rows_render_nothing() -> None:
 
 def test_ad_funnel_counts_link_to_filtered_chats() -> None:
     _set_lang()
-    # row AD1: total=10, pipeline=4, won=3, dormant=3
-    html = _ad_tree_html([("AD1", None, 10, 4, 3, 3, 1)], {}, {}, products=_PRODUCTS)
+    # row AD1: total=10, pipeline=4, won=3, dormant=3, deals=1, events=2
+    html = _ad_tree_html([("AD1", None, 10, 4, 3, 3, 1, 2)], {}, {}, products=_PRODUCTS)
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1">10</a>' in html   # total → all chats
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=pipeline">4</a>' in html
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=won">3</a>' in html
     assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=dormant">3</a>' in html
+    # Deals and event bookings share one cell, and each number opens its own chat list.
+    assert '<a class="rep-lnk" href="/ui/inbox?ad_id=AD1&grp=deal">1</a>' in html
+    assert 'href="/ui/inbox?ad_id=AD1&grp=event"' in html
+    assert ">2</a>" in html
 
 
 def test_inbox_grp_filter_shows_group_chip_and_scoped_load() -> None:

@@ -527,10 +527,15 @@ class CrmLeadState(SQLModel, table=True):
     verdict: str = Field(default="proceed", description="proceed|hold")
     reason: str | None = Field(default=None)
     raw: str | None = Field(default=None, description="verbatim CRM JSON for display/debug")
-    # Columns, not just fields inside `raw`: this is the one outcome the whole channel is
-    # judged on, and a report cannot count a JSON blob.
+    # Columns, not just fields inside `raw`: these are the outcomes the channel is judged on,
+    # and a report cannot count a JSON blob.
     deal_won: bool = Field(default=False, index=True)
     deal_won_at: datetime | None = Field(default=None)
+    # Booked onto a CRM event — the conversion that lands BEFORE a contract. Eight leads
+    # Stepan worked through in July are all registered on the 8 August demo with no contract
+    # signed, so a report counting only deals read as "these chats achieved nothing".
+    event_name: str | None = Field(default=None)
+    event_at: datetime | None = Field(default=None, index=True)
     fetched_at: datetime = Field(default_factory=_utcnow, index=True)
 
 
