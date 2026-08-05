@@ -34,7 +34,16 @@ _WANTED = (
     "id", "external_id", "from", "message", "chanel",
     "project_id", "branch_id", "conversation_id", "chat_id",
     "from_name", "user_id", "attachment",
+    # Direction. Their side can switch on callbacks for OUTGOING messages too, so we can see
+    # that a human took the lead over — including the echo of a manager typing in the WhatsApp
+    # app itself. Without reading this field a manager's own message arrives shaped exactly
+    # like a lead's, and Stepan answers the manager: two voices in one chat, in front of the
+    # customer. Read from the first callback, before that switch is ever flipped.
+    "type_send",
 )
+
+# The value their side sends on an outgoing message.
+_OUT = "out"
 
 # Seen message ids, newest last. Their side already dedupes, but a retry or a restart on
 # either end can repeat a callback, and answering a lead twice is the visible failure.
@@ -113,6 +122,16 @@ async def inbound_callback(request: Request) -> Response:
 
     form = await request.form()
     data = {k: str(form[k]) for k in _WANTED if k in form}
+
+    if data.get("type_send", "").strip().lower() == _OUT:
+        # A message going TO the lead — a manager writing, or the echo of one typing in the
+        # WhatsApp app. Never a prompt to reply: answering it would put Stepan in a
+        # conversation a human already owns, second voice in front of the customer. Recorded
+        # rather than dropped, because "a manager is engaged" is the signal that should later
+        # stand the bot down on this lead.
+        _log.info("sender outbound seen (manager engaged): %s", _safe(data))
+        _RECENT.append({"at": utc_now().isoformat(), **data})
+        return Response(status_code=status.HTTP_200_OK)
 
     external_id = data.get("external_id", "").strip()
     if not external_id:

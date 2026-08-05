@@ -239,3 +239,53 @@ def test_the_callback_path_is_public_to_the_session_middleware() -> None:
     # And the prefix must not open the rest of the API.
     assert not _is_public("/api/v1/leads")
     assert not _is_public("/ui/settings/panel")
+
+
+def _open_client(monkeypatch) -> TestClient:  # noqa: ANN001
+    """Auth is not what these tests are about; direction is."""
+    monkeypatch.setenv("STEPAN2_SENDER_CALLBACK_OPEN", "true")
+    settings.cache_clear()
+    return _client()
+
+
+def test_a_managers_own_message_never_swallows_a_lead_turn(monkeypatch) -> None:  # noqa: ANN001
+    """Their side can switch on callbacks for OUTGOING messages so we can see a human take
+    over — including the echo of a manager typing in the WhatsApp app (Victor's spec, §4).
+
+    An outgoing message is not a lead turn, so it must not consume the deduplication slot.
+    If it did, an inbound arriving under the same id would be discarded as a repeat and the
+    lead's actual question would vanish — and, once replies are on, answering the echo would
+    put Stepan in a conversation a human already owns, second voice in front of the customer.
+    """
+    c = _open_client(monkeypatch)
+    same_id = "wamid.SAME"
+
+    out = {**_BODY, "external_id": same_id, "message": "Halo kak, saya manager",
+           "type_send": "out"}
+    assert c.post("/api/v1/sender/inbound-callback", data=out).status_code == 200
+
+    lead = {**_BODY, "external_id": same_id, "message": "berapa harganya?"}
+    assert c.post("/api/v1/sender/inbound-callback", data=lead).status_code == 200
+
+    texts = [r.get("message") for r in recent()]
+    assert "berapa harganya?" in texts, "the lead's message was swallowed by the echo"
+    assert recent()[0]["type_send"] == "out"
+
+
+def test_an_inbound_message_is_still_taken_when_the_field_says_in(monkeypatch) -> None:  # noqa: ANN001
+    body = {**_BODY, "external_id": "wamid.IN1", "message": "Halo, mau tanya",
+            "type_send": "in"}
+
+    assert _open_client(monkeypatch).post(
+        "/api/v1/sender/inbound-callback", data=body).status_code == 200
+    assert recent()[0]["message"] == "Halo, mau tanya"
+
+
+def test_a_callback_without_the_field_is_still_an_inbound(monkeypatch) -> None:  # noqa: ANN001
+    """Today their side sends inbound only and no direction field at all. Absence must keep
+    meaning "a lead wrote", or turning the option on would become the only way to work."""
+    body = {**_BODY, "external_id": "wamid.IN2", "message": "masih ada tempat?"}
+
+    assert _open_client(monkeypatch).post(
+        "/api/v1/sender/inbound-callback", data=body).status_code == 200
+    assert recent()[0]["message"] == "masih ada tempat?"
