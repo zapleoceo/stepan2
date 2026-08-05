@@ -111,7 +111,41 @@ def _tr_line(tr: str | None) -> str:
     return f'<div class="cm-tr">{_h.escape(tr)}</div>' if tr else ""
 
 
-def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict) -> str:
+def _conversion_line(by_status: dict, lang: str) -> str:
+    """The number this page was missing: did anyone we answered actually come into DM.
+
+    'dm_sent' looks like an outcome and is not — it records only that our public line carried
+    an invitation. Without this line an operator reads seven invitations as seven wins. Both
+    outcomes are shown side by side because the comparison is the point: if inviting converts
+    no better than simply being useful, that is a decision about the wording."""
+    from app.modules.comments.conversion import Conversion  # noqa: PLC0415
+
+    invited = by_status.get("dm_sent", Conversion(0, 0))
+    answered = by_status.get("replied", Conversion(0, 0))
+    if not (invited.replies or answered.replies):
+        return ""
+    label = _lbl({
+        "ru": "Дошли в личку за 2 недели после ответа",
+        "en": "Came into DM within 2 weeks of the reply",
+        "id": "Masuk ke DM dalam 2 minggu setelah balasan",
+    }, lang)
+    with_invite = _lbl({"ru": "с приглашением", "en": "with an invite",
+                        "id": "dengan ajakan"}, lang)
+    plain = _lbl({"ru": "просто ответ", "en": "plain answer", "id": "balasan biasa"}, lang)
+    of = _lbl({"ru": "из", "en": "of", "id": "dari"}, lang)
+    # "0 of 7", not "0%": the raw pair says how much evidence there is, and at this sample
+    # size that matters more than the ratio.
+    return (
+        f'<div class="cm-conv"><span class="cm-conv-l">{_h.escape(label)}</span>'
+        f'<span class="cm-conv-v">{_h.escape(with_invite)}: '
+        f'<b>{invited.arrived}</b> {_h.escape(of)} {invited.replies}</span>'
+        f'<span class="cm-conv-v">{_h.escape(plain)}: '
+        f'<b>{answered.arrived}</b> {_h.escape(of)} {answered.replies}</span></div>'
+    )
+
+
+def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict,
+                         conversion: dict | None = None) -> str:
     title = _h.escape(t("nav.comments"))
     intro = _h.escape(_lbl({
         "ru": "Комментарии под нашими постами: что бот ответил публично и кого позвал в директ. "
@@ -140,7 +174,8 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict) -
             "branch": r.branch_name, "comments": []})
         p["comments"].append(r)
 
-    out = [f'<div class="panel cm-panel"><h2>{title}</h2><p class="muted">{intro}</p>']
+    out = [f'<div class="panel cm-panel"><h2>{title}</h2><p class="muted">{intro}</p>'
+           + _conversion_line(conversion or {}, lang)]
     for _mid, p in posts.items():
         cap = _h.escape((p["caption"] or "")[:90]) or _h.escape(_lbl(
             {"ru": "(без подписи)", "en": "(no caption)", "id": "(tanpa teks)"}, lang))
@@ -179,6 +214,13 @@ _STYLE = (
     # #main is overflow:hidden, so the panel needs its OWN scroller or a long list is clipped
     # (this is why new comments 'didn't show' — they were below the fold with no scrollbar).
     ".cm-panel{height:100%;overflow-y:auto;padding:.6rem .95rem;box-sizing:border-box}"
+    # The conversion strip sits under the intro, above the posts: it is the summary, and a
+    # summary below the detail is one nobody reads.
+    ".cm-conv{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline;margin:2px 0 6px;"
+    "padding:8px 12px;border:1px solid var(--line,#2a2f3d);border-radius:8px;font-size:13px}"
+    ".cm-conv-l{color:var(--muted,#8b93a7)}"
+    ".cm-conv-v{font-variant-numeric:tabular-nums}"
+    ".cm-conv-v b{font-size:15px}"
     ".cm-post{margin:14px 0;border:1px solid var(--line,#2a2f3d);border-radius:10px;"
     "overflow:hidden}"
     ".cm-post-h{padding:10px 12px;background:var(--card2,#1d212d);font-weight:600;"
@@ -210,5 +252,11 @@ async def comments_panel(request: Request) -> HTMLResponse:
         if rows and lang != "id":
             from app.adapters.llm.broker import BrokerLLM  # noqa: PLC0415
             trs = await _ensure_translations(session, rows, lang, BrokerLLM())
+        # Only for a single selected branch: the join is per-tenant, and summing two branches
+        # into one ratio would compare accounts with different audiences and different volume.
+        conversion: dict = {}
+        if rows and branch_ids and len(branch_ids) == 1:
+            from app.modules.comments.conversion import conversion_by_status  # noqa: PLC0415
+            conversion = await conversion_by_status(session, branch_ids[0])
     multi = not branch_ids or len(branch_ids) > 1
-    return HTMLResponse(_comments_panel_html(rows, lang, multi, trs))
+    return HTMLResponse(_comments_panel_html(rows, lang, multi, trs, conversion))
