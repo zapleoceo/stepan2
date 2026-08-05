@@ -24,7 +24,13 @@ import json  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.adapters.mcp_client import McpUnavailable, call, payload, read  # noqa: E402
+from app.adapters.mcp_client import (  # noqa: E402
+    McpUnavailable,
+    call,
+    payload,
+    read,
+)
+from app.adapters.mcp_client import session as session_cm  # noqa: E402
 
 
 class _Block:
@@ -206,3 +212,21 @@ async def test_a_failure_before_the_answer_still_fails(monkeypatch) -> None:
 
     assert await read("https://crm.example/mcp?token=x", timeout_s=5,
                       using=_boom, what="crm") is None
+
+
+async def test_a_timeout_says_so_instead_of_logging_an_empty_reason(monkeypatch) -> None:
+    """TimeoutError's str is empty, so the warning used to end at the colon:
+    "crm mcp read failed (phone=+62...): ". A server that was merely slow looked exactly like
+    one that was broken, and reads that timed out on every call went unnoticed for months of
+    log lines that said nothing."""
+    _patch_transport(monkeypatch, None)
+
+    async def _hang(s):  # noqa: ANN001, ANN202
+        raise TimeoutError
+
+    with pytest.raises(McpUnavailable) as caught:
+        async with session_cm("https://crm.example/mcp?token=x", timeout_s=25) as s:
+            await _hang(s)
+
+    assert "25s" in str(caught.value)
+    assert str(caught.value).rstrip().endswith("25s"), "the reason must not be blank"

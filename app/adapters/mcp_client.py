@@ -60,6 +60,14 @@ async def session(url: str, *, timeout_s: float) -> AsyncIterator[Any]:
                     delivered = True
     except asyncio.CancelledError:
         raise
+    except TimeoutError as exc:
+        # Spelled out because TimeoutError's str is EMPTY: the warning read "crm mcp read
+        # failed (phone=+62...): " and stopped at the colon, so a server that was merely slow
+        # looked exactly like one that was broken. Reads timing out on every single call went
+        # unnoticed for that reason alone.
+        if delivered:
+            return
+        raise McpUnavailable(f"{redact(url)}: no answer within {timeout_s:g}s") from exc
     except Exception as exc:
         # A failure while CLOSING a session whose work already finished is not a failed
         # exchange. streamablehttp_client raises ClosedResourceError on teardown, and this
