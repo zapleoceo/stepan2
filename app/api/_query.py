@@ -830,6 +830,32 @@ async def fetch_deals_count(
     return int((await session.execute(q)).scalar_one() or 0)
 
 
+async def fetch_event_bookings_count(
+    session: AsyncSession, branch_ids: list[int] | None,
+) -> int:
+    """Leads registered on a CRM event that has not happened yet.
+
+    Reuses event_booked_clause so this tile and the deal column of the ad table are the same
+    number by construction. Two views of one conversion that could drift apart is precisely
+    what the KPI rework of 2026-07-27 set out to stop.
+
+    Deliberately NOT filtered by the report window, unlike every other tile here. We can date
+    a sale (deal_won_at) but not a booking: the CRM history hands us the event's date and
+    never the day the lead signed up for it. Filtering on the event date would answer "does
+    the demo fall inside these seven days" — a question about the calendar, not about what
+    Stepan achieved — and would empty the tile for every window that ends before the event.
+    The tile hint says so out loud, because a number that ignores the window while sitting
+    next to five that respect it is otherwise read as a bug."""
+    q = (
+        select(func.count())
+        .select_from(Lead)
+        .where(event_booked_clause())
+    )
+    if branch_ids:
+        q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
+    return int((await session.execute(q)).scalar_one() or 0)
+
+
 _KPI_METRICS = ("leads", "handoff", "deal", "dormant", "messages")
 
 

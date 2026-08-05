@@ -480,7 +480,9 @@ def _ad_tree_html(
             ]
         cols += [
             ("rep.total", True, "min", True), ("rep.pipeline", True, "min", True),
-            ("rep.won", True, "min", True), ("rep.deal", True, "min", True),
+            # "Сделка · Запись": one header for a cell that carries both numbers, so the
+            # second one is not an unexplained digit next to the first.
+            ("rep.won", True, "min", True), ("rep.deal_event", True, "min", True),
             ("rep.dormant", True, "min", True),
             ("rep.conv", True, "min", True),
         ]
@@ -980,6 +982,7 @@ def reports_panel_html(
     handover_totals: tuple[int, int] | None = None,
     crm_totals: tuple[int, int] | None = None,
     deals: int | None = None,
+    events: int | None = None,
     daily_kpis: dict[str, dict[str, int]] | None = None,
     organic: tuple[int, int, int, int, int] | None = None,
     media_to_ad: dict[str, dict] | None = None,
@@ -990,17 +993,37 @@ def reports_panel_html(
 
     def _kpi(
         label: str, value: str, color: str = "#e8eef4", series: str = "", href: str = "",
+        extra: int = 0, extra_href: str = "", extra_color: str = "", extra_label: str = "",
     ) -> str:
         """A tile, optionally linking to the chats behind it. Without the link a number like
         "Сделка 1" is unanswerable: the buyer may have come from no ad at all, so no table
-        further down the page contains them."""
-        body = (
-            f'<div class="kpi-n" style="color:{color}">{_h.escape(value)}</div>'
-            f'<div class="kpi-l">{_h.escape(t(label))}</div>'
-            f'{_sparkline(series, color) if series else ""}'
-        )
-        cls = "kpi kpi-lnk" if href else "kpi"
+        further down the page contains them.
+
+        `extra` puts a SECOND number in the same tile, the way _count_cell does in the ad
+        table — same feature, same shape, so the two places agree on sight. A tile carrying
+        an extra becomes a div wrapping two links: an <a> inside an <a> is invalid HTML and
+        browsers silently unnest it, which drops the second link."""
+        num = f'<div class="kpi-n" style="color:{color}">{_h.escape(value)}</div>'
         tip = _h.escape(t(f"{label}.hint"))
+        lbl = _h.escape(t(label))
+        if extra:
+            etip = _h.escape(t(f"{extra_label}.hint")) if extra_label else ""
+            elbl = _h.escape(t(extra_label)) if extra_label else ""
+            return (
+                f'<div class="kpi" title="{tip}">'
+                f'<div class="kpi-n">'
+                f'<a class="rep-lnk" href="{_h.escape(href)}" style="color:{color}">'
+                f'{_h.escape(value)}</a>'
+                f'<span style="color:#5f6b78"> · </span>'
+                f'<a class="rep-lnk" href="{_h.escape(extra_href)}" '
+                f'style="color:{extra_color}" title="{etip}">{extra}</a></div>'
+                f'<div class="kpi-l">{lbl}<span style="color:#5f6b78"> · </span>'
+                f'<span style="color:{extra_color}">{elbl}</span></div>'
+                f'{_sparkline(series, color) if series else ""}'
+                f"</div>"
+            )
+        body = f'{num}<div class="kpi-l">{lbl}</div>{_sparkline(series, color) if series else ""}'
+        cls = "kpi kpi-lnk" if href else "kpi"
         if href:
             return f'<a class="{cls}" href="{_h.escape(href)}" title="{tip}">{body}</a>'
         return f'<div class="{cls}" title="{tip}">{body}</div>'
@@ -1033,8 +1056,13 @@ def reports_panel_html(
         # The only tile that means money — everything else counts conversations. Clickable
         # because a buyer can come from no ad at all, in which case NO table on this page
         # lists them: the ad tree only holds threads that carry an ad_id.
+        # Event bookings ride in the same tile: a booking is the conversion most leads reach
+        # BEFORE any contract exists, so a tile counting deals alone reported a month of work
+        # on the 08/08 demo as having achieved nothing.
         + _kpi("rep.deal", str(deals or 0), "#ffd43b", _series(daily, "deal"),
-               href="/ui/inbox?grp=deal")
+               href="/ui/inbox?grp=deal", extra=events or 0,
+               extra_href="/ui/inbox?grp=event", extra_color="#4dabf7",
+               extra_label="rep.event")
         + _kpi("rep.dormant_period", str(sum(daily.get("dormant", {}).values())), "#868e96",
                _series(daily, "dormant"))
         + _kpi("rep.msgs_tile", f"{total_out}↑ / {total_in}↓", "#63c5ff",

@@ -44,6 +44,7 @@ from ._query import (
     fetch_daily_kpis,
     fetch_deals_count,
     fetch_discovery_metrics,
+    fetch_event_bookings_count,
     fetch_handover_totals,
     fetch_media_to_ad,
     fetch_organic_funnel,
@@ -365,6 +366,8 @@ async def reports_panel(
             session, branch_ids, since=since_dt, until=until_dt)
         deals = await fetch_deals_count(
             session, branch_ids, since=since_dt, until=until_dt)
+        # No window: a booking has no date of its own to filter on - see the function.
+        events = await fetch_event_bookings_count(session, branch_ids)
         daily_kpis = await fetch_daily_kpis(
             session, branch_ids, since=since_dt, until=until_dt)
         organic = await fetch_organic_funnel(
@@ -403,6 +406,7 @@ async def reports_panel(
                            closed_in_period=closed_in_period,
                            handover_totals=handover_totals, crm_totals=crm_totals,
                            deals=deals,
+                           events=events,
                            daily_kpis=daily_kpis, organic=organic,
                            media_to_ad=media_to_ad, ad_spend=ad_spend,
                            ads_synced_at=ads_synced_at,

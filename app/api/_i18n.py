@@ -497,6 +497,31 @@ _TR: dict[str, dict[str, str]] = {
               "and the close date falls inside the window. An untimed close shows only on "
               "the all-time range — there is no honest way to place it in a window.",
         "id": "Penjualan menurut CRM, ditutup setelah percakapan kami dimulai."},
+    "rep.event": {"ru": "Запись", "en": "Booked", "id": "Terdaftar"},
+    "rep.deal_event": {"ru": "Сделка · Запись", "en": "Deal · Booked",
+                       "id": "Deal · Terdaftar"},
+    "rep.deal_event.hint": {
+        "ru": "Два числа в одной ячейке: слева продажа по CRM, справа запись на будущее "
+              "мероприятие. Оба отвечают на один вопрос — сконвертировало ли объявление. "
+              "Подробности — в подсказках плитки «Сделка» наверху страницы.",
+        "en": "Two numbers in one cell: a CRM sale on the left, a booking onto an upcoming "
+              "event on the right. Both answer one question — did this ad convert.",
+        "id": "Dua angka dalam satu sel: penjualan CRM dan pendaftaran acara."},
+    "rep.event.hint": {
+        "ru": "Записан на мероприятие, которое ЕЩЁ НЕ прошло — конверсия, до которой лид "
+              "доходит РАНЬШЕ договора. Проверено 05.08.2026: все, кого Степан довёл в июле "
+              "до демо 08.08, записаны и ни у кого нет договора, так что колонка «Сделка» "
+              "показывала по ним ноль. ВНИМАНИЕ: это число НЕ зависит от выбранного периода. "
+              "Продажу мы датируем днём закрытия, а запись датировать нечем — CRM отдаёт "
+              "дату самого мероприятия и никогда день, когда лид записался.",
+        "en": "Booked onto an event that has NOT happened yet — the conversion a lead reaches "
+              "BEFORE any contract. Checked 2026-08-05: everyone Stepan worked to the 08/08 "
+              "demo is booked and none has a contract, so the 'Deal' column read zero for "
+              "them. NOTE: this number ignores the selected period. A sale is dated by its "
+              "close; a booking has nothing to be dated by — the CRM gives us the event's "
+              "date and never the day the lead signed up.",
+        "id": "Terdaftar pada acara yang belum berlangsung — konversi sebelum kontrak. "
+              "Angka ini tidak mengikuti periode yang dipilih."},
     "rep.closed_period.hint": {
         "ru": "Слева — всего дошло до человека (ready/handed_off) за всё время. Справа — "
               "сколько из лидов, ПРИШЕДШИХ за выбранный период, до человека дошли. Это не "

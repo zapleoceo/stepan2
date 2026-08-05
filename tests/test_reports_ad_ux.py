@@ -13,6 +13,7 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api._ui_panels import _ad_tree_html, admap_cell_inner  # noqa: E402
+from app.api._ui_reports import reports_panel_html  # noqa: E402
 from app.api.main import app  # noqa: E402
 
 _PRODUCTS = [("vibe_coding", "Vibe Coding"), ("smm_intensive", "SMM Intensive")]
@@ -201,3 +202,28 @@ def test_connector_chips_flip_strikethrough_on_click() -> None:
     assert "kindChip(this)" in resp.text           # each chip flips its state on click
     assert "chk-kind on" in resp.text              # the selected source is highlighted
     assert "chk-kind off" in resp.text             # the others are struck through
+
+
+def test_the_deal_tile_carries_the_event_count_not_only_the_ad_table() -> None:
+    """The KPI tile is what the owner actually looks at.
+
+    The first cut put the event number only in the ad-funnel cell further down the page, so
+    the tile still read "Сделка 1" and the bookings were invisible where they are looked for.
+    Caught by the owner, from a screenshot of the tile."""
+    html = reports_panel_html(stage_counts={"new": 3}, hour_in={}, hour_out={}, deals=1, events=2)
+
+    # The deal tile specifically, not whichever tile happens to render first.
+    start = html.index("/ui/inbox?grp=deal")
+    tile = html[start:html.index("</div>", html.index("kpi-l", start))]
+    assert ">1</a>" in tile, "the deal count is missing from its own tile"
+    assert ">2</a>" in tile, "the booking count never reached the tile"
+    assert "/ui/inbox?grp=event" in html
+    # An <a> inside an <a> is unnested by browsers, which silently drops the second link.
+    assert '<a class="kpi kpi-lnk" href="/ui/inbox?grp=deal"' not in html
+
+
+def test_a_tile_without_an_extra_still_renders_as_a_single_link() -> None:
+    html = reports_panel_html(stage_counts={"new": 3}, hour_in={}, hour_out={}, deals=1, events=0)
+
+    assert '<a class="kpi kpi-lnk" href="/ui/inbox?grp=deal"' in html
+    assert "grp=event" not in html
