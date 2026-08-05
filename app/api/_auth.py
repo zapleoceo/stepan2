@@ -35,7 +35,14 @@ _PUBLIC_EXACT = ("/healthz", "/login", "/api/tg_login", "/logout", "/", "/privac
 # /connect/ is the client OAuth flow: Meta redirects the browser back here with no session
 # cookie, so it cannot sit behind auth. It trusts nothing from the request — the channel id
 # arrives in an HMAC-signed state parameter (app/modules/meta/oauth.py).
-_PUBLIC_PREFIXES = ("/webhooks/", "/mcp/", "/connector/", "/reader/", "/demo/", "/connect/")
+# /api/v1/sender/ is the CRM sender's inbound callback: their side posts a lead's WhatsApp
+# message with no session cookie and never will have one, exactly like /webhooks/. Public here
+# does NOT mean unauthenticated — the route runs its own check (signature, bearer token or
+# address allowlist) and refuses everything when none is configured. Reaching that check is
+# the point: behind this middleware their POST got a 401 before our code ever saw it, which
+# reads to the other side as "your callback is broken" rather than "you are not authorised".
+_PUBLIC_PREFIXES = ("/webhooks/", "/mcp/", "/connector/", "/reader/", "/demo/", "/connect/",
+                    "/api/v1/sender/")
 
 
 def _secret() -> str:

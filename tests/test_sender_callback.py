@@ -223,3 +223,19 @@ def test_open_still_deduplicates(monkeypatch) -> None:  # noqa: ANN001
     c.post("/api/v1/sender/inbound-callback", data=_BODY)
 
     assert len(recent()) == 1
+
+
+def test_the_callback_path_is_public_to_the_session_middleware() -> None:
+    """Their side posts with no session cookie and never will have one.
+
+    Public here does NOT mean unauthenticated — the route runs its own check and refuses
+    everything when nothing is configured. But it has to REACH that check: behind the session
+    middleware the POST returned 401 before our code saw it, which reads to the other side as
+    "your callback is broken" rather than "you are not authorised". Caught on the live server
+    minutes after deploying, by posting to it."""
+    from app.api._auth import _is_public
+
+    assert _is_public("/api/v1/sender/inbound-callback")
+    # And the prefix must not open the rest of the API.
+    assert not _is_public("/api/v1/leads")
+    assert not _is_public("/ui/settings/panel")
