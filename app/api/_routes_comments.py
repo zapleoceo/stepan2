@@ -3,10 +3,9 @@ view does for DMs. Read-only: comments grouped by post, each showing the author'
 bot's public reply (or why it was skipped/hidden), and the status."""
 from __future__ import annotations
 
-import asyncio
 import html as _h
-import json
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -15,7 +14,8 @@ from sqlalchemy import text
 from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
 from app.api._i18n import apply_lang, t
-from app.modules.conversation.translate import target_for_lang, translate_text
+from app.domain.clock import utc_now
+from app.modules.comments.translate import cached
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -29,66 +29,19 @@ _Q = (
     " ORDER BY pc.media_id, pc.occurred_at DESC LIMIT 300"
 )
 
-# At most this many translations run concurrently on a first render — the broker queues the
-# rest. Keeps a cold page (nothing cached yet) from firing 50+ parallel chat:fast calls.
-_TR_CONCURRENCY = 6
+def _cached_translations(rows: list, lang: str) -> dict:
+    """Whatever is already translated, and nothing more.
 
-
-def _cached(raw: str | None, lang: str) -> str | None:
-    if not raw:
-        return None
-    try:
-        return json.loads(raw).get(lang)
-    except (ValueError, AttributeError):
-        return None
-
-
-def _merge_cache(raw: str | None, lang: str, value: str) -> str:
-    try:
-        d = json.loads(raw) if raw else {}
-    except ValueError:
-        d = {}
-    d[lang] = value
-    return json.dumps(d, ensure_ascii=False)
-
-
-async def _ensure_translations(session, rows: list, lang: str, llm) -> dict:  # noqa: ANN001
-    """Translate every question + reply to `lang`, cached in post_comment.{text_tr,reply_tr}.
-    Returns {comment_id: {'text': str|None, 'reply': str|None}}. Indonesian (the source) is
-    never translated — the raw text is already in the operator's likely reading language."""
-    result: dict = {}
+    The panel reads; it never translates. Filling the cache on render meant one model call per
+    untranslated line before the first pixel - fine when everything was cached, and a visibly
+    frozen page the morning after a busy night. The hourly ingest owns filling it (see
+    app.modules.comments.translate.translate_pending); a line it has not reached yet shows in
+    the original, which is still readable and arrives instantly."""
     if lang == "id":
-        return result
-    target = target_for_lang(lang)
-    sem = asyncio.Semaphore(_TR_CONCURRENCY)
+        return {}
+    return {r.id: {"text": cached(r.text_tr, lang),
+                   "reply": cached(r.reply_tr, lang)} for r in rows}
 
-    async def _one(body: str, cache_raw: str | None, col: str, cid: int):  # noqa: ANN202
-        hit = _cached(cache_raw, lang)
-        if hit is not None:
-            return hit
-        if not (body or "").strip():
-            return None
-        async with sem:
-            tr = await translate_text(llm, body, target)
-        if tr:
-            await session.execute(
-                text(f"UPDATE post_comment SET {col}=:v WHERE id=:id"),  # noqa: S608
-                {"v": _merge_cache(cache_raw, lang, tr), "id": cid})
-        return tr
-
-    tasks = []
-    for r in rows:
-        result[r.id] = {"text": None, "reply": None}
-        tasks.append(("text", r.id, _one(r.text, r.text_tr, "text_tr", r.id)))
-        if r.reply_text:
-            tasks.append(("reply", r.id, _one(r.reply_text, r.reply_tr, "reply_tr", r.id)))
-    done = await asyncio.gather(*(c for _, _, c in tasks), return_exceptions=True)
-    for (field, cid, _), out in zip(tasks, done, strict=True):
-        if isinstance(out, Exception):
-            logger.warning("comment translate failed id=%s: %s", cid, out)
-            continue
-        result[cid][field] = out
-    return result
 
 _STATUS = {
     "replied":  ("💬", {"ru": "Отвечено", "en": "Replied", "id": "Dibalas"}),
@@ -109,6 +62,33 @@ def _lbl(d: dict, lang: str) -> str:
 def _tr_line(tr: str | None) -> str:
     """Small muted translation under the original — shown only when a translation exists."""
     return f'<div class="cm-tr">{_h.escape(tr)}</div>' if tr else ""
+
+
+def _stamp_full(when: object) -> str:
+    """Absolute time, for the tooltip. The relative label answers "is this fresh"; this one
+    answers "which day exactly", and an operator comparing against the Instagram app needs it."""
+    if not isinstance(when, datetime):
+        return ""
+    return when.strftime("%d.%m.%Y %H:%M")
+
+
+def _stamp_ago(when: object, lang: str) -> str:
+    """How long ago, at the coarseness that matters: comments are collected hourly, so
+    minute-level precision would be false accuracy."""
+    if not isinstance(when, datetime):
+        return ""
+    delta = utc_now().replace(tzinfo=None) - when.replace(tzinfo=None)
+    hours = delta.total_seconds() / 3600
+    if hours < 1:
+        return _lbl({"ru": "только что", "en": "just now", "id": "baru saja"}, lang)
+    if hours < 24:
+        n = int(hours)
+        return _lbl({"ru": f"{n} ч назад", "en": f"{n}h ago", "id": f"{n} jam lalu"}, lang)
+    days = int(hours // 24)
+    if days < 30:
+        return _lbl({"ru": f"{days} дн назад", "en": f"{days}d ago",
+                     "id": f"{days} hari lalu"}, lang)
+    return when.strftime("%d.%m.%Y")
 
 
 def _conversion_line(by_status: dict, lang: str) -> str:
@@ -200,7 +180,9 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict,
             else:
                 body = ""
             out.append(
-                f'<div class="cm-item"><div class="cm-lead"><b>@{author}</b> {ctext}'
+                f'<div class="cm-item"><div class="cm-lead"><b>@{author}</b> '
+                f'<span class="cm-when" title="{_h.escape(_stamp_full(c.occurred_at))}">'
+                f'{_h.escape(_stamp_ago(c.occurred_at, lang))}</span> {ctext}'
                 f'{_tr_line(tr.get("text"))}</div>'
                 f'{body}<div class="cm-status">{icon} {st}</div></div>')
         out.append("</div>")
@@ -228,6 +210,9 @@ _STYLE = (
     ".cm-post-h a{color:var(--accent,#4f8cff);text-decoration:none}"
     ".cm-item{padding:10px 12px;border-top:1px solid var(--line,#2a2f3d)}"
     ".cm-lead{margin-bottom:4px}"
+    # Muted and inline before the question — the operator's first question about any comment
+    # is how stale it is, and it must not compete with the text itself.
+    ".cm-when{color:var(--muted,#8b93a7);font-size:12px;white-space:nowrap;margin-right:6px}"
     ".cm-reply{margin:4px 0 4px 14px;padding:6px 10px;border-left:2px solid var(--accent,#4f8cff);"
     "background:var(--card,#171a23);border-radius:0 8px 8px 0}"
     ".cm-skip{margin:4px 0 4px 14px;font-size:13px}"
@@ -248,10 +233,11 @@ async def comments_panel(request: Request) -> HTMLResponse:
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     async with session_scope() as session:
         rows = list((await session.execute(text(_Q.format(where=where)), params)).all())
-        trs: dict = {}
-        if rows and lang != "id":
-            from app.adapters.llm.broker import BrokerLLM  # noqa: PLC0415
-            trs = await _ensure_translations(session, rows, lang, BrokerLLM())
+        # Cache only — the page never waits on the broker. It used to translate whatever was
+        # missing before rendering a single line, so opening the panel after a batch of new
+        # comments meant sitting through that many model calls. Anything not yet translated
+        # simply shows in the original; the hourly ingest fills the cache for next time.
+        trs = _cached_translations(rows, lang)
         # Only for a single selected branch: the join is per-tenant, and summing two branches
         # into one ratio would compare accounts with different audiences and different volume.
         conversion: dict = {}

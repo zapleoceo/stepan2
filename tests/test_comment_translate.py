@@ -1,5 +1,6 @@
-"""Comments panel translates questions + replies to the UI language and caches the result
-(never re-bills a translation), mirroring message.tr_text."""
+"""Comment text gets operator-language copies, cached so a translation is never re-billed
+(mirroring message.tr_text). The work runs in the hourly ingest, not while the panel renders:
+translating on render meant one model call per untranslated line before the first pixel."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,8 +8,14 @@ from datetime import datetime
 from sqlalchemy import text
 
 from app.adapters.db.models import Branch, Channel, PostComment
-from app.api._routes_comments import _cached, _ensure_translations, _merge_cache
 from app.domain.enums import ChannelKind
+from app.modules.comments.translate import (
+    OPERATOR_LANGS,
+    cached,
+    merge_cache,
+    translate_pending,
+    translate_rows,
+)
 
 
 class _CountingLLM:
@@ -24,12 +31,12 @@ class _CountingLLM:
 
 
 def test_cache_helpers_roundtrip() -> None:
-    raw = _merge_cache(None, "ru", "привет")
-    raw = _merge_cache(raw, "en", "hi")
-    assert _cached(raw, "ru") == "привет"
-    assert _cached(raw, "en") == "hi"
-    assert _cached(raw, "id") is None
-    assert _cached(None, "ru") is None
+    raw = merge_cache(None, "ru", "привет")
+    raw = merge_cache(raw, "en", "hi")
+    assert cached(raw, "ru") == "привет"
+    assert cached(raw, "en") == "hi"
+    assert cached(raw, "id") is None
+    assert cached(None, "ru") is None
 
 
 async def _seed(s) -> tuple[int, int]:
@@ -56,14 +63,14 @@ async def _rows(session, bid):  # noqa: ANN001, ANN201
 async def test_translates_and_caches(db_session) -> None:
     bid, cid = await _seed(db_session)
     llm = _CountingLLM()
-    trs = await _ensure_translations(db_session, await _rows(db_session, bid), "ru", llm)
+    trs = await translate_rows(db_session, await _rows(db_session, bid), "ru", llm)
     assert trs[cid]["text"] == "переведено"
     assert trs[cid]["reply"] == "переведено"
     assert llm.calls == 2  # question + reply
 
     # second render: cache hit, no new LLM calls
     llm2 = _CountingLLM()
-    trs2 = await _ensure_translations(db_session, await _rows(db_session, bid), "ru", llm2)
+    trs2 = await translate_rows(db_session, await _rows(db_session, bid), "ru", llm2)
     assert trs2[cid]["text"] == "переведено"
     assert llm2.calls == 0  # served from post_comment.text_tr / reply_tr
 
@@ -71,5 +78,35 @@ async def test_translates_and_caches(db_session) -> None:
 async def test_indonesian_ui_skips_translation(db_session) -> None:
     bid, _cid = await _seed(db_session)
     llm = _CountingLLM()
-    trs = await _ensure_translations(db_session, await _rows(db_session, bid), "id", llm)
+    trs = await translate_rows(db_session, await _rows(db_session, bid), "id", llm)
     assert trs == {} and llm.calls == 0  # source is already Indonesian
+
+
+def test_every_ui_language_gets_a_copy() -> None:
+    """The worker fills the cache ahead of any request, so it cannot ask what language the
+    reader wants — it has to cover all of them. A UI language added to LANGS and not here
+    would leave that operator staring at untranslated Indonesian with no error anywhere."""
+    from app.api._i18n import LANGS
+
+    assert OPERATOR_LANGS == tuple(x for x in LANGS if x != "id")
+
+
+async def test_the_panel_never_calls_the_model(db_session) -> None:
+    """The whole point of moving this: an untranslated line renders instantly in the original
+    rather than holding the page open for a model round-trip."""
+    from app.api._routes_comments import _cached_translations
+
+    bid, cid = await _seed(db_session)
+    trs = _cached_translations(await _rows(db_session, bid), "ru")
+
+    assert trs[cid] == {"text": None, "reply": None}
+
+
+async def test_pending_fills_the_cache_for_the_whole_branch(db_session) -> None:
+    bid, cid = await _seed(db_session)
+    llm = _CountingLLM()
+    looked_at = await translate_pending(db_session, bid, llm, ("ru",))
+
+    assert looked_at == 1
+    rows = {r.id: r for r in await _rows(db_session, bid)}
+    assert cached(rows[cid].text_tr, "ru") == "переведено"

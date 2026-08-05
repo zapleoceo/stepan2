@@ -189,9 +189,28 @@ def _presence(last_active_at: datetime | None) -> str:
     return f'<span class="pres" title="last active">⚫ {_ago(last_active_at)}</span>'
 
 
+def _avatar_expired(url: str) -> bool:
+    """Instagram CDN links are signed and time-limited: `oe` is the expiry as a hex unix
+    timestamp. Past it the CDN answers 403, so a page listing dormant leads fired one failed
+    request per stale avatar — dozens of red lines in the console and dozens of pointless
+    round-trips before the browser gave up on each.
+
+    We cannot renew the signature from here (only a fresh private-API profile fetch does that,
+    and it happens when the lead is next active — see leads/profiles.py). What we can do is not
+    ask: an expired link is treated as no link, and the initial shows instead."""
+    m = re.search(r"[?&]oe=([0-9A-Fa-f]+)", url)
+    if not m:
+        return False
+    try:
+        return int(m.group(1), 16) < datetime.now(UTC).timestamp()
+    except ValueError:
+        return False
+
+
 def _avatar(name: str | None, avatar_url: str | None, size_cls: str = "ti-av") -> str:
     initial = _h.escape(((name or "?")[0]).upper())
-    if avatar_url and avatar_url.lower().startswith(("http://", "https://")):
+    if (avatar_url and avatar_url.lower().startswith(("http://", "https://"))
+            and not _avatar_expired(avatar_url)):
         safe_url = _h.escape(avatar_url)
         return (
             f'<span class="{size_cls}" style="background-image:url(\'{safe_url}\')">'

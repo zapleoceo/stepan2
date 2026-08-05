@@ -847,6 +847,7 @@ async def ingest_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
     Anti-ban jitter up front — the cron fires on a fixed second, so offset the private-API
     walk off the machine tick (same reason as ingest_branch)."""
     from app.modules.comments.service import CommentService  # noqa: PLC0415
+    from app.modules.comments.translate import OPERATOR_LANGS, translate_pending  # noqa: PLC0415
 
     await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
     posted = 0
@@ -866,6 +867,13 @@ async def ingest_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
                 port = await wiring.build_channel_port(session, channel)
                 await svc.ingest(channel, port)
                 posted += await svc.process(channel, port)
+                # Operator-language copies, filled here rather than while the panel renders —
+                # see app.modules.comments.translate. Failing this must not lose the replies
+                # we just posted, so it gets its own guard.
+                try:
+                    await translate_pending(session, branch_id, BrokerLLM(), OPERATOR_LANGS)
+                except Exception:
+                    logger.exception("comment translate failed branch=%d", branch_id)
         except (NotImplementedError, KeyError, RuntimeError) as exc:
             logger.warning("comment ingest skip branch=%d channel=%s: %s",
                            branch_id, channel.id, exc)
