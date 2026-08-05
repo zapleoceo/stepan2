@@ -96,14 +96,18 @@ Business, WhatsApp) — так чипы и селектор не перееха�
 
 ### Возможности объявляются, а не вынюхиваются
 
-`Capability` (`REVOKE`, `MARK_SEEN`, `FETCH_PROFILE`, `DOWNLOAD_MEDIA`, `COMMENTS`) —
+`Capability` (`REVOKE`, `MARK_SEEN`, `FETCH_PROFILE`, `DOWNLOAD_MEDIA`, `COMMENTS`,
+`OUTBOUND_COMMENT`) —
 заявление коннектора, которое контрактный тест сверяет с классом адаптера **в обе стороны**:
 заявленная возможность без метода падает, и метод без заявления падает тоже.
 
 `ChannelPort` сократился до базовых `fetch_inbound` / `send_text` / `session_status` —
 раньше он объявлял методы комментариев, которых нет у двух адаптеров из трёх. Отдельным
 протоколом остался только `CommentPort`: `CommentService` берёт порт целиком и зовёт три его
-метода. Остальные возможности типизируются там, где их потребляют (`deletions.Revoker`,
+метода. Рядом с ним — `OutboundCommentPort` (`fetch_user_posts`, `comment_on_post`), намеренно
+**отдельный**: ответ под своим постом платформа терпит, а появление без приглашения под чужим —
+это ровно та форма, которую ловит любой антиспам. Коннектор может честно уметь первое и не
+уметь второе, см. [proactive-comments.md](proactive-comments.md). Остальные возможности типизируются там, где их потребляют (`deletions.Revoker`,
 `profiles.ProfileFetcher`, `media.MediaDownloader`) — третья копия той же мысли в
 `app/ports/channel.py` не давала ничего.
 

@@ -46,5 +46,6 @@ SPEC = ConnectorSpec(
         Capability.FETCH_PROFILE,
         Capability.DOWNLOAD_MEDIA,
         Capability.COMMENTS,
+        Capability.OUTBOUND_COMMENT,
     }),
 )

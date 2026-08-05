@@ -32,6 +32,7 @@ class Capability(StrEnum):
     FETCH_PROFILE = "fetch_profile"
     DOWNLOAD_MEDIA = "download_media"
     COMMENTS = "comments"
+    OUTBOUND_COMMENT = "outbound_comment"
 
 
 # Methods a port must expose to honour each capability. The contract test compares this to
@@ -43,6 +44,7 @@ CAPABILITY_METHODS: dict[Capability, tuple[str, ...]] = {
     Capability.FETCH_PROFILE: ("fetch_profile",),
     Capability.DOWNLOAD_MEDIA: ("download_media",),
     Capability.COMMENTS: ("fetch_comments", "reply_to_comment", "hide_comment"),
+    Capability.OUTBOUND_COMMENT: ("fetch_user_posts", "comment_on_post"),
 }
 
 # Every connector answers these three — reading, sending, and whether it is alive.

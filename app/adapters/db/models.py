@@ -417,6 +417,39 @@ class PostComment(SQLModel, table=True):
     attempts: int = Field(default=0, description="soft-block ретраи отправки")
 
 
+class OutboundComment(SQLModel, table=True):
+    """Наш комментарий под ЧУЖИМ постом (проактивная миссия).
+
+    Отдельная таблица от `post_comment`, а не флаг в ней: там строка = чужой вопрос под нашим
+    постом, здесь = наш выход в чужое пространство. Разные ключи дедупа (там нативный id
+    коммента, здесь пара «пост + наш канал»), разные лимиты и разная цена ошибки. Строка
+    создаётся ДО отправки — решение «писать» и сам факт отправки видны раздельно, иначе
+    отклонённые кандидаты нигде не остаются и подобрать порог релевантности не по чему."""
+    __tablename__ = "outbound_comment"
+    __table_args__ = (UniqueConstraint("channel_id", "media_id", name="uq_outbound_media"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    branch_id: int = Field(foreign_key="branch.id", index=True)
+    channel_id: int = Field(foreign_key="channel.id")
+    lead_id: int | None = Field(default=None, foreign_key="lead.id", index=True)
+    media_id: str = Field(index=True, description="чужой пост, под которым пишем")
+    media_permalink: str | None = Field(default=None)
+    media_caption: str | None = Field(default=None, description="подпись поста — вход судьи")
+    author_pk: str = Field(description="numeric IG id владельца поста")
+    author_username: str | None = Field(default=None)
+    post_taken_at: datetime | None = Field(default=None, description="когда выложен пост")
+    # skipped=судья сказал «мимо», sent=комментарий ушёл, error=сбой отправки
+    status: str = Field(default="pending", index=True, description="pending|skipped|sent|error")
+    relevant: bool | None = Field(default=None, description="вердикт судьи chat:fast")
+    skip_reason: str | None = Field(default=None, description="почему судья отказал")
+    text: str | None = Field(default=None, description="что мы написали")
+    external_id: str | None = Field(default=None, description="id нашего коммента в IG")
+    text_tr: str | None = Field(default=None, description="JSON {lang: перевод}")
+    llm_info: str | None = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    handled_at: datetime | None = Field(default=None)
+
+
 class Outbox(SQLModel, table=True):
     """Единственный исходящий путь — очередь на отправку (caps/окна применяются раз)."""
     __tablename__ = "outbox"

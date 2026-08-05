@@ -20,7 +20,8 @@ Stepan-1.
 | [launch-checklist.md](launch-checklist.md) | Готовность к продакшену: что задать (env, auth, бот), статус уведомлений/KB/профилей |
 | [deploy.md](deploy.md) | Деплой: изолированный стек на Hetzner, nginx/Cloudflare, auth (Telegram Login), cutover со Stepan-1, CI/CD |
 | [worker.md](worker.md) | ARQ-воркер: cron-задачи, капы/тихие часы outbox, заморозка сессии при challenge, advisory-lock |
-| [chat-panel-perf.md](chat-panel-perf.md) | Открытие чата: запросы панели, фоновая (lazy) загрузка перевода needs, оптимизация медиа-превью сообщений |
+| [proactive-comments.md](proactive-comments.md) | **Комментарии под чужими постами**: единственная миссия, где бот пишет первым. Судья chat:fast, автор chat:smart, три потолка лимитов, что сознательно не сделано |
+| [chat-panel-perf.md](chat-panel-perf.md) | Открытие панелей: запросы чата, lazy-перевод needs, медиа-превью, перевод комментариев в почасовом воркере, протухшие аватарки IG |
 | [tech-debt.md](tech-debt.md) | **Отложенные работы**: что решили не делать сейчас и почему. Сейчас в списке — официальный вебхук Meta вместо опроса приватным API |
 
 ## Конвенции

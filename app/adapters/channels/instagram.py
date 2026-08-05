@@ -10,7 +10,12 @@ from typing import Any, Protocol
 
 from app.domain.clock import as_naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
-from app.ports.channel import InboundComment, InboundMessage, SendResult
+from app.ports.channel import (
+    CandidatePost,
+    InboundComment,
+    InboundMessage,
+    SendResult,
+)
 
 # IG errors that mean the message is already gone — unsend is idempotent, don't retry.
 _GONE_MARKERS = ("not found", "does not exist", "media_unavailable", "no longer available",
@@ -46,6 +51,12 @@ class IGTransport(Protocol):
         ...
 
     async def fetch_own_comments(self, since_epoch_us: int | None) -> list[dict[str, Any]]:
+        ...
+
+    async def fetch_user_posts(self, user_pk: str, amount: int = 3) -> list[dict[str, Any]]:
+        ...
+
+    async def comment_on_media(self, media_pk: str, text: str) -> dict[str, Any]:
         ...
 
     async def send_comment_reply(self, comment_id: str, text: str) -> dict[str, Any]:
@@ -143,6 +154,31 @@ class InstagramAdapter:
                 return SendResult(ok=True)
             return SendResult(ok=False, error=str(exc))
         return SendResult(ok=True)
+
+    async def fetch_user_posts(self, user_pk: str, *, limit: int = 3) -> list[CandidatePost]:
+        """Recent posts of a lead we already know, as commenting candidates. A post with no
+        caption is dropped here: the relevance judge reads the caption, and an image it cannot
+        see is not something to form an opinion about."""
+        raw = await self._t.fetch_user_posts(user_pk, limit)
+        out: list[CandidatePost] = []
+        for p in raw:
+            taken = p.get("taken_at")
+            if not (p.get("caption") or "").strip() or not isinstance(taken, datetime):
+                continue
+            out.append(CandidatePost(
+                media_id=str(p["media_id"]), author_pk=str(user_pk),
+                caption=str(p["caption"]), taken_at=taken,
+                permalink=p.get("permalink") or None,
+                like_count=int(p.get("like_count", 0) or 0),
+                comment_count=int(p.get("comment_count", 0) or 0)))
+        return out
+
+    async def comment_on_post(self, media_id: str, text: str) -> SendResult:
+        try:
+            raw = await self._t.comment_on_media(media_id, text)
+        except Exception as exc:  # noqa: BLE001 — transport failure → caller decides retry
+            return SendResult(ok=False, error=str(exc))
+        return SendResult(ok=True, external_message_id=str(raw.get("pk", "")))
 
     def _to_comment(self, c: dict[str, Any]) -> InboundComment:
         return InboundComment(

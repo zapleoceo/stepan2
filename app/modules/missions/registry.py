@@ -36,10 +36,25 @@ COMMENT_REPLY = MissionSpec(
     budget_share=0.15,
 )
 
-# Everything registered. Proactive missions are deliberately absent until the reactive pair
-# is running under one budget — adding them first would mean tuning three counters at once on
-# the account that carries the entire Jakarta funnel.
-ALL: tuple[MissionSpec, ...] = (INBOUND_REPLY, COMMENT_REPLY)
+PROACTIVE_COMMENT = MissionSpec(
+    key="proactive_comment",
+    label="Комментарий под чужим постом",
+    initiative=Initiative.PROACTIVE,
+    grounding=Grounding.STRICT,
+    requires=frozenset({Capability.OUTBOUND_COMMENT}),
+    # Not selling, and not even inviting: a line under the post of somebody who already wrote
+    # to us once, about the thing they actually posted. What it buys is being seen again by a
+    # person who knows us — a reply, if it comes, lands in DM where INBOUND_REPLY works.
+    goal="напомнить о себе тем, кто уже писал — без продажи",
+    # The smallest share of the three, deliberately. It is the only mission that speaks
+    # uninvited, which is the exact shape platform anti-spam exists to catch, and the account
+    # carrying the whole Jakarta funnel is not where anyone should find the line.
+    budget_share=0.10,
+)
+
+# Everything registered. The reactive pair carries the funnel; the proactive one runs on what
+# is left, and only where a connector declares it can write into somebody else's space.
+ALL: tuple[MissionSpec, ...] = (INBOUND_REPLY, COMMENT_REPLY, PROACTIVE_COMMENT)
 
 BY_KEY: dict[str, MissionSpec] = {m.key: m for m in ALL}
 

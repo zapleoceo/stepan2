@@ -25,6 +25,7 @@ from app.modules.missions import (  # noqa: E402
     ALL,
     COMMENT_REPLY,
     INBOUND_REPLY,
+    PROACTIVE_COMMENT,
     Grounding,
     Initiative,
     Spend,
@@ -49,9 +50,12 @@ def test_a_mission_only_runs_where_the_connector_can_carry_it() -> None:
     assert "inbound_reply" in keys  # answering a visitor is exactly what it does
 
 
-def test_instagram_carries_both_reactive_missions() -> None:
+def test_instagram_carries_every_mission() -> None:
+    """The unofficial API is the only connector that can do all three, which is also why it
+    is the only one that can get the account throttled for all three at once."""
     ig = spec_for(ChannelKind.INSTAGRAM).capabilities
-    assert {m.key for m in missions_for(ig)} == {"inbound_reply", "comment_reply"}
+    assert {m.key for m in missions_for(ig)} == {
+        "inbound_reply", "comment_reply", "proactive_comment"}
 
 
 def test_the_official_meta_connector_cannot_comment() -> None:
@@ -68,10 +72,18 @@ def test_public_work_is_held_to_a_stricter_standard_than_private() -> None:
     assert INBOUND_REPLY.grounding is Grounding.NORMAL
 
 
-def test_everything_registered_today_is_reactive() -> None:
-    """Proactive missions stay out until the reactive pair runs under one budget. Tuning three
-    counters at once, on the account carrying the whole funnel, is not a thing to do first."""
-    assert all(m.initiative is Initiative.REACTIVE for m in ALL)
+def test_only_one_mission_ever_speaks_first() -> None:
+    """Initiative is the biggest single driver of platform risk, so the count of proactive
+    missions is a number worth pinning: it went 0 to 1 deliberately, and a second one arriving
+    unnoticed is exactly the drift this asserts against."""
+    proactive = [m for m in ALL if m.initiative is Initiative.PROACTIVE]
+    assert [m.key for m in proactive] == ["proactive_comment"]
+
+
+def test_the_proactive_mission_gets_the_smallest_share() -> None:
+    """It is the only one we could stop doing tomorrow with nothing lost but reach, and the
+    only one that can quietly cost the account. Both point the same way."""
+    assert all(PROACTIVE_COMMENT.budget_share <= m.budget_share for m in ALL)
 
 
 def test_a_spent_budget_gives_a_mission_nothing() -> None:

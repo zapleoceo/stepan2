@@ -32,12 +32,12 @@ _ORPHAN = (
 # so the next feature that adds one is caught in CI rather than in the field.
 _BY_THREAD = ("outbox", "manager_alert", "stage_event", "thread_log")
 _BY_LEAD = ("manager_alert", "stage_event", "crm_lead_state", "lead_need_tag",
-            "need_lead_state")
+            "need_lead_state", "outbound_comment")
 # app_setting rows scoped to a channel are per-connector overrides. Production carries no FK
 # for that column (the migration added it without one, unlike the model), so they never
 # blocked the delete — they just outlived it, and would have attached themselves to whatever
 # channel took the id next.
-_BY_CHANNEL = ("post_comment", "channel_session", "app_setting")
+_BY_CHANNEL = ("post_comment", "outbound_comment", "channel_session", "app_setting")
 
 
 @dataclass(frozen=True)

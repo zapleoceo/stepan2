@@ -338,6 +338,39 @@ class InstagrapiTransport:
                 })
         return out
 
+    async def fetch_user_posts(self, user_pk: str, amount: int = 3) -> list[dict[str, Any]]:
+        """Recent posts of ANOTHER account. Same private-API call the own-comment walk uses,
+        pointed at someone else's pk — the only difference is whose feed it reads.
+
+        Kept to a handful: we want their latest, not their archive, and each call is a private
+        endpoint that IG throttles per account."""
+        client = self._ensure_client()
+        medias = await asyncio.to_thread(client.user_medias_v1, int(user_pk), amount)
+        out: list[dict[str, Any]] = []
+        for m in medias:
+            media_pk = str(getattr(m, "pk", "") or "")
+            if not media_pk:
+                continue
+            code = str(getattr(m, "code", "") or "")
+            taken = getattr(m, "taken_at", None)
+            out.append({
+                "media_id": media_pk,
+                "caption": str(getattr(m, "caption_text", "") or ""),
+                "taken_at": as_naive_utc(taken) if taken else None,
+                "permalink": f"https://www.instagram.com/p/{code}/" if code else None,
+                "like_count": int(getattr(m, "like_count", 0) or 0),
+                "comment_count": int(getattr(m, "comment_count", 0) or 0),
+            })
+        return out
+
+    async def comment_on_media(self, media_pk: str, text: str) -> dict[str, Any]:
+        """Top-level comment under someone else's post — `media_comment` with no replied-to id.
+        The same endpoint as a reply under our own post; what differs is whose media it is,
+        which is why the caller counts these against a separate, much smaller budget."""
+        client = self._ensure_client()
+        result = await asyncio.to_thread(client.media_comment, media_pk, text)
+        return {"pk": str(getattr(result, "pk", "") or "")}
+
     async def send_comment_reply(self, comment_id: str, text: str) -> dict[str, Any]:
         """Publicly reply to a comment. instagrapi threads a reply by media + replied-to id;
         we look up the comment's media from our own stored row, passed as `comment_id` in the

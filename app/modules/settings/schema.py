@@ -161,6 +161,40 @@ SCHEMA: list[SettingSection] = [
            _l("Ответов на один пост", "Replies / post", "Balasan / post"),
            ph=_l("5", "5", "5"), width="76px", scope="channel"),
     ]),
+    SettingSection("fa-solid fa-hand-sparkles",
+                   _l("Комментарии под чужими постами", "Comments on other people's posts",
+                      "Komentar di postingan orang lain"), [
+        _f("proactive_comments_enabled", "bool", "false",
+           _l("Напоминать о себе", "Reach out under their posts", "Sapa di postingan mereka"),
+           width="150px", scope="channel",
+           help=_l("Раз в час бот заходит в ленту тех, кто нам УЖЕ писал, и оставляет одну "
+                   "человеческую реплику под свежим постом — без продажи, без ссылок, без "
+                   "названия курса. Один человек не чаще раза в 30 дней. Это единственное "
+                   "место, где бот пишет первым: держите лимиты низкими",
+                   "Hourly, the bot visits the feed of people who ALREADY wrote to us and "
+                   "leaves one human line under a recent post — no pitch, no links, no course "
+                   "name. One person at most once per 30 days. This is the only place the bot "
+                   "speaks first: keep the caps low",
+                   "Tiap jam bot mengunjungi feed orang yang SUDAH menulis ke kami dan "
+                   "meninggalkan satu komentar manusiawi — tanpa jualan, tanpa tautan")),
+        # The judge measures a post against this line. No default and no fallback: a generic
+        # "we teach things" would wave through anything cheerful, and the mission simply does
+        # not run until a human has written who this branch is.
+        _f("proactive_comment_about", "text", "",
+           _l("Кто мы и где", "Who we are and where", "Siapa kami dan di mana"),
+           ph=_l("курсы программирования и дизайна в Джакарте",
+                 "coding and design courses in Jakarta",
+                 "kursus coding dan desain di Jakarta"),
+           width="320px", scope="channel",
+           help=_l("По этой строке ИИ решает, наш это пост или мимо. Пусто — миссия не "
+                   "работает",
+                   "The AI judges relevance against this line. Empty — the mission does not "
+                   "run",
+                   "AI menilai relevansi dari kalimat ini. Kosong — misi tidak berjalan")),
+        _f("proactive_comment_daily_cap", "int", "5",
+           _l("Комментариев в сутки", "Comments / day", "Komentar / hari"),
+           ph=_l("5", "5", "5"), width="76px", scope="channel"),
+    ]),
     SettingSection("fa-solid fa-bell",
                    _l("Уведомления", "Notifications", "Notifikasi"), [
         _f("tg_group_id", "text", "",

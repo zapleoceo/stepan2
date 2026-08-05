@@ -111,7 +111,14 @@ async def account_spend(session: Any, channel_id: int, cap: int) -> Spend:
         text("SELECT COUNT(*) FROM post_comment WHERE channel_id = :ch"
              " AND status IN ('replied', 'dm_sent') AND handled_at >= :since"),
         {"ch": channel_id, "since": cutoff})).scalar() or 0
-    return Spend(used=int(sent) + int(commented), cap=max(0, cap))
+    # The third mission. A comment under somebody else's post is the same act to Instagram as
+    # one under ours — and the riskiest of the three — so leaving it out of the total would
+    # reopen the hole this function exists to close, on the one mission that can least afford it.
+    outbound = (await session.execute(
+        text("SELECT COUNT(*) FROM outbound_comment WHERE channel_id = :ch"
+             " AND status = 'sent' AND handled_at >= :since"),
+        {"ch": channel_id, "since": cutoff})).scalar() or 0
+    return Spend(used=int(sent) + int(commented) + int(outbound), cap=max(0, cap))
 
 
 def log_exhausted(channel_id: int, mission: str, spend: Spend) -> None:

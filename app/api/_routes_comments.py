@@ -14,6 +14,8 @@ from sqlalchemy import text
 from app.adapters.db.session import session_scope
 from app.admin._branch import branch_ids_from_request
 from app.api._i18n import apply_lang, t
+from app.api._outbound_block import OUTBOUND_Q, outbound_block
+from app.api._outbound_block import STYLE as _OB_STYLE
 from app.domain.clock import utc_now
 from app.modules.comments.translate import cached
 
@@ -91,6 +93,14 @@ def _stamp_ago(when: object, lang: str) -> str:
     return when.strftime("%d.%m.%Y")
 
 
+class _Stamp:
+    """The panel's own time formatting, handed to the outbound block so both halves of the
+    page describe the same moment the same way."""
+
+    full = staticmethod(_stamp_full)
+    ago = staticmethod(_stamp_ago)
+
+
 def _conversion_line(by_status: dict, lang: str) -> str:
     """The number this page was missing: did anyone we answered actually come into DM.
 
@@ -125,7 +135,7 @@ def _conversion_line(by_status: dict, lang: str) -> str:
 
 
 def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict,
-                         conversion: dict | None = None) -> str:
+                         conversion: dict | None = None, outbound: list | None = None) -> str:
     title = _h.escape(t("nav.comments"))
     intro = _h.escape(_lbl({
         "ru": "Комментарии под нашими постами: что бот ответил публично и кого позвал в директ. "
@@ -143,8 +153,9 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict,
                   "the bot pulls new ones hourly.",
             "id": "Belum ada komentar. Aktifkan 'Balas komentar' di Pengaturan channel.",
         }, lang))
+        ob = outbound_block(outbound or [], lang, multi_branch, _Stamp)
         return (f'<div class="panel cm-panel"><h2>{title}</h2><p class="muted">{intro}</p>'
-                f'<div class="emp">{empty}</div></div>')
+                f'{ob}<div class="emp">{empty}</div></div>' + _STYLE)
 
     # Group by post, preserving query order (media_id, occurred_at DESC).
     posts: dict[str, dict] = {}
@@ -155,7 +166,8 @@ def _comments_panel_html(rows: list, lang: str, multi_branch: bool, trs: dict,
         p["comments"].append(r)
 
     out = [f'<div class="panel cm-panel"><h2>{title}</h2><p class="muted">{intro}</p>'
-           + _conversion_line(conversion or {}, lang)]
+           + _conversion_line(conversion or {}, lang)
+           + outbound_block(outbound or [], lang, multi_branch, _Stamp)]
     for _mid, p in posts.items():
         cap = _h.escape((p["caption"] or "")[:90]) or _h.escape(_lbl(
             {"ru": "(без подписи)", "en": "(no caption)", "id": "(tanpa teks)"}, lang))
@@ -218,6 +230,7 @@ _STYLE = (
     ".cm-skip{margin:4px 0 4px 14px;font-size:13px}"
     ".cm-status{font-size:12px;color:var(--muted,#9aa1b5);margin-top:4px}"
     ".cm-tr{font-size:12.5px;color:var(--muted,#9aa1b5);font-style:italic;margin-top:2px}"
+    + _OB_STYLE +
     "</style>"
 )
 
@@ -231,8 +244,11 @@ async def comments_panel(request: Request) -> HTMLResponse:
         conditions.append("pc.branch_id = ANY(:bids)")
         params["bids"] = branch_ids
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    ob_where = where.replace("pc.branch_id", "oc.branch_id")
     async with session_scope() as session:
         rows = list((await session.execute(text(_Q.format(where=where)), params)).all())
+        outbound = list((await session.execute(
+            text(OUTBOUND_Q.format(where=ob_where)), params)).all())
         # Cache only — the page never waits on the broker. It used to translate whatever was
         # missing before rendering a single line, so opening the panel after a batch of new
         # comments meant sitting through that many model calls. Anything not yet translated
@@ -245,4 +261,4 @@ async def comments_panel(request: Request) -> HTMLResponse:
             from app.modules.comments.conversion import conversion_by_status  # noqa: PLC0415
             conversion = await conversion_by_status(session, branch_ids[0])
     multi = not branch_ids or len(branch_ids) > 1
-    return HTMLResponse(_comments_panel_html(rows, lang, multi, trs, conversion))
+    return HTMLResponse(_comments_panel_html(rows, lang, multi, trs, conversion, outbound))

@@ -70,6 +70,11 @@ class BranchSettings:
     comment_replies_enabled: bool = False
     comment_hourly_cap: int = 20
     comment_per_post_cap: int = 5
+    # The one mission that speaks first. Off by default and gated on `about` being written:
+    # see comments/proactive.runs_on. The daily cap is deliberately a single digit.
+    proactive_comments_enabled: bool = False
+    proactive_comment_about: str = ""
+    proactive_comment_daily_cap: int = 5
     # Trunk country code for phones mined from a lead's free-text message (see
     # leads.phone.extract_phone). Default Indonesia "62"; set per branch so a non-Indonesian
     # branch doesn't stamp its leads' local numbers as +62.
@@ -208,6 +213,9 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         comment_replies_enabled=_b(raw, "comment_replies_enabled"),
         comment_hourly_cap=_i(raw, "comment_hourly_cap"),
         comment_per_post_cap=_i(raw, "comment_per_post_cap"),
+        proactive_comments_enabled=_b(raw, "proactive_comments_enabled"),
+        proactive_comment_about=raw.get("proactive_comment_about", ""),
+        proactive_comment_daily_cap=_i(raw, "proactive_comment_daily_cap"),
         daily_budget_usd=_f(raw, "daily_budget_usd"),
         crm_enabled=_b(raw, "crm_enabled"),
         crm_webhook_url=raw.get("crm_webhook_url", ""),

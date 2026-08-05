@@ -18,7 +18,7 @@ from arq.connections import RedisSettings
 from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import Channel
+from app.adapters.db.models import Branch, Channel
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
@@ -883,6 +883,58 @@ async def ingest_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
     return posted
 
 
+async def proactive_comments(ctx: dict[str, Any]) -> int:
+    """Hourly: fan out the proactive comment mission, one job per branch. Platform-gated for
+    the same reason as the reactive one, and more so — this is the only path that writes into
+    somebody else's space, so an operator stopping the bot must stop it too."""
+    return await _fan_out_per_branch(ctx, "proactive_comments_branch",
+                                     gate_platform=True, gate_broker=True)
+
+
+async def proactive_comments_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    """One branch: for each channel that can write under other people's posts and has the
+    mission switched on, visit a few known leads' feeds. Returns comments posted."""
+    from app.modules.comments.proactive import (  # noqa: PLC0415
+        ProactiveCommentService,
+        jitter_seconds,
+        runs_on,
+    )
+
+    await asyncio.sleep(jitter_seconds(_INGEST_JITTER_S))
+    posted = 0
+    async with session_scope() as session:
+        channels = await wiring.active_channels(session, branch_id)
+        branch = await session.get(Branch, branch_id)
+        lang = branch.lang if branch else "id"
+        brand_terms = _brand_terms(branch)
+    for channel in channels:
+        try:
+            async with session_scope() as session:
+                ch_cfg = await get_channel_settings(session, branch_id, channel.id)
+                if not runs_on(channel, ch_cfg, ch_cfg.proactive_comment_about):
+                    continue
+                svc = ProactiveCommentService(
+                    session, branch_id, BrokerLLM(), ch_cfg,
+                    about=ch_cfg.proactive_comment_about, lang=lang, brand_terms=brand_terms)
+                port = await wiring.build_channel_port(session, channel)
+                posted += await svc.run(channel, port)
+        except (NotImplementedError, KeyError, RuntimeError) as exc:
+            logger.warning("proactive comments skip branch=%d channel=%s: %s",
+                           branch_id, channel.id, exc)
+        except Exception:
+            logger.exception("proactive comments failed branch=%d channel=%s",
+                             branch_id, channel.id)
+    return posted
+
+
+def _brand_terms(branch: Branch | None) -> tuple[str, ...]:
+    """Words a comment under somebody else's post must not contain. The branch's own name is
+    the one that matters: a line naming us turns a reaction into an advert, and it is the
+    single thing the model reaches for when it runs out of anything specific to say."""
+    name = (branch.name if branch else "") or ""
+    return tuple(w for w in (name, *name.split()) if len(w) > 2)
+
+
 async def sync_ads(ctx: dict[str, Any]) -> int:
     """Fan out the Meta ad map + insight sync, one job per branch.
 
@@ -1148,7 +1200,7 @@ class WorkerSettings:
         schedule_followups, reactivate_dormant, learning_audit, escalate_stale_alerts,
         sync_crm_writeback,
         process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
-        daily_digest, crm_rescue, ingest_comments,
+        daily_digest, crm_rescue, ingest_comments, proactive_comments,
         aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
@@ -1160,7 +1212,7 @@ class WorkerSettings:
         escalate_stale_alerts_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         backfill_media_branch, aggregate_needs_branch,
-        daily_digest_branch, ingest_comments_branch,
+        daily_digest_branch, ingest_comments_branch, proactive_comments_branch,
         sync_ads_branch, backfill_ads_branch,
         # Push, not cron: enqueued by app/api/webhooks.py the moment Meta delivers a message.
         # It MUST be listed here — an unregistered name is accepted by enqueue_job and then
@@ -1265,6 +1317,10 @@ class WorkerSettings:
         # a public reply is higher-stakes than a DM, so the kill switch stops it too. IG
         # throttles comment automation hard, hence hourly + the low comment caps.
         cron(ingest_comments, minute={17}, second=30, run_at_startup=False),
+        # Comments under OTHER people's posts: hourly at :47, half an hour off the reactive
+        # walk so the two never share a minute of private-API traffic. Opt-in per channel,
+        # capped to single digits a day, and the only mission here that speaks first.
+        cron(proactive_comments, minute={47}, second=30, run_at_startup=False),
         # Meta ad map + insights every 20 min. Deliberately slow: Meta throttles an ad account
         # account-wide after a burst (code 80004 — hit live while building this), and its own
         # attribution lags ~7 days, so a faster cadence would buy nothing but 429s. Costs zero

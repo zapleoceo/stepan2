@@ -57,6 +57,25 @@ class InboundComment:
     media_permalink: str | None = None
 
 
+@dataclass(frozen=True)
+class CandidatePost:
+    """Somebody ELSE's post, considered as a place to leave a comment.
+
+    Deliberately not shaped like InboundComment: nobody wrote to us, there is no question
+    waiting, and the author's only relationship with us is having once sent a DM. The fields
+    are what the relevance judge needs in order to decide whether a comment here would be
+    welcome or would be us shouting into a stranger's photo album."""
+
+    media_id: str
+    author_pk: str
+    caption: str
+    taken_at: datetime
+    author_username: str | None = None
+    permalink: str | None = None
+    like_count: int = 0
+    comment_count: int = 0
+
+
 class ChannelPort(Protocol):
     """The baseline every connector honours: read, send, and say whether it is alive.
 
@@ -96,4 +115,22 @@ class CommentPort(ChannelPort, Protocol):
 
     async def hide_comment(self, comment_external_id: str) -> SendResult:
         """Удалить спам/оскорбление под нашим постом (private API: delete владельцем)."""
+        ...
+
+
+class OutboundCommentPort(ChannelPort, Protocol):
+    """Capability.OUTBOUND_COMMENT — writing under SOMEBODY ELSE'S post.
+
+    Split from CommentPort rather than folded into it because the two carry different risk.
+    Answering under our own post is the one automated action every platform tolerates;
+    appearing uninvited under a stranger's is the shape anti-spam systems exist to catch. A
+    connector may honestly have the first and not the second, and the caps that govern them
+    are separate for the same reason."""
+
+    async def fetch_user_posts(self, user_pk: str, *, limit: int = 3) -> list[CandidatePost]:
+        """Последние посты ЧУЖОГО аккаунта — кандидаты на комментарий."""
+        ...
+
+    async def comment_on_post(self, media_id: str, text: str) -> SendResult:
+        """Оставить комментарий верхнего уровня под чужим постом."""
         ...
