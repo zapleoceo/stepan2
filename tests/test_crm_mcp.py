@@ -10,6 +10,7 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+import logging  # noqa: E402
 from datetime import UTC, datetime, timedelta  # noqa: E402
 
 from app.adapters.crm import CrmReader  # noqa: E402
@@ -160,3 +161,26 @@ def test_an_event_row_without_a_timestamp_still_yields_the_booking() -> None:
     assert name == "DEMO"
     assert event_at is not None
     assert booked_at is None
+
+
+async def test_a_timed_out_read_logs_a_reason_not_an_empty_string(monkeypatch, caplog) -> None:
+    """TimeoutError's str is empty, so the warning ended at the colon and said nothing.
+
+    The reader used to wrap _fetch in its own asyncio.timeout on top of the one
+    mcp_client.session already applies. Two budgets of the same length are not belt and
+    braces: the outer starts marginally earlier, so it always won, and it raises a bare
+    TimeoutError. Every timed-out read therefore logged 'crm mcp read failed (phone=+62...): '
+    and stopped — a slow server was indistinguishable from a broken one."""
+    seen: list[str] = []
+    monkeypatch.setattr(logging.getLogger("app.adapters.crm_mcp"), "warning",
+                        lambda msg, *a: seen.append(msg % a if a else msg))
+
+    async def _boom(url: str, phone: str) -> None:  # noqa: ARG001
+        raise TimeoutError
+
+    r = CrmMcpReader("jakarta")
+    monkeypatch.setattr(r, "_fetch", _boom)
+
+    assert await r.get_state(_MCP_URL, "", "+62812") is None
+    assert seen, "a failed read must be logged"
+    assert seen[-1].rstrip().endswith("TimeoutError"), f"empty reason: {seen[-1]!r}"

@@ -14,7 +14,6 @@ outage must not silence a live sales bot.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -51,11 +50,18 @@ class CrmMcpReader:
         self.city_alias = city_alias
 
     async def get_state(self, url: str, secret: str, phone: str) -> dict | None:  # noqa: ARG002
+        # No timeout wrapper here: mcp_client.session owns the budget, and this one was a
+        # leftover of the per-caller plumbing that client consolidated. Two timeouts of the
+        # same length are not belt and braces — the outer starts marginally earlier, so it
+        # always won, and it raises a bare TimeoutError whose str() is empty. That is how the
+        # warning below ended at the colon and said nothing for every timed-out read.
         try:
-            async with asyncio.timeout(settings().crm_mcp_timeout_s):
-                return await self._fetch(url, phone)
+            return await self._fetch(url, phone)
         except Exception as exc:  # noqa: BLE001 — no opinion → gate fails open
-            logger.warning("crm mcp read failed (phone=%s): %s", phone, str(exc)[:200])
+            # `or type(...)` because an exception with an empty str is not a reason anyone can
+            # act on, and TimeoutError is exactly that.
+            reason = str(exc)[:200] or type(exc).__name__
+            logger.warning("crm mcp read failed (phone=%s): %s", phone, reason)
             return None
 
     async def _fetch(self, url: str, phone: str) -> dict | None:
@@ -80,11 +86,11 @@ class CrmMcpReader:
         out-calls with billsec ≤ 10s (missed / voicemail-bounce), minus any phone that
         ALSO had an answered call in the window. Newest missed attempt first. Returns []
         on any failure — the rescue job just skips a cycle."""
+        # Budget lives in _list_missed's session, for the reason given in get_state.
         try:
-            async with asyncio.timeout(settings().crm_mcp_timeout_s * 2):
-                return await self._list_missed(url, days, max_pages)
+            return await self._list_missed(url, days, max_pages)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("crm mcp calls list failed: %s", str(exc)[:200])
+            logger.warning("crm mcp calls list failed: %s", str(exc)[:200] or type(exc).__name__)
             return []
 
     async def _list_missed(self, url: str, days: int, max_pages: int) -> list[tuple[str, str]]:
