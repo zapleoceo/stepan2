@@ -37,18 +37,21 @@ _COL = "event_booked_at"
 _INDEX = "ix_crm_lead_state_event_booked_at"
 
 
-def _to_naive_utc(value: object) -> str | None:
-    """CRM timestamp → naive UTC, the same normalisation parse_won_at applies on the live
-    path. The CRM sends Jakarta offsets ("2026-07-30T13:45:40+07:00") and every column here
-    is TIMESTAMP WITHOUT TIME ZONE, so truncating the string instead of converting would
+def _to_naive_utc(value: object) -> datetime | None:
+    """CRM timestamp → naive UTC datetime, the same normalisation parse_won_at applies on the
+    live path. The CRM sends Jakarta offsets ("2026-07-30T13:45:40+07:00") and every column
+    here is TIMESTAMP WITHOUT TIME ZONE, so truncating the string instead of converting would
     store local time as if it were UTC — seven hours adrift from every row the gate writes,
-    and only in the backfilled ones, which is the kind of split that is never noticed."""
+    and only in the backfilled ones, which is the kind of split that is never noticed.
+
+    A datetime, not a formatted string: asyncpg rejects a str bound to a timestamp column and
+    aborted this migration on prod, while SQLite accepts one and let the tests pass."""
     try:
         at = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
     at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-    return at.astimezone(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    return at.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _backfill() -> None:
@@ -71,7 +74,7 @@ def _backfill() -> None:
         if not booked and data.get("last_result") == "result_event":
             booked = data.get("last_result_at")
         at = _to_naive_utc(booked)
-        if not at:
+        if at is None:
             continue
         conn.execute(
             sa.text(f"UPDATE {_TABLE} SET {_COL} = :at WHERE id = :id"),
