@@ -19,6 +19,7 @@ from app.admin.setup import mount_admin
 from app.api._auth import AdminGuardMiddleware, AuthMiddleware, WriteGuardMiddleware
 from app.api._routes_auth import router as auth_router
 from app.api._routes_mcp import router as mcp_router
+from app.api._routes_sender import router as sender_router
 from app.api.mcp_reader import mcp as mcp_reader
 from app.api.mcp_reader import reader_app
 from app.api.mcp_remote import connector_app
@@ -224,6 +225,7 @@ def create_app() -> FastAPI:
     app.mount("/connector", connector_app())  # remote write MCP (funnel ops, web clients)
     app.mount("/reader", reader_app())         # read-only MCP (dialogs + analysis)
     app.include_router(webhooks_router)
+    app.include_router(sender_router)  # CRM sender → inbound WhatsApp (closed unless configured)
     app.include_router(admin_meta_router)
     app.include_router(ui_router)
     _try_mount_admin(app)

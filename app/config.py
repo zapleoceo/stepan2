@@ -70,6 +70,16 @@ class Settings(BaseSettings):
     mcp_read_secret: str = Field(
         default="", description="Bearer token(s) gating the read-only /reader MCP")
 
+    # The CRM's sender posts a lead's WhatsApp message to /api/v1/sender/inbound-callback.
+    # BOTH default to empty, and with both empty the endpoint refuses everything: an open one
+    # lets a stranger post a fake inbound and have Stepan answer a real customer in the
+    # business's name, on our model budget. Their side sends no signature today, so the
+    # allowlist is the interim they can use without changing their code.
+    sender_callback_secret: str = Field(
+        default="", description="Shared secret: X-Sender-Signature HMAC, or a bearer token")
+    sender_callback_ips: str = Field(
+        default="", description="Comma-separated addresses allowed to post the callback")
+
     # CRM read link (the gate that stops Stepan re-touching a lead a manager already owns).
     crm_read_timeout_s: float = Field(default=8.0, description="per-request CRM read timeout")
     crm_mcp_timeout_s: float = Field(
