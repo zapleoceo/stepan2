@@ -106,26 +106,18 @@ class CrmMcpPusher:
     async def add_lead_event(
         self, phone: str, event_type: str, *, comment: str, name: str | None,
     ) -> tuple[bool, str]:
-        from mcp import ClientSession  # noqa: PLC0415
-        from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
+        from app.adapters.mcp_client import session as mcp_session  # noqa: PLC0415
 
-        from app.adapters.mcp_auth import connect_args  # noqa: PLC0415
-
-        target, headers = connect_args(self.url)
         try:
-            async with streamablehttp_client(
-                target, headers=headers, timeout=self.timeout_s,
-            ) as (r, w, _):
-                async with ClientSession(r, w) as s:
-                    await s.initialize()
-                    # crm_lead_add_event assumes the phone is ALREADY a CRM contact — for an
-                    # IG-ad lead that never existed in CRM, its internal add-contact call
-                    # 404s (confirmed with itstep CRM devs, 2026-07-23). crm_client_search
-                    # first tells us which of the two tools this phone actually needs.
-                    known = await self._is_known_client(s, phone)
-                    if known:
-                        return await self._add_event(s, phone, event_type, comment, name)
-                    return await self._create_internet_request(s, phone, comment, name)
+            async with mcp_session(self.url, timeout_s=self.timeout_s) as s:
+                # crm_lead_add_event assumes the phone is ALREADY a CRM contact — for an
+                # IG-ad lead that never existed in CRM, its internal add-contact call
+                # 404s (confirmed with itstep CRM devs, 2026-07-23). crm_client_search
+                # first tells us which of the two tools this phone actually needs.
+                known = await self._is_known_client(s, phone)
+                if known:
+                    return await self._add_event(s, phone, event_type, comment, name)
+                return await self._create_internet_request(s, phone, comment, name)
         except Exception as exc:  # noqa: BLE001 — external MCP transport; log + report, never raise
             logger.exception("crm push transport error phone=%s", phone)
             return False, str(exc)

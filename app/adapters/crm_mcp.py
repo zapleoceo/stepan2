@@ -19,7 +19,7 @@ import json
 import logging
 from datetime import UTC, datetime, timedelta
 
-from app.adapters.mcp_auth import connect_args
+from app.adapters.mcp_client import session as mcp_session
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -59,26 +59,19 @@ class CrmMcpReader:
             return None
 
     async def _fetch(self, url: str, phone: str) -> dict | None:
-        # local import: keep the app importable even if the mcp package is absent
-        from mcp.client.session import ClientSession  # noqa: PLC0415
-        from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
-
-        target, headers = connect_args(url)
-        async with streamablehttp_client(target, headers=headers) as (read, write, _):
-            async with ClientSession(read, write) as s:
-                await s.initialize()
-                found = await self._call(s, "crm_client_search",
-                                         {"cityAlias": self.city_alias, "search": phone})
-                cards = (found or {}).get("data") or []
-                if not cards:
-                    return {"exists": False, "source": "mcp"}
-                crm_id = int(cards[0].get("id_uniq") or 0)
-                if not crm_id:
-                    return {"exists": False, "source": "mcp"}
-                history = await self._call(s, "crm_client_history",
-                                           {"cityAlias": self.city_alias,
-                                            "clientId": crm_id, "perPage": 50})
-                return self._derive(crm_id, (history or {}).get("data") or [])
+        async with mcp_session(url, timeout_s=settings().crm_mcp_timeout_s) as s:
+            found = await self._call(s, "crm_client_search",
+                                     {"cityAlias": self.city_alias, "search": phone})
+            cards = (found or {}).get("data") or []
+            if not cards:
+                return {"exists": False, "source": "mcp"}
+            crm_id = int(cards[0].get("id_uniq") or 0)
+            if not crm_id:
+                return {"exists": False, "source": "mcp"}
+            history = await self._call(s, "crm_client_history",
+                                       {"cityAlias": self.city_alias,
+                                        "clientId": crm_id, "perPage": 50})
+            return self._derive(crm_id, (history or {}).get("data") or [])
 
     async def list_missed_out_calls(
         self, url: str, days: int = 3, max_pages: int = 3,
@@ -95,9 +88,6 @@ class CrmMcpReader:
             return []
 
     async def _list_missed(self, url: str, days: int, max_pages: int) -> list[tuple[str, str]]:
-        from mcp.client.session import ClientSession  # noqa: PLC0415
-        from mcp.client.streamable_http import streamablehttp_client  # noqa: PLC0415
-
         now = datetime.now(UTC)
         args_base = {
             "cityAlias": self.city_alias,
@@ -107,26 +97,25 @@ class CrmMcpReader:
         }
         answered: set[str] = set()
         missed: dict[str, str] = {}
-        target, headers = connect_args(url)
-        async with streamablehttp_client(target, headers=headers) as (read, write, _):
-            async with ClientSession(read, write) as s:
-                await s.initialize()
-                for page in range(1, max_pages + 1):
-                    data = await self._call(s, "crm_calls_list", {**args_base, "page": page})
-                    rows = (data or {}).get("data") or []
-                    if not rows:
-                        break
-                    for x in rows:
-                        if x.get("call_type") != "out":
-                            continue
-                        phone = str(x.get("number_to") or "").strip()
-                        if not phone:
-                            continue
-                        at = str(x.get("date_call") or "")
-                        if int(x.get("billsec") or 0) > 10:
-                            answered.add(phone)
-                        elif at > missed.get(phone, ""):
-                            missed[phone] = at
+        # Paging inside ONE session: a fresh connection per page would multiply the handshake
+        # by max_pages against a CRM that is already the slowest thing in this job.
+        async with mcp_session(url, timeout_s=settings().crm_mcp_timeout_s * 2) as s:
+            for page in range(1, max_pages + 1):
+                data = await self._call(s, "crm_calls_list", {**args_base, "page": page})
+                rows = (data or {}).get("data") or []
+                if not rows:
+                    break
+                for x in rows:
+                    if x.get("call_type") != "out":
+                        continue
+                    phone = str(x.get("number_to") or "").strip()
+                    if not phone:
+                        continue
+                    at = str(x.get("date_call") or "")
+                    if int(x.get("billsec") or 0) > 10:
+                        answered.add(phone)
+                    elif at > missed.get(phone, ""):
+                        missed[phone] = at
         return sorted(((p, at) for p, at in missed.items() if p not in answered),
                       key=lambda kv: kv[1], reverse=True)
 
