@@ -186,10 +186,18 @@ def _section_html(
 def settings_form_html(
     values: dict[str, str], lang: str,
     cap_usage: dict[str, tuple[int, int]] | None = None,
+    branch_name: str = "",
 ) -> str:
     """Full settings panel: every schema section rendered with current values. `cap_usage`
     (e.g. {"hourly_cap": (used, cap)}) shows a live badge under the anti-ban limit fields —
     computed fresh by the route from real sent counts each request, never hardcoded here.
+
+    The branch is NAMED in the heading because every value on this panel belongs to one
+    branch and nothing on screen used to say which. The CRM block is the sharpest case: an
+    operator reading "MCP-сервер CRM" and "Город (cityAlias)" cannot tell Indonesia's live
+    CRM link from the sandbox's, and the two differ by a token that reaches a real customer
+    database. The owner asked which it was — that question is the proof the screen did not
+    answer it.
 
     No Save button by design — every field auto-saves on change (see _HX). The autosave
     label next to the title says so up front, since a manager used to a Save button won't
@@ -197,6 +205,10 @@ def settings_form_html(
     from app.api._i18n import t  # noqa: PLC0415
     title = _h.escape(t("nav.settings"))
     autosave = _h.escape(t("set.autosave"))
+    named = (
+        f'<span style="font-size:.72rem;color:#2563eb;margin-left:.5rem;font-weight:600">'
+        f'{_h.escape(branch_name)}</span>'
+    ) if branch_name else ""
     # Branch panel shows only branch-scoped settings; connector-scoped ones (follow-ups,
     # anti-ban caps, phone code, Meta) live in the per-channel editor (Филиалы → канал).
     body = "".join(
@@ -212,7 +224,7 @@ def settings_form_html(
     return (
         f'{script}'
         f'<div class="ch"><span class="ch-n" data-help="{_h.escape(t("help.settings"))}">'
-        f'{title}</span>'
+        f'{title}</span>{named}'
         f'<span style="font-size:.68rem;color:#5f6b78;margin-left:.6rem">'
         f'· {autosave}</span></div>'
         f'<div class="pnl-body" style="max-width:1400px">'

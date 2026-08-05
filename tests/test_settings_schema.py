@@ -232,3 +232,41 @@ def test_routing_settings_removed_from_ui() -> None:
     # every live reply rides the sales chain now — no operator toggles
     assert S.field_for("smart_stages") is None
     assert S.field_for("reply_routing") is None
+
+
+def test_the_panel_names_the_branch_it_is_editing() -> None:
+    """Every value on the settings panel belongs to ONE branch, and nothing on screen used to
+    say which. The CRM block is the sharpest case — its MCP url carries a token that reaches a
+    real customer database, and Indonesia's differs from the sandbox's only by that token.
+
+    The owner asked "это касается всего Степана или конкретного филиала?" while looking at the
+    panel. That question is the bug: the screen has to answer it."""
+    from app.api._ui_settings import settings_form_html
+
+    html = settings_form_html({}, "ru", branch_name="Indonesia")
+
+    assert "Indonesia" in html
+
+
+def test_without_a_branch_name_the_heading_stays_clean() -> None:
+    """No name is better than an empty badge — the caller that cannot resolve one (a stale
+    branch row) must not render a dangling marker."""
+    from app.api._ui_settings import settings_form_html
+
+    html = settings_form_html({}, "ru")
+
+    assert "font-weight:600" not in html.split("pnl-body")[0]
+
+
+def test_the_branch_switch_no_longer_calls_itself_the_master_switch() -> None:
+    """agent_enabled_global is per-branch despite its name; agent_enabled_platform is the
+    platform one. A label reading "master send switch" on the per-branch field taught the
+    opposite, and the operator acting on it would think one click stopped every tenant."""
+    from app.modules.settings.schema import SCHEMA
+
+    field = next(f for sec in SCHEMA for f in sec.fields if f.key == "agent_enabled_global")
+
+    assert "филиале" in field.label["ru"]
+    assert "branch" in field.label["en"].lower()
+    for text in field.help.values():
+        assert "master" not in text.lower()

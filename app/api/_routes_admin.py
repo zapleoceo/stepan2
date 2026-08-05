@@ -425,9 +425,15 @@ async def settings_panel(request: Request) -> HTMLResponse:
             text("SELECT key, value FROM app_setting"
                  " WHERE branch_id = :b AND channel_id IS NULL ORDER BY key"),
             {"b": branch_id})).all()
+        # The panel names the branch it edits. Every value on it belongs to that branch, and
+        # the CRM block carries a token reaching a real customer database — "whose settings
+        # am I looking at?" has to be answerable without leaving the screen.
+        named = (await session.execute(
+            text("SELECT name FROM branch WHERE id = :b"), {"b": branch_id})).first()
     # Anti-ban caps moved to the per-connector editor (with a per-channel live-usage badge),
     # so the branch panel no longer shows or computes them.
-    return HTMLResponse(settings_form_html({k: v for k, v in rows}, lang))
+    return HTMLResponse(settings_form_html(
+        {k: v for k, v in rows}, lang, branch_name=named[0] if named else ""))
 
 
 

@@ -17,9 +17,17 @@ _UNLIMITED = _l("0 = без лимита", "0 = unlimited", "0 = tanpa batas")
 
 SCHEMA: list[SettingSection] = [
     SettingSection("fa-solid fa-robot", _l("Бот", "Bot", "Bot"), [
+        # The key says "global" and the setting is per-branch — a legacy name kept because
+        # renaming it would mean migrating live rows. The LABEL must not repeat the lie: the
+        # platform-wide switch is a different key (agent_enabled_platform, the header
+        # toggle), and an operator reading "master switch" here would believe turning it off
+        # stops every branch.
         _f("agent_enabled_global", "bool", "true",
-           _l("Авто-ответы бота", "Bot auto-replies", "Balasan otomatis"),
-           help=_l("Главный выключатель отправки", "Master send switch", "Sakelar utama"),
+           _l("Авто-ответы в этом филиале", "Bot auto-replies in this branch",
+              "Balasan otomatis di cabang ini"),
+           help=_l("Только этот филиал. Платформенный выключатель — в шапке",
+                   "This branch only. The platform-wide switch lives in the header",
+                   "Cabang ini saja. Sakelar seluruh platform ada di header"),
            width="130px"),
         _f("reply_delay_min_s", "int", "5",
            _l("Задержка ответа, мин (с)", "Reply delay, min (s)", "Jeda min (dtk)"),
