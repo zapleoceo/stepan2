@@ -23,7 +23,7 @@ from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM, BrokerUnavailable
 from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
-from app.connectors.registry import supports
+from app.connectors.registry import spec_for, supports
 from app.connectors.spec import Capability
 from app.domain.enums import SessionStatus
 from app.modules.conversation.followup import FollowupService
@@ -138,8 +138,19 @@ async def ingest_active_conversations(ctx: dict[str, Any]) -> int:
 
 
 async def ingest_active_branch(ctx: dict[str, Any], branch_id: int) -> int:
-    """Poll ONLY channels with an active (recent, unanswered) conversation — skip idle ones so
-    the baseline anti-ban cadence is untouched for accounts nobody is chatting with right now."""
+    """The off-minute poll: connectors allowed a per-minute cadence, plus channels mid-chat.
+
+    Two different reasons to poll on an odd minute, and they are not the same rule:
+
+      * the connector's own cadence — an official API is one authenticated request against a
+        published rate limit, so nothing needs protecting and it polls every minute whether
+        or not anyone is chatting (ConnectorSpec.polls_every_minute);
+      * a live conversation — a private API stays on 2 minutes for anti-ban reasons, and the
+        one exception is a lead writing right now, seen in ~1 minute instead of ~2 while idle
+        accounts keep the exact 2-minute footprint.
+
+    Collapsing the two would either hammer the private accounts or leave the official
+    connector idle between messages — which is where its ~2-minute reply latency came from."""
     await asyncio.sleep(random.uniform(0, _INGEST_JITTER_S))  # noqa: S311 — jitter, not crypto
     cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=_ACTIVE_CONVO_WINDOW_MIN)
     async with session_scope() as session:
@@ -148,7 +159,8 @@ async def ingest_active_branch(ctx: dict[str, Any], branch_id: int) -> int:
             session, [c.id for c in channels], cutoff)
     stored = 0
     for channel in channels:
-        if channel.id in active_ids:
+        spec = spec_for(channel.kind)
+        if (spec is not None and spec.polls_every_minute) or channel.id in active_ids:
             stored += await _ingest_channel(branch_id, channel.id)
     return stored
 

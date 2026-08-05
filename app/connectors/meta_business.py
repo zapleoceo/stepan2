@@ -101,4 +101,8 @@ SPEC = ConnectorSpec(
     # inbox "awaiting reply" split would put work in the queue nobody can act on. Flip this to
     # True the day it is finished; nothing else has to change.
     counts_as_awaiting=False,
+    # One authenticated Graph request per poll against a published rate limit — none of the
+    # anti-ban arithmetic that puts instagrapi on a 2-minute cadence applies here. Halves the
+    # wait until webhooks are live (blocked on App Review).
+    polls_every_minute=True,
 )

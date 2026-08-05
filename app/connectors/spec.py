@@ -109,6 +109,20 @@ class ConnectorSpec:
     # persona, prices and catalogue — a branch-scoped write escalating into a global,
     # cross-tenant, publicly visible change.
     operator_addable: bool = True
+    # Is polling this connector cheap enough to do every minute?
+    #
+    # The 2-minute ingest cadence is an ANTI-BAN measure, not a performance choice: one
+    # instagrapi poll is several private-API calls, each carrying a deliberate 2-5s delay, so
+    # a cycle runs ~50s — a per-minute schedule both risked overlapping itself and hammered
+    # the account. None of that holds for the official Graph API: it is one authenticated
+    # HTTPS request against a published rate limit, and Meta does not ban a Page for reading
+    # its own inbox.
+    #
+    # So an official connector also polls on the odd minutes and a lead waits ~1 minute
+    # instead of ~2, while private connectors keep the cadence their platform tolerates. This
+    # does not replace the webhook — that is the real fix and it is blocked on App Review —
+    # it is the half of the latency we can take back today.
+    polls_every_minute: bool = False
 
     def supports(self, capability: Capability) -> bool:
         return capability in self.capabilities
