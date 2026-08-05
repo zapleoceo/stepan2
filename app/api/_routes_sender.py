@@ -50,7 +50,13 @@ _RECENT: deque[dict] = deque(maxlen=50)
 def _authorised(request: Request, raw: bytes) -> bool:
     """True if this really came from sender.
 
-    Two accepted proofs, because their side has not committed to one yet:
+    `sender_callback_open` short-circuits all of it, and is safe ONLY because this endpoint
+    records and nothing else: a forged payload starts no reply, reaches no customer and spends
+    no model budget. It exists so their side can test delivery before we have agreed on a
+    secret. The reply path must refuse to run while it is on — see the guard at the top of
+    whatever eventually sends, and docs/sender-endpoint-for-victor.md.
+
+    Two accepted proofs otherwise, because their side has not committed to one yet:
       * a signature header — HMAC-SHA256 of the raw body under the shared secret, compared in
         constant time. This is what we want long term.
       * a bearer token equal to the shared secret, if they would rather not compute an HMAC.
@@ -58,6 +64,9 @@ def _authorised(request: Request, raw: bytes) -> bool:
         touching their code.
     No secret and no allowlist configured means nobody is authorised — refusing every call is
     the correct behaviour for an endpoint that can make us message real customers."""
+    if settings().sender_callback_open:
+        return True
+
     secret = settings().sender_callback_secret
     if secret:
         header = request.headers.get("X-Sender-Signature", "")
@@ -96,6 +105,11 @@ async def inbound_callback(request: Request) -> Response:
     if not _authorised(request, raw):
         _log.warning("sender callback refused: no valid signature and address not allowlisted")
         return Response(status_code=status.HTTP_403_FORBIDDEN)
+    if settings().sender_callback_open:
+        # Loud on every call, not once at boot: this is a temporary state and the log is what
+        # makes it impossible to forget it is still on weeks later.
+        _log.warning("sender callback is UNAUTHENTICATED (sender_callback_open) — "
+                     "record-only mode, must be turned off before replies go out")
 
     form = await request.form()
     data = {k: str(form[k]) for k in _WANTED if k in form}

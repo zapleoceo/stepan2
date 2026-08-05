@@ -190,3 +190,36 @@ def test_the_fields_we_agreed_on_survive_and_the_rest_is_dropped(monkeypatch) ->
     assert "status" not in got
     assert "provider_response_json" not in got
     assert "user_photo" not in got
+
+
+def test_the_open_switch_accepts_an_unauthenticated_call(monkeypatch) -> None:  # noqa: ANN001
+    """The integration window: their side tests delivery before we agree on a secret.
+
+    Safe only because this endpoint records and nothing else — a forged payload starts no
+    reply, reaches no customer and spends no model call."""
+    monkeypatch.setenv("STEPAN2_SENDER_CALLBACK_OPEN", "true")
+    settings.cache_clear()
+
+    r = _client().post("/api/v1/sender/inbound-callback", data=_BODY)
+
+    assert r.status_code == 200
+    assert len(recent()) == 1
+
+
+def test_open_is_off_unless_someone_turns_it_on() -> None:
+    """A temporary hole has to be an explicit act, never a default. A fresh deploy, a restored
+    config or a new environment must all come up closed."""
+    assert settings().sender_callback_open is False
+
+
+def test_open_still_deduplicates(monkeypatch) -> None:  # noqa: ANN001
+    """Being open does not make it careless: answering a lead twice is what the customer sees,
+    and that guard must not depend on how the caller authenticated."""
+    monkeypatch.setenv("STEPAN2_SENDER_CALLBACK_OPEN", "true")
+    settings.cache_clear()
+    c = _client()
+
+    c.post("/api/v1/sender/inbound-callback", data=_BODY)
+    c.post("/api/v1/sender/inbound-callback", data=_BODY)
+
+    assert len(recent()) == 1

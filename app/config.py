@@ -79,6 +79,13 @@ class Settings(BaseSettings):
         default="", description="Shared secret: X-Sender-Signature HMAC, or a bearer token")
     sender_callback_ips: str = Field(
         default="", description="Comma-separated addresses allowed to post the callback")
+    # Deliberately unauthenticated, for the integration window only. Tolerable ONLY while the
+    # endpoint merely records: a forged payload starts nothing, reaches no customer and costs
+    # no model call. The moment replies go out it stops being tolerable — a stranger would be
+    # able to make Stepan message a real customer as the business — so the reply path refuses
+    # to run while this is on, and says so.
+    sender_callback_open: bool = Field(
+        default=False, description="TEMPORARY: accept unauthenticated callbacks (record-only)")
 
     # CRM read link (the gate that stops Stepan re-touching a lead a manager already owns).
     crm_read_timeout_s: float = Field(default=8.0, description="per-request CRM read timeout")
