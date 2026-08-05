@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     crm_mcp_timeout_s: float = Field(
         default=25.0, description="whole-conversation budget for one MCP state read "
                                   "(handshake + search + history)")
+    crm_mcp_batch_timeout_s: float = Field(
+        default=180.0, description="budget for a shared MCP session spanning a whole pull "
+                                   "pass; must exceed the cron's own time budget or the "
+                                   "session dies mid-pass and every later lead reconnects")
     crm_manager_call_hold_h: float = Field(
         default=72.0, description="a SUCCESSFUL manager call younger than this holds the "
                                   "bot off the lead; an older one doesn't (re-engaging a "

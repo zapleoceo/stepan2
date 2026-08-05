@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
+from app.adapters.mcp_client import McpUnavailable
 from app.adapters.mcp_client import session as mcp_session
 from app.config import settings
 
@@ -48,6 +51,8 @@ class CrmMcpReader:
 
     def __init__(self, city_alias: str) -> None:
         self.city_alias = city_alias
+        # Set only for the duration of batch(); None means "open your own connection".
+        self._shared: object | None = None
 
     async def get_state(self, url: str, secret: str, phone: str) -> dict | None:  # noqa: ARG002
         # No timeout wrapper here: mcp_client.session owns the budget, and this one was a
@@ -64,20 +69,49 @@ class CrmMcpReader:
             logger.warning("crm mcp read failed (phone=%s): %s", phone, reason)
             return None
 
+    @asynccontextmanager
+    async def batch(self, url: str) -> AsyncIterator[None]:
+        """One connection for a whole run of reads, instead of one per lead.
+
+        The handshake costs 7.5s against the live CRM and came out of every lead's 25s budget,
+        so a third of each read was spent reconnecting to a server we had just finished
+        talking to — and reads timed out with nothing to show for it.
+
+        Fails open like everything else here: if the shared session cannot be opened, the
+        block still runs and each read falls back to its own connection. A CRM that refuses
+        one connection must not turn into a pull pass that refreshes nobody."""
+        try:
+            async with mcp_session(url, timeout_s=settings().crm_mcp_batch_timeout_s) as s:
+                self._shared = s
+                try:
+                    yield
+                finally:
+                    self._shared = None
+        except McpUnavailable as exc:
+            logger.warning("crm mcp batch session unavailable, falling back per-lead: %s", exc)
+            self._shared = None
+            yield
+
     async def _fetch(self, url: str, phone: str) -> dict | None:
+        if self._shared is not None:
+            return await self._exchange(self._shared, phone)
         async with mcp_session(url, timeout_s=settings().crm_mcp_timeout_s) as s:
-            found = await self._call(s, "crm_client_search",
-                                     {"cityAlias": self.city_alias, "search": phone})
-            cards = (found or {}).get("data") or []
-            if not cards:
-                return {"exists": False, "source": "mcp"}
-            crm_id = int(cards[0].get("id_uniq") or 0)
-            if not crm_id:
-                return {"exists": False, "source": "mcp"}
-            history = await self._call(s, "crm_client_history",
-                                       {"cityAlias": self.city_alias,
-                                        "clientId": crm_id, "perPage": 50})
-            return self._derive(crm_id, (history or {}).get("data") or [])
+            return await self._exchange(s, phone)
+
+    async def _exchange(self, s: object, phone: str) -> dict | None:
+        """The two-call read itself, on whichever session it was handed."""
+        found = await self._call(s, "crm_client_search",
+                                 {"cityAlias": self.city_alias, "search": phone})
+        cards = (found or {}).get("data") or []
+        if not cards:
+            return {"exists": False, "source": "mcp"}
+        crm_id = int(cards[0].get("id_uniq") or 0)
+        if not crm_id:
+            return {"exists": False, "source": "mcp"}
+        history = await self._call(s, "crm_client_history",
+                                   {"cityAlias": self.city_alias,
+                                    "clientId": crm_id, "perPage": 50})
+        return self._derive(crm_id, (history or {}).get("data") or [])
 
     async def list_missed_out_calls(
         self, url: str, days: int = 3, max_pages: int = 3,

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -53,6 +55,20 @@ class CrmState:
 
 class CrmReaderPort:
     async def get_state(self, url: str, secret: str, phone: str) -> dict | None: ...
+
+    @asynccontextmanager
+    async def batch(self, url: str) -> AsyncIterator[None]:  # noqa: ARG002
+        """Hold one connection open across a run of get_state calls.
+
+        Part of the port rather than a capability callers sniff for: a reader that gains
+        nothing from it inherits this no-op, and the pull loop stays source-agnostic.
+
+        It exists because the MCP handshake is not free — 7.5s measured against the live CRM,
+        paid per lead out of a 25s budget. A cron pass spent a third of every lead's time
+        reconnecting to a server it had just finished talking to, and reads timed out at 25s
+        with nothing to show. `_list_missed` already pages inside one session for this reason;
+        the lead loop simply never got the same treatment."""
+        yield
 
 
 def crm_read_url(cfg) -> str:  # noqa: ANN001

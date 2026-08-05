@@ -78,15 +78,21 @@ class CrmPullService:
         leads = await self._stale_active(limit)
         held = 0
         started = time.monotonic()
-        for lead in leads:
-            if time.monotonic() - started > time_budget_s:
-                logger.info("crm pull branch=%d: time budget hit", self.branch_id)
-                break
-            try:
-                if await self.gate.enforce(lead) == "hold":
-                    held += 1
-            except Exception:
-                logger.exception("crm pull failed branch=%d lead=%d", self.branch_id, lead.id)
+        # One connection for the whole pass. The MCP handshake is 7.5s against the live CRM
+        # and used to be paid per lead out of a 25s budget, so a third of every read went on
+        # reconnecting and the rest timed out. A reader that gains nothing from this inherits
+        # a no-op, so the loop stays source-agnostic.
+        async with self.gate.reader.batch(crm_read_url(cfg)):
+            for lead in leads:
+                if time.monotonic() - started > time_budget_s:
+                    logger.info("crm pull branch=%d: time budget hit", self.branch_id)
+                    break
+                try:
+                    if await self.gate.enforce(lead) == "hold":
+                        held += 1
+                except Exception:
+                    logger.exception("crm pull failed branch=%d lead=%d",
+                                     self.branch_id, lead.id)
         if leads:
             logger.info("crm pull branch=%d: %d checked, %d held",
                         self.branch_id, len(leads), held)
@@ -108,19 +114,22 @@ class CrmPullService:
         leads = await self._stale_exited(limit)
         won = 0
         started = time.monotonic()
-        for lead in leads:
-            if time.monotonic() - started > time_budget_s:
-                logger.info("crm outcomes branch=%d: time budget hit", self.branch_id)
-                break
-            try:
-                state = await self.gate.refresh(lead)
-            except Exception:
-                logger.exception(
-                    "crm outcomes failed branch=%d lead=%d", self.branch_id, lead.id)
-                continue
-            if state is not None and state.deal_won and _ours(state, lead):
-                won += 1
-                await self._report_purchase(lead, cfg)
+        # One connection for the pass, as in sync_active — and it matters more here: this
+        # loop has the bigger limit, and it is what fills deal_won and the event booking.
+        async with self.gate.reader.batch(crm_read_url(cfg)):
+            for lead in leads:
+                if time.monotonic() - started > time_budget_s:
+                    logger.info("crm outcomes branch=%d: time budget hit", self.branch_id)
+                    break
+                try:
+                    state = await self.gate.refresh(lead)
+                except Exception:
+                    logger.exception(
+                        "crm outcomes failed branch=%d lead=%d", self.branch_id, lead.id)
+                    continue
+                if state is not None and state.deal_won and _ours(state, lead):
+                    won += 1
+                    await self._report_purchase(lead, cfg)
         if leads:
             logger.info("crm outcomes branch=%d: %d checked, %d won",
                         self.branch_id, len(leads), won)
