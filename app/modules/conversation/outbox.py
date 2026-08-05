@@ -19,6 +19,8 @@ from app.config import settings
 from app.connectors.registry import does_proactive_outreach, spec_for
 from app.domain.clock import branch_day_start_utc
 from app.domain.enums import Stage
+from app.modules.missions import INBOUND_REPLY
+from app.modules.missions.budget import account_spend, log_exhausted
 from app.modules.settings.service import get_channel_settings
 from app.ports.channel import ChannelPort
 
@@ -334,10 +336,17 @@ class OutboxSender:
 
     async def _cap_reached(self, now: datetime, s, channel_id: int) -> bool:
         """True when THIS connector already hit its hourly or daily send cap (cap ≤ 0 = off).
-        Counts are per-channel so one connector's volume never throttles another's."""
+        Counts are per-channel so one connector's volume never throttles another's.
+
+        The hourly check counts the ACCOUNT's whole hour, not only DM sends: a public comment
+        reply is the same act to Instagram, and counting the two separately let them reach 170
+        in an hour with both caps reported as respected. On an ordinary day this changes
+        nothing — the busiest hour in 14 days was 82 against a cap of 150 — it removes the
+        arithmetic that produced the overshoot."""
         if s.hourly_cap > 0:
-            if await self.outbox.count_sent_since(
-                    now - timedelta(hours=1), channel_id) >= s.hourly_cap:
+            spend = await account_spend(self.session, channel_id, s.hourly_cap)
+            if spend.exhausted:
+                log_exhausted(channel_id, INBOUND_REPLY.key, spend)
                 return True
         if s.daily_cap > 0:
             day_start = branch_day_start_utc(now, s.tz_offset_h)

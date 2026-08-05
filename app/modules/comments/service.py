@@ -20,6 +20,8 @@ from app.modules.conversation import guard
 from app.modules.conversation.canned import comment_fallback, comment_persona
 from app.modules.conversation.delivery import guard_prompt
 from app.modules.knowledge.service import KnowledgeService
+from app.modules.missions import COMMENT_REPLY
+from app.modules.missions.budget import account_spend, log_exhausted
 from app.modules.promptlib.pipeline import prompt_knowledge
 from app.modules.settings.service import BranchSettings
 from app.ports.channel import CommentPort
@@ -97,6 +99,15 @@ class CommentService:
         hourly_cap = self.settings.comment_hourly_cap
         per_post_cap = self.settings.comment_per_post_cap
         budget = max(0, hourly_cap - await self.repo.replied_last_hour(channel.id or 0))
+        # The ACCOUNT's ceiling, above this mission's own. Instagram counts actions per
+        # account — a DM send and a public reply are the same act to it — while this mission
+        # and the outbox sender each counted only themselves: 150 + 20 in one hour with both
+        # caps "respected". The live branch hit a soft block twice on DM volume alone.
+        spend = await account_spend(self.session, channel.id or 0, self.settings.hourly_cap)
+        if spend.exhausted:
+            log_exhausted(channel.id or 0, COMMENT_REPLY.key, spend)
+            return 0
+        budget = min(budget, spend.left)
         if budget <= 0:
             return 0
         pending = await self.repo.pending(channel.id or 0, limit=budget * 2)
