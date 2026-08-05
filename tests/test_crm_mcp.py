@@ -125,3 +125,38 @@ async def test_gate_allows_on_mcp_clean_state(db_session) -> None:
     state = {"exists": True, "crm_id": 1, "deal_won": False, "manager_called": False}
     ok, _ = await CrmGate(db_session, bid, _FakeMcpReader(state)).allow_send(lead, "agent")
     assert ok is True and lead.agent_enabled is True
+
+
+def test_a_booking_carries_the_day_it_was_made_not_only_the_event_date() -> None:
+    """Two different dates, weeks apart, and the reports need both.
+
+    The row's own `date_time` is when the lead signed up; `date_event` is when the demo is.
+    The first cut read only the latter, leaving a booking with nothing to be placed in a
+    report window by, so every booking counted in every period."""
+    future = (datetime.now(UTC) + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = [{
+        "date_time": "2026-07-30 13:45:40",
+        "typeName": "out-call",
+        "events": {"name_event": "VIBE CODING DEMO", "date_event": future},
+    }]
+
+    name, event_at, booked_at = CrmMcpReader("jakarta")._event_booked(rows)
+
+    assert name == "VIBE CODING DEMO"
+    assert event_at is not None
+    assert booked_at is not None, "the sign-up date was dropped"
+    assert (booked_at.year, booked_at.month, booked_at.day) == (2026, 7, 30)
+    assert booked_at.date() != event_at.date()
+
+
+def test_an_event_row_without_a_timestamp_still_yields_the_booking() -> None:
+    """Fail soft: a booking we cannot date is worth more than no booking at all — it still
+    counts on the all-time range, exactly like an undated win."""
+    future = (datetime.now(UTC) + timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = [{"events": {"name_event": "DEMO", "date_event": future}}]
+
+    name, event_at, booked_at = CrmMcpReader("jakarta")._event_booked(rows)
+
+    assert name == "DEMO"
+    assert event_at is not None
+    assert booked_at is None

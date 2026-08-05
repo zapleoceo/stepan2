@@ -17,7 +17,11 @@ from app.adapters.db.models import (
     StageEvent,
 )
 from app.api._i18n import _lang, t
-from app.api._query import fetch_daily_kpis, fetch_deals_count
+from app.api._query import (
+    fetch_daily_kpis,
+    fetch_deals_count,
+    fetch_event_bookings_count,
+)
 from app.api._ui_panels import _sparkline, reports_panel_html
 from app.domain.enums import ChannelKind, Stage
 
@@ -114,3 +118,44 @@ async def test_undated_win_counts_only_on_the_all_time_range(db_session) -> None
     assert await fetch_deals_count(db_session, [b.id]) == 1
     assert await fetch_deals_count(
         db_session, [b.id], since=datetime(2026, 7, 1), until=datetime(2026, 8, 1)) == 0
+
+
+async def test_bookings_are_dated_by_the_signup_not_by_the_event(db_session) -> None:
+    """The event is one date; signing up for it is another, weeks earlier.
+
+    Two clients booked onto the 08/08 demo signed up on 30 July and 4 August. The first cut
+    stored only the event's date, so the tile counted both bookings in every window — they
+    showed up under "last hour". Caught by the owner asking why."""
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.HANDED_OFF, created_at=datetime(2026, 7, 1))
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(CrmLeadState(
+        branch_id=b.id, lead_id=lead.id, event_name="VIBE CODING DEMO 08/08/2026",
+        event_at=datetime(2026, 8, 8), event_booked_at=datetime(2026, 7, 30)))
+    await db_session.flush()
+
+    inside = await fetch_event_bookings_count(
+        db_session, [b.id], since=datetime(2026, 7, 29), until=datetime(2026, 7, 31))
+    assert inside == 1
+    # The window the EVENT falls in, but not the sign-up: counting here is the bug.
+    outside = await fetch_event_bookings_count(
+        db_session, [b.id], since=datetime(2026, 8, 7), until=datetime(2026, 8, 9))
+    assert outside == 0
+
+
+async def test_a_booking_made_before_our_first_message_is_not_ours(db_session) -> None:
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.HANDED_OFF, created_at=datetime(2026, 7, 1))
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(CrmLeadState(
+        branch_id=b.id, lead_id=lead.id, event_name="older",
+        event_at=datetime(2026, 6, 1), event_booked_at=datetime(2026, 7, 30)))
+    await db_session.flush()
+
+    assert await fetch_event_bookings_count(db_session, [b.id]) == 0

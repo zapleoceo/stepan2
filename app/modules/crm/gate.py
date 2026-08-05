@@ -48,6 +48,7 @@ class CrmState:
     # demo with no contract anywhere, so counting deals alone read as "achieved nothing".
     event_name: str | None = None
     event_at: str | None = None
+    event_booked_at: str | None = None
 
 
 class CrmReaderPort:
@@ -164,6 +165,7 @@ def _parse(raw: dict) -> CrmState:
         won_at=raw.get("deal_won_at") or raw.get("won_at"),
         event_name=raw.get("event_name"),
         event_at=raw.get("event_at"),
+        event_booked_at=raw.get("event_booked_at"),
     )
 
 
@@ -267,6 +269,7 @@ class CrmGate:
         row.deal_won_at = parse_won_at(state.won_at)
         row.event_name = state.event_name
         row.event_at = parse_won_at(state.event_at)
+        row.event_booked_at = parse_won_at(state.event_booked_at)
         row.fetched_at = utc_now()
         self.session.add(row)
         await self.session.flush()

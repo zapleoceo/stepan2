@@ -536,6 +536,9 @@ class CrmLeadState(SQLModel, table=True):
     # signed, so a report counting only deals read as "these chats achieved nothing".
     event_name: str | None = Field(default=None)
     event_at: datetime | None = Field(default=None, index=True)
+    # When they signed up, not when the event is. Indexed because the reports place a
+    # booking in a window by it, the same way deal_won_at places a sale.
+    event_booked_at: datetime | None = Field(default=None, index=True)
     fetched_at: datetime = Field(default_factory=_utcnow, index=True)
 
 

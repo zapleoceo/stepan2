@@ -142,7 +142,7 @@ class CrmMcpReader:
             and datetime.now(UTC) - last_ok_call < hold_window
         )
         result_name, result_at, result_by = self._latest_result(rows)
-        event_name, event_at = self._event_booked(rows)
+        event_name, event_at, booked_at = self._event_booked(rows)
         return {
             "exists": True,
             "crm_id": crm_id,
@@ -153,6 +153,11 @@ class CrmMcpReader:
             # achieved" on chats that had in fact converted.
             "event_name": event_name,
             "event_at": event_at.isoformat() if event_at else None,
+            # WHEN the booking was made, off the history row that carries it — the same
+            # `date_time` deal_won_at reads. Without it the reports could not place a booking
+            # in a window, so the tile counted every booking in every period: two clients
+            # signed up on 30 July and 4 August both showed up under "last hour".
+            "event_booked_at": booked_at.isoformat() if booked_at else None,
             # Что менеджер поставил последним контактом — сигнал, определяющий, о чём Степану
             # говорить дальше. Раньше отбрасывался.
             "last_result": result_name or None,
@@ -245,8 +250,11 @@ class CrmMcpReader:
         return latest
 
     @staticmethod
-    def _event_booked(rows: list[dict]) -> tuple[str | None, datetime | None]:
-        """The soonest upcoming event this client is registered on, as (name, date).
+    def _event_booked(
+        rows: list[dict],
+    ) -> tuple[str | None, datetime | None, datetime | None]:
+        """The soonest upcoming event this client is registered on: (name, when it is, when
+        they signed up).
 
         A booking is the outcome BEFORE a contract: eight leads Stepan worked in July all sat
         on "VIBE CODING DEMO 08/08/2026" with zero contracts, so a report that counts only
@@ -255,8 +263,13 @@ class CrmMcpReader:
         that group several contacts carry it on the members, so both levels are read.
 
         Soonest rather than newest: a returning client has old events too (one card here
-        carries two from 2025), and what matters is the one they are expected at next."""
-        best: tuple[str, datetime] | None = None
+        carries two from 2025), and what matters is the one they are expected at next.
+
+        The third value is the row's own `date_time` — the moment the booking was made, as
+        opposed to the date it is FOR. Both are needed and they are weeks apart: two clients
+        booked onto the 08/08 demo signed up on 30 July and 4 August. Reading only the event
+        date left the reports with nothing to place a booking in a window by."""
+        best: tuple[str, datetime, datetime | None] | None = None
         now = datetime.now(UTC)
         for row in rows:
             for item in [row, *(row.get("group") or [])]:
@@ -269,8 +282,9 @@ class CrmMcpReader:
                 if at is None or at < now:
                     continue  # already happened — it is history, not a pending booking
                 if best is None or at < best[1]:
-                    best = (str(ev["name_event"]), at)
-        return (best[0], best[1]) if best else (None, None)
+                    booked = _as_dt(str(item.get("date_time") or "").replace(" ", "T"))
+                    best = (str(ev["name_event"]), at, booked)
+        return best if best else (None, None, None)
 
     @staticmethod
     def _last_answered_call(rows: list[dict]) -> datetime | None:

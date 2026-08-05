@@ -511,17 +511,17 @@ _TR: dict[str, dict[str, str]] = {
         "ru": "Записан на мероприятие, которое ЕЩЁ НЕ прошло — конверсия, до которой лид "
               "доходит РАНЬШЕ договора. Проверено 05.08.2026: все, кого Степан довёл в июле "
               "до демо 08.08, записаны и ни у кого нет договора, так что колонка «Сделка» "
-              "показывала по ним ноль. ВНИМАНИЕ: это число НЕ зависит от выбранного периода. "
-              "Продажу мы датируем днём закрытия, а запись датировать нечем — CRM отдаёт "
-              "дату самого мероприятия и никогда день, когда лид записался.",
+              "показывала по ним ноль. Дата — по дню ЗАПИСИ, а не по дню мероприятия: иначе "
+              "отчёт за прошлую неделю показывал бы ноль, потому что демо ещё впереди. "
+              "Запись без даты видна только на «всё время».",
         "en": "Booked onto an event that has NOT happened yet — the conversion a lead reaches "
               "BEFORE any contract. Checked 2026-08-05: everyone Stepan worked to the 08/08 "
               "demo is booked and none has a contract, so the 'Deal' column read zero for "
-              "them. NOTE: this number ignores the selected period. A sale is dated by its "
-              "close; a booking has nothing to be dated by — the CRM gives us the event's "
-              "date and never the day the lead signed up.",
+              "them. Dated by the SIGN-UP, not by the event: dating it by the event would "
+              "empty this tile for every window ending before the demo. An undated booking "
+              "shows only on the all-time range.",
         "id": "Terdaftar pada acara yang belum berlangsung — konversi sebelum kontrak. "
-              "Angka ini tidak mengikuti periode yang dipilih."},
+              "Dihitung dari tanggal pendaftaran, bukan tanggal acara."},
     "rep.closed_period.hint": {
         "ru": "Слева — всего дошло до человека (ready/handed_off) за всё время. Справа — "
               "сколько из лидов, ПРИШЕДШИХ за выбранный период, до человека дошли. Это не "

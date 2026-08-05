@@ -366,8 +366,8 @@ async def reports_panel(
             session, branch_ids, since=since_dt, until=until_dt)
         deals = await fetch_deals_count(
             session, branch_ids, since=since_dt, until=until_dt)
-        # No window: a booking has no date of its own to filter on - see the function.
-        events = await fetch_event_bookings_count(session, branch_ids)
+        events = await fetch_event_bookings_count(
+            session, branch_ids, since=since_dt, until=until_dt)
         daily_kpis = await fetch_daily_kpis(
             session, branch_ids, since=since_dt, until=until_dt)
         organic = await fetch_organic_funnel(
