@@ -22,6 +22,7 @@ Create Date: 2026-08-05 19:00:00
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from alembic import op
@@ -34,6 +35,20 @@ depends_on = None
 _TABLE = "crm_lead_state"
 _COL = "event_booked_at"
 _INDEX = "ix_crm_lead_state_event_booked_at"
+
+
+def _to_naive_utc(value: object) -> str | None:
+    """CRM timestamp → naive UTC, the same normalisation parse_won_at applies on the live
+    path. The CRM sends Jakarta offsets ("2026-07-30T13:45:40+07:00") and every column here
+    is TIMESTAMP WITHOUT TIME ZONE, so truncating the string instead of converting would
+    store local time as if it were UTC — seven hours adrift from every row the gate writes,
+    and only in the backfilled ones, which is the kind of split that is never noticed."""
+    try:
+        at = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    return at.astimezone(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _backfill() -> None:
@@ -55,11 +70,12 @@ def _backfill() -> None:
         booked = data.get("event_booked_at")
         if not booked and data.get("last_result") == "result_event":
             booked = data.get("last_result_at")
-        if not booked:
+        at = _to_naive_utc(booked)
+        if not at:
             continue
         conn.execute(
             sa.text(f"UPDATE {_TABLE} SET {_COL} = :at WHERE id = :id"),
-            {"at": str(booked)[:19].replace("T", " "), "id": row_id},
+            {"at": at, "id": row_id},
         )
 
 
