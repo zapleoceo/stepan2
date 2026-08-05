@@ -37,6 +37,20 @@ class McpUnavailable(RuntimeError):
     means. This is "we never got an answer", which is what a retry is for."""
 
 
+def reason(exc: BaseException, depth: int = 0) -> str:
+    """A human-readable cause, digging through the task groups the MCP transport runs in.
+
+    Those surface as "unhandled errors in a TaskGroup (1 sub-exception)", which names the
+    plumbing and hides the fault — the second unactionable message this log has produced,
+    after TimeoutError's empty str. Whoever reads a CRM warning at 3am needs the
+    ClosedResourceError or the ReadTimeout underneath, not the shape of the wrapper."""
+    subs = getattr(exc, "exceptions", None)
+    if subs and depth < 3:
+        return " / ".join(reason(e, depth + 1) for e in subs[:3])
+    text = str(exc)[:160]
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
 @asynccontextmanager
 async def session(url: str, *, timeout_s: float) -> AsyncIterator[Any]:
     """An initialized MCP session, or McpUnavailable.
@@ -77,9 +91,9 @@ async def session(url: str, *, timeout_s: float) -> AsyncIterator[Any]:
         # fail open, nothing surfaced except leads quietly never getting their CRM state.
         if delivered:
             logger.debug("mcp session teardown after a completed exchange (%s): %s",
-                         redact(url), str(exc)[:200])
+                         redact(url), reason(exc))
             return
-        raise McpUnavailable(f"{redact(url)}: {str(exc)[:200]}") from exc
+        raise McpUnavailable(f"{redact(url)}: {reason(exc)}") from exc
 
 
 def payload(result: Any) -> dict | list | None:

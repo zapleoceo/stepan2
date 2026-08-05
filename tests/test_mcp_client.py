@@ -29,6 +29,7 @@ from app.adapters.mcp_client import (  # noqa: E402
     call,
     payload,
     read,
+    reason,  # noqa: E402
 )
 from app.adapters.mcp_client import session as session_cm  # noqa: E402
 
@@ -230,3 +231,27 @@ async def test_a_timeout_says_so_instead_of_logging_an_empty_reason(monkeypatch)
 
     assert "25s" in str(caught.value)
     assert str(caught.value).rstrip().endswith("25s"), "the reason must not be blank"
+
+
+def test_a_task_group_error_names_the_fault_not_the_plumbing() -> None:
+    """The transport runs in anyio task groups, so real faults arrived wrapped as
+    'unhandled errors in a TaskGroup (1 sub-exception)' — a message that names the machinery
+    and hides the cause. Whoever reads a CRM warning needs the ClosedResourceError inside."""
+    from anyio import ClosedResourceError
+
+    grouped = ExceptionGroup("unhandled errors in a TaskGroup", [ClosedResourceError()])
+
+    assert reason(grouped) == "ClosedResourceError"
+    assert "TaskGroup" not in reason(grouped)
+
+
+def test_nested_groups_are_unwrapped_to_the_innermost_fault() -> None:
+    inner = ExceptionGroup("inner", [TimeoutError("read timed out")])
+    outer = ExceptionGroup("outer", [inner])
+
+    assert reason(outer) == "TimeoutError: read timed out"
+
+
+def test_a_plain_exception_is_left_alone() -> None:
+    assert reason(ValueError("bad json")) == "ValueError: bad json"
+    assert reason(TimeoutError()) == "TimeoutError"
