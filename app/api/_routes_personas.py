@@ -9,7 +9,8 @@ from fastapi.responses import HTMLResponse
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import writable_selected_branch_id
-from app.api._i18n import apply_lang, t
+from app.api._i18n import apply_lang
+from app.api._responses import gone, pick_branch
 from app.api._ui_personas import persona_detail_html, personas_panel_html
 from app.modules.persona import service as P
 
@@ -51,7 +52,7 @@ async def persona_detail(pid: int, request: Request) -> HTMLResponse:
     async with session_scope() as session:
         persona = await P.get_persona(session, pid)
         if persona is None:
-            return HTMLResponse(f'<div class="emp">{t("pl.gone")}</div>', status_code=404)
+            return gone()
         active_id, addendum, fav_ids = (
             await P.branch_state(session, bid) if bid is not None else (None, {}, set()))
         history = await P.versions_of(session, persona.slug)
@@ -69,7 +70,7 @@ async def personas_import(request: Request, changelog: str = Form(default="")) -
     apply_lang(request)
     bid = _acting_branch(request)
     if bid is None:
-        return HTMLResponse(f'<div class="emp">{t("pl.pick_branch")}</div>', status_code=400)
+        return pick_branch()
     async with session_scope() as session:
         from app.adapters.db.models import Branch  # noqa: PLC0415
         branch = await session.get(Branch, bid)
@@ -84,10 +85,10 @@ async def persona_use(pid: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     bid = _acting_branch(request)
     if bid is None:
-        return HTMLResponse(f'<div class="emp">{t("pl.pick_branch")}</div>', status_code=400)
+        return pick_branch()
     async with session_scope() as session:
         if await P.get_persona(session, pid) is None:
-            return HTMLResponse(f'<div class="emp">{t("pl.gone")}</div>', status_code=404)
+            return gone()
         await P.set_active(session, bid, pid)
     return HTMLResponse(await _render_library(request))
 
@@ -97,10 +98,10 @@ async def persona_favorite(pid: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     bid = _acting_branch(request)
     if bid is None:
-        return HTMLResponse(f'<div class="emp">{t("pl.pick_branch")}</div>', status_code=400)
+        return pick_branch()
     async with session_scope() as session:
         if await P.get_persona(session, pid) is None:
-            return HTMLResponse(f'<div class="emp">{t("pl.gone")}</div>', status_code=404)
+            return gone()
         await P.toggle_favorite(session, bid, pid)
     return HTMLResponse(await _render_library(request))
 
@@ -112,11 +113,11 @@ async def persona_addendum(
     apply_lang(request)
     bid = _acting_branch(request)
     if bid is None:
-        return HTMLResponse(f'<div class="emp">{t("pl.pick_branch")}</div>', status_code=400)
+        return pick_branch()
     async with session_scope() as session:
         persona = await P.get_persona(session, pid)
         if persona is None:
-            return HTMLResponse(f'<div class="emp">{t("pl.gone")}</div>', status_code=404)
+            return gone()
         await P.save_addendum(session, bid, section.strip(), text)
         active_id, addendum, fav_ids = await P.branch_state(session, bid)
     return HTMLResponse(persona_detail_html(

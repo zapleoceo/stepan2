@@ -22,6 +22,7 @@ from app.modules.knowledge.history import (
 
 from ._i18n import apply_lang
 from ._query import _branch_where
+from ._responses import forbidden, not_found
 from ._ui_html import pick_branch_html
 from ._ui_kb import kb_history_html
 from ._ui_panels import product_edit_html, products_panel_html
@@ -65,9 +66,9 @@ async def products_edit(prod_id: int, request: Request) -> HTMLResponse:
             )
         ).first()
     if not row:
-        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        return not_found()
     if is_branch_forbidden(row[6], branch_ids):
-        return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+        return forbidden()
     return HTMLResponse(
         product_edit_html(
             row[0], str(row[1]), str(row[2] or ""),
@@ -93,9 +94,9 @@ async def products_save(
             text("SELECT branch_id, slug, content FROM product WHERE id=:id"),
             {"id": prod_id})).first()
         if prev is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         if is_branch_write_forbidden(prev[0], writable):  # WRITE role required for this branch
-            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+            return forbidden()
         await session.execute(
             text("UPDATE product SET title=:t, content=:c, is_active=:a, sort_order=:s,"
                  " updated_by=:by, updated_at=NOW() WHERE id=:id"),
@@ -115,7 +116,7 @@ async def products_save(
             )
         ).first()
     if not row:
-        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        return not_found()
     return HTMLResponse(
         product_edit_html(
             row[0], str(row[1]), str(row[2] or ""),
@@ -186,11 +187,11 @@ async def products_history(prod_id: int, request: Request) -> HTMLResponse:
         row = (await session.execute(
             text("SELECT branch_id, slug FROM product WHERE id=:id"), {"id": prod_id})).first()
         if not row:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         # Same IDOR shape as knowledge_history: the row's branch must be in the caller's
         # scope, or id enumeration reads another branch's product history.
         if is_branch_forbidden(row[0], branch_ids):
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         bid = row[0] if branch_ids else None
         revs = await list_revisions(session, bid, "product", str(row[1]))
     return HTMLResponse(kb_history_html(
@@ -207,9 +208,9 @@ async def products_restore(request: Request, rev_id: int = Form(...)) -> HTMLRes
         status, out = await restore_revision_scoped(
             session, rev_id, writable=writable, actor=actor_from_request(request))
         if status == "forbidden":
-            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+            return forbidden()
         if out is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         # Scoped read-back: slug is unique per branch only (uq_product_branch_slug), so the
         # old `WHERE slug=:s` handed the editor an arbitrary tenant's row — and its id, which
         # product_edit_html wires straight into the /save and /delete buttons.

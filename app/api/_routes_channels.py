@@ -32,6 +32,7 @@ from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import get_channel_settings
 
 from ._i18n import apply_lang, t
+from ._responses import not_found
 from ._ui_panels import (
     _ch_form_for,
     _ch_ig_form,
@@ -153,7 +154,7 @@ async def channel_edit(ch_id: int, request: Request) -> HTMLResponse:
             {"id": ch_id},
         )).first()
         if not row:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         values = await SettingRepo(session).load_all(branch_id, ch_id)
         cap_usage = await _channel_cap_usage(session, branch_id, ch_id)
     body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
@@ -213,7 +214,7 @@ async def channel_save(
             {"id": ch_id},
         )).first()
         if not row:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         values = await SettingRepo(session).load_all(branch_id, ch_id)
     body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
     resp = HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id))
@@ -237,7 +238,7 @@ async def channel_delete(ch_id: int, request: Request) -> HTMLResponse:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         result = await ChannelService(session, branch_id).purge(ch_id)
         if result is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         html = await _ch_list_html(session, branch_id)
     resp = HTMLResponse(html)
     resp.headers["HX-Trigger"] = "refreshChannelList"
@@ -259,7 +260,7 @@ async def channel_credential(ch_id: int, request: Request) -> HTMLResponse:
             {"id": ch_id},
         )).first()
         if not row:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         st_row = (await session.execute(
             text(
                 "SELECT status FROM channel_session"
@@ -282,7 +283,7 @@ async def channel_form(ch_id: int, request: Request) -> HTMLResponse:
             text("SELECT kind FROM channel WHERE id=:id"), {"id": ch_id},
         )).first()
     if not row:
-        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        return not_found()
     return HTMLResponse(_ch_form_for(ch_id, row[0]))
 
 

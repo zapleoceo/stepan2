@@ -27,6 +27,7 @@ from app.modules.knowledge.sections import reassemble
 
 from ._i18n import apply_lang
 from ._query import _branch_where
+from ._responses import forbidden, not_found
 from ._ui_kb import kb_editor_html, kb_history_html, kb_tree_html
 
 router = APIRouter()
@@ -58,9 +59,9 @@ async def knowledge_edit(doc_id: int, request: Request) -> HTMLResponse:
             text("SELECT id, slug, title, content, updated_by, branch_id"
                  " FROM knowledge_doc WHERE id = :id"), {"id": doc_id})).first()
     if not row:
-        return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+        return not_found()
     if is_branch_forbidden(row[5], branch_ids):
-        return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+        return forbidden()
     return HTMLResponse(kb_editor_html(
         row[0], str(row[1]), str(row[2] or ""), str(row[3] or ""), row[4]))
 
@@ -124,9 +125,9 @@ async def knowledge_save(doc_id: int, request: Request) -> HTMLResponse:
             text("SELECT branch_id, slug, content FROM knowledge_doc WHERE id=:id"),
             {"id": doc_id})).first()
         if prev is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         if is_branch_write_forbidden(prev[0], writable):  # WRITE role required for this branch
-            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+            return forbidden()
         await session.execute(
             text("UPDATE knowledge_doc SET title=:t, content=:c,"
                  " updated_by=:a, updated_at=NOW() WHERE id=:id"),
@@ -152,12 +153,12 @@ async def knowledge_history(doc_id: int, request: Request) -> HTMLResponse:
             text("SELECT branch_id, slug FROM knowledge_doc WHERE id=:id"),
             {"id": doc_id})).first()
         if not row:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         # The doc's own branch_id must be within the caller's scope — taking it from the row
         # alone let a branch-scoped user read another branch's doc history by id enumeration
         # (the sibling /edit route checks; this one didn't).
         if is_branch_forbidden(row[0], branch_ids):
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         bid = row[0] if branch_ids else None
         revs = await list_revisions(session, bid, "doc", str(row[1]))
     return HTMLResponse(kb_history_html(f"/ui/knowledge/{doc_id}/edit", str(row[1]), revs))
@@ -174,9 +175,9 @@ async def knowledge_restore(request: Request, rev_id: int = Form(...)) -> HTMLRe
         status, out = await restore_revision_scoped(
             session, rev_id, writable=writable, actor=_actor(request))
         if status == "forbidden":
-            return HTMLResponse('<div class="emp">Forbidden</div>', status_code=403)
+            return forbidden()
         if out is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         _, slug, owner = out
         # Read back the doc that was actually restored. slug is unique PER BRANCH
         # (uq_kdoc_branch_slug), so a bare `WHERE slug=:s` returned an arbitrary tenant's
