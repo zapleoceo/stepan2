@@ -93,6 +93,20 @@ class Settings(BaseSettings):
     sender_callback_open: bool = Field(
         default=False, description="TEMPORARY: accept unauthenticated callbacks (record-only)")
 
+    # Reading their list back, to recover what the callback never delivered. Their side does
+    # not retry a failed callback, so a message arriving while we restart is otherwise lost
+    # with nobody the wiser. All four are empty until they hand them over; the sweep does
+    # nothing while any is missing rather than guessing an address or a tenant.
+    sender_api_url: str = Field(default="", description="sender base URL, e.g. https://host")
+    sender_api_token: str = Field(default="", description="Bearer token for the sender API")
+    sender_project_id: str = Field(default="", description="their numeric project id")
+    sender_branch_id: str = Field(default="", description="their numeric branch id")
+    # UNCONFIRMED: their examples show 'date_start=2026-08-05 10:00:00' with no zone and
+    # nobody has said whose clock it is (open question 8). Wrong by seven hours this fetches a
+    # period nobody wrote in and reports nothing missing — which reads exactly like success.
+    sender_api_tz_offset_h: float = Field(
+        default=0.0, description="hours to add to UTC to reach the sender's clock")
+
     # CRM read link (the gate that stops Stepan re-touching a lead a manager already owns).
     crm_read_timeout_s: float = Field(default=8.0, description="per-request CRM read timeout")
     crm_mcp_timeout_s: float = Field(
