@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import text
-
 from app.adapters.db.models import Outbox, StageEvent, ThreadLog
 from app.adapters.db.session import session_scope
 from app.adapters.llm.broker import BrokerLLM
@@ -20,6 +18,7 @@ from app.admin._branch import (
     writable_branch_ids,
 )
 from app.config import settings
+from app.modules.conversation.chat_repo import ChatRepo
 from app.modules.conversation.needs import parse_needs
 from app.modules.conversation.needs_translate import cached_needs, translated_needs
 from app.modules.conversation.reply import ReplyService
@@ -102,26 +101,14 @@ async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | N
     profile, new_tr = await translated_needs(parse_needs(needs), needs_tr, lang, BrokerLLM(),
                                              branch_id=branch_id, thread_id=thread_id)
     if new_tr is not None:
-        await session.execute(
-            text("UPDATE lead SET needs_tr = :v WHERE id = :id"), {"v": new_tr, "id": lead_id},
-        )
-        await session.flush()
+        await ChatRepo(session).cache_needs_translation(lead_id, new_tr)
     return profile
 
 
 async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) -> int | None:
     """Thread's lead branch_id, or None if it doesn't exist or is outside the caller's
     allowed branches — the per-thread tenant-ownership guard (blocks cross-branch IDOR)."""
-    row = (
-        await session.execute(
-            text(
-                "SELECT l.branch_id, b.tz_offset_h FROM channel_thread ct"
-                " JOIN lead l ON l.id = ct.lead_id"
-                " JOIN branch b ON b.id = l.branch_id WHERE ct.id = :tid"
-            ),
-            {"tid": thread_id},
-        )
-    ).first()
+    row = await ChatRepo(session).branch_and_tz(thread_id)
     if row is None:
         return None
     if is_branch_forbidden(row[0], allowed):
@@ -134,39 +121,19 @@ async def _build_chat_panel(
 ) -> str | None:
     """Panel HTML for one thread, or None if it does not exist / is outside the caller's
     branches. Shared by the partial route (/panel) and the canonical page route."""
-    info = (
-        await session.execute(
-            text(
-                "SELECT ct.id, l.display_name, l.stage, l.branch_id,"
-                " ct.product_slug, ct.external_thread_id,"
-                " l.phone_e164, l.created_at, ct.last_in_at,"
-                " l.ig_username, l.avatar_url,"
-                " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                " l.agent_enabled, l.is_blocked,"
-                " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at,"
-                " b.tz_offset_h, l.dossier AS needs, l.id, l.needs_tr,"
-                " l.manager_note,"
-                " ch.kind AS channel_kind"
-                " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-                " JOIN branch b ON b.id = l.branch_id"
-                " LEFT JOIN channel ch ON ch.id = ct.channel_id"
-                " WHERE ct.id = :tid"
-            ),
-            {"tid": thread_id},
-        )
-    ).first()
-    if not info or is_branch_forbidden(info[3], allowed):
+    info = await ChatRepo(session).panel_row(thread_id)
+    if not info or is_branch_forbidden(info.branch_id, allowed):
         return None
     msgs = await fetch_messages(session, thread_id)
     pending = await fetch_pending(session, thread_id)
     events = await fetch_thread_events(session, thread_id)
-    products = [(p.slug, p.title) for p in await ProductRepo(session, info[3]).active()]
-    (_, name, stage, _, product_slug, ig_id,
+    products = [(p.slug, p.title) for p in await ProductRepo(session, info.branch_id).active()]
+    (_, name, stage, lead_id, _branch, product_slug, ig_id,
      phone, created_at, last_in_at,
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
      follower_count, following_count, last_active_at, lead_seen_at, _tz, needs,
-     lead_id, needs_tr, manager_note, channel_kind) = info
+     needs_tr, manager_note, channel_kind) = info
     needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return chat_panel_html(
         thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -233,16 +200,7 @@ async def chat_needs_lazy(thread_id: int, request: Request) -> HTMLResponse:
     lang = apply_lang(request)
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        row = (
-            await session.execute(
-                text(
-                    "SELECT l.branch_id, l.dossier, l.needs_tr, l.id"
-                    " FROM channel_thread ct"
-                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
+        row = await ChatRepo(session).needs_row(thread_id)
         if not row or is_branch_forbidden(row[0], allowed):
             return HTMLResponse("")
         needs_bid, needs, needs_tr, lead_id = row
@@ -301,12 +259,7 @@ async def chat_media(asset_id: int, request: Request) -> Response:
     """Serve a downloaded MediaAsset's bytes (branch-guarded; private cache)."""
     allowed = allowed_branch_ids(request)
     async with session_scope() as session:
-        row = (
-            await session.execute(
-                text("SELECT data, mime, kind, branch_id FROM media_asset WHERE id = :id"),
-                {"id": asset_id},
-            )
-        ).first()
+        row = await ChatRepo(session).media_asset(asset_id)
     if row is None or row[0] is None:
         return Response(status_code=404)
     if is_branch_forbidden(row[3], allowed):
@@ -375,45 +328,20 @@ async def chat_bot_toggle(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
-        info = (
-            await session.execute(
-                text(
-                    "SELECT l.id, l.branch_id, l.agent_enabled FROM channel_thread ct"
-                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
+        repo = ChatRepo(session)
+        info = await repo.lead_flags(thread_id, "agent_enabled")
         if not info:
             return HTMLResponse("")
         lead_id, branch_id, enabled = info
         if is_branch_forbidden(branch_id, allowed):
             return HTMLResponse(chat_bot_pill_html(thread_id, bool(enabled)))
         new_val = not bool(enabled)
-        # Record that a HUMAN decided this, so ingest._revive_bot doesn't undo it the moment
-        # the lead writes again. Turning the bot back on clears the flag: whoever switched it
-        # on is handing the thread back.
-        await session.execute(
-            text("UPDATE lead SET agent_enabled = :v, agent_off_manual = :m WHERE id = :id"),
-            {"v": new_val, "m": not new_val, "id": lead_id},
-        )
+        await repo.set_bot_enabled(lead_id, new_val)
         if not new_val:
-            # Выключение забирает и то, что бот УЖЕ написал, но не успел отправить.
-            # Между генерацией и отправкой проходит от одной до трёх минут (паузы между
-            # пузырями), и раньше нажатие OFF в этом окне ничего не меняло: сообщение
-            # уходило лиду уже после того, как человек забрал тред себе. Живой случай —
-            # тред 5632, 30.07.2026: OFF нажали в 09:58, ответ ушёл в 10:01.
-            # 'canceled', а не 'failed': ничего не сломалось и повторять нечего, поэтому в
-            # чате это не должно выглядеть красной кнопкой «отправить снова».
-            res = await session.execute(
-                text("UPDATE outbox SET status = 'canceled',"
-                     " error = 'bot switched off — human took the thread'"
-                     " WHERE thread_id = :t AND status = 'pending' AND source <> 'manager'"),
-                {"t": thread_id},
-            )
-            if res.rowcount:
+            canceled = await repo.cancel_queued_bot_messages(thread_id)
+            if canceled:
                 _log.info("bot off thread=%d: canceled %d queued bot messages",
-                          thread_id, res.rowcount)
+                          thread_id, canceled)
     return HTMLResponse(chat_bot_pill_html(thread_id, new_val))
 
 
@@ -423,30 +351,15 @@ async def chat_block(thread_id: int, request: Request) -> HTMLResponse:
     apply_lang(request)
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
     async with session_scope() as session:
-        info = (
-            await session.execute(
-                text(
-                    "SELECT l.id, l.branch_id, l.is_blocked FROM channel_thread ct"
-                    " JOIN lead l ON l.id = ct.lead_id WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
+        repo = ChatRepo(session)
+        info = await repo.lead_flags(thread_id, "is_blocked")
         if not info:
             return HTMLResponse("")
         lead_id, branch_id, blocked = info
         if is_branch_forbidden(branch_id, allowed):
             return HTMLResponse(chat_block_pill_html(thread_id, bool(blocked)))
         new_val = not bool(blocked)
-        if new_val:
-            await session.execute(
-                text("UPDATE lead SET is_blocked=true, agent_enabled=false WHERE id=:id"),
-                {"id": lead_id},
-            )
-        else:
-            await session.execute(
-                text("UPDATE lead SET is_blocked=false WHERE id=:id"), {"id": lead_id}
-            )
+        await repo.set_blocked(lead_id, new_val)
     return HTMLResponse(chat_block_pill_html(thread_id, new_val))
 
 
@@ -468,20 +381,7 @@ async def chat_clear(thread_id: int, request: Request) -> HTMLResponse:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
             return HTMLResponse("")
-        await session.execute(
-            text("UPDATE channel_thread SET context_cleared_at=:t WHERE id=:tid"),
-            {"t": now, "tid": thread_id},
-        )
-        # The dossier is memory too, and a human who clears the context expects a clean slate.
-        # Leaving it behind gave the opposite: Stepan forgot the conversation but still knew
-        # the lead's goal and which product they'd been shown, so he resumed mid-sale into a
-        # blank chat (thread 452 — a lead whose discovery was not finished got offered the
-        # event straight away).
-        await session.execute(
-            text("UPDATE lead SET dossier=NULL, needs=NULL WHERE id ="
-                 " (SELECT lead_id FROM channel_thread WHERE id=:tid)"),
-            {"tid": thread_id},
-        )
+        await ChatRepo(session).clear_context(thread_id, now)
         session.add(ThreadLog(
             branch_id=branch_id, thread_id=thread_id, kind="context_cleared",
             actor=_actor_name(request),
@@ -501,10 +401,7 @@ async def chat_load_context(thread_id: int, request: Request) -> HTMLResponse:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
             return HTMLResponse("")
-        await session.execute(
-            text("UPDATE channel_thread SET context_cleared_at=NULL WHERE id=:tid"),
-            {"tid": thread_id},
-        )
+        await ChatRepo(session).restore_context(thread_id)
         session.add(ThreadLog(
             branch_id=branch_id, thread_id=thread_id, kind="context_loaded",
             actor=_actor_name(request),
@@ -525,41 +422,19 @@ async def chat_stage(
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        info = (
-            await session.execute(
-                text(
-                    "SELECT ct.id, l.display_name, l.id as lead_id, l.stage as old_stage,"
-                    " ct.product_slug, ct.external_thread_id,"
-                    " l.phone_e164, l.created_at, ct.last_in_at,"
-                    " l.ig_username, l.avatar_url,"
-                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.dossier AS needs, l.needs_tr, l.manager_note,"
-                    " ch.kind AS channel_kind"
-                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-                    " JOIN branch b ON b.id = l.branch_id"
-                    " LEFT JOIN channel ch ON ch.id = ct.channel_id"
-                    " WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
+        info = await ChatRepo(session).panel_row(thread_id)
         if not info:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        (_, name, lead_id, old_stage, product_slug, ig_id,
+        (_, name, old_stage, lead_id, _branch, product_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at, _tz, needs, needs_tr,
+         follower_count, following_count, last_active_at, _seen, _tz, needs, needs_tr,
          manager_note, channel_kind) = info
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         changed = stage != str(old_stage)
         if changed:
-            await session.execute(
-                text("UPDATE lead SET stage = :s WHERE id = :id"),
-                {"s": stage, "id": lead_id},
-            )
+            await ChatRepo(session).set_stage(lead_id, stage)
             session.add(StageEvent(
                 branch_id=branch_id, lead_id=lead_id, thread_id=thread_id,
                 from_stage=str(old_stage), to_stage=stage,
@@ -616,41 +491,20 @@ async def chat_product(
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        info = (
-            await session.execute(
-                text(
-                    "SELECT ct.id, l.display_name, l.stage, ct.product_slug,"
-                    " ct.external_thread_id, l.phone_e164, l.created_at, ct.last_in_at,"
-                    " l.ig_username, l.avatar_url,"
-                    " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
-                    " l.agent_enabled, l.is_blocked,"
-                    " l.follower_count, l.following_count, l.last_active_at, b.tz_offset_h,"
-                    " l.dossier AS needs, l.id, l.needs_tr, l.manager_note,"
-                    " ch.kind AS channel_kind"
-                    " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
-                    " JOIN branch b ON b.id = l.branch_id"
-                    " LEFT JOIN channel ch ON ch.id = ct.channel_id WHERE ct.id = :tid"
-                ),
-                {"tid": thread_id},
-            )
-        ).first()
+        info = await ChatRepo(session).panel_row(thread_id)
         if not info:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        (_, name, stage, old_slug, ig_id,
+        (_, name, stage, lead_id, _branch, old_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
-         follower_count, following_count, last_active_at, _tz, needs,
-         lead_id, needs_tr, manager_note, channel_kind) = info
+         follower_count, following_count, last_active_at, _seen, _tz, needs,
+         needs_tr, manager_note, channel_kind) = info
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if new_slug is not None and new_slug not in {sl for sl, _ in products}:
             new_slug = old_slug  # ignore a slug that isn't an active product of this branch
         if new_slug != old_slug:
-            await session.execute(
-                text("UPDATE channel_thread SET product_slug = :p,"
-                     " product_source = 'manager' WHERE id = :tid"),
-                {"p": new_slug, "tid": thread_id},
-            )
+            await ChatRepo(session).set_product(thread_id, new_slug)
             session.add(ThreadLog(
                 branch_id=branch_id, thread_id=thread_id, kind="product_changed",
                 detail=f"{old_slug or '∅'} → {new_slug or '∅'}",
@@ -692,15 +546,9 @@ async def chat_manager_note(
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
             return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
-        await session.execute(
-            text(
-                "UPDATE lead SET manager_note = :n, manager_note_by = :who,"
-                " manager_note_at = :now"
-                " WHERE id = (SELECT lead_id FROM channel_thread WHERE id = :tid)"
-            ),
-            {"n": cleaned, "who": _actor_name(request),
-             "now": datetime.now(UTC).replace(tzinfo=None), "tid": thread_id},
-        )
+        await ChatRepo(session).set_manager_note(
+            thread_id, cleaned, _actor_name(request),
+            datetime.now(UTC).replace(tzinfo=None))
         # The lead row only holds the CURRENT note (overwritten on every save) — log every
         # change to ThreadLog too, so the chronology survives updates and shows in the chat
         # timeline (same mechanism as context-clear/product-change log lines).
@@ -782,16 +630,7 @@ async def chat_translate(thread_id: int, request: Request) -> HTMLResponse:
         summary_bid = await _guarded_branch(session, thread_id, allowed)
         if summary_bid is None:
             return HTMLResponse("")
-        rows = (
-            await session.execute(
-                text(
-                    "SELECT direction, text FROM message"
-                    " WHERE thread_id = :tid AND text <> ''"
-                    " ORDER BY occurred_at DESC, id DESC LIMIT :lim"
-                ),
-                {"tid": thread_id, "lim": _SUMMARY_MAX_MSGS},
-            )
-        ).all()
+        rows = await ChatRepo(session).recent_texts(thread_id, _SUMMARY_MAX_MSGS)
     if not rows:
         return HTMLResponse("")
     convo = "\n".join(
@@ -866,35 +705,17 @@ async def msg_delete(thread_id: int, mid: int, request: Request) -> HTMLResponse
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-        row = (
-            await session.execute(
-                text("SELECT direction FROM message WHERE id=:mid AND thread_id=:tid"),
-                {"mid": mid, "tid": thread_id},
-            )
-        ).first()
+        repo = ChatRepo(session)
+        row = await repo.message_direction(thread_id, mid)
         if row is None:
             return HTMLResponse("")
         if row[0] == "out":
-            await session.execute(
-                text("UPDATE message SET delete_requested=true WHERE id=:mid"),
-                {"mid": mid},
-            )
+            await repo.request_unsend(mid)
             return HTMLResponse(
                 '<div class="bb bb-o" style="opacity:.5;font-style:italic;font-size:.78rem">'
                 "⏳ отзывается…</div>"
             )
-        await session.execute(
-            text("DELETE FROM message WHERE id=:mid AND thread_id=:tid"),
-            {"mid": mid, "tid": thread_id},
-        )
-        # rewind last_in_at so the sidebar re-sorts by real last-activity — a direct
-        # inbound delete used to leave it stale, so the chat list kept the old order.
-        await session.execute(
-            text("UPDATE channel_thread SET last_in_at="
-                 "(SELECT max(occurred_at) FROM message WHERE thread_id=:tid AND direction='in')"
-                 " WHERE id=:tid"),
-            {"tid": thread_id},
-        )
+        await repo.delete_message(thread_id, mid)
     return HTMLResponse("")
 
 
@@ -906,11 +727,7 @@ async def pending_delete(thread_id: int, oid: int, request: Request) -> HTMLResp
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-        await session.execute(
-            text("UPDATE outbox SET status='skipped'"
-                 " WHERE id=:oid AND thread_id=:tid AND status IN ('pending', 'failed')"),
-            {"oid": oid, "tid": thread_id},
-        )
+        await ChatRepo(session).cancel_pending(thread_id, oid)
     return HTMLResponse("")  # bubble removed; OOB refresh won't re-add a skipped row
 
 
@@ -924,12 +741,8 @@ async def pending_retry(thread_id: int, oid: int, request: Request) -> HTMLRespo
     async with session_scope() as session:
         if await _guarded_branch(session, thread_id, allowed) is None:
             return HTMLResponse("")
-        await session.execute(
-            text("UPDATE outbox SET status='pending', error=NULL, scheduled_at=:now"
-                 " WHERE id=:oid AND thread_id=:tid AND status='failed'"),
-            {"oid": oid, "tid": thread_id,
-             "now": datetime.now(UTC).replace(tzinfo=None)},
-        )
+        await ChatRepo(session).retry_pending(
+            thread_id, oid, datetime.now(UTC).replace(tzinfo=None))
         pending = await fetch_pending(session, thread_id)
     return HTMLResponse(pending_block_html(pending, thread_id))
 
@@ -944,10 +757,7 @@ async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLR
         outmsg_bid = await _guarded_branch(session, thread_id, allowed)
         if outmsg_bid is None:
             return HTMLResponse("")
-        row = (await session.execute(
-            text("SELECT text, tr_text FROM outbox WHERE id=:oid AND thread_id=:tid"),
-            {"oid": oid, "tid": thread_id},
-        )).first()
+        row = await ChatRepo(session).outbox_texts(thread_id, oid)
         if not row or not row[0]:
             return HTMLResponse("")
         if row[1]:  # already translated (cache) — no LLM call
@@ -959,6 +769,5 @@ async def pending_translate(thread_id: int, oid: int, request: Request) -> HTMLR
             _log.warning("pending translate error tid=%s oid=%s: %s", thread_id, oid, exc)
             return HTMLResponse("")
         if tr:
-            await session.execute(
-                text("UPDATE outbox SET tr_text=:t WHERE id=:oid"), {"t": tr, "oid": oid})
+            await ChatRepo(session).cache_outbox_translation(oid, tr)
     return HTMLResponse(f"🌐 {_h.escape(tr)}" if tr else "")
