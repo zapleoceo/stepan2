@@ -13,8 +13,8 @@ from app.admin._branch import require_super_admin
 from app.domain.enums import Role
 from app.modules.auth.repository import MembershipRepo, UserRepo
 
-from ._responses import not_found
 from ._i18n import apply_lang, t
+from ._responses import not_found
 from ._ui_members import members_panel_html
 
 router = APIRouter(dependencies=[Depends(require_super_admin)])

@@ -20,9 +20,9 @@ from app.modules.knowledge.history import (
     restore_revision_scoped,
 )
 
-from ._responses import forbidden,not_found
 from ._i18n import apply_lang
 from ._query import _branch_where
+from ._responses import forbidden, not_found
 from ._ui_html import pick_branch_html
 from ._ui_kb import kb_history_html
 from ._ui_panels import product_edit_html, products_panel_html

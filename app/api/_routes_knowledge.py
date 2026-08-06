@@ -25,9 +25,9 @@ from app.modules.knowledge.history import (
 )
 from app.modules.knowledge.sections import reassemble
 
-from ._responses import forbidden,not_found
 from ._i18n import apply_lang
 from ._query import _branch_where
+from ._responses import forbidden, not_found
 from ._ui_kb import kb_editor_html, kb_history_html, kb_tree_html
 
 router = APIRouter()

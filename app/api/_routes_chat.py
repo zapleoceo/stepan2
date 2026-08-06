@@ -35,7 +35,6 @@ from app.modules.media.service import MediaService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import get_settings
 
-from ._responses import thread_not_found
 from ._i18n import apply_lang, current_lang, t
 from ._query import (
     fetch_message,
@@ -44,6 +43,7 @@ from ._query import (
     fetch_pending,
     fetch_thread_events,
 )
+from ._responses import thread_not_found
 from ._ui_html import (
     _bubble,
     app_shell,

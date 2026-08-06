@@ -31,8 +31,8 @@ from app.modules.meta.tokens import page_access_token
 from app.modules.settings.repository import SettingRepo
 from app.modules.settings.service import get_channel_settings
 
-from ._responses import not_found
 from ._i18n import apply_lang, t
+from ._responses import not_found
 from ._ui_panels import (
     _ch_form_for,
     _ch_ig_form,

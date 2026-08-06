@@ -9,7 +9,8 @@ from fastapi.responses import HTMLResponse
 
 from app.adapters.db.session import session_scope
 from app.admin._branch import writable_selected_branch_id
-from app.api._i18n import apply_lang, t
+from app.api._i18n import apply_lang
+from app.api._responses import gone, pick_branch
 from app.api._ui_personas import persona_detail_html, personas_panel_html
 from app.modules.persona import service as P
 

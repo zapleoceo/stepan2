@@ -15,8 +15,8 @@ from app.modules.knowledge.source import copy_kb
 from app.modules.settings.repository import SettingRepo
 from app.modules.settings.schema import defaults as _schema_defaults
 
-from ._responses import branch_not_found
 from ._i18n import apply_lang
+from ._responses import branch_not_found
 from ._ui_panels import branch_edit_html, branches_panel_html
 
 router = APIRouter(dependencies=[Depends(require_super_admin)])
