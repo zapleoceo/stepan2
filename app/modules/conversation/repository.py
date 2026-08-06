@@ -162,7 +162,13 @@ class OutboxRepo(BranchScoped[Outbox]):
 
     async def count_sent_since(self, since: datetime, channel_id: int | None = None) -> int:
         """Lines sent since `since` for hourly/daily cap accounting. With channel_id the count
-        is scoped to that connector (anti-ban caps are per-channel); without it, branch-wide."""
+        is scoped to that connector (anti-ban caps are per-channel); without it, branch-wide.
+
+        `queued` counts too. The caps exist so an account does not LOOK like a bot, and what
+        the platform sees is a message we handed over — whether the transport has got round to
+        confirming it is our bookkeeping, not theirs. Counting only `sent` would let a
+        connector that reports delivery asynchronously blow straight through an anti-ban cap
+        while every row still said the budget was untouched."""
         # COUNT in SQL instead of materializing rows; branch_id filter replicates
         # BranchScoped._q() — tenant isolation must not be lost here.
         q = (
@@ -170,7 +176,7 @@ class OutboxRepo(BranchScoped[Outbox]):
             .select_from(Outbox)
             .where(
                 Outbox.branch_id == self.branch_id,
-                Outbox.status == "sent",
+                Outbox.status.in_(("sent", "queued")),  # type: ignore[union-attr]
                 Outbox.sent_at >= since,
             )
         )

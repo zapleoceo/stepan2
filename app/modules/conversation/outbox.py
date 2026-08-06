@@ -22,7 +22,7 @@ from app.domain.enums import Stage
 from app.modules.missions import INBOUND_REPLY
 from app.modules.missions.budget import account_spend, log_exhausted
 from app.modules.settings.service import get_channel_settings
-from app.ports.channel import ChannelPort
+from app.ports.channel import READ_ONLY_ERROR, ChannelPort
 
 from .dormancy import park_dormant
 from .repository import MessageRepo, OutboxRepo, ThreadRepo
@@ -74,6 +74,25 @@ class OutboxSender:
         thread = await self.threads.by_id(thread_id)
         if thread is None:
             return None
+        # An ingest-only instance: we hold a linked-device session purely to READ someone
+        # else's conversation (manager WhatsApp numbers), and the human on the other end is
+        # still working that chat from their own phone. A line delivered from here would
+        # arrive as if the manager had typed it. No source bypasses this — not "manager"
+        # either: the manager writes from their handset, never through us.
+        #
+        # This is the port's own declaration (ChannelPort.read_only), not a kind check: the
+        # same connector runs read-only for the analytics numbers and writable for the
+        # follow-up one, so the answer belongs to the instance, not to WhatsApp.
+        if getattr(self.channel, "read_only", False):
+            row.status = "skipped"
+            row.error = READ_ONLY_ERROR
+            self.session.add(row)
+            await self.session.flush()
+            logger.warning(
+                "outbox skip branch=%d thread=%d: channel is read-only, nothing sent",
+                self.branch_id, thread_id,
+            )
+            return row
         # Resolve settings for THIS thread's connector: anti-ban caps, sending toggle and the
         # follow-up schedule are per-channel (Meta's official API needs no anti-ban throttle
         # and closes its window in ~24h, so its cadence differs from Instagram's). Branch-scope
@@ -172,7 +191,13 @@ class OutboxSender:
         await self._humanize(thread.external_thread_id)
         result = await self.channel.send_text(thread.external_thread_id, row.text)
         if result.ok:
-            row.status = "sent"
+            # "sent" only when the transport ANSWERS for delivery. A connector that merely
+            # queues gets "queued", resolved later by whatever reports the real outcome —
+            # writing "sent" here would claim a delivery nobody has confirmed, and the
+            # hand-off owed on a failure would never fire because nothing looks again.
+            confirmed = spec is None or spec.confirms_delivery
+            row.status = "sent" if confirmed else "queued"
+            row.external_ref = result.external_message_id
             row.sent_at = now
             row.error = None
             await self.messages.add(self._outgoing(thread, row, result.external_message_id))

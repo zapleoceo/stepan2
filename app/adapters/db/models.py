@@ -461,7 +461,13 @@ class Outbox(SQLModel, table=True):
     source: str = Field(default="agent", description="agent|manager|followup")
     sent_by_name: str | None = Field(
         default=None, description="имя менеджера из сессии дашборда для source=manager")
-    status: str = Field(default="pending", index=True, description="pending|sent|failed")
+    status: str = Field(
+        default="pending", index=True,
+        description="pending|sending|queued|sent|failed. `queued` = a transport that does "
+                    "not confirm delivery accepted it; resolved later to sent|failed")
+    # What the transport called the message, so a later delivery report can find this row.
+    # Only transports that report back populate it (ConnectorSpec.confirms_delivery=False).
+    external_ref: str | None = Field(default=None, index=True)
     scheduled_at: datetime = Field(default_factory=_utcnow)
     sent_at: datetime | None = Field(default=None)
     error: str | None = Field(default=None)
@@ -469,6 +475,35 @@ class Outbox(SQLModel, table=True):
     tr_text: str | None = Field(default=None, description="кэш перевода очередной реплики")
     attempts: int = Field(default=0, description="soft-block retries so far — capped, not "
                                                   "infinite (see outbox._MAX_SOFT_BLOCK_ATTEMPTS)")
+
+
+class SenderInbound(SQLModel, table=True):
+    """Одно входящее из CRM-sender: приняли, записали, ещё не обработали.
+
+    Пишется и колбеком, и добором пропущенных за период — у них общий ключ external_id,
+    поэтому повтор из любого источника отсекается уникальным индексом, а не памятью процесса.
+    """
+    __tablename__ = "sender_inbound"
+
+    id: int | None = Field(default=None, primary_key=True)
+    # id сообщения в мессенджере — ключ дедупликации на обеих сторонах.
+    external_id: str = Field(unique=True, index=True)
+    # Их идентификаторы. Числовые: маппинг на наши филиалы делается отдельно и позже.
+    project_id: str | None = Field(default=None)
+    branch_ref: str | None = Field(default=None, description="branch_id на их стороне")
+    conversation_id: str | None = Field(default=None, index=True)
+    chat_id: str | None = Field(default=None)
+    sender_message_id: str | None = Field(default=None, description="id в самом sender")
+    phone: str | None = Field(default=None, index=True, description="wa-id как прислали")
+    from_name: str | None = Field(default=None)
+    text: str | None = Field(default=None)
+    attachment: str | None = Field(default=None)
+    channel_name: str | None = Field(default=None, description="whats-app и т.п.")
+    direction: str = Field(default="in", description="in|out; out = писал менеджер")
+    # callback | catchup — чем поймали. Разница в том, сработал ли колбек вообще.
+    arrived_via: str = Field(default="callback", index=True)
+    received_at: datetime = Field(default_factory=_utcnow, index=True)
+    processed_at: datetime | None = Field(default=None, index=True)
 
 
 class ManagerAlert(SQLModel, table=True):

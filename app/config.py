@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # Instagram private-API proxy (same geo as login — avoids checkpoint). Empty = none.
     ig_proxy: str = Field(default="", description="proxy URL for instagrapi transport")
 
+    # Self-hosted Evolution API (WhatsApp). It is OUR service on the internal docker network,
+    # so the operator never types its address: one server serves every number, and an instance
+    # per number is created from the channel panel. Empty = the WA pairing UI stays disabled.
+    evolution_url: str = Field(default="", description="internal Evolution API base URL")
+    evolution_api_key: str = Field(default="", description="Evolution API global auth key")
+
     # Telegram bot token for manager alerts (BotFather token — never in VCS)
     tg_bot_token: str = Field(default="", description="Telegram bot token for manager pings")
     public_url: str = Field(default="",
