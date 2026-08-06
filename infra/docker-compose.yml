@@ -26,6 +26,70 @@ services:
     # Внешний порт не публикуем — Redis доступен контейнерам по сети (redis:6379).
     restart: unless-stopped
 
+  # WhatsApp через связанное устройство. Порт наружу НЕ публикуем: сервис доступен только
+  # api/worker по внутренней сети, а панель канала ходит в него от их имени. Своя БД в том
+  # же постгресе (её надо создать один раз руками, см. docs/whatsapp-readonly.md) и свой
+  # индекс redis — общий кэш с приложением дал бы пересечение ключей.
+  # Своя база Evolution не создаётся сама: том постгреса давно существует, а
+  # docker-entrypoint-initdb.d отрабатывает только на пустом. Один идемпотентный шаг здесь
+  # избавляет от ручной команды на сервере — и от того, что о ней забудут при переезде.
+  evolution-init:
+    image: pgvector/pgvector:pg16
+    container_name: stepan2-evolution-init
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        psql -h postgres -U stepan2 -d stepan2 -tAc
+        "SELECT 1 FROM pg_database WHERE datname='evolution'" | grep -q 1
+        || psql -h postgres -U stepan2 -d stepan2 -c "CREATE DATABASE evolution"
+    restart: "no"
+
+  evolution:
+    image: atendai/evolution-api:v2.2.3
+    container_name: stepan2-evolution
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+      evolution-init: {condition: service_completed_successfully}
+    environment:
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY must be set}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://stepan2:${POSTGRES_PASSWORD}@postgres:5432/evolution
+      DATABASE_CONNECTION_CLIENT_NAME: stepan2
+      # Читающему инстансу нужны сами сообщения и чаты — без этого findMessages пуст.
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_LOCAL_ENABLED: "false"
+      # Имя, под которым сессия видна менеджеру в «Связанные устройства». Незнакомое
+      # устройство в этом списке выглядит как угон аккаунта, и его отвяжут первым же
+      # вечером — поэтому оно названо, а не оставлено дефолтным «Chrome (Linux)».
+      CONFIG_SESSION_PHONE_CLIENT: Stepan Analytics
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      DEL_INSTANCE: "false"
+      QRCODE_LIMIT: "10"
+      LOG_LEVEL: ERROR,WARN
+    volumes:
+      - stepan2_evolution:/evolution/instances
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
   api:
     build: ..
     container_name: stepan2-api
@@ -56,6 +120,8 @@ services:
       # Meta pixel on the public landing. API only — the worker renders no pages. Empty =
       # no tracking injected, so the page stays clean when no ad is running against it.
       STEPAN2_LANDING_PIXEL_ID: ${LANDING_PIXEL_ID:-}
+      STEPAN2_EVOLUTION_URL: ${EVOLUTION_URL:-http://evolution:8080}
+      STEPAN2_EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
     ports:
       - "127.0.0.1:8020:8000"
     # Give uvicorn its full --timeout-graceful-shutdown window to drain in-flight
@@ -87,8 +153,12 @@ services:
       STEPAN2_IG_PROXY: ${IG_PROXY:-}
       STEPAN2_TG_BOT_TOKEN: ${TG_BOT_TOKEN:-}
       STEPAN2_PUBLIC_URL: ${PUBLIC_URL:-}
+      STEPAN2_EVOLUTION_URL: ${EVOLUTION_URL:-http://evolution:8080}
+      STEPAN2_EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
     restart: unless-stopped
 
 volumes:
   stepan2_pgdata:
+    driver: local
+  stepan2_evolution:
     driver: local

@@ -48,6 +48,9 @@ class SessionStatus(StrEnum):
     ACTIVE = "active"
     EXPIRED = "expired"      # окно/сессия истекли (напр. MBS 24ч)
     CHALLENGE = "challenge"  # требуется ре-логин/верификация
+    # QR показан, телефон ещё не подтвердил. Намеренно НЕ active: пока привязки нет,
+    # воркер не должен получить порт на этот канал (см. active_session_settings).
+    PENDING = "pending"
 
 
 # Стадии, в которых бот молчит безусловно. `manager` сюда НЕ входит (S1-семантика):

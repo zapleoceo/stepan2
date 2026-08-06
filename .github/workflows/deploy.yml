@@ -83,7 +83,7 @@ jobs:
           ssh -p "$PORT" -o BatchMode=yes -o ConnectTimeout=15 "root@${HOST}" \
             "set -e; cd ${REMOTE_DIR}/infra \
              && docker compose build api \
-             && docker compose up -d postgres redis"
+             && docker compose up -d postgres redis evolution"
 
       - name: Apply migrations (before the new API serves)
         run: |

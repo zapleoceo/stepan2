@@ -1,8 +1,15 @@
 """Inbound callback from the CRM's sender: a WhatsApp message a lead just wrote.
 
-Stage one, deliberately. This accepts, authenticates, deduplicates and RECORDS — it does not
+Stage one, deliberately. This accepts, authenticates, deduplicates and STORES — it does not
 reply yet, because replying needs the sender MCP we have not been given, and the mapping of
-their project/branch ids onto ours, which nobody has written down. Standing it up now buys two
+their project/branch ids onto ours, which nobody has written down.
+
+Deduplication is the unique index on sender_inbound.external_id, not a set in this process:
+a restart used to forget every id, and nothing can be reconciled against memory. Their side
+does not retry a failed callback, so a message arriving while we restart is otherwise gone —
+they have it, we never did — which is what the catch-up sweep exists to repair.
+
+Standing it up now buys two
 things: their side gets something to test against, and we get to see the real payload — the
 phone format above all, since the same Indonesian lead also writes to us on Instagram and the
 two have to merge into one lead by number.
@@ -22,8 +29,10 @@ from collections import deque
 
 from fastapi import APIRouter, Request, Response, status
 
+from app.adapters.db.session import session_scope
 from app.config import settings
 from app.domain.clock import utc_now
+from app.modules.sender.inbound import CALLBACK, store, to_row
 
 router = APIRouter(prefix="/api/v1/sender", tags=["sender"])
 _log = logging.getLogger(__name__)
@@ -44,13 +53,6 @@ _WANTED = (
 
 # The value their side sends on an outgoing message.
 _OUT = "out"
-
-# Seen message ids, newest last. Their side already dedupes, but a retry or a restart on
-# either end can repeat a callback, and answering a lead twice is the visible failure.
-# In-process on purpose at this stage: nothing is persisted yet, so a restart forgetting is
-# harmless. When replies start going out this MUST move to the DB.
-_SEEN: deque[str] = deque(maxlen=5000)
-_SEEN_SET: set[str] = set()
 
 # Last few payloads, for reading the shape their side actually sends while we integrate.
 _RECENT: deque[dict] = deque(maxlen=50)
@@ -93,17 +95,6 @@ def _authorised(request: Request, raw: bytes) -> bool:
     return bool(allow and client in allow)
 
 
-def _remember(external_id: str) -> bool:
-    """True if this id is new. Evicting from the deque drops it from the set with it."""
-    if external_id in _SEEN_SET:
-        return False
-    if len(_SEEN) == _SEEN.maxlen:
-        _SEEN_SET.discard(_SEEN[0])
-    _SEEN.append(external_id)
-    _SEEN_SET.add(external_id)
-    return True
-
-
 @router.post("/inbound-callback")
 async def inbound_callback(request: Request) -> Response:
     """Accept one inbound message. Fast, always — their side times out in 5 seconds.
@@ -123,15 +114,7 @@ async def inbound_callback(request: Request) -> Response:
     form = await request.form()
     data = {k: str(form[k]) for k in _WANTED if k in form}
 
-    if data.get("type_send", "").strip().lower() == _OUT:
-        # A message going TO the lead — a manager writing, or the echo of one typing in the
-        # WhatsApp app. Never a prompt to reply: answering it would put Stepan in a
-        # conversation a human already owns, second voice in front of the customer. Recorded
-        # rather than dropped, because "a manager is engaged" is the signal that should later
-        # stand the bot down on this lead.
-        _log.info("sender outbound seen (manager engaged): %s", _safe(data))
-        _RECENT.append({"at": utc_now().isoformat(), **data})
-        return Response(status_code=status.HTTP_200_OK)
+    outgoing = data.get("type_send", "").strip().lower() == _OUT
 
     external_id = data.get("external_id", "").strip()
     if not external_id:
@@ -141,7 +124,19 @@ async def inbound_callback(request: Request) -> Response:
         _RECENT.append({"at": utc_now().isoformat(), "no_external_id": True, **data})
         return Response(status_code=status.HTTP_200_OK)
 
-    if not _remember(external_id):
+    # Both directions take the same path. An OUTGOING message is a manager writing (or the
+    # echo of one typing in the WhatsApp app): never something to answer — that would put
+    # Stepan second-voice into a conversation a human already owns — but very much something
+    # to keep, since "a manager is engaged" is what should later stand the bot down. Storing
+    # it under the same key also means their retry of an echo cannot become two rows.
+    row = to_row(data, arrived_via=CALLBACK)
+    if row is None:  # no external_id; handled above, kept for the direct caller
+        return Response(status_code=status.HTTP_200_OK)
+    async with session_scope() as session:
+        fresh = await store(session, row)
+        if fresh:
+            await session.commit()
+    if not fresh:
         _log.info("sender callback duplicate, ignored: external_id=%s", external_id)
         return Response(status_code=status.HTTP_200_OK)
 
@@ -149,7 +144,8 @@ async def inbound_callback(request: Request) -> Response:
     # INFO on purpose while integrating: this is the record of what their side actually sends,
     # and the phone format in `from` is the open question that decides whether a WhatsApp lead
     # merges with the same person's Instagram thread.
-    _log.info("sender inbound: %s", _safe(data))
+    _log.info("sender %s: %s", "outbound (manager engaged)" if outgoing else "inbound",
+              _safe(data))
     return Response(status_code=status.HTTP_200_OK)
 
 
@@ -169,8 +165,6 @@ def recent() -> list[dict]:
 
 
 def _reset_for_tests() -> None:
-    _SEEN.clear()
-    _SEEN_SET.clear()
     _RECENT.clear()
 
 

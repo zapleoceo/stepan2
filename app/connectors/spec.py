@@ -125,6 +125,19 @@ class ConnectorSpec:
     # does not replace the webhook — that is the real fix and it is blocked on App Review —
     # it is the half of the latency we can take back today.
     polls_every_minute: bool = False
+    # Does a successful send call mean the message REACHED the correspondent, or only that
+    # somebody accepted it for delivery?
+    #
+    # True for every connector we have today: instagrapi and the Graph API both answer once
+    # the message exists in the conversation, so `ok` IS delivery and the outbox may write
+    # "sent".
+    #
+    # The CRM's sender is the first where it is not. Its conversation/send queues and returns
+    # the conversation immediately: a 2xx means "accepted", and the real outcome arrives later
+    # as status 1 (success) or 2 (fail) — Victor, 2026-08-05. Recording that as "sent" would
+    # claim a delivery that may never happen, and the hand-off that should fire on a failed
+    # send would never fire, because nothing would ever look again.
+    confirms_delivery: bool = True
 
     def supports(self, capability: Capability) -> bool:
         return capability in self.capabilities
