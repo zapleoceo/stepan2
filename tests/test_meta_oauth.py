@@ -68,9 +68,36 @@ def test_scopes_stay_minimal() -> None:
     """App Review rejects permissions the app cannot demonstrate, and every extra scope is one
     more thing the client is asked to trust us with."""
     assert set(SCOPES) == {
-        "pages_show_list", "pages_messaging", "pages_read_engagement",
-        "instagram_basic", "instagram_manage_messages", "business_management",
+        "pages_show_list", "pages_messaging", "pages_manage_metadata",
+        "pages_read_engagement", "instagram_basic", "instagram_manage_messages",
+        "business_management",
     }
+
+
+def test_the_submitted_permissions_are_the_requested_ones() -> None:
+    """The set above is not an internal preference — it is what the App Review submission asks
+    for, and the two drifting apart is how the previous attempt would have failed.
+
+    A permission in the submission but not in SCOPES never appears on the consent screen, so
+    the reviewer cannot see it being granted and rejects the ENTIRE submission. The reverse
+    (asked for, never submitted) is a permission the client grants and we can never use.
+    """
+    submitted = {
+        "pages_show_list", "pages_manage_metadata", "pages_messaging",
+        "business_management", "instagram_manage_messages", "pages_read_engagement",
+        "instagram_basic",
+    }
+    assert set(SCOPES) == submitted, (
+        "docs/meta-review-readiness.md lists what the submission asks for; change both or "
+        "neither"
+    )
+
+
+def test_the_page_subscription_scope_is_present() -> None:
+    """/{page-id}/subscribed_apps answers 403 without it, which turns off the webhook for every
+    client silently — connecting still succeeds, so nothing looks broken until nothing arrives.
+    """
+    assert "pages_manage_metadata" in SCOPES
 
 
 def test_connect_paths_are_public() -> None:

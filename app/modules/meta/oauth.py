@@ -22,9 +22,16 @@ _GRAPH = "https://graph.facebook.com/{ver}"
 
 # What the agent genuinely needs, and nothing more — App Review rejects unused permissions,
 # and every extra scope is one more thing the client is asked to trust us with.
+#
+# `pages_manage_metadata` is the one that looks droppable and is not: /{page-id}/subscribed_apps
+# refuses without it, so leaving it out means subscribe_page 403s for every client that ever
+# connects and the webhook never fires. It is also load-bearing for App Review itself — a
+# permission the consent screen never shows is a permission the reviewer cannot see us ask for,
+# and an unshown permission rejects the whole submission, not just itself.
 SCOPES = (
     "pages_show_list",
     "pages_messaging",
+    "pages_manage_metadata",
     "pages_read_engagement",
     "instagram_basic",
     "instagram_manage_messages",
