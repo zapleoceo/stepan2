@@ -15,9 +15,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 # Колонки шапки чата. Один список на два роута (смена стадии и смена продукта) — раньше
 # они держали два почти одинаковых запроса на 25 колонок, и любая правка схемы требовала
 # помнить про оба.
+# Имена ровно те, что отдаёт строка — по ним и обращаться (row.display_name, не row.name).
+# Список нужен, чтобы распаковка кортежа в роутах сверялась с ним, а не считалась глазами.
 PANEL_FIELDS = (
-    "thread_id", "name", "stage", "lead_id", "branch_id", "product_slug", "ig_id",
-    "phone", "created_at", "last_in_at", "ig_username", "avatar_url",
+    "id", "display_name", "stage", "lead_id", "branch_id", "product_slug",
+    "external_thread_id", "phone_e164", "created_at", "last_in_at",
+    "ig_username", "avatar_url",
     "lead_source", "ad_id", "ad_media_id", "ad_preview_url", "agent_enabled", "is_blocked",
     "follower_count", "following_count", "last_active_at", "lead_seen_at", "tz_offset_h",
     "needs", "needs_tr", "manager_note", "channel_kind",
