@@ -30,13 +30,32 @@ services:
   # api/worker по внутренней сети, а панель канала ходит в него от их имени. Своя БД в том
   # же постгресе (её надо создать один раз руками, см. docs/whatsapp-readonly.md) и свой
   # индекс redis — общий кэш с приложением дал бы пересечение ключей.
+  # Своя база Evolution не создаётся сама: том постгреса давно существует, а
+  # docker-entrypoint-initdb.d отрабатывает только на пустом. Один идемпотентный шаг здесь
+  # избавляет от ручной команды на сервере — и от того, что о ней забудут при переезде.
+  evolution-init:
+    image: pgvector/pgvector:pg16
+    container_name: stepan2-evolution-init
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        psql -h postgres -U stepan2 -d stepan2 -tAc
+        "SELECT 1 FROM pg_database WHERE datname='evolution'" | grep -q 1
+        || psql -h postgres -U stepan2 -d stepan2 -c "CREATE DATABASE evolution"
+    restart: "no"
+
   evolution:
     image: atendai/evolution-api:v2.2.3
     container_name: stepan2-evolution
-    profiles: ["whatsapp"]
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
+      evolution-init: {condition: service_completed_successfully}
     environment:
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?EVOLUTION_API_KEY must be set}
       DATABASE_ENABLED: "true"

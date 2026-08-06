@@ -9,37 +9,33 @@ IG-тред → телефон → WhatsApp → оплата. Плюс корп�
 
 ---
 
-## 1. Что нужно на сервере (один раз)
+## 1. Что на сервере (ничего руками)
 
-**1.1. База для Evolution.** Она не создаётся сама: том постгреса уже существует, а
-`docker-entrypoint-initdb.d` отрабатывает только на пустом.
+Деплой поднимает Evolution сам. Ручных шагов не осталось — они были и стали причиной
+этого раздела, поэтому каждый закрыт кодом, а не инструкцией:
 
-```bash
-docker exec stepan2-postgres psql -U stepan2 -d stepan2 -c 'CREATE DATABASE evolution'
-```
+| было руками | чем закрыто |
+|---|---|
+| `CREATE DATABASE evolution` | сервис `evolution-init` в compose, идемпотентный |
+| `docker compose --profile whatsapp up` | профиля нет, сервис поднимается обычным деплоем |
+| ключ в `infra/.env` | сгенерирован один раз; `infra/.env` исключён из rsync и переживает деплои |
 
-**1.2. Ключ в `infra/.env`.** Длинный и случайный — им авторизуется всё управление
-инстансами.
-
-```bash
-echo "EVOLUTION_API_KEY=$(openssl rand -hex 32)" >> /var/www/vera/../stepan2/infra/.env
-```
-
-**1.3. Поднять сервис.** Он под профилем `whatsapp` — без профиля не стартует, поэтому
-обычный деплой его не трогает.
+Единственное, что придётся повторить **при переезде на новый сервер** — положить
+`EVOLUTION_API_KEY` в `infra/.env`. Без него compose падает намеренно: пустой ключ означал
+бы открытый шлюз управления чужими WhatsApp-сессиями.
 
 ```bash
-docker compose -f infra/docker-compose.yml --profile whatsapp up -d evolution
+grep -q '^EVOLUTION_API_KEY=' infra/.env || \
+  printf 'EVOLUTION_API_KEY=%s\n' "$(openssl rand -hex 32)" >> infra/.env
 ```
 
-Наружу порт не публикуется: `api` и `worker` ходят в него по внутренней сети на
-`http://evolution:8080`. Проверить, что поднялся:
+Наружу порт не публикуется: `api` и `worker` ходят к нему по внутренней сети на
+`http://evolution:8080`. Первый старт дольше обычного — Evolution прогоняет свои миграции
+по новой базе.
 
 ```bash
 docker compose -f infra/docker-compose.yml logs --tail 40 evolution
 ```
-
-Первый старт дольше обычного — Evolution прогоняет свои миграции по новой базе.
 
 ---
 
