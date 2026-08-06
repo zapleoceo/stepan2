@@ -50,7 +50,7 @@ services:
     restart: "no"
 
   evolution:
-    image: atendai/evolution-api:v2.2.3
+    image: evoapicloud/evolution-api:v2.3.7
     container_name: stepan2-evolution
     depends_on:
       postgres: {condition: service_healthy}
