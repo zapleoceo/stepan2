@@ -13,6 +13,7 @@ from app.admin._branch import require_super_admin
 from app.domain.enums import Role
 from app.modules.auth.repository import MembershipRepo, UserRepo
 
+from ._responses import not_found
 from ._i18n import apply_lang, t
 from ._ui_members import members_panel_html
 
@@ -90,7 +91,7 @@ async def members_set_role(
         repo = MembershipRepo(session)
         m = await repo.get(membership_id)
         if m is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         blocked = _forbidden_self_edit(request, m.user_id)
         if blocked is not None:
             return blocked
@@ -109,7 +110,7 @@ async def members_set_branch(
         repo = MembershipRepo(session)
         m = await repo.get(membership_id)
         if m is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         blocked = _forbidden_self_edit(request, m.user_id)
         if blocked is not None:
             return blocked
@@ -125,7 +126,7 @@ async def members_delete(membership_id: int, request: Request) -> HTMLResponse:
         repo = MembershipRepo(session)
         m = await repo.get(membership_id)
         if m is None:
-            return HTMLResponse('<div class="emp">Not found</div>', status_code=404)
+            return not_found()
         blocked = _forbidden_self_edit(request, m.user_id)
         if blocked is not None:
             return blocked

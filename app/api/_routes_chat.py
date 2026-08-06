@@ -35,6 +35,7 @@ from app.modules.media.service import MediaService
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import get_settings
 
+from ._responses import thread_not_found
 from ._i18n import apply_lang, current_lang, t
 from ._query import (
     fetch_message,
@@ -159,7 +160,7 @@ async def chat_panel(thread_id: int, request: Request) -> HTMLResponse:
     async with session_scope() as session:
         html = await _build_chat_panel(session, thread_id, allowed)
     if html is None:
-        return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+        return thread_not_found()
     return HTMLResponse(html)
 
 
@@ -180,7 +181,7 @@ async def chat_page(
     is_hx = request.headers.get("HX-Request") == "true"
     if html is None:
         if is_hx:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+            return thread_not_found()
         return RedirectResponse("/ui/inbox", status_code=303)
     if is_hx:
         return HTMLResponse(html)
@@ -422,10 +423,10 @@ async def chat_stage(
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+            return thread_not_found()
         info = await ChatRepo(session).panel_row(thread_id)
         if not info:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+            return thread_not_found()
         (_, name, old_stage, lead_id, _branch, product_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
@@ -491,10 +492,10 @@ async def chat_product(
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+            return thread_not_found()
         info = await ChatRepo(session).panel_row(thread_id)
         if not info:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+            return thread_not_found()
         (_, name, stage, lead_id, _branch, old_slug, ig_id,
          phone, created_at, last_in_at,
          ig_username, avatar_url,
@@ -546,7 +547,7 @@ async def chat_manager_note(
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None:
-            return HTMLResponse('<div class="emp">Thread not found</div>', status_code=404)
+            return thread_not_found()
         await ChatRepo(session).set_manager_note(
             thread_id, cleaned, _actor_name(request),
             datetime.now(UTC).replace(tzinfo=None))
