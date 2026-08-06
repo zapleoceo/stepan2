@@ -412,20 +412,7 @@ class EvolutionTransport:
         async with self._client() as c:
             r = await c.get(f"/chat/findMessages/{self._instance}")
         r.raise_for_status()
-        out: list[dict[str, Any]] = []
-        for m in r.json():
-            key = m.get("key") or {}
-            if key.get("fromMe"):
-                continue
-            out.append(
-                {
-                    "remote_jid": key.get("remoteJid", ""),
-                    "sender_id": key.get("participant") or key.get("remoteJid", ""),
-                    "text": (m.get("message") or {}).get("conversation", ""),
-                    "message_timestamp": m.get("messageTimestamp"),
-                }
-            )
-        return out
+        return [_wa_message(m) for m in _wa_records(r.json())]
 
     async def send_message(self, remote_jid: str, text: str) -> dict[str, Any]:
         async with self._client() as c:
@@ -441,6 +428,138 @@ class EvolutionTransport:
             r = await c.get(f"/instance/connectionState/{self._instance}")
         r.raise_for_status()
         return ((r.json().get("instance") or {}).get("state")) or "close"
+
+    async def pair(self) -> str:
+        """Create the instance if new, then return the QR as a data: URI to render.
+
+        Evolution answers 409 for an instance that already exists; that is the normal path
+        for "the QR expired, show me another one", not an error."""
+        async with self._client() as c:
+            r = await c.post(
+                "/instance/create",
+                json={"instanceName": self._instance, "integration": "WHATSAPP-BAILEYS",
+                      "qrcode": True},
+            )
+            if r.status_code not in (409, 403):
+                r.raise_for_status()
+                qr = _qr_data_uri(r.json())
+                if qr:
+                    return qr
+            r = await c.get(f"/instance/connect/{self._instance}")
+        r.raise_for_status()
+        return _qr_data_uri(r.json())
+
+    async def forget(self) -> None:
+        """Unlink and drop the instance — the manager's phone loses our linked device."""
+        async with self._client() as c:
+            await c.delete(f"/instance/logout/{self._instance}")
+            await c.delete(f"/instance/delete/{self._instance}")
+
+
+def _qr_data_uri(payload: dict[str, Any]) -> str:
+    """Evolution returns the QR under `qrcode.base64` on create and flat on connect."""
+    qr = payload.get("qrcode") or payload
+    b64 = qr.get("base64") or ""
+    if not b64:
+        return ""
+    return b64 if b64.startswith("data:") else f"data:image/png;base64,{b64}"
+
+
+def _wa_records(payload: Any) -> list[dict[str, Any]]:
+    """findMessages answers a bare list on some versions and {messages:{records:[…]}} on
+    others. Reading only one shape returns an empty inbox instead of failing."""
+    if isinstance(payload, list):
+        return [m for m in payload if isinstance(m, dict)]
+    if not isinstance(payload, dict):
+        return []
+    inner = payload.get("messages")
+    if isinstance(inner, list):
+        return [m for m in inner if isinstance(m, dict)]
+    if isinstance(inner, dict) and isinstance(inner.get("records"), list):
+        return [m for m in inner["records"] if isinstance(m, dict)]
+    return []
+
+
+# Every shape whose text a human actually reads. Plain `conversation` covers only the
+# simplest bubble: a reply, a link, a photo caption and a voice note all arrive under other
+# keys, and reading just the one left most of a real chat looking blank.
+_WA_TEXT_KEYS: tuple[tuple[str, str], ...] = (
+    ("conversation", ""),
+    ("extendedTextMessage", "text"),
+    ("imageMessage", "caption"),
+    ("videoMessage", "caption"),
+    ("documentMessage", "caption"),
+    ("documentWithCaptionMessage", "caption"),
+    ("buttonsResponseMessage", "selectedDisplayText"),
+    ("listResponseMessage", "title"),
+    ("templateButtonReplyMessage", "selectedDisplayText"),
+    ("ephemeralMessage", ""),
+)
+
+# Non-text bubbles we must still record. A voice note is where half an Indonesian sales
+# conversation lives; filing it as an empty string would read as silence in the transcript.
+_WA_MEDIA_KINDS: tuple[tuple[str, str], ...] = (
+    ("imageMessage", "image"),
+    ("videoMessage", "video"),
+    ("audioMessage", "audio"),
+    ("stickerMessage", "image"),
+    ("documentMessage", "document"),
+    ("documentWithCaptionMessage", "document"),
+)
+
+
+def _wa_body(message: Any) -> dict[str, Any]:
+    """Unwrap the envelopes WhatsApp wraps a real message in (disappearing / view-once)."""
+    body = message if isinstance(message, dict) else {}
+    for _ in range(3):  # bounded: these nest at most twice in practice, never cyclically
+        for envelope in ("ephemeralMessage", "viewOnceMessage", "viewOnceMessageV2",
+                         "documentWithCaptionMessage"):
+            inner = body.get(envelope)
+            if isinstance(inner, dict) and isinstance(inner.get("message"), dict):
+                body = inner["message"]
+                break
+        else:
+            return body
+    return body
+
+
+def _wa_text(message: Any) -> str:
+    body = _wa_body(message)
+    for key, field in _WA_TEXT_KEYS:
+        value = body.get(key)
+        if not field and isinstance(value, str):
+            return value
+        if field and isinstance(value, dict) and isinstance(value.get(field), str):
+            return value[field]
+    return ""
+
+
+def _wa_media_kind(message: Any) -> str | None:
+    body = _wa_body(message)
+    for key, kind in _WA_MEDIA_KINDS:
+        if isinstance(body.get(key), dict):
+            return kind
+    return None
+
+
+def _wa_message(raw: dict[str, Any]) -> dict[str, Any]:
+    """One Evolution record → the flat shape WhatsAppAdapter maps to InboundMessage.
+
+    `fromMe` used to mean "drop it". On a manager's number that threw away the half we
+    linked the device for: how they answer, how fast, what they say about price. It is now
+    a DIRECTION, decided here where the raw flag is, not re-derived downstream from who the
+    sender looks like — that guess is exactly what mislabelled 1401 Instagram messages."""
+    key = raw.get("key") or {}
+    message = raw.get("message")
+    return {
+        "remote_jid": key.get("remoteJid", ""),
+        "sender_id": key.get("participant") or key.get("remoteJid", ""),
+        "text": _wa_text(message),
+        "message_timestamp": raw.get("messageTimestamp"),
+        "external_id": key.get("id") or None,
+        "direction": "out" if key.get("fromMe") else "in",
+        "media_kind": _wa_media_kind(message),
+    }
 
 
 # Graph 400s the WHOLE request over one subfield it dislikes, and fetch_conversations turns

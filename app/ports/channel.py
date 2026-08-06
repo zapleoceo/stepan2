@@ -43,6 +43,10 @@ class SendResult:
     error: str | None = None
 
 
+# Stored in outbox.error and matched by the inbox queries, so it must never be re-worded.
+READ_ONLY_ERROR = "read_only_channel"
+
+
 @dataclass(frozen=True)
 class InboundComment:
     """A comment under one of OUR OWN posts. Public channel, separate from DMs — no thread,
@@ -88,6 +92,7 @@ class ChannelPort(Protocol):
     port and calls three of its methods."""
 
     kind: ChannelKind
+    read_only: bool  # ingest-only instance: OutboxSender must never send through it
 
     async def fetch_inbound(self) -> list[InboundMessage]:
         """Новые входящие сообщения этого канала (для чтения)."""

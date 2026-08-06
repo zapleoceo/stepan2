@@ -23,7 +23,9 @@ async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
         instance=dump["instance"],
         api_key=dump["api_key"],
     )
-    return WhatsAppAdapter(transport, instance=dump["instance"])
+    return WhatsAppAdapter(
+        transport, instance=dump["instance"], read_only=bool(dump.get("read_only"))
+    )
 
 
 SPEC = ConnectorSpec(

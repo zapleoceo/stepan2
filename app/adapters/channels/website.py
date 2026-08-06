@@ -22,6 +22,7 @@ class WebsiteAdapter:
     """ChannelPort for the public site chat: readable in-request, never writable."""
 
     kind: ChannelKind = ChannelKind.WEBSITE
+    read_only: bool = False  # its send path is a no-op by nature, not by configuration
 
     async def fetch_inbound(self) -> list[InboundMessage]:
         """Always empty — there is nothing to poll.

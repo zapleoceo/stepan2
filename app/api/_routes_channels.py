@@ -8,12 +8,13 @@ import secrets
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 
 from app.adapters.channels.ig_client import build_ig_client
-from app.adapters.crypto import encrypt
+from app.adapters.channels.transports import EvolutionTransport
+from app.adapters.crypto import decrypt, encrypt
 from app.adapters.db.models import Channel
 from app.adapters.db.session import session_scope
 from app.admin._branch import (
@@ -23,7 +24,8 @@ from app.admin._branch import (
 )
 from app.config import settings
 from app.connectors.registry import is_operator_addable
-from app.domain.enums import ChannelKind
+from app.connectors.whatsapp_ui import wa_instance_name, wa_qr_panel
+from app.domain.enums import ChannelKind, SessionStatus
 from app.modules.channels.service import ChannelService
 from app.modules.meta.tokens import page_access_token
 from app.modules.settings.repository import SettingRepo
@@ -595,41 +597,128 @@ async def meta_connect(
 
 # ─── WhatsApp Evolution ───────────────────────────────────────────────────────
 
-@router.post("/channels/{ch_id}/wa/connect", response_class=HTMLResponse)
-async def wa_connect(
+async def _wa_pending(session: Any, ch_id: int) -> dict[str, Any] | None:
+    """The half-finished pairing: a PENDING session row holding the config we will need
+    the moment the phone confirms. Not ACTIVE — active_session_settings() would hand a
+    port to the worker for a number that is not linked yet."""
+    row = (await session.execute(
+        text("SELECT secret_enc FROM channel_session"
+             " WHERE channel_id=:id AND status=:pending LIMIT 1"),
+        {"id": ch_id, "pending": SessionStatus.PENDING.value},
+    )).mappings().first()
+    return json.loads(decrypt(row["secret_enc"])) if row else None
+
+
+async def _wa_store(
+    session: Any, ch_id: int, dump: dict[str, Any], status: SessionStatus
+) -> None:
+    await session.execute(
+        text("DELETE FROM channel_session WHERE channel_id=:id"), {"id": ch_id}
+    )
+    await session.execute(
+        text("UPDATE channel SET handle=:h WHERE id=:id"),
+        {"h": dump.get("phone") or dump["instance"], "id": ch_id},
+    )
+    await session.execute(
+        text("INSERT INTO channel_session (channel_id, secret_enc, status)"
+             " VALUES (:ch, :sec, :st)"),
+        {"ch": ch_id, "sec": encrypt(json.dumps(dump)), "st": status.value},
+    )
+
+
+def _wa_transport(instance: str) -> EvolutionTransport:
+    return EvolutionTransport(
+        base_url=settings().evolution_url,
+        instance=instance,
+        api_key=settings().evolution_api_key,
+    )
+
+
+@router.post("/channels/{ch_id}/wa/pair", response_class=HTMLResponse)
+async def wa_pair(
     ch_id: int,
     request: Request,
-    base_url: str = Form(default=""),
-    instance: str = Form(default=""),
-    api_key: str = Form(default=""),
+    phone: str = Form(default=""),
+    read_only: str = Form(default=""),
 ) -> HTMLResponse:
+    """Create the instance and show its QR. Re-posting with no phone means "the code
+    expired, give me another" — the pending row remembers which number we were pairing."""
+    apply_lang(request)
+    if not settings().evolution_url:
+        return HTMLResponse(_ch_wa_form(ch_id, error=t("ch.wa_off")))
+    async with session_scope() as session:
+        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
+            return HTMLResponse(_ch_wa_form(ch_id, error="Forbidden"))
+        pending = await _wa_pending(session, ch_id)
+
+    if phone.strip():
+        dump = {
+            "instance": wa_instance_name(phone),
+            "phone": phone.strip(),
+            "read_only": bool(read_only.strip()),
+        }
+    elif pending:
+        dump = pending  # QR refresh — keep the number AND the permission already chosen
+    else:
+        return HTMLResponse(_ch_wa_form(ch_id, error=t("ch.wa_need_phone")))
+    if not "".join(c for c in dump["phone"] if c.isdigit()):
+        return HTMLResponse(_ch_wa_form(ch_id, error=t("ch.wa_need_phone")))
+
+    try:
+        qr = await _wa_transport(dump["instance"]).pair()
+    except (httpx.HTTPError, OSError) as exc:
+        logger.warning("wa pair failed channel=%d: %s", ch_id, exc)
+        return HTMLResponse(_ch_wa_form(ch_id, error=str(exc)))
+
+    async with session_scope() as session:
+        await _wa_store(session, ch_id, dump, SessionStatus.PENDING)
+    return HTMLResponse(wa_qr_panel(ch_id, qr, dump["phone"]))
+
+
+@router.get("/channels/{ch_id}/wa/state", response_class=HTMLResponse)
+async def wa_state(ch_id: int, request: Request) -> HTMLResponse:
+    """Poll target while the QR is on screen: has the phone confirmed the link yet?"""
     apply_lang(request)
     async with session_scope() as session:
         if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
             return HTMLResponse(_ch_wa_form(ch_id, error="Forbidden"))
-    if not base_url.strip() or not instance.strip() or not api_key.strip():
-        return HTMLResponse(_ch_wa_form(ch_id, error="All three fields are required"))
-    dump = {
-        "base_url": base_url.strip(),
-        "instance": instance.strip(),
-        "api_key": api_key.strip(),
-    }
-    enc = encrypt(json.dumps(dump))
+        pending = await _wa_pending(session, ch_id)
+    if pending is None:
+        return HTMLResponse(_ch_wa_form(ch_id))
+    try:
+        state = await _wa_transport(pending["instance"]).connection_state()
+    except (httpx.HTTPError, OSError):
+        return HTMLResponse(wa_qr_panel(ch_id, "", pending["phone"]))
+    if state != "open":
+        # 204 = "nothing changed": htmx leaves the panel alone. Re-rendering it every three
+        # seconds would replace the <img> mid-scan and the phone would never finish reading
+        # the code it was pointed at.
+        return Response(status_code=204)
     async with session_scope() as session:
-        await session.execute(
-            text("DELETE FROM channel_session WHERE channel_id=:id"), {"id": ch_id}
-        )
-        await session.execute(
-            text("UPDATE channel SET handle=:h WHERE id=:id"),
-            {"h": instance.strip(), "id": ch_id},
-        )
-        await session.execute(
-            text(
-                "INSERT INTO channel_session (channel_id, secret_enc, status)"
-                " VALUES (:ch, :sec, 'active')"
-            ),
-            {"ch": ch_id, "sec": enc},
-        )
+        await _wa_store(session, ch_id, pending, SessionStatus.ACTIVE)
     resp = HTMLResponse(channel_credential_html(ch_id, "whatsapp", "active"))
     resp.headers["HX-Trigger"] = "refreshChannelList"
     return resp
+
+
+@router.post("/channels/{ch_id}/wa/cancel", response_class=HTMLResponse)
+async def wa_cancel(ch_id: int, request: Request) -> HTMLResponse:
+    """Abandon a pairing: drop our linked device from the phone, then forget the row.
+
+    Leaving the instance behind would hold one of the four device slots on someone's
+    account for nothing."""
+    apply_lang(request)
+    async with session_scope() as session:
+        if await _channel_branch(session, ch_id, writable_branch_ids(request)) is None:
+            return HTMLResponse(_ch_wa_form(ch_id, error="Forbidden"))
+        pending = await _wa_pending(session, ch_id)
+        if pending is not None:
+            await session.execute(
+                text("DELETE FROM channel_session WHERE channel_id=:id"), {"id": ch_id}
+            )
+    if pending is not None:
+        try:
+            await _wa_transport(pending["instance"]).forget()
+        except (httpx.HTTPError, OSError) as exc:
+            logger.warning("wa unlink failed channel=%d: %s", ch_id, exc)
+    return HTMLResponse(_ch_wa_form(ch_id))
