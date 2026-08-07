@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, Lead
@@ -68,13 +68,28 @@ async def merge_by_phone(session: AsyncSession, lead: Lead) -> Lead | None:
     return survivor
 
 
+# Rows that describe the PERSON and must follow them, not stay with the retired record.
+#
+# crm_lead_state is the one that bites: a booking on an absorbed lead is the same booking
+# twice. The funnel filters merged leads so its totals stayed right, but any question asked
+# straight of the CRM table — "how many are registered for the event" — counted a person and
+# their own duplicate. Found while reconciling nine bookings against six reminders.
+_FOLLOWS_THE_PERSON = ("crm_lead_state", "stage_event", "manager_alert",
+                       "lead_need_tag", "need_lead_state")
+
+
 async def _absorb(session: AsyncSession, survivor: Lead, absorbed: Lead) -> None:
-    """Re-point the absorbed lead's threads and retire the row."""
+    """Re-point everything about the absorbed lead and retire the row."""
     if survivor.id is None or absorbed.id is None or survivor.id == absorbed.id:
         return
     for thread in await _threads_of(session, absorbed.id):
         thread.lead_id = survivor.id
         session.add(thread)
+    for table in _FOLLOWS_THE_PERSON:
+        await session.execute(
+            text(f"UPDATE {table} SET lead_id = :to WHERE lead_id = :from"),  # noqa: S608
+            {"to": survivor.id, "from": absorbed.id},
+        )
     # Keep whatever the absorbed record knew that the survivor does not. A manager's contact
     # often carries the only real name we have.
     if not survivor.display_name and absorbed.display_name:
