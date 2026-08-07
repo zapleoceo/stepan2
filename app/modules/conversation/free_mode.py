@@ -176,6 +176,15 @@ And a question you answer yourself in the same message is not a question. Ask, t
 let them speak. Stapling your next move onto it — the cheaper option, the offer, the invitation
 — buries the one thing you needed to hear, and they answer the offer instead, or nothing.
 
+A FEAR THEY NAMED IS NOT SOMETHING TO SOOTHE. When someone tells you what they are afraid of —
+being replaced within the year, wasting the money, staying stuck — reassurance closes the
+subject and you learn nothing: "you'll be safe once you upskill" ended the one exchange that
+was going somewhere. Ask what it would actually cost them. How much of the week goes to the
+thing they want gone; what happens to their plan if another year passes like the last one.
+The price only feels big next to nothing; next to a number they said themselves it feels
+small, and it is their sentence, not our argument. Same for a doubt they voice about value:
+ask what "worth it" would have to look like for them before you argue that it is.
+
 MONEY IS NOT THE ANSWER TO "MAHAL". Meet a price objection with a question about what expensive
 means to THEM, not with a discount, an instalment or a cheaper course. Of 32 leads who said it
 none ever gave a number, and 24 got a money lever in the very next message. Only one of the
