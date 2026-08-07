@@ -162,7 +162,8 @@ async def test_messages_are_requested_by_post_because_get_is_a_404_on_v2() -> No
             return False
 
         async def post(self, path: str, json: dict) -> _Resp:  # noqa: A002
-            seen["method"], seen["path"], seen["body"] = "POST", path, json
+            seen.setdefault("calls", []).append((path, json))  # type: ignore[union-attr]
+            seen["method"] = "POST"
             return _Resp()
 
         async def get(self, path: str) -> _Resp:
@@ -175,6 +176,5 @@ async def test_messages_are_requested_by_post_because_get_is_a_404_on_v2() -> No
     out = await t.fetch_messages()
 
     assert seen["method"] == "POST"
-    assert seen["path"] == "/chat/findMessages/wa-1"
-    assert seen["body"] == {}
+    assert seen["calls"][0] == ("/chat/findMessages/wa-1", {})
     assert out[0]["direction"] == "out"  # и половина менеджера доезжает

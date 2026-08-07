@@ -112,10 +112,10 @@ async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | N
 async def _thread_channel_label(session, thread_id: int) -> str:  # noqa: ANN001
     """Which connector this thread lives on — the tag over every bubble in it."""
     row = (await session.execute(
-        text("SELECT c.kind FROM channel_thread t JOIN channel c ON c.id=t.channel_id"
+        text("SELECT c.kind, c.handle FROM channel_thread t JOIN channel c ON c.id=t.channel_id"
              " WHERE t.id=:id"), {"id": thread_id},
     )).first()
-    return channel_label(row[0]) if row else ""
+    return channel_label(row[0], row[1]) if row else ""
 
 
 async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) -> int | None:
@@ -160,6 +160,7 @@ async def _build_chat_panel(
         last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs_profile,
         needs_pending=needs_pending, events=events, products=products,
         manager_note=manager_note, channel_kind=channel_kind,
+        ch_label=await _thread_channel_label(session, thread_id),
     )
 
 

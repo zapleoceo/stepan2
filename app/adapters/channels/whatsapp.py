@@ -77,6 +77,11 @@ class WhatsAppAdapter:
             direction=str(msg.get("direction", "in")),
             external_id=msg.get("external_id"),
             media_kind=msg.get("media_kind"),
+            # Identity, not decoration: without these a WhatsApp lead is a bare number with
+            # no picture, and there is nothing to consolidate them by.
+            sender_name=msg.get("sender_name"),
+            sender_avatar=msg.get("sender_avatar"),
+            lead_phone=msg.get("lead_phone"),
         )
 
 

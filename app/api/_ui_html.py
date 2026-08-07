@@ -444,8 +444,16 @@ def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str
     return ' <span class="rcpt" title="Sent">✓</span>'
 
 
-def channel_label(kind: str | None) -> str:
-    """The connector's own name for the tag — asked of the registry, never spelled here."""
+def channel_label(kind: str | None, handle: str | None = None) -> str:
+    """The ACCOUNT's label, not the connector's.
+
+    Two WhatsApp numbers both read "WhatsApp (Evolution API)" — a tag that cannot tell you
+    which of the managers' phones a line came through, which is the only thing it exists to
+    answer. The operator already named each channel; that name is the answer. The
+    connector's own label is the fallback for a channel nobody bothered to name."""
+    named = (handle or "").strip()
+    if named:
+        return named
     spec = spec_for(kind) if kind else None
     return t(spec.label_key) if spec is not None else ""
 
@@ -999,6 +1007,7 @@ def chat_panel_html(
     products: list | None = None,
     manager_note: str | None = None,
     channel_kind: str | None = None,
+    ch_label: str = "",
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -1020,7 +1029,7 @@ def chat_panel_html(
         f'{header}'
         f'{note_popup_slot_html(tid)}'
         f'<div class="msgs" id="msgs-{tid}">'
-        f'{messages_html(msgs, pending, tid, lead_seen_at, events, channel_label(channel_kind))}'
+        f'{messages_html(msgs, pending, tid, lead_seen_at, events, ch_label)}'
         f'</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'

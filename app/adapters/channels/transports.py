@@ -416,8 +416,38 @@ class EvolutionTransport:
         returns {"messages":{"total":…,"records":[…]}} newest-first."""
         async with self._client() as c:
             r = await c.post(f"/chat/findMessages/{self._instance}", json={})
-        r.raise_for_status()
-        return [_wa_message(m) for m in _wa_records(r.json())]
+            r.raise_for_status()
+            messages = [_wa_message(m) for m in _wa_records(r.json())]
+            profiles = await self._profiles(c)
+        for m in messages:
+            name, avatar = profiles.get(m["remote_jid"], (None, None))
+            m["sender_name"], m["sender_avatar"] = name, avatar
+        return messages
+
+    async def _profiles(self, client: Any) -> dict[str, tuple[str | None, str | None]]:
+        """Who each chat belongs to, by jid → (name, avatar).
+
+        A separate call because findMessages carries no profile: without it every WhatsApp
+        lead shows in the inbox as a bare number with no picture. One request per poll for
+        the whole instance, and a failure here must not cost us the messages — a nameless
+        chat is a cosmetic loss, a dropped poll is a real one."""
+        try:
+            r = await client.post(f"/chat/findChats/{self._instance}", json={})
+            r.raise_for_status()
+            rows = r.json()
+        except Exception as exc:  # noqa: BLE001 — profiles are decoration, messages are not
+            logger.warning("wa profiles unavailable for %s: %s", self._instance, exc)
+            return {}
+        out: dict[str, tuple[str | None, str | None]] = {}
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            jid = row.get("remoteJid") or row.get("id")
+            if not jid:
+                continue
+            name = row.get("pushName") or row.get("name") or None
+            out[str(jid)] = (name, row.get("profilePicUrl") or None)
+        return out
 
     async def send_message(self, remote_jid: str, text: str) -> dict[str, Any]:
         async with self._client() as c:
@@ -547,6 +577,23 @@ def _wa_media_kind(message: Any) -> str | None:
     return None
 
 
+def _wa_phone(jid: str) -> str | None:
+    """+62… from a WhatsApp address, or None when the address is not a phone.
+
+    `628119720022@s.whatsapp.net` is the number itself — on WhatsApp the address IS the
+    identity, which is what makes it the join key for consolidating a lead across channels.
+
+    Two shapes deliberately return None rather than a guess. `@lid` is WhatsApp's privacy
+    identifier and contains no number at all — such chats will never merge by phone, and
+    that is a property of the platform, not a bug to paper over. `@g.us` is a group: it has
+    many participants and belongs to none of them."""
+    local, _, domain = str(jid or "").partition("@")
+    if domain != "s.whatsapp.net":
+        return None
+    digits = local.split(":")[0]  # a device suffix rides along on some items
+    return f"+{digits}" if digits.isdigit() and len(digits) >= 8 else None
+
+
 def _wa_message(raw: dict[str, Any]) -> dict[str, Any]:
     """One Evolution record → the flat shape WhatsAppAdapter maps to InboundMessage.
 
@@ -556,8 +603,10 @@ def _wa_message(raw: dict[str, Any]) -> dict[str, Any]:
     sender looks like — that guess is exactly what mislabelled 1401 Instagram messages."""
     key = raw.get("key") or {}
     message = raw.get("message")
+    jid = key.get("remoteJid", "")
     return {
-        "remote_jid": key.get("remoteJid", ""),
+        "remote_jid": jid,
+        "lead_phone": _wa_phone(jid),
         "sender_id": key.get("participant") or key.get("remoteJid", ""),
         "text": _wa_text(message),
         "message_timestamp": raw.get("messageTimestamp"),

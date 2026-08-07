@@ -75,7 +75,10 @@ class IngestService:
                 if row is not None:
                     created.append(row)
                 continue
-            phone = extract_phone(inbound.text, cc)  # merge key when the lead shares a number
+            # The channel's own number wins over one scraped from the text: on WhatsApp the
+            # address IS the lead's phone, while extract_phone can only ever find a number
+            # someone typed — which may well be a friend's, or the school's own.
+            phone = inbound.lead_phone or extract_phone(inbound.text, cc)
             lead, thread = await self.identity.resolve_or_create(
                 inbound.external_thread_id, channel_id,
                 display_name=inbound.sender_name,
