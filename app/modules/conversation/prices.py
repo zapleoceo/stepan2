@@ -46,14 +46,22 @@ class MoneyLocale:
     magnitudes: dict[str, int]
 
 
-_ID_MAGNITUDES = {"juta": 1_000_000, "jt": 1_000_000, "ribu": 1_000, "rb": 1_000, "k": 1_000}
+# "-an" is how Indonesian says "-ish": 13 jutaan, 500 ribuan. Spelled out rather than handled
+# by a suffix rule because "k" must not take it — "harganya 500 kan?" is a particle, not
+# 500 thousand, and a magnitude read there would block a reply that quoted nothing.
+_ID_MAGNITUDES = {
+    "juta": 1_000_000, "jutaan": 1_000_000, "jt": 1_000_000,
+    "ribu": 1_000, "ribuan": 1_000, "rb": 1_000, "k": 1_000,
+}
+_ID_MAGNITUDE_RE = r"jutaan|ribuan|juta|jt|ribu|rb|k"
 
 # Indonesian: verbatim the two patterns that have run on branch 1 since the gate was written.
 # Note "k" is a magnitude for canonicalisation but NOT a price signal in quote_re — "500k" was
 # never treated as leading with money, and this file does not get to change that.
 _ID = MoneyLocale(
-    figure_re=re.compile(r"(rp\.?\s*)?(\d[\d.,]*)\s*(juta|jt|ribu|rb|k)?\b", re.IGNORECASE),
-    quote_re=re.compile(r"\brp\.?\s?\d[\d.,]*|\d[\d.,]*\s?(?:ribu|juta|rb\b)", re.IGNORECASE),
+    figure_re=re.compile(rf"(rp\.?\s*)?(\d[\d.,]*)\s*({_ID_MAGNITUDE_RE})?\b", re.IGNORECASE),
+    quote_re=re.compile(r"\brp\.?\s?\d[\d.,]*|\d[\d.,]*\s?(?:ribuan|jutaan|ribu|juta|rb\b)",
+                        re.IGNORECASE),
     magnitudes=_ID_MAGNITUDES,
 )
 
@@ -82,11 +90,11 @@ _EN_MAGNITUDES = {
 _EN = MoneyLocale(
     figure_re=re.compile(
         rf"({_EN_CURRENCY}\.?\s*)?(\d[\d.,]*)\s*"
-        r"(millions|million|thousands|thousand|juta|ribu|mio|mn|jt|rb|k)?\b",
+        rf"(millions|million|thousands|thousand|{_ID_MAGNITUDE_RE}|mio|mn)?\b",
         re.IGNORECASE),
     quote_re=re.compile(
         rf"{_EN_CURRENCY}\.?\s?\d[\d.,]*"
-        r"|\d[\d.,]*\s?(?:millions|million|thousands|thousand|juta|ribu|mio|mn|rb\b)",
+        r"|\d[\d.,]*\s?(?:millions|million|thousands|thousand|jutaan|ribuan|juta|ribu|mio|mn|rb\b)",
         re.IGNORECASE),
     magnitudes=_EN_MAGNITUDES,
 )

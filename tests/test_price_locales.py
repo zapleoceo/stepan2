@@ -257,3 +257,24 @@ def test_an_uninvited_dollar_figure_in_a_nudge_is_caught() -> None:
     nudge = "Still thinking it over? The course is $1,500 and we start next month."
     assert uninvited_price(nudge, _Dossier(), money_lang="en")
     assert not uninvited_price(nudge, _Dossier())
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("bayar developer bikin 1 app aja bisa 20 jutaan", {20_000_000}),
+    ("harganya 13 jutaan kak", {13_000_000}),
+    ("tiketnya 100 ribuan aja", {100_000}),
+])
+def test_the_ish_suffix_is_still_a_price(text: str, expected: set[int]) -> None:
+    """"-an" is how Indonesian says "-ish", and the boundary after the magnitude word used to
+    end the match before it: "20 jutaan" canonicalised to 20, so the money gate compared twenty
+    against a knowledge base of millions, found it harmless, and let an invented market
+    comparison ship (sim m9, ambiguous_expensive)."""
+    assert canonical_prices(text) == expected
+    assert quotes_price(text)
+
+
+def test_the_particle_kan_is_not_five_hundred_thousand() -> None:
+    """"500 kan?" is "five hundred, right?" — the reason the suffix is spelled out per word
+    instead of appended to every magnitude. A bare number with no currency marker is not a
+    price at all here; what matters is that the particle never becomes a magnitude."""
+    assert 500_000 not in canonical_prices("harganya 500 kan?")
