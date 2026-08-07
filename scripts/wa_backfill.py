@@ -106,7 +106,11 @@ async def _backfill_channel(channel: Channel) -> int:
             for raw in records:
                 msg = _wa_message(raw)
                 name, avatar = profiles.get(msg["remote_jid"], (None, None))
-                msg["sender_name"], msg["sender_avatar"] = name, avatar
+                # The message's own pushName wins — the chat list had 4 names in 238 rows,
+                # the messages carry one each. Overwriting with the list emptied the field
+                # and left 135 nameable chats anonymous.
+                msg["sender_name"] = msg.get("sender_name") or name
+                msg["sender_avatar"] = avatar
                 batch.append(msg)
             # Reuse the adapter's own mapping so the backfill and the live poll cannot
             # disagree about what a message is.
