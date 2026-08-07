@@ -89,6 +89,12 @@ async def threads_awaiting_reply(
         .where(
             Lead.branch_id == branch_id,
             Channel.is_active.is_(True),  # type: ignore[attr-defined]
+            # Same class of waste, one step earlier: a read-only channel is one we linked to
+            # WATCH a manager work. The send gate already refuses these, so every reply
+            # generated for one was written and thrown away — five for five on the first two
+            # live numbers. Their threads are still ingested and read; they are simply not
+            # ours to answer.
+            Channel.read_only.is_(False),  # type: ignore[attr-defined]
             Lead.agent_enabled.is_(True),  # type: ignore[attr-defined]
             Lead.is_blocked.is_(False),  # type: ignore[attr-defined]
             Lead.stage.not_in(BOT_SILENT_STAGES),  # type: ignore[attr-defined]

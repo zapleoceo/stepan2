@@ -617,8 +617,9 @@ async def _wa_store(
         text("DELETE FROM channel_session WHERE channel_id=:id"), {"id": ch_id}
     )
     await session.execute(
-        text("UPDATE channel SET handle=:h WHERE id=:id"),
-        {"h": dump.get("phone") or dump["instance"], "id": ch_id},
+        text("UPDATE channel SET handle=:h, read_only=:ro WHERE id=:id"),
+        {"h": dump.get("phone") or dump["instance"],
+         "ro": bool(dump.get("read_only")), "id": ch_id},
     )
     await session.execute(
         text("INSERT INTO channel_session (channel_id, secret_enc, status)"
