@@ -409,8 +409,13 @@ class EvolutionTransport:
         )
 
     async def fetch_messages(self) -> list[dict[str, Any]]:
+        """Newest page of the instance's messages, both directions.
+
+        POST with a body, not GET: v1's GET form answers 404 on v2 and the ingest fails
+        with the channel showing "active" — verified against the live server, which
+        returns {"messages":{"total":…,"records":[…]}} newest-first."""
         async with self._client() as c:
-            r = await c.get(f"/chat/findMessages/{self._instance}")
+            r = await c.post(f"/chat/findMessages/{self._instance}", json={})
         r.raise_for_status()
         return [_wa_message(m) for m in _wa_records(r.json())]
 
