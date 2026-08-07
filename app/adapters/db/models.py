@@ -115,6 +115,15 @@ class Lead(SQLModel, table=True):
     # were re-pointed at the survivor; the row stays so an id that was handed out, logged or
     # linked never dangles, and so a wrong merge can be read back rather than guessed at.
     is_merged_into: int | None = Field(default=None, foreign_key="lead.id", index=True)
+    # Not one of Stepan's leads: every thread this person has lives on a read-only channel,
+    # so they are somebody the manager was already talking to.
+    #
+    # A COLUMN because it is asked on every read. It was two correlated subqueries over
+    # channel_thread inside the funnel predicate — `lead` already takes 573k sequential
+    # scans reading two billion rows, and adding per-row subqueries to that is the wrong
+    # direction. The writer knows the answer when it attaches a thread; the reader should
+    # not have to work it out again.
+    manager_only: bool = Field(default=False, index=True)
     handed_off_at: datetime | None = Field(default=None)
     follower_count: int | None = Field(default=None)
     following_count: int | None = Field(default=None)
