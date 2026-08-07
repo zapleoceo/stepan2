@@ -92,3 +92,81 @@ def test_pending_is_not_active() -> None:
     active_session_settings отдаёт только ACTIVE."""
     assert SessionStatus.PENDING.value == "pending"
     assert SessionStatus.PENDING is not SessionStatus.ACTIVE
+
+
+# ── сборка порта ──────────────────────────────────────────────────────────────
+
+
+async def test_a_paired_channel_builds_its_port_from_the_environment(
+    db_session, monkeypatch,  # noqa: ANN001
+) -> None:
+    """Панель перестала спрашивать адрес и ключ — их знает окружение. Сборка порта про это
+    не знала и падала на `KeyError: 'base_url'`, а падала она в воркере: канал привязан,
+    в интерфейсе «активно», и ровно ноль диалогов. Поймано на первом живом номере."""
+    import json
+
+    from app.adapters.crypto import encrypt
+    from app.adapters.db.models import Branch, Channel, ChannelSession
+    from app.config import settings
+    from app.connectors.whatsapp import build_port
+    from app.domain.enums import ChannelKind, SessionStatus
+
+    monkeypatch.setenv("STEPAN2_EVOLUTION_URL", "http://evolution:8080")
+    monkeypatch.setenv("STEPAN2_EVOLUTION_API_KEY", "k")
+    settings.cache_clear()
+
+    branch = Branch(name="T", lang="id")
+    db_session.add(branch)
+    await db_session.flush()
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP)
+    db_session.add(channel)
+    await db_session.flush()
+    db_session.add(ChannelSession(
+        channel_id=channel.id,
+        secret_enc=encrypt(json.dumps(
+            {"instance": "wa-628119720022", "phone": "+628119720022", "read_only": True})),
+        status=SessionStatus.ACTIVE,
+    ))
+    await db_session.flush()
+
+    port = await build_port(db_session, channel)
+
+    assert port.read_only is True
+    settings.cache_clear()
+
+
+async def test_a_channel_paired_by_the_old_form_still_works(
+    db_session, monkeypatch,  # noqa: ANN001
+) -> None:
+    """Строка, записанная старой формой из трёх полей, несёт свои адрес и ключ. Она должна
+    продолжать работать без пере-привязки — иначе релиз молча гасит живой канал."""
+    import json
+
+    from app.adapters.crypto import encrypt
+    from app.adapters.db.models import Branch, Channel, ChannelSession
+    from app.config import settings
+    from app.connectors.whatsapp import build_port
+    from app.domain.enums import ChannelKind, SessionStatus
+
+    monkeypatch.setenv("STEPAN2_EVOLUTION_URL", "")
+    monkeypatch.setenv("STEPAN2_EVOLUTION_API_KEY", "")
+    settings.cache_clear()
+
+    branch = Branch(name="T", lang="id")
+    db_session.add(branch)
+    await db_session.flush()
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP)
+    db_session.add(channel)
+    await db_session.flush()
+    db_session.add(ChannelSession(
+        channel_id=channel.id,
+        secret_enc=encrypt(json.dumps({"base_url": "https://old.example.com",
+                                       "instance": "legacy", "api_key": "old-key"})),
+        status=SessionStatus.ACTIVE,
+    ))
+    await db_session.flush()
+
+    port = await build_port(db_session, channel)
+
+    assert port.read_only is False  # старая форма про флаг не знала → канал остаётся пишущим
+    settings.cache_clear()

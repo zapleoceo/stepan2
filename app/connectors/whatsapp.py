@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.channels.transports import EvolutionTransport
 from app.adapters.channels.whatsapp import WhatsAppAdapter
 from app.adapters.db.models import Channel
+from app.config import settings
 from app.domain.enums import ChannelKind
 from app.ports.channel import ChannelPort
 
@@ -18,10 +19,15 @@ async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
     dump = await active_session_settings(session, channel.id or 0)
     if dump is None:
         raise RuntimeError(f"no WhatsApp config for channel {channel.id}")
+    # Server address and key come from the environment: Evolution is OUR service, one per
+    # deployment, and the pairing panel no longer asks for them. A row written by the OLD
+    # three-field form still carries its own — honour it, so an existing channel keeps
+    # working without being re-paired.
+    cfg = settings()
     transport = EvolutionTransport(
-        base_url=dump["base_url"],
+        base_url=dump.get("base_url") or cfg.evolution_url,
         instance=dump["instance"],
-        api_key=dump["api_key"],
+        api_key=dump.get("api_key") or cfg.evolution_api_key,
     )
     return WhatsAppAdapter(
         transport, instance=dump["instance"], read_only=bool(dump.get("read_only"))
