@@ -444,7 +444,24 @@ def _receipt(occurred_at: datetime | None, lead_seen_at: datetime | None) -> str
     return ' <span class="rcpt" title="Sent">✓</span>'
 
 
-def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
+def channel_label(kind: str | None) -> str:
+    """The connector's own name for the tag — asked of the registry, never spelled here."""
+    spec = spec_for(kind) if kind else None
+    return t(spec.label_key) if spec is not None else ""
+
+
+def _ch_tag(label: str) -> str:
+    """Which connector this message travelled through, next to the time.
+
+    Today a thread belongs to one channel, so every bubble in it carries the same tag and
+    the tag earns nothing. It is built now because the consolidated lead view merges
+    Instagram, WhatsApp and the site into ONE feed — and there a line without its origin is
+    unreadable: you cannot tell what the customer actually saw, or where to answer."""
+    return f'<span class="bm-ch">{_h.escape(label)}</span> · ' if label else ""
+
+
+def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None,
+            channel_label: str = "") -> str:
     (mid, direction, sent_by, text, ts, llm_info, link_url, preview_url,
      media_id, media_kind, media_ready, media_pending) = row[:12]  # type: ignore[misc]
     # Optional trailing columns, in _MSG_COLS order: sent_by_name, then the excluded flag.
@@ -484,7 +501,7 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     if direction == "in":
         return (
             f'<div class="bb bb-i{ex}" id="bb-{mid}">'
-            f'<div class="bm">{who} · {time_str} {tr_btn}</div>'
+            f'<div class="bm">{_ch_tag(channel_label)}{who} · {time_str} {tr_btn}</div>'
             f'{body}</div>'
         )
     mgr = " mgr" if sent_by == "manager" else ""
@@ -498,7 +515,8 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None) -> str:
     )
     return (
         f'<div class="bb bb-o{mgr}{ex}" id="bb-{mid}">'
-        f'<div class="bm">{who} · {time_str}{_receipt(ts, lead_seen_at)} {tr_btn} {del_btn}</div>'
+        f'<div class="bm">{_ch_tag(channel_label)}{who} · {time_str}'
+        f'{_receipt(ts, lead_seen_at)} {tr_btn} {del_btn}</div>'
         f'{body}{llm_chip}</div>'
     )
 
@@ -556,11 +574,13 @@ def _anchor_event_ts(event_ts: datetime, out_ts: list[datetime]) -> datetime:
     return event_ts
 
 
-def _merge_feed(msgs: list, events: list, tid: int, lead_seen_at: datetime | None) -> str:
+def _merge_feed(msgs: list, events: list, tid: int, lead_seen_at: datetime | None,
+                channel_label: str = "") -> str:
     """Message bubbles + system-log lines, interleaved in DISPLAY order (not raw write
     order — see _anchor_event_ts)."""
     out_ts = sorted(ts for m in msgs if m[1] == "out" and (ts := _as_dt(m[4])) is not None)
-    items = [(_as_dt(m[4]) or datetime.min, 0, _bubble(m, tid, lead_seen_at)) for m in msgs]
+    items = [(_as_dt(m[4]) or datetime.min, 0,
+              _bubble(m, tid, lead_seen_at, channel_label)) for m in msgs]
     items += [
         (_anchor_event_ts(_as_dt(e[5]) or datetime.min, out_ts), 1, _event_bubble(e))
         for e in events
@@ -654,11 +674,11 @@ def pending_block_html(pending: list, tid: int, oob: bool = False) -> str:
 def since_bubbles_html(
     msgs: list, tid: int, after_id: int, lead_seen_at: datetime | None = None,
     pending: list | None = None, events: list | None = None,
-    after_stage_id: int = 0, after_log_id: int = 0,
+    after_stage_id: int = 0, after_log_id: int = 0, channel_label: str = "",
 ) -> str:
     """New bubbles/events + fresh sentinel, plus an OOB refresh of the pending block."""
     events = events or []
-    feed = _merge_feed(msgs, events, tid, lead_seen_at)
+    feed = _merge_feed(msgs, events, tid, lead_seen_at, channel_label)
     stage_max, log_max = _last_event_ids(events)
     out = feed + poll_sentinel_html(
         tid, _last_msg_id(msgs) or after_id,
@@ -671,11 +691,11 @@ def since_bubbles_html(
 
 def messages_html(
     msgs: list, pending: list, tid: int, lead_seen_at: datetime | None = None,
-    events: list | None = None,
+    events: list | None = None, channel_label: str = "",
 ) -> str:
     events = events or []
     stage_max, log_max = _last_event_ids(events)
-    parts = [_merge_feed(msgs, events, tid, lead_seen_at)]
+    parts = [_merge_feed(msgs, events, tid, lead_seen_at, channel_label)]
     parts.append(poll_sentinel_html(tid, _last_msg_id(msgs), stage_max, log_max))
     parts.append(pending_block_html(pending, tid))  # queued replies pinned at the bottom
     return "".join(parts)
@@ -1000,7 +1020,8 @@ def chat_panel_html(
         f'{header}'
         f'{note_popup_slot_html(tid)}'
         f'<div class="msgs" id="msgs-{tid}">'
-        f'{messages_html(msgs, pending, tid, lead_seen_at, events)}</div>'
+        f'{messages_html(msgs, pending, tid, lead_seen_at, events, channel_label(channel_kind))}'
+        f'</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
         f'<div class="fin">'

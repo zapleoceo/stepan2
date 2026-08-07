@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy import text
 
 from app.adapters.db.models import Outbox, StageEvent, ThreadLog
 from app.adapters.db.session import session_scope
@@ -47,6 +48,7 @@ from ._responses import thread_not_found
 from ._ui_html import (
     _bubble,
     app_shell,
+    channel_label,
     chat_block_pill_html,
     chat_bot_pill_html,
     chat_header_html,
@@ -105,6 +107,15 @@ async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | N
     if new_tr is not None:
         await ChatRepo(session).cache_needs_translation(lead_id, new_tr)
     return profile
+
+
+async def _thread_channel_label(session, thread_id: int) -> str:  # noqa: ANN001
+    """Which connector this thread lives on — the tag over every bubble in it."""
+    row = (await session.execute(
+        text("SELECT c.kind FROM channel_thread t JOIN channel c ON c.id=t.channel_id"
+             " WHERE t.id=:id"), {"id": thread_id},
+    )).first()
+    return channel_label(row[0]) if row else ""
 
 
 async def _guarded_branch(session, thread_id: int, allowed: list[int] | None) -> int | None:
@@ -316,10 +327,12 @@ async def chat_since(
         rows = await fetch_messages_since(session, thread_id, after_id)
         pending = await fetch_pending(session, thread_id)
         events = await fetch_thread_events(session, thread_id, after_stage_id, after_log_id)
+        label = await _thread_channel_label(session, thread_id)
     return HTMLResponse(
         since_bubbles_html(
             list(rows), thread_id, after_id, pending=pending, events=list(events),
             after_stage_id=after_stage_id, after_log_id=after_log_id,
+            channel_label=label,
         )
     )
 
@@ -369,7 +382,9 @@ async def _rerender_feed(session, thread_id: int) -> HTMLResponse:
     msgs = await fetch_messages(session, thread_id)
     pending = await fetch_pending(session, thread_id)
     events = await fetch_thread_events(session, thread_id)
-    return HTMLResponse(messages_html(msgs, pending, thread_id, events=events))
+    label = await _thread_channel_label(session, thread_id)
+    return HTMLResponse(
+        messages_html(msgs, pending, thread_id, events=events, channel_label=label))
 
 
 @router.post("/chat/{thread_id}/clear", response_class=HTMLResponse)
