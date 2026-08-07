@@ -183,11 +183,12 @@ async def test_a_known_thread_gets_its_name_even_though_dedup_drops_the_message(
     идентичность читалась лишь при записи новой строки — тред, заведённый до того, как канал
     научился отдавать имя, оставался безымянным навсегда: следующий опрос имя привозил,
     дедуп ронял сообщение, и больше на него никто не смотрел. Живьём: 13 тредов, 0 имён."""
+    from datetime import UTC, datetime
+
     from app.adapters.db.models import Branch, Channel, ChannelThread, Lead
     from app.domain.enums import ChannelKind
     from app.modules.leads.ingest import IngestService
     from app.ports.channel import InboundMessage
-    from datetime import UTC, datetime
 
     branch = Branch(name="T", lang="id")
     db_session.add(branch)
@@ -201,8 +202,9 @@ async def test_a_known_thread_gets_its_name_even_though_dedup_drops_the_message(
     thread = ChannelThread(lead_id=lead.id, channel_id=channel.id,
                            external_thread_id="628119720022@s.whatsapp.net")
     db_session.add(thread)
-    msg = Message(thread_id=thread.id, direction="in", text="halo",
-                  external_id="A", occurred_at=datetime.now(UTC).replace(tzinfo=None))
+    db_session.add(Message(
+        thread_id=thread.id, direction="in", text="halo", external_id="A",
+        occurred_at=datetime.now(UTC).replace(tzinfo=None)))
     await db_session.flush()
 
     inbound = InboundMessage(
