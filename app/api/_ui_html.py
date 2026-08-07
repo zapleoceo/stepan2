@@ -1087,6 +1087,7 @@ def chat_panel_html(
         f'</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
+        f'{_read_only_notice(conns)}'
         f'<div class="fin">'
         f'<div class="fin-tools">'
         f'<button class="act-btn"'

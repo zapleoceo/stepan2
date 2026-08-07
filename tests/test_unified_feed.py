@@ -89,3 +89,16 @@ def test_the_composer_warns_when_the_newest_channel_is_a_managers() -> None:
 def test_no_warning_when_we_can_actually_answer() -> None:
     assert _read_only_notice([{"handle": "IG itstep", "read_only": False}]) == ""
     assert _read_only_notice([]) == ""
+
+
+def test_the_panel_actually_renders_the_warning() -> None:
+    """Тест на саму функцию проходил, а вызова в панели не было — замена не совпала с
+    шаблоном, и предупреждение существовало, но никому не показывалось."""
+    from app.api._ui_html import chat_panel_html
+
+    html = chat_panel_html(
+        7, "Valian", "handed_off", [], [],
+        conns=[{"handle": "WA Excel", "read_only": True, "kind": "whatsapp"}],
+    )
+    assert "fin-ro" in html
+    assert "WA Excel" in html
