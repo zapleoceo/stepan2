@@ -254,6 +254,10 @@ async def threads_partial(
     kind = _remembered_kind(request, kind)
     branch_ids = branch_ids_from_request(request)
     conditions, params = [], {}
+    # A record folded into another would show the same person twice, once with half their
+    # history. The same predicate the funnel counts with, so the list and the totals cannot
+    # disagree — a chat visible in one and missing from the other reads as a broken counter.
+    conditions.append("l.is_merged_into IS NULL")
     if branch_ids:
         conditions.append("l.branch_id = ANY(:bids)")
         params["bids"] = branch_ids

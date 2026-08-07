@@ -20,6 +20,7 @@ from app.modules.notifications.alerts import AlertService
 from app.ports.channel import InboundMessage
 from app.ports.notify import NotifierPort
 
+from .consolidate import merge_by_phone
 from .identity import IdentityService
 from .phone import extract_phone
 from .repository import MessageRepo
@@ -126,9 +127,17 @@ class IngestService:
             if thread is None:
                 continue  # brand-new: the storing path resolves it with everything at once
             lead = await self.session.get(Lead, thread.lead_id)
-            if lead is not None:
-                self.identity.backfill(lead, phone, name, None, None, avatar)
-                self.session.add(lead)
+            if lead is None:
+                continue
+            knew_phone = lead.phone_e164
+            self.identity.backfill(lead, phone, name, None, None, avatar)
+            self.session.add(lead)
+            # A phone that has only just become known is the moment two records can be
+            # recognised as one person — Stepan's thread and the manager's chat. Merging is
+            # retroactive by nature: the number arrives mid-conversation, long after both
+            # records exist.
+            if lead.phone_e164 and lead.phone_e164 != knew_phone:
+                await merge_by_phone(self.session, lead)
 
     async def _advance_read_receipts(
         self, channel_id: int, messages: list[InboundMessage]

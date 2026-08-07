@@ -111,6 +111,10 @@ class Lead(SQLModel, table=True):
                     "должен). Без этого флага ingest._revive_bot возвращал бота на любой "
                     "входящий, и ручное решение отменялось молча")
     is_blocked: bool = Field(default=False, index=True, description="спам/бан — бот игнорит")
+    # This record turned out to be the same person as another one (same phone). Its threads
+    # were re-pointed at the survivor; the row stays so an id that was handed out, logged or
+    # linked never dangles, and so a wrong merge can be read back rather than guessed at.
+    is_merged_into: int | None = Field(default=None, foreign_key="lead.id", index=True)
     handed_off_at: datetime | None = Field(default=None)
     follower_count: int | None = Field(default=None)
     following_count: int | None = Field(default=None)

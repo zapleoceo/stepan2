@@ -28,7 +28,10 @@ from app.modules.channels.service import _BY_CHANNEL, _BY_LEAD, _BY_THREAD  # no
 # Deleted by their own statement rather than through one of the loops below.
 _HANDLED_SEPARATELY = {
     "channel_thread": {"message", "channel_thread"},
-    "lead": {"channel_thread"},
+    # lead.is_merged_into points at another LEAD. It is not deleted with the orphan set — the
+    # purge nulls the pointer first, because the survivor keeps the threads either way and a
+    # merge note that outlives its target is worse than no note.
+    "lead": {"channel_thread", "lead"},
     "channel": {"channel_thread", "message"},
     "message": {"media_asset"},
 }

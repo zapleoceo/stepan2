@@ -81,6 +81,11 @@ class ChannelService:
 
         # 2) leads now orphaned — the threads on this channel were their only ones.
         n_leads = await self._count(f"({_ORPHAN}) AS orphan", p)  # noqa: S608
+        # lead.is_merged_into points at another LEAD, so an orphan that absorbed someone
+        # cannot be deleted while the pointer stands. Cut the pointer first: the survivor
+        # keeps the threads either way, and a dangling merge note is worse than none.
+        await self._exec(
+            f"UPDATE lead SET is_merged_into = NULL WHERE is_merged_into IN ({_ORPHAN})", p)  # noqa: S608
         for tbl in _BY_LEAD:
             await self._exec(f"DELETE FROM {tbl} WHERE lead_id IN ({_ORPHAN})", p)  # noqa: S608
         await self._exec(f"DELETE FROM lead WHERE id IN ({_ORPHAN})", p)  # noqa: S608

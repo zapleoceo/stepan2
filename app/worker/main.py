@@ -993,6 +993,22 @@ async def backfill_ads_branch(ctx: dict[str, Any], branch_id: int) -> int:
         return 0
 
 
+async def merge_leads(ctx: dict[str, Any]) -> int:
+    """Fold together leads that share a phone. Hourly.
+
+    The ingest hook covers a number that arrives in a message, but phones also come from the
+    CRM, from an operator typing one in, and from every poll that ran before the merge
+    existed — so the reconcile pass is what makes the rule true rather than mostly true."""
+    return await _fan_out_per_branch(ctx, "merge_leads_branch")
+
+
+async def merge_leads_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    from app.modules.leads import consolidate  # noqa: PLC0415
+
+    async with session_scope() as session:
+        return await consolidate.sweep(session, branch_id)
+
+
 async def watch_wa_sessions(ctx: dict[str, Any]) -> int:
     """Probe every linked WhatsApp device; alert on one that stayed down. Every 5 minutes.
 
@@ -1216,7 +1232,7 @@ class WorkerSettings:
         schedule_followups, reactivate_dormant, learning_audit, escalate_stale_alerts,
         sync_crm_writeback,
         process_deletions, sync_crm, refresh_profiles, watch_wa_sessions, backfill_media,
-        prune_broker_log,
+        prune_broker_log, merge_leads,
         daily_digest, crm_rescue, ingest_comments, proactive_comments,
         aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
@@ -1228,7 +1244,7 @@ class WorkerSettings:
         sync_crm_writeback_branch,
         escalate_stale_alerts_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
-        watch_wa_sessions_branch,
+        watch_wa_sessions_branch, merge_leads_branch,
         backfill_media_branch, aggregate_needs_branch,
         daily_digest_branch, ingest_comments_branch, proactive_comments_branch,
         sync_ads_branch, backfill_ads_branch,
@@ -1320,6 +1336,7 @@ class WorkerSettings:
         # Off the busy seconds: this one talks to Evolution, not to the model.
         cron(watch_wa_sessions, minute=set(range(0, 60, 5)), second=50,
              run_at_startup=False),
+        cron(merge_leads, minute={52}, second=0, run_at_startup=False),
         # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
         # Broker-log retention: prune old rows daily at 03:30 (broker_log_retention_days)
