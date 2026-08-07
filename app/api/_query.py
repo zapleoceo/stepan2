@@ -450,13 +450,7 @@ async def fetch_stage_reach(
 # whose every thread lives on a read-only channel is not Stepan's lead at all: it is someone
 # the manager was already talking to, and counting them measures a human's pipeline as the
 # bot's. Having no thread at all is neither — that lead is simply new, and stays.
-NOT_IN_FUNNEL = (
-    "(l.is_merged_into IS NOT NULL"
-    " OR (EXISTS (SELECT 1 FROM channel_thread ct WHERE ct.lead_id = l.id)"
-    "     AND NOT EXISTS (SELECT 1 FROM channel_thread ct"
-    "                     JOIN channel c ON c.id = ct.channel_id"
-    "                     WHERE ct.lead_id = l.id AND NOT c.read_only)))"
-)
+NOT_IN_FUNNEL = "(l.is_merged_into IS NOT NULL OR l.manager_only)"
 IN_FUNNEL = f"NOT {NOT_IN_FUNNEL}"
 
 _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where

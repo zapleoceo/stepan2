@@ -5,6 +5,8 @@ contact arrives via a different channel. Isolation lives in the BranchScoped rep
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, Lead
@@ -30,11 +32,18 @@ class IdentityService:
         ig_user_id: str | None = None,
         ig_username: str | None = None,
         avatar_url: str | None = None,
+        first_seen: datetime | None = None,
     ) -> tuple[Lead, ChannelThread]:
-        """Return (lead, thread): phone-match → existing thread's lead → new lead."""
+        """Return (lead, thread): phone-match → existing thread's lead → new lead.
+
+        `first_seen` is when the MESSAGE happened, and it becomes the lead's created_at.
+        Defaulting to "now" was invisible while every message arrived live; a history
+        backfill then stamped 306 leads with the hour it ran, and every report keyed on
+        arrival date showed a spike on the day of the import instead of the months the
+        conversations actually spanned."""
         thread = await self.threads.by_external(channel_id, external_thread_id)
         lead = await self._resolve_lead(
-            thread, phone, display_name, ig_user_id, ig_username, avatar_url
+            thread, phone, display_name, ig_user_id, ig_username, avatar_url, first_seen
         )
         thread = await self._upsert_thread(thread, lead, channel_id, external_thread_id)
         return lead, thread
@@ -47,6 +56,7 @@ class IdentityService:
         ig_user_id: str | None = None,
         ig_username: str | None = None,
         avatar_url: str | None = None,
+        first_seen: datetime | None = None,
     ) -> Lead:
         # An EXISTING thread's identity wins over a phone. The phone is mined from free
         # message text (see ingest.extract_phone) — a lead who types SOMEONE ELSE'S number
@@ -64,16 +74,17 @@ class IdentityService:
             if existing is not None:
                 self.backfill(existing, phone, display_name, ig_user_id, ig_username, avatar_url)
                 return existing
-        return await self.leads.add(
-            Lead(
-                display_name=display_name,
-                phone_e164=phone,
-                ig_user_id=ig_user_id,
-                ig_username=ig_username,
-                avatar_url=avatar_url,
-                branch_id=self.branch_id,
-            )
+        fresh = Lead(
+            display_name=display_name,
+            phone_e164=phone,
+            ig_user_id=ig_user_id,
+            ig_username=ig_username,
+            avatar_url=avatar_url,
+            branch_id=self.branch_id,
         )
+        if first_seen is not None:
+            fresh.created_at = first_seen
+        return await self.leads.add(fresh)
 
     @staticmethod
     def backfill(

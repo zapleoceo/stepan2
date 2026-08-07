@@ -615,9 +615,15 @@ def _funnel_flow_html(
     # Bottom lane, spread across the width: nurturing sits early (its traffic is heaviest
     # around qualifying/presenting), dormant and manager later, mirroring where in a real
     # conversation a lead is most likely to fall into each.
-    pos["nurturing"] = (left + 1.5 * step, bot_y)
-    pos["dormant"] = (left + 3 * step, bot_y)
-    pos["manager"] = (left + 4.5 * step, bot_y)
+    #
+    # As FRACTIONS of the lane, not multiples of the spine's step. Multiples tied these three
+    # to how many funnel stages there happen to be: with five stages the step is 152 and
+    # `left + 4.5 * step` put "менеджер" at x=730 in a 700-wide viewBox, so the node and its
+    # label were drawn outside the picture and the panel simply cut them off.
+    span = right - left
+    pos["nurturing"] = (left + 0.28 * span, bot_y)
+    pos["dormant"] = (left + 0.54 * span, bot_y)
+    pos["manager"] = (left + 0.80 * span, bot_y)
 
     def bar_h(s: str) -> float:
         return max(10.0, min(96.0, tp.get(s, 0) / max_tp * 96))

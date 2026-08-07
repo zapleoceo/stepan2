@@ -163,6 +163,8 @@ _CSS = (
     ".lc-cnt{margin-left:auto;opacity:.75;white-space:nowrap}"
     ".lc-ro{opacity:.6}"
     ".ch-conn{margin-top:.15rem;opacity:.85}"
+    ".lc-line2{display:flex;align-items:center;gap:.4rem;min-width:0}"
+    ".lc-stage{margin-left:auto;flex-shrink:0}"
     # source bar (lead origin — ad / story / direct)
     ".srcbar{display:flex;align-items:center;gap:.45rem;padding:.22rem .9rem;"
     "background:#0d1017;border-bottom:1px solid #1e2636;font-size:.71rem;flex-shrink:0}"

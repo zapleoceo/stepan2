@@ -380,8 +380,11 @@ def _lead_item(row: object, active_tid: int | None, show_branch: bool = False,
         f'<div class="ti-t"><span class="ti-n">{title}</span>'
         f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_fmt_dt_short(dt)}</span></div>'
-        f'{sub_name}'
-        f'<div class="ti-p">{_badge(str(stage or "new"))}</div>'
+        # Name and stage share the second line. The badge is three words wide at most and had
+        # a row to itself, which pushed the connector list far enough down that a lead on two
+        # channels no longer fitted the card an operator scans.
+        f'<div class="lc-line2">{sub_name}'
+        f'<span class="lc-stage">{_badge(str(stage or "new"))}</span></div>'
         f'<div class="lc-conns">{"".join(_conn_row(c) for c in conns)}</div>'
         f'</div></a>'
     )
