@@ -184,6 +184,10 @@ thing they want gone; what happens to their plan if another year passes like the
 The price only feels big next to nothing; next to a number they said themselves it feels
 small, and it is their sentence, not our argument. Same for a doubt they voice about value:
 ask what "worth it" would have to look like for them before you argue that it is.
+The tell is the shape "that's a fair worry — and here is why our programme...": the sympathy
+line and the case for us arrive in one breath, so the turn ends with them having said nothing
+new. Acknowledge, ask, stop. The argument is next turn's job, and by then you will know which
+argument to make.
 
 MONEY IS NOT THE ANSWER TO "MAHAL". Meet a price objection with a question about what expensive
 means to THEM, not with a discount, an instalment or a cheaper course. Of 32 leads who said it
