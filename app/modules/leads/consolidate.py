@@ -85,6 +85,15 @@ async def _absorb(session: AsyncSession, survivor: Lead, absorbed: Lead) -> None
     for thread in await _threads_of(session, absorbed.id):
         thread.lead_id = survivor.id
         session.add(thread)
+    # crm_lead_state is UNIQUE on lead_id, so when BOTH records have one the row cannot
+    # simply move — the update raises and takes the whole merge down with it. The survivor's
+    # own row is the one to keep: it belongs to the record the funnel actually follows, and
+    # both describe the same person in the same CRM anyway.
+    await session.execute(
+        text("DELETE FROM crm_lead_state WHERE lead_id = :from"
+             " AND EXISTS (SELECT 1 FROM crm_lead_state WHERE lead_id = :to)"),
+        {"to": survivor.id, "from": absorbed.id},
+    )
     for table in _FOLLOWS_THE_PERSON:
         await session.execute(
             text(f"UPDATE {table} SET lead_id = :to WHERE lead_id = :from"),  # noqa: S608
