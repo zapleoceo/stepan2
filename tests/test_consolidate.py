@@ -151,3 +151,29 @@ async def test_the_sweep_catches_numbers_that_arrived_before_this_code(db_sessio
 
     assert await consolidate.sweep(db_session, bid) == 1
     assert await consolidate.sweep(db_session, bid) == 0  # идемпотентно
+
+
+# ── что ещё должно уехать к выжившему ─────────────────────────────────────────
+
+
+async def test_a_crm_booking_follows_the_person_not_the_retired_record(db_session) -> None:  # noqa: ANN001
+    """Бронь на поглощённом лиде — это одна и та же бронь, посчитанная дважды. Воронка
+    отсеивает слитые записи, поэтому её итоги оставались верными; но любой вопрос,
+    заданный прямо таблице CRM — «сколько записано на ивент» — считал человека и его же
+    дубль. Найдено при сверке девяти броней с шестью напоминаниями."""
+    from sqlalchemy import text
+
+    from app.adapters.db.models import CrmLeadState
+
+    bid = await _branch(db_session)
+    ig = await _lead_on(db_session, bid, read_only=False, phone="+628111")
+    wa = await _lead_on(db_session, bid, read_only=True, phone="+628111",
+                        stage=Stage.MANAGER)
+    db_session.add(CrmLeadState(lead_id=wa.id, branch_id=bid))
+    await db_session.flush()
+
+    await consolidate.merge_by_phone(db_session, ig)
+
+    owner = (await db_session.execute(
+        text("SELECT lead_id FROM crm_lead_state"))).scalars().all()
+    assert owner == [ig.id]
