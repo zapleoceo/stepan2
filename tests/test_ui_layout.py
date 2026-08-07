@@ -109,3 +109,39 @@ def test_wide_content_scrolls_inside_itself_rather_than_the_page() -> None:
     scrolling document moves the whole UI sideways, including the nav."""
     assert "html,body{height:100%;overflow-x:hidden}" in _CSS
     assert ".tbl{min-width:520px}" in _media_block("@media (max-width:760px)")
+
+
+# ── метка канала над сообщением ───────────────────────────────────────────────
+
+
+def test_a_bubble_names_the_connector_it_came_through() -> None:
+    """Сегодня тред принадлежит одному каналу и метка внутри него одинакова. Она нужна для
+    слитой ленты лида: там Instagram, WhatsApp и сайт лежат вперемешку, и строка без
+    происхождения не читается — непонятно, что клиент видел и куда отвечать."""
+    from app.api._ui_html import _bubble
+
+    row = (1, "in", "lead", "halo", None, None, None, None, None, None, None, None)
+    assert "WhatsApp" in _bubble(row, 7, None, "WhatsApp")
+
+
+def test_the_tag_is_on_the_sent_side_too() -> None:
+    """Не только над вопросом лида: в слитой ленте ответ мог уйти другим каналом, чем
+    пришёл вопрос, и это ровно то, что нужно видеть."""
+    from app.api._ui_html import _bubble
+
+    row = (2, "out", "agent", "baik", None, None, None, None, None, None, None, None)
+    assert "WhatsApp" in _bubble(row, 7, None, "WhatsApp")
+
+
+def test_no_label_means_no_empty_separator() -> None:
+    from app.api._ui_html import _bubble
+
+    row = (3, "in", "lead", "halo", None, None, None, None, None, None, None, None)
+    assert "bm-ch" not in _bubble(row, 7, None, "")
+
+
+def test_a_hostile_channel_name_cannot_inject_markup() -> None:
+    from app.api._ui_html import _bubble
+
+    row = (4, "in", "lead", "halo", None, None, None, None, None, None, None, None)
+    assert "<script>" not in _bubble(row, 7, None, "<script>alert(1)</script>")
