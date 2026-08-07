@@ -10,6 +10,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import case, func, select
+from sqlalchemy.orm import aliased
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import (
@@ -60,6 +61,9 @@ _AWAITING_REPLY_MAX_AGE = timedelta(days=settings().awaiting_reply_max_age_days)
 _REPLY_BATCH_CAP = settings().reply_batch_cap
 
 
+_newest = aliased(ChannelThread)
+
+
 async def threads_awaiting_reply(
     session: AsyncSession, branch_id: int, limit: int | None = None,
 ) -> list[int]:
@@ -95,6 +99,23 @@ async def threads_awaiting_reply(
             # live numbers. Their threads are still ingested and read; they are simply not
             # ours to answer.
             Channel.read_only.is_(False),  # type: ignore[attr-defined]
+            # Answer where the person is ACTUALLY waiting. A consolidated lead has several
+            # threads, and replying into an older one answers a conversation they left —
+            # while the message they just sent sits unanswered somewhere else.
+            #
+            # This is also how a read-only channel silences the lead ENTIRELY rather than
+            # just itself: if their newest message came to a manager's WhatsApp, the only
+            # eligible thread is one the filter above excludes, so nothing is generated. The
+            # manager has them; a second answer from us on Instagram would be two voices
+            # from one school. (Owner's rule, 2026-08-07.)
+            ChannelThread.last_in_at == (
+                # aliased: correlating ChannelThread with itself leaves the subquery with no
+                # FROM clause of its own, and SQLAlchemy refuses rather than guessing.
+                select(func.max(_newest.last_in_at))
+                .where(_newest.lead_id == Lead.id)
+                .correlate(Lead)
+                .scalar_subquery()
+            ),
             Lead.agent_enabled.is_(True),  # type: ignore[attr-defined]
             Lead.is_blocked.is_(False),  # type: ignore[attr-defined]
             Lead.stage.not_in(BOT_SILENT_STAGES),  # type: ignore[attr-defined]
