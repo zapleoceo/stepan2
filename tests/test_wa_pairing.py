@@ -202,8 +202,10 @@ async def test_a_known_thread_gets_its_name_even_though_dedup_drops_the_message(
     thread = ChannelThread(lead_id=lead.id, channel_id=channel.id,
                            external_thread_id="628119720022@s.whatsapp.net")
     db_session.add(thread)
+    await db_session.flush()
     db_session.add(Message(
-        thread_id=thread.id, direction="in", text="halo", external_id="A",
+        branch_id=branch.id, thread_id=thread.id, channel_id=channel.id,
+        direction="in", text="halo", external_id="A",
         occurred_at=datetime.now(UTC).replace(tzinfo=None)))
     await db_session.flush()
 
