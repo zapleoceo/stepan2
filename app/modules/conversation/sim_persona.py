@@ -170,8 +170,58 @@ LAST_100_PERSONAS: dict[str, str] = {
                     "hargai, kalau dijanjiin angka pasti kamu curiga.",
 }
 
+# Каждая персона давит на ОДНУ слабую методологию из аудита 07.08.2026, а не изображает
+# «трудного лида вообще». Слабые места по тому аудиту: Challenger 4/10, Closing 6/10,
+# Sandler-commitment 6.5, SPIN-Implication, и «отвечай на прямой вопрос ПЕРВЫМ».
+METHOD_PERSONAS: dict[str, str] = {
+    # Проверяет рекомендацию №1: сначала ответ, потом ОДИН квалифицирующий вопрос.
+    # Если Степан начнёт с вопроса — персона повторяет вопрос жёстче и уходит.
+    "direct_question": "Kamu langsung to the point. Pesan pertama kamu: «SMM Intensive "
+                       "biayanya berapa dan berapa lama?». Kamu TIDAK mau ditanya balik "
+                       "sebelum dijawab. Kalau admin membalas dengan pertanyaan tanpa "
+                       "memberi angka dan durasi lebih dulu, kamu ulangi pertanyaanmu lebih "
+                       "tegas: «tolong jawab dulu, berapa?». Kalau diulang lagi tanpa "
+                       "jawaban — kamu bilang «ya sudah, makasih» dan berhenti. Kalau "
+                       "dijawab lengkap dan baru ditanya SATU hal, kamu jawab dengan senang "
+                       "hati dan lanjut ngobrol.",
+    # Проверяет №8: горячего лида не квалифицируют заново, его ведут к шагу.
+    "ready_to_pay": "Kamu sudah memutuskan. Pesan pertama: «Saya mau daftar Vibe Coding, "
+                    "gimana cara bayarnya?». Kamu tidak butuh presentasi, tidak butuh "
+                    "pertanyaan tentang tujuan hidupmu — kamu butuh langkah berikutnya. "
+                    "Kalau admin malah mulai menggali («kenapa tertarik?», «mau bikin apa?»), "
+                    "kamu jawab pendek dan makin tidak sabar: «saya sudah baca semuanya kak, "
+                    "tinggal bayar aja gimana?». Kalau admin langsung memberi langkah konkret "
+                    "(nominal, DP, pilihan jadwal, minta kontak) — kamu ikuti dan beri "
+                    "nomormu.",
+    # Проверяет SPIN-Implication: цель есть, последствий бездействия человек не осознал.
+    "vague_goal": "Kamu bilang ingin «upgrade skill biar nggak ketinggalan», tapi tidak bisa "
+                  "menjelaskan untuk apa persisnya. Kalau ditanya tujuan, jawabanmu umum: "
+                  "«ya biar bisa aja», «zaman sekarang kan AI semua». Kamu BARU membuka diri "
+                  "kalau admin bertanya soal AKIBAT — apa yang terjadi kalau setahun lagi "
+                  "kamu masih di posisi yang sama, atau apa yang sekarang paling bikin kamu "
+                  "tertinggal di kerjaan. Pada pertanyaan seperti itu kamu bercerita jujur: "
+                  "kamu takut posisimu digantikan orang yang lebih melek AI.",
+    # Проверяет №5: «дорого» бывает трёх видов, и их надо разделять вопросом.
+    "ambiguous_expensive": "Kamu tertarik, tapi begitu dengar harga kamu bilang «wah mahal "
+                           "ya». Kamu SENGAJA tidak menjelaskan kenapa. Sebenarnya uangnya "
+                           "ada — kamu cuma belum yakin programnya sepadan. Kalau admin "
+                           "langsung menawarkan cicilan, DP, atau diskon, kamu merasa "
+                           "didorong dan menutup diri: «nanti dulu deh». Kalau admin bertanya "
+                           "dulu apa yang terasa berat — nominalnya atau keyakinan pada "
+                           "hasilnya — kamu mengaku terus terang bahwa kamu ragu hasilnya.",
+    # Проверяет Challenger: у человека ошибочная посылка, и её надо мягко оспорить.
+    "wrong_assumption": "Kamu yakin bahwa untuk bisa bikin aplikasi kamu harus kuasai coding "
+                        "dulu dari nol, jadi rencanamu: belajar Python sendiri setahun di "
+                        "YouTube, baru ikut kursus. Kamu menyampaikan itu sebagai keputusan "
+                        "yang sudah matang. Kalau admin cuma setuju dan menunggu setahun, "
+                        "kamu pamit sopan. Kalau admin dengan hormat menantang asumsinya — "
+                        "menunjukkan bahwa urutannya justru terbalik dan setahun itu bisa "
+                        "jadi hilang percuma — kamu kaget, tertarik, dan mulai bertanya.",
+}
+
 PERSONAS.update(REAL_PERSONAS)
 PERSONAS.update(LAST_100_PERSONAS)
+PERSONAS.update(METHOD_PERSONAS)
 
 # Без этого стенд врёт в главном: 99 из последних 100 лидов пришли С РЕКЛАМЫ, и Степан на проде
 # ЗНАЕТ, какое объявление нажали. Симуляционный тред приходил пустым, поэтому «а про что была
@@ -184,6 +234,11 @@ PERSONA_AD_ORIGIN: dict[str, str] = {
     "clicked_by_accident": "smm_intensive",
     "salary_first": "smm_intensive",
     "spare_parts_owner": "vibe_coding",
+    "direct_question": "smm_intensive",
+    "ready_to_pay": "vibe_coding",
+    "vague_goal": "smm_intensive",
+    "ambiguous_expensive": "vibe_coding",
+    "wrong_assumption": "vibe_coding",
 }
 
 
