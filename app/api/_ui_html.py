@@ -1252,9 +1252,12 @@ def app_shell(
         "var all=[].slice.call(btn.parentNode.querySelectorAll('.chk-kind'));"
         "var on=all.filter(function(b){return b.classList.contains('on');})"
         ".map(function(b){return b.getAttribute('data-kind');});"
-        "var kind=on.length===all.length?'':(on.length===0?'none':on.join(','));"
+        # 'all', not an empty value: the selection is remembered in a cookie now, so an
+        # omitted parameter has to keep meaning "nothing was said" — otherwise turning every
+        # chip back on would read as silence and the cookie would answer in its place.
+        "var kind=on.length===all.length?'all':(on.length===0?'none':on.join(','));"
         "var p=new URLSearchParams(window.location.search);"
-        "if(kind)p.set('kind',kind);else p.delete('kind');var qs=p.toString();"
+        "p.set('kind',kind);var qs=p.toString();"
         "htmx.ajax('GET','/ui/threads'+(qs?'?'+qs:''),{target:'#tl',source:btn});"
         "history.replaceState(null,'','/ui/inbox'+(qs?'?'+qs:''));}"
         "function scrollBot(m){if(m)m.scrollTop=m.scrollHeight;}"
@@ -1598,6 +1601,8 @@ def app_shell(
         _all_kinds = tuple(s.kind.value for s in _specs)
         if kind == "none":
             _sel_kinds: set[str] = set()
+        elif kind == "all":
+            _sel_kinds = set(_all_kinds)
         elif kind:
             _picked = {x for x in kind.split(",") if x in _all_kinds}
             _sel_kinds = _picked or set(_all_kinds)  # garbage → all on

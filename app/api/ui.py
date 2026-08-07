@@ -129,6 +129,29 @@ _THREAD_TMPL = (
     " ORDER BY t.last_act DESC NULLS LAST"
 )
 
+# The connector filter is a VIEW preference, not a place. It used to live only in the query
+# string, so every plain load of /ui/inbox — a bookmark, a new tab, F5 — silently switched
+# every connector back on, and an operator who had hidden the managers' WhatsApp numbers
+# found them back in the list each morning. The cookie is the memory; an explicit `kind` in
+# the URL still wins, so a shared link keeps meaning what it said.
+KIND_COOKIE = "s2_kind"
+_KIND_MAX_AGE_S = 60 * 60 * 24 * 365
+
+
+def _remembered_kind(request: Request, kind: str) -> str:
+    return kind.strip() or (request.cookies.get(KIND_COOKIE) or "").strip()
+
+
+def _remember_kind(resp: HTMLResponse, kind: str) -> HTMLResponse:
+    """Persist the chip selection. 'all' is the default view and needs no memory."""
+    if kind and kind != "all":
+        resp.set_cookie(KIND_COOKIE, kind, max_age=_KIND_MAX_AGE_S,
+                        httponly=False, samesite="lax")
+    else:
+        resp.delete_cookie(KIND_COOKIE)
+    return resp
+
+
 # ─── full pages ───────────────────────────────────────────────────────────────
 
 @router.get("/inbox", response_class=HTMLResponse)
@@ -138,11 +161,13 @@ async def inbox(
 ) -> HTMLResponse:
     lang = apply_lang(request)
     empty = f'<div class="emp">{_h.escape(t("inbox.select"))}</div>'
-    return HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
+    kind = _remembered_kind(request, kind)
+    resp = HTMLResponse(app_shell(lang, empty, active_nav="inbox", stage=stage.strip(),
                                   ad_id=ad_id.strip(), grp=grp.strip(), no_ad=no_ad.strip(),
                                   lead_type=lead_type.strip(), audience=audience.strip(),
-                                  awaiting=awaiting.strip(), kind=kind.strip(), q=q.strip(),
+                                  awaiting=awaiting.strip(), kind=kind, q=q.strip(),
                                   is_super=is_super_admin(request)))
+    return _remember_kind(resp, kind)
 
 
 @router.get("/knowledge", response_class=HTMLResponse)
@@ -226,6 +251,7 @@ async def threads_partial(
     audience: str = "", awaiting: str = "", kind: str = "", q: str = "", no_ad: str = "",
 ) -> HTMLResponse:
     apply_lang(request)
+    kind = _remembered_kind(request, kind)
     branch_ids = branch_ids_from_request(request)
     conditions, params = [], {}
     if branch_ids:
@@ -337,8 +363,12 @@ async def threads_partial(
                             ("ad_id", ",".join(ads)), ("no_ad", no_ad.strip()),
                             ("grp", grp.strip()), ("awaiting", aw),
                             ("kind", kind_qs), ("q", needle)) if v})
-    return HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
-                                         filter_qs=filter_qs))
+    # The chip click lands here, so this is where the new selection becomes the remembered
+    # one — the full page is not reloaded and would never get the chance.
+    return _remember_kind(
+        HTMLResponse(thread_list_html(rows, active_tid, show_branch=show_branch,
+                                      filter_qs=filter_qs)),
+        kind)
 
 
 @router.get("/reports", response_class=HTMLResponse)
