@@ -183,3 +183,50 @@ async def test_a_writable_thread_is_still_picked(db_session) -> None:
 
     bid, tid = await _thread_on(db_session, read_only=False)
     assert await wiring.threads_awaiting_reply(db_session, bid) == [tid]
+
+
+# ── куда именно отвечать, когда каналов несколько ─────────────────────────────
+
+
+async def _lead_with(s, *, newest_read_only: bool):  # noqa: ANN001, ANN202
+    """Лид с двумя тредами: наш канал и номер менеджера. Меняется только то, куда пришло
+    последнее сообщение."""
+    from datetime import UTC, datetime, timedelta
+    now = datetime.now(UTC).replace(tzinfo=None)
+    branch = Branch(name="T", lang="id")
+    s.add(branch)
+    await s.flush()
+    ig = Channel(branch_id=branch.id, kind=ChannelKind.INSTAGRAM, read_only=False)
+    wa = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, read_only=True)
+    s.add(ig)
+    s.add(wa)
+    await s.flush()
+    lead = Lead(branch_id=branch.id, stage="qualifying")
+    s.add(lead)
+    await s.flush()
+    old, new = (now - timedelta(hours=2), now)
+    ig_t = ChannelThread(lead_id=lead.id, channel_id=ig.id, external_thread_id="ig",
+                         last_in_at=new if not newest_read_only else old)
+    wa_t = ChannelThread(lead_id=lead.id, channel_id=wa.id, external_thread_id="wa",
+                         last_in_at=old if not newest_read_only else new)
+    s.add(ig_t)
+    s.add(wa_t)
+    await s.flush()
+    return branch.id, ig_t.id
+
+
+async def test_the_reply_goes_where_the_lead_last_wrote(db_session) -> None:  # noqa: ANN001
+    from app.worker import wiring
+
+    bid, ig_tid = await _lead_with(db_session, newest_read_only=False)
+    assert await wiring.threads_awaiting_reply(db_session, bid) == [ig_tid]
+
+
+async def test_a_manager_holding_the_newest_message_silences_us_everywhere(db_session) -> None:  # noqa: ANN001
+    """Владелец: «если коннектор в ридонли — ответ не нужен, это ответственность менеджера».
+    Ответить в старый инстаграм-тред значило бы дать клиенту второй голос от той же школы,
+    пока человек ведёт его в WhatsApp."""
+    from app.worker import wiring
+
+    bid, _ = await _lead_with(db_session, newest_read_only=True)
+    assert await wiring.threads_awaiting_reply(db_session, bid) == []

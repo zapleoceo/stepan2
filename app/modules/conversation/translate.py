@@ -119,17 +119,26 @@ async def translate_message(
     Raises whatever the LLM transport raises on a miss — the caller decides the fallback."""
     row = (
         await session.execute(
-            text("SELECT text, tr_text FROM message WHERE id=:mid"), {"mid": mid}
+            text("SELECT text, tr_text, tr_lang FROM message WHERE id=:mid"), {"mid": mid}
         )
     ).first()
     if not row or not row[0]:
         return None
-    if row[1]:  # cache hit — no LLM call
+    # A hit only when the cached text is in the language being asked for. It used to answer
+    # any language with whatever had been requested first, so a bubble translated once for
+    # an English admin came back in English to a Russian one — which reads as a translator
+    # that ignores you, not as a cache doing its job.
+    #
+    # A row cached before the language was recorded (tr_lang NULL) is trusted once: it was
+    # almost certainly made in the branch's own admin language, and re-billing every stored
+    # translation to find out is the more expensive way to be right.
+    if row[1] and (row[2] is None or row[2] == target):
         return row[1]
     clean = await translate_text(llm, row[0] or "", target, branch_id=branch_id,
                                  thread_id=thread_id)
     if clean:
         await session.execute(
-            text("UPDATE message SET tr_text=:t WHERE id=:mid"), {"t": clean, "mid": mid}
+            text("UPDATE message SET tr_text=:t, tr_lang=:l WHERE id=:mid"),
+            {"t": clean, "l": target, "mid": mid},
         )
     return clean or None

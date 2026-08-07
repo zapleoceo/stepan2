@@ -92,40 +92,52 @@ router.include_router(_mcpadmin_router)
 
 _CHANNEL_KINDS = frozenset(k.value for k in ChannelKind)  # valid inbox connector-filter values
 
-# Pick the top-100 threads FIRST (cheap: PK joins + an ORDER/LIMIT on channel_thread), THEN
-# run the two per-thread message LATERALs on only those 100. Evaluating the LATERALs inline
-# made Postgres compute the last-message lookup AND a full per-thread message COUNT for EVERY
-# thread in the branch (3.5k+) before the LIMIT — the count aggregate alone read ~28k buffers
-# for rows nobody sees. Limiting first cuts that ~30x (a branch with 3.5k threads: 87ms -> ~10ms),
-# and this query is polled every 30s per open inbox, so it's constant DB load, not a one-off.
-_THREAD_TMPL = (
-    "SELECT t.id, t.display_name, t.stage, t.last_act,"
-    " t.phone_e164, t.product_slug, t.ig_username, t.avatar_url,"
+# One row per LEAD, not per thread. A person on Instagram and on a manager's WhatsApp was
+# two cards saying different things about the same conversation, and the operator had no way
+# to know they were one person.
+#
+# Shape kept from the thread version for the same reason it was written that way: pick the
+# top-100 FIRST, cheaply, then do the expensive per-row work on only those. The message
+# counts that used to need a LATERAL per thread are now columns on channel_thread, kept by
+# the writer — grouping them per lead costs a SUM instead of a second scan of `message`.
+_LEAD_TMPL = (
+    "SELECT t.lead_id, t.display_name, t.stage, t.last_act,"
+    " t.phone_e164, t.ig_username, t.avatar_url,"
     " t.follower_count, t.following_count, t.agent_enabled,"
     " lm.text AS last_msg, lm.direction AS last_dir,"
-    " mc.cnt_in, mc.cnt_out,"
-    " t.branch_name, t.tz_offset_h, t.channel_kind, t.external_thread_id"
+    " t.cnt_in, t.cnt_out, t.branch_name, t.tz_offset_h, t.open_tid, t.conns"
     " FROM ("
-    "  SELECT ct.id, l.display_name, l.stage,"
-    "   COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) AS last_act,"
-    "   l.phone_e164, ct.product_slug, l.ig_username, l.avatar_url,"
+    "  SELECT l.id AS lead_id, l.display_name, l.stage,"
+    "   MAX(COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at)) AS last_act,"
+    "   l.phone_e164, l.ig_username, l.avatar_url,"
     "   l.follower_count, l.following_count, l.agent_enabled,"
-    "   b.name AS branch_name, b.tz_offset_h, ch.kind AS channel_kind,"
-    "   ct.external_thread_id"
+    "   b.name AS branch_name, b.tz_offset_h,"
+    "   SUM(ct.msg_in) AS cnt_in, SUM(ct.msg_out) AS cnt_out,"
+    # The thread a click opens: the one that moved last. Anything else opens a conversation
+    # the person is not currently having.
+    "   (ARRAY_AGG(ct.id ORDER BY"
+    "     COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) DESC))[1]"
+    "    AS open_tid,"
+    # Which accounts this person is reachable on, newest first: kind for the icon, the
+    # channel's own name, their address on it, and the traffic through it.
+    "   JSON_AGG(JSON_BUILD_OBJECT("
+    "     'kind', ch.kind, 'handle', ch.handle, 'ext', ct.external_thread_id,"
+    "     'nick', l.ig_username, 'read_only', ch.read_only,"
+    "     'tid', ct.id, 'cin', ct.msg_in, 'cout', ct.msg_out)"
+    "    ORDER BY COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) DESC)"
+    "    AS conns"
     "  FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
     "  JOIN branch b ON b.id = l.branch_id"
     "  JOIN channel ch ON ch.id = ct.channel_id"
     "  {where}"
-    "  ORDER BY COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at)"
+    "  GROUP BY l.id, l.display_name, l.stage, l.phone_e164, l.ig_username, l.avatar_url,"
+    "   l.follower_count, l.following_count, l.agent_enabled, b.name, b.tz_offset_h"
+    "  ORDER BY MAX(COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at))"
     "  DESC NULLS LAST LIMIT 100"
     " ) t"
     " LEFT JOIN LATERAL ("
-    "  SELECT m.text, m.direction FROM message m WHERE m.thread_id = t.id"
+    "  SELECT m.text, m.direction FROM message m WHERE m.thread_id = t.open_tid"
     "  ORDER BY m.occurred_at DESC, m.id DESC LIMIT 1) lm ON TRUE"
-    " LEFT JOIN LATERAL ("
-    "  SELECT COUNT(*) FILTER (WHERE m.direction = 'in') AS cnt_in,"
-    "         COUNT(*) FILTER (WHERE m.direction = 'out') AS cnt_out"
-    "  FROM message m WHERE m.thread_id = t.id) mc ON TRUE"
     " ORDER BY t.last_act DESC NULLS LAST"
 )
 
@@ -347,7 +359,7 @@ async def threads_partial(
     async with session_scope() as session:
         rows = (
             await session.execute(
-                text(_THREAD_TMPL.format(where=where_clause)), params,
+                text(_LEAD_TMPL.format(where=where_clause)), params,
             )
         ).all()
     raw_open = request.cookies.get("stepan2_open_thread", "")

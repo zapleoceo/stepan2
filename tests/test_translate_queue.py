@@ -53,17 +53,30 @@ def _fn(name: str) -> str:
 
 
 def test_the_batch_never_fires_every_request_at_once() -> None:
-    """The exact shape of the original bug: iterate, call, await nothing."""
+    """The exact shape of the original bug: iterate, call, await nothing.
+
+    Strict one-at-a-time replaced it and was too far the other way — minutes on a long chat.
+    The pool is bounded instead: a fixed number of workers pulling from one queue, so the
+    broker is never handed the whole thread and never left idle either."""
     body = _fn("trAll")
     assert ".forEach(" not in body, "a forEach over trMsg is the burst this replaced"
-    assert "step()" in body
+    assert re.search(r"for\(var w=0;w<_TRPAR", body), body
 
 
-def test_each_bubble_waits_for_the_one_before_it() -> None:
+def test_no_request_is_fired_without_being_awaited() -> None:
+    """What actually keeps translations from going missing: a worker starts the next bubble
+    only from inside the previous one's callback, so an unanswered request holds its slot
+    instead of being replaced by another."""
     body = _fn("trAll")
-    # The continuation sits INSIDE the promise callback — that is what serialises it.
     assert re.search(r"trMsg\([^)]*\)\.then\(", body), body
-    assert body.count("step()") >= 3  # kick-off plus the two continuations
+    assert "pump()" in body and "tick()" in body
+
+
+def test_the_newest_message_is_translated_first() -> None:
+    """The operator is looking at the bottom of the chat. Starting from the top spends the
+    first minute on messages from three weeks ago while the line that prompted the click
+    sits untranslated."""
+    assert ".reverse()" in _fn("trAll")
 
 
 def test_a_failed_bubble_is_retried_before_being_given_up_on() -> None:

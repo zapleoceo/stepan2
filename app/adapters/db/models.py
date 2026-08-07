@@ -147,6 +147,13 @@ class ChannelThread(SQLModel, table=True):
     window_until: datetime | None = Field(default=None, description="окно ответа канала")
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
+    # Kept by the writer instead of counted by every reader. The inbox recomputed both with
+    # a per-thread LATERAL on every poll — 414 million index lookups against `message`, for
+    # a number that changes only when a row is inserted. Grouping those counts per LEAD, as
+    # the consolidated list does, would have multiplied the same work by the number of
+    # connectors a person is on.
+    msg_in: int = Field(default=0)
+    msg_out: int = Field(default=0)
     lead_seen_at: datetime | None = Field(
         default=None, description="read-receipt лида (IG last_seen_at)")
     next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
@@ -363,6 +370,12 @@ class Message(SQLModel, table=True):
     occurred_at: datetime = Field(default_factory=_utcnow)
     llm_info: str | None = Field(default=None)
     tr_text: str | None = Field(default=None, description="кэш перевода (не биллить повторно)")
+    # WHICH language tr_text is in. Without it the cache answered every language with
+    # whatever was asked for first: a bubble translated once for an English admin came back
+    # in English to a Russian one, and looked like a broken translator rather than a stale
+    # cache. One slot per message, replaced when the language differs — a second column
+    # beats a second table on the hottest read in the app.
+    tr_lang: str | None = Field(default=None, description="язык, на который переведён tr_text")
     delete_requested: bool = Field(default=False, index=True, description="ждёт IG-unsend")
     media_pending: bool = Field(default=False, index=True, description="медиа ждёт backfill")
     media_attempts: int = Field(default=0, description="сколько раз backfill уже пробовал")

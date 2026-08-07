@@ -74,7 +74,15 @@ def awaiting_kind_sql(specs: Iterable[ConnectorSpec]) -> str:
     strings, so it carries no parameters of its own. They are ChannelKind members — a closed
     enum from our own source, never anything a request supplies."""
     excluded = [s.kind.value for s in specs if not s.counts_as_awaiting]
-    exists = " AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
+    # A read-only channel is somebody else's conversation. "Awaiting a reply" there is not a
+    # queue item — the manager is answering from their own phone, and Stepan is forbidden to
+    # write at all — so counting it inflates the badge with work nobody owes.
+    #
+    # A per-CHANNEL flag rather than a per-kind one, unlike the exclusion above: the same
+    # WhatsApp connector runs writable for the follow-up number and read-only for the
+    # managers', so the kind cannot answer this.
+    exists = (" AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
+              "             AND NOT c.read_only")
     if not excluded:
         return exists + ")"
     kinds = ", ".join(f"'{k}'" for k in excluded)
@@ -172,6 +180,19 @@ AD_FUNNEL_GROUPS: dict[str, tuple[str, ...]] = {
 }
 
 
+def _leads(clause=None):  # noqa: ANN001, ANN201
+    """Distinct LEADS, optionally only those matching a condition.
+
+    Every funnel here counted THREADS. That was the same number while a person had one
+    conversation; once Instagram and a manager's WhatsApp fold into one lead it is not, and
+    a table headed "leads from this ad" would quietly report how many chats they opened.
+
+    The stage sums had it worse: SUM(CASE stage=…) adds one per THREAD, so a two-channel
+    lead in `ready` counted as two sales."""
+    target = Lead.id if clause is None else case((clause, Lead.id))
+    return func.count(func.distinct(target))
+
+
 async def fetch_ad_funnel(
     session: AsyncSession, branch_ids: list[int] | None,
     since: datetime | None = None, until: datetime | None = None,
@@ -183,22 +204,23 @@ async def fetch_ad_funnel(
     the only column here that means money changed hands. since/until scope by the lead's
     conversation-start date — the same window as the rest of the reports panel, so
     picking a date range affects this table too, not just the KPIs above it."""
-    won = func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0))
     q = (
         select(
             ChannelThread.ad_id,
             ChannelThread.ad_media_id,
-            func.count().label("total"),
-            func.sum(case((Lead.stage.in_(_PIPELINE_STAGES), 1), else_=0)).label("pipeline"),
-            won.label("won"),
-            func.sum(case((Lead.stage == "dormant", 1), else_=0)).label("dormant"),
-            func.sum(case((deal_won_clause(), 1), else_=0)).label("deals"),
-            func.sum(case((event_booked_clause(), 1), else_=0)).label("events"),
+            _leads().label("total"),
+            _leads(Lead.stage.in_(_PIPELINE_STAGES)).label("pipeline"),
+            _leads(Lead.stage.in_(_WON_STAGES)).label("won"),
+            _leads(Lead.stage == "dormant").label("dormant"),
+            _leads(deal_won_clause()).label("deals"),
+            _leads(event_booked_clause()).label("events"),
         )
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
-        .where(ChannelThread.ad_id.is_not(None))  # type: ignore[union-attr]
+        .where(ChannelThread.ad_id.is_not(None),  # type: ignore[union-attr]
+               # A record folded into another is the same person a second time.
+               Lead.is_merged_into.is_(None))  # type: ignore[union-attr]
         .group_by(ChannelThread.ad_id, ChannelThread.ad_media_id)
-        .order_by(func.count().desc())
+        .order_by(_leads().desc())
     )
     if branch_ids:
         q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]
@@ -220,16 +242,17 @@ async def fetch_organic_funnel(
     that omitted half, which made "where is my deal?" unanswerable from this page."""
     q = (
         select(
-            func.count().label("total"),
-            func.sum(case((Lead.stage.in_(_PIPELINE_STAGES), 1), else_=0)).label("pipeline"),
-            func.sum(case((Lead.stage.in_(_WON_STAGES), 1), else_=0)).label("won"),
-            func.sum(case((Lead.stage == "dormant", 1), else_=0)).label("dormant"),
-            func.sum(case((deal_won_clause(), 1), else_=0)).label("deals"),
-            func.sum(case((event_booked_clause(), 1), else_=0)).label("events"),
+            _leads().label("total"),
+            _leads(Lead.stage.in_(_PIPELINE_STAGES)).label("pipeline"),
+            _leads(Lead.stage.in_(_WON_STAGES)).label("won"),
+            _leads(Lead.stage == "dormant").label("dormant"),
+            _leads(deal_won_clause()).label("deals"),
+            _leads(event_booked_clause()).label("events"),
         )
         .select_from(ChannelThread)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
-        .where(ChannelThread.ad_id.is_(None))  # type: ignore[union-attr]
+        .where(ChannelThread.ad_id.is_(None),  # type: ignore[union-attr]
+               Lead.is_merged_into.is_(None))  # type: ignore[union-attr]
     )
     if branch_ids:
         q = q.where(Lead.branch_id.in_(branch_ids))  # type: ignore[attr-defined]

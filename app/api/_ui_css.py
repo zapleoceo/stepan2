@@ -151,6 +151,18 @@ _CSS = (
     ".ti-sub{font-size:.62rem;color:#4a5568;display:flex;gap:.35rem;margin-top:.06rem;"
     "white-space:nowrap;overflow:hidden;align-items:center}"
     ".ti-cnt{opacity:.7}"
+    # One line per connector under a lead. Dense on purpose: a person on three accounts must
+    # still fit a card the operator scans, not scrolls.
+    ".lc-name{font-size:.7rem;color:#8b98a5;margin-top:.02rem}"
+    ".lc-conns{margin-top:.22rem;display:flex;flex-direction:column;gap:.1rem}"
+    ".lc-conn{font-size:.63rem;color:#6b7685;display:flex;align-items:center;gap:.3rem;"
+    "min-width:0}"
+    ".lc-acc{color:#8b98a5;font-weight:600;white-space:nowrap;overflow:hidden;"
+    "text-overflow:ellipsis;max-width:9rem}"
+    ".lc-addr{color:#5f6b78;white-space:nowrap}"
+    ".lc-cnt{margin-left:auto;opacity:.75;white-space:nowrap}"
+    ".lc-ro{opacity:.6}"
+    ".ch-conn{margin-top:.15rem;opacity:.85}"
     # source bar (lead origin — ad / story / direct)
     ".srcbar{display:flex;align-items:center;gap:.45rem;padding:.22rem .9rem;"
     "background:#0d1017;border-bottom:1px solid #1e2636;font-size:.71rem;flex-shrink:0}"

@@ -473,8 +473,23 @@ class EvolutionTransport:
         async with self._client() as c:
             r = await c.post(
                 "/instance/create",
-                json={"instanceName": self._instance, "integration": "WHATSAPP-BAILEYS",
-                      "qrcode": True},
+                json={
+                    "instanceName": self._instance, "integration": "WHATSAPP-BAILEYS",
+                    "qrcode": True,
+                    # WhatsApp decides how much history to hand over ONCE, at link time.
+                    # Left off, it sent a thin slice: a chat with months of conversation
+                    # arrived holding four messages, and no amount of paging afterwards
+                    # found the rest — Evolution did not have it either.
+                    "syncFullHistory": True,
+                    # Do not steal the manager's phone notifications: an "always online"
+                    # companion makes WhatsApp stop pushing to the handset, and the person
+                    # whose number this is would notice within a day.
+                    "alwaysOnline": False,
+                    # Never mark their chats read. Our galochka appearing on somebody else's
+                    # conversation is a visible change to how the manager's account behaves.
+                    "readMessages": False,
+                    "readStatus": False,
+                },
             )
             if r.status_code not in (409, 403):
                 r.raise_for_status()

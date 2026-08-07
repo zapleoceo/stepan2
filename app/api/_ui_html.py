@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 
 from app.connectors.registry import all_specs, spec_for
+from app.domain.enums import ChannelKind
 
 from ._i18n import t
 
@@ -288,35 +289,75 @@ def _channel_badge(kind: str | None, external_thread_id: str | None = None) -> s
     return f'<i class="{icon}" style="color:{color}" title="{_h.escape(key)}"></i>'
 
 
-def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
-                 filter_qs: str = "") -> str:
-    (tid, name, stage, last_act, phone, product_slug,
-     ig_username, avatar_url, follower_count, following_count, agent_enabled,
-     last_msg, last_dir, cnt_in, cnt_out, branch_name, tz_offset_h,
-     channel_kind, external_thread_id) = row  # type: ignore[misc]
-    dt = _as_dt(last_act)  # raw UTC; _fmt_dt_short applies the viewer offset once (was a
-    # per-row branch shift here + the contextvar shift there — now a single viewer shift)
-    on = " on" if tid == active_tid else ""
-    prod_badge = (
-        f' <span class="bg sq" style="font-size:.57rem;text-transform:none">'
-        f'{_h.escape(str(product_slug))}</span>'
-        if product_slug else ""
+def _conn_addr(conn: dict) -> str:
+    """How this person is addressed on that account: their number, or their handle.
+
+    A WhatsApp jid is the address itself, so it is shown as a number — except when WhatsApp
+    masked it as @lid, where there is no number to show and the account name is all there
+    is. Social connectors show the nick, which is what the operator would search for."""
+    ext = str(conn.get("ext") or "")
+    if conn.get("kind") == ChannelKind.WHATSAPP.value:
+        local, _, domain = ext.partition("@")
+        digits = local.split(":")[0]
+        return f"+{digits}" if domain == "s.whatsapp.net" and digits.isdigit() else ""
+    nick = conn.get("nick")
+    return f"@{nick}" if nick else ""
+
+
+def _conn_meta_row(conn: dict) -> str:
+    """The chat header's line for one connector: whose account, the address, since when,
+    and when they last wrote there."""
+    spec = spec_for(conn.get("kind"))
+    icon = (f'<i class="{spec.icon_class}" style="color:{spec.icon_color}"></i>'
+            if spec is not None else "•")
+    bits = [f'{icon} {_h.escape(str(conn.get("handle") or (spec.label if spec else "")))}']
+    if addr := _conn_addr(conn):
+        bits.append(f"📞 {_h.escape(addr)}")
+    if since := fmt_dt(conn.get("since"), "%d %b %Y"):
+        bits.append(f"📅 с {since}")
+    if last_in := conn.get("last_in"):
+        bits.append(f"⬇ {_fmt_dt_short(_as_dt(last_in))}")
+    if conn.get("read_only"):
+        bits.append(f'<span class="lc-ro">👁 {_h.escape(t("ch.read_only"))}</span>')
+    return f'<div class="ch-meta ch-conn">{"  ·  ".join(bits)}</div>'
+
+
+def _conn_row(conn: dict) -> str:
+    """One connector line under a lead: whose account, the address on it, the traffic."""
+    spec = spec_for(conn.get("kind"))
+    icon = (f'<i class="{spec.icon_class}" style="color:{spec.icon_color}"></i>'
+            if spec is not None else "•")
+    account = _h.escape(str(conn.get("handle") or (spec.label if spec else "")))
+    addr = _conn_addr(conn)
+    addr_html = f'<span class="lc-addr">{_h.escape(addr)}</span>' if addr else ""
+    ro = ' <span class="lc-ro" title="read-only">👁</span>' if conn.get("read_only") else ""
+    return (
+        f'<div class="lc-conn">{icon} <span class="lc-acc">{account}</span>{ro}'
+        f'{addr_html}'
+        f'<span class="lc-cnt">⬇{int(conn.get("cin") or 0)} ⬆{int(conn.get("cout") or 0)}'
+        f'</span></div>'
     )
-    handle_row = (
-        f'<div class="ti-handle">@{_h.escape(str(ig_username))}</div>'
-        if ig_username else ""
-    )
-    sub_parts = []
-    if phone:
-        sub_parts.append(f'<span>{_h.escape(str(phone))}</span>')
-    total = (cnt_in or 0) + (cnt_out or 0)
-    if total:
-        sub_parts.append(f'<span class="ti-cnt">💬 {cnt_in or 0}/{cnt_out or 0}</span>')
-    if follower_count is not None or following_count is not None:
-        sub_parts.append(
-            f'<span class="ti-fl">👥 {_compact(follower_count)}·{_compact(following_count)}</span>'
-        )
-    sub_row = f'<div class="ti-sub">{"  ·  ".join(sub_parts)}</div>' if sub_parts else ""
+
+
+def _lead_item(row: object, active_tid: int | None, show_branch: bool = False,
+               filter_qs: str = "") -> str:
+    """One LEAD, with every connector they are reachable on listed underneath.
+
+    Was one card per thread, so a person on Instagram and on a manager's WhatsApp appeared
+    twice, each card telling a different half of the story and neither saying they were the
+    same person."""
+    (lead_id, name, stage, last_act, phone, ig_username, avatar_url,
+     follower_count, following_count, agent_enabled, last_msg, last_dir,
+     cnt_in, cnt_out, branch_name, tz_offset_h, open_tid, conns) = row  # type: ignore[misc]
+    dt = _as_dt(last_act)  # raw UTC; _fmt_dt_short applies the viewer offset once
+    conns = conns if isinstance(conns, list) else _json.loads(conns or "[]")
+    on = " on" if open_tid == active_tid else ""
+    # The phone leads, because it is the identity that ties the connectors together and the
+    # thing an operator matches against a CRM row. Falls back to the name when WhatsApp
+    # masked the number — most chats arrive that way.
+    title = _h.escape(str(phone or name or "Lead"))
+    sub_name = (f'<div class="lc-name">{_h.escape(str(name))}</div>'
+                if phone and name else "")
     br_badge = (
         f'<span class="ti-br" title="Branch">🏢 {_h.escape(str(branch_name))}</span>'
         if show_branch and branch_name else ""
@@ -325,26 +366,24 @@ def _thread_item(row: object, active_tid: int | None, show_branch: bool = False,
         f'<span class="ti-off" title="{_h.escape(t("chat.bot_off_hint"))}">🤖⛔</span>'
         if not agent_enabled else ""
     )
-    # Preserve the active inbox filter in the pushed URL, so a full reload (F5 / background
-    # nav) rebuilds the shell with the same filtered thread list, not the whole inbox.
-    _chat_url = f"/ui/chat/{tid}?{filter_qs}" if filter_qs else f"/ui/chat/{tid}"
+    _chat_url = f"/ui/chat/{open_tid}?{filter_qs}" if filter_qs else f"/ui/chat/{open_tid}"
     _back_url = f"/ui/inbox?{filter_qs}" if filter_qs else "/ui/inbox"
-    _kind_attr = _h.escape(str(channel_kind or ""))
-    _name_esc = _h.escape(str(name or "Lead"))
+    kinds = " ".join(sorted({str(c.get("kind") or "") for c in conns}))
     return (
-        f'<a class="ti{on}" data-channel-kind="{_kind_attr}"'
-        f' hx-get="/ui/chat/{tid}" hx-target="#main" hx-push-url="{_h.escape(_chat_url)}"'
-        f' onclick="setOn(this);setOpenThread({tid})"'
+        f'<a class="ti{on}" data-channel-kind="{_h.escape(kinds)}"'
+        f' hx-get="/ui/chat/{open_tid}" hx-target="#main"'
+        f' hx-push-url="{_h.escape(_chat_url)}"'
+        f' onclick="setOn(this);setOpenThread({open_tid})"'
         f' href="{_h.escape(_back_url)}">'
         f'{_avatar(str(name or "?"), avatar_url)}'
         f'<div class="ti-body">'
-        f'<div class="ti-t">{_channel_badge(channel_kind, external_thread_id)}'
-        f' <span class="ti-n">{_name_esc}</span>'
+        f'<div class="ti-t"><span class="ti-n">{title}</span>'
         f'{bot_off}{br_badge}'
         f'<span class="ti-ts">{_fmt_dt_short(dt)}</span></div>'
-        f'<div class="ti-p">{_badge(str(stage or "new"))}{prod_badge}</div>'
-        f'{handle_row}'
-        f'{sub_row}</div></a>'
+        f'{sub_name}'
+        f'<div class="ti-p">{_badge(str(stage or "new"))}</div>'
+        f'<div class="lc-conns">{"".join(_conn_row(c) for c in conns)}</div>'
+        f'</div></a>'
     )
 
 
@@ -363,7 +402,7 @@ def thread_list_html(
 ) -> str:
     if not threads:
         return f'<div class="emp">{_h.escape(t("inbox.empty"))}</div>'
-    return "".join(_thread_item(r, active_tid, show_branch, filter_qs) for r in threads)
+    return "".join(_lead_item(r, active_tid, show_branch, filter_qs) for r in threads)
 
 
 _LINK_RE = re.compile(r"(https?://[^\s<]+)")
@@ -801,6 +840,7 @@ def chat_header_html(
     products: list | None = None,
     manager_note: str | None = None,
     channel_kind: str | None = None,
+    conns: list | None = None,
 ) -> str:
     """Renders chat header + source bar (for hx-swap=outerHTML on stage change)."""
     opts = "".join(
@@ -882,6 +922,10 @@ def chat_header_html(
         f'<div class="ch-meta">{"  ·  ".join(meta_parts)}</div>'
         if meta_parts else ""
     )
+    # One line PER CONNECTOR under the shared one. A consolidated lead reaches us in several
+    # places, and "since 07 Aug, last inbound 13:01" is only true of one of them — collapsing
+    # them into a single row states as a fact about the person what is a fact about one chat.
+    meta_row += "".join(_conn_meta_row(c) for c in (conns or []))
     src_chip = (
         f'<span class="ch-src">{_channel_badge(channel_kind)}</span>'
         if channel_kind else ""
@@ -1008,6 +1052,7 @@ def chat_panel_html(
     manager_note: str | None = None,
     channel_kind: str | None = None,
     ch_label: str = "",
+    conns: list | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -1024,6 +1069,7 @@ def chat_panel_html(
         follower_count=follower_count, following_count=following_count,
         last_active_at=last_active_at, needs=needs, needs_pending=needs_pending,
         products=products, manager_note=manager_note, channel_kind=channel_kind,
+        conns=conns,
     )
     return (
         f'{header}'
@@ -1399,23 +1445,35 @@ def app_shell(
         # and reported once at the end, not as one toast per bubble. The button carries the
         # progress and stays disabled meanwhile, so a second click cannot start a second queue
         # over the same bubbles.
+        # Translate-all: a few workers pulling from one queue, NEWEST FIRST.
+        #
+        # It was one request at a time, which on a long chat took minutes; and it was a burst
+        # of parallel calls before that, which the broker answered in part and the rest came
+        # back missing. A bounded pool keeps both ends honest — every reply is still waited
+        # for and retried once, but four are in flight instead of one.
+        #
+        # Newest first because that is where the operator is looking. A chat translated from
+        # the top spends its first minute on messages from three weeks ago while the line
+        # that prompted the click sits untranslated at the bottom.
+        "var _TRPAR=4;"
         "function trAll(tid,btn){"
         "var els=[].slice.call(document.querySelectorAll('[id^=\"bt-\"]'))"
-        ".filter(function(el){return el.dataset.state!=='tr';});"
+        ".filter(function(el){return el.dataset.state!=='tr';}).reverse();"
         "if(!els.length)return;"
         "var lbl=btn?btn.textContent:'';if(btn)btn.disabled=true;"
-        "var i=0,failed=0;"
-        "function done(){if(btn){btn.disabled=false;btn.textContent=lbl;}"
+        "var next=0,done=0,failed=0,total=els.length;"
+        "function finish(){if(btn){btn.disabled=false;btn.textContent=lbl;}"
         "if(failed)toast(_TRERR+' ('+failed+')');}"
-        "function step(){"
-        "if(i>=els.length){done();return;}"
-        "var mid=els[i++].id.slice(3);"
-        "if(btn)btn.textContent=i+'/'+els.length;"
+        "function tick(){done++;if(btn)btn.textContent=done+'/'+total;"
+        "if(done>=total){finish();return;}pump();}"
+        "function pump(){"
+        "if(next>=els.length)return;"
+        "var mid=els[next++].id.slice(3);"
         "trMsg(mid,tid,true).then(function(ok){"
-        "if(ok){step();return;}"
+        "if(ok){tick();return;}"
         "setTimeout(function(){trMsg(mid,tid,true).then(function(ok2){"
-        "if(!ok2)failed++;step();});},700);});}"
-        "step();}"
+        "if(!ok2)failed++;tick();});},700);});}"
+        "for(var w=0;w<_TRPAR&&w<els.length;w++)pump();}"
         # KB editor: translate every section (+title) into the UI language, in place, for
         # READING. Reversible toggle; while translated the fields go read-only and Save is
         # locked so a translation can't be saved over the source. Sequential, not parallel, so
