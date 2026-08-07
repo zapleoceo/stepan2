@@ -421,7 +421,8 @@ class EvolutionTransport:
             profiles = await self._profiles(c)
         for m in messages:
             name, avatar = profiles.get(m["remote_jid"], (None, None))
-            m["sender_name"], m["sender_avatar"] = name, avatar
+            m["sender_name"] = m.get("sender_name") or name  # the message wins
+            m["sender_avatar"] = avatar
         return messages
 
     async def _profiles(self, client: Any) -> dict[str, tuple[str | None, str | None]]:
@@ -583,10 +584,10 @@ def _wa_phone(jid: str) -> str | None:
     `628119720022@s.whatsapp.net` is the number itself — on WhatsApp the address IS the
     identity, which is what makes it the join key for consolidating a lead across channels.
 
-    Two shapes deliberately return None rather than a guess. `@lid` is WhatsApp's privacy
-    identifier and contains no number at all — such chats will never merge by phone, and
-    that is a property of the platform, not a bug to paper over. `@g.us` is a group: it has
-    many participants and belongs to none of them."""
+    `@lid` is WhatsApp's privacy identifier and carries no number of its own — 266 of the
+    first 286 threads arrived that way, so reading only the plain form left consolidation
+    covering 7% of chats. The real address rides alongside it in `remoteJidAlt`; the caller
+    passes that first. `@g.us` is a group: many participants, belonging to none of them."""
     local, _, domain = str(jid or "").partition("@")
     if domain != "s.whatsapp.net":
         return None
@@ -604,9 +605,16 @@ def _wa_message(raw: dict[str, Any]) -> dict[str, Any]:
     key = raw.get("key") or {}
     message = raw.get("message")
     jid = key.get("remoteJid", "")
+    from_me = bool(key.get("fromMe"))
     return {
         "remote_jid": jid,
-        "lead_phone": _wa_phone(jid),
+        # remoteJidAlt first: on a @lid chat it holds the actual number, and @lid is now the
+        # overwhelming majority. Falls back to the plain jid for older, unmasked chats.
+        "lead_phone": _wa_phone(key.get("remoteJidAlt") or "") or _wa_phone(jid),
+        # The name rides on the message itself and is far better populated than the chat
+        # list (4 names in 238 chats there, one per message here). On OUR OWN items it is
+        # our account's name, which must never be written onto the lead.
+        "sender_name": None if from_me else (raw.get("pushName") or None),
         "sender_id": key.get("participant") or key.get("remoteJid", ""),
         "text": _wa_text(message),
         "message_timestamp": raw.get("messageTimestamp"),

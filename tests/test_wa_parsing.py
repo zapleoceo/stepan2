@@ -178,3 +178,50 @@ async def test_messages_are_requested_by_post_because_get_is_a_404_on_v2() -> No
     assert seen["method"] == "POST"
     assert seen["calls"][0] == ("/chat/findMessages/wa-1", {})
     assert out[0]["direction"] == "out"  # и половина менеджера доезжает
+
+
+# ── @lid: где на самом деле лежит номер ───────────────────────────────────────
+
+
+def test_the_real_number_is_read_from_the_masked_chats_alternate_address() -> None:
+    """266 из первых 286 тредов пришли как @lid — приватный идентификатор без номера.
+    Читая только его, сшивка по телефону накрывала 7% чатов. Настоящий адрес едет рядом,
+    в remoteJidAlt."""
+    out = _wa_message({"key": {"remoteJid": "60520501653592@lid",
+                               "remoteJidAlt": "6285156469324@s.whatsapp.net",
+                               "fromMe": False}, "message": {"conversation": "halo"}})
+    assert out["lead_phone"] == "+6285156469324"
+    assert out["remote_jid"] == "60520501653592@lid"  # тред по-прежнему свой
+
+
+def test_an_unmasked_chat_still_works() -> None:
+    out = _wa_message({"key": {"remoteJid": "628119720022@s.whatsapp.net"}, "message": {}})
+    assert out["lead_phone"] == "+628119720022"
+
+
+def test_a_masked_chat_with_no_alternate_yields_no_phone() -> None:
+    out = _wa_message({"key": {"remoteJid": "605205@lid"}, "message": {}})
+    assert out["lead_phone"] is None
+
+
+def test_a_group_is_nobodys_phone() -> None:
+    out = _wa_message({"key": {"remoteJid": "12036@g.us"}, "message": {}})
+    assert out["lead_phone"] is None
+
+
+# ── имя ───────────────────────────────────────────────────────────────────────
+
+
+def test_the_name_comes_off_the_message_itself() -> None:
+    """В списке чатов имя было у 4 из 238; на сообщении оно есть почти всегда."""
+    out = _wa_message({"key": {"remoteJid": "1@lid", "fromMe": False},
+                       "pushName": "Valian", "message": {"conversation": "halo"}})
+    assert out["sender_name"] == "Valian"
+
+
+def test_our_own_account_name_is_never_written_onto_the_lead() -> None:
+    """На наших собственных элементах pushName — это имя школы. Записать его лиду значит
+    переименовать половину базы в «Academy It Step»."""
+    out = _wa_message({"key": {"remoteJid": "1@lid", "fromMe": True},
+                       "pushName": "Academy It Step", "message": {"conversation": "baik"}})
+    assert out["sender_name"] is None
