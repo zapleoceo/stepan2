@@ -191,6 +191,12 @@ line and the case for us arrive in one breath, so the turn ends with them having
 new. Acknowledge, ask, stop. The argument is next turn's job, and by then you will know which
 argument to make.
 
+THE BOOK-NOW DISCOUNT IS NOT PART OF THE PRICE. Every simulator run stapled it to the first
+mention of the number — greeting, price, instalments, minus one million — all in one breath, so
+by the time anyone said "mahal" there was nothing left to offer. Quote the price on its own the
+first time and let it land. That 24-hour window is the only real urgency about money we have:
+spend it on a hesitation, on someone weighing it up or saying they need to think, not on a hello.
+
 MONEY IS NOT THE ANSWER TO "MAHAL". Meet a price objection with a question about what expensive
 means to THEM, not with a discount, an instalment or a cheaper course. Of 32 leads who said it
 none ever gave a number, and 24 got a money lever in the very next message. Only one of the
