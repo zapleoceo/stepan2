@@ -565,6 +565,18 @@ _MEDIA_JOIN = (
 _EXCLUDED_COL = (
     ", (ct.context_cleared_at IS NOT NULL AND m.occurred_at <= ct.context_cleared_at)"
     " AS excluded"
+    # Which account this line travelled through. Per MESSAGE, because the feed is now the
+    # lead's whole correspondence: Instagram and a manager's WhatsApp interleaved by time,
+    # where a bubble without its origin is unreadable — you cannot tell what the customer
+    # saw, or where an answer would even go.
+    ", COALESCE(ch.handle, ch.kind) AS ch_label"
+)
+# Everything the LEAD said and was told, not one conversation of theirs. Consolidation made
+# one person one card; opening that card and seeing only their most recent channel is the
+# same split, one screen later.
+_LEAD_THREADS = (
+    " WHERE ct.lead_id = (SELECT lead_id FROM channel_thread WHERE id = :tid)"
+    " AND m.revoked_at IS NULL"
 )
 
 
@@ -574,8 +586,9 @@ async def fetch_messages(session: AsyncSession, thread_id: int) -> list:
             text(
                 f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
+                " JOIN channel ch ON ch.id = ct.channel_id"
                 f"{_MEDIA_JOIN}"
-                " WHERE m.thread_id = :tid AND m.revoked_at IS NULL"
+                f"{_LEAD_THREADS}"
                 " ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id},
@@ -589,8 +602,10 @@ async def fetch_messages_since(session: AsyncSession, thread_id: int, after_id: 
             text(
                 f"SELECT {_MSG_COLS}{_EXCLUDED_COL} FROM message m"  # noqa: S608
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
+                " JOIN channel ch ON ch.id = ct.channel_id"
                 f"{_MEDIA_JOIN}"
-                " WHERE m.thread_id = :tid AND m.id > :after AND m.revoked_at IS NULL"
+                f"{_LEAD_THREADS}"
+                " AND m.id > :after"
                 " ORDER BY m.occurred_at, m.id"
             ),
             {"tid": thread_id, "after": after_id},
@@ -609,6 +624,7 @@ async def fetch_message(session: AsyncSession, mid: int):
                 " ct.id AS thread_id, ct.lead_seen_at, l.branch_id, b.tz_offset_h"
                 " FROM message m"
                 " JOIN channel_thread ct ON ct.id = m.thread_id"
+                " JOIN channel ch ON ch.id = ct.channel_id"
                 " JOIN lead l ON l.id = ct.lead_id"
                 " JOIN branch b ON b.id = l.branch_id"
                 f"{_MEDIA_JOIN}"

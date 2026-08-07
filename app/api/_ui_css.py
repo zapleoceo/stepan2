@@ -165,6 +165,8 @@ _CSS = (
     ".ch-conn{margin-top:.15rem;opacity:.85}"
     ".lc-line2{display:flex;align-items:center;gap:.4rem;min-width:0}"
     ".lc-stage{margin-left:auto;flex-shrink:0}"
+    ".fin-ro{font-size:.72rem;color:#ffa94d;background:#2a2118;border-top:1px solid #3a2a1f;"
+    "padding:.4rem .8rem;line-height:1.35}"
     # source bar (lead origin — ad / story / direct)
     ".srcbar{display:flex;align-items:center;gap:.45rem;padding:.22rem .9rem;"
     "background:#0d1017;border-bottom:1px solid #1e2636;font-size:.71rem;flex-shrink:0}"

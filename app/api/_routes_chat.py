@@ -126,6 +126,15 @@ _LEAD_CONNS_Q = (
 )
 
 
+async def _is_read_only(session, thread_id: int) -> bool:  # noqa: ANN001
+    row = (await session.execute(
+        text("SELECT c.read_only FROM channel_thread t JOIN channel c ON c.id = t.channel_id"
+             " WHERE t.id = :tid"),
+        {"tid": thread_id},
+    )).first()
+    return bool(row and row[0])
+
+
 async def _lead_conns(session, thread_id: int) -> list[dict]:  # noqa: ANN001
     """Every account this thread's LEAD is reachable on.
 
@@ -330,6 +339,11 @@ async def chat_send(
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None or not text_body:
+            return await _rerender_feed(session, thread_id)
+        # The banner above the composer says this will not send; the route says it too.
+        # A queued line on a read-only channel is refused later and further away, and the
+        # operator who typed it has already moved on by then.
+        if await _is_read_only(session, thread_id):
             return await _rerender_feed(session, thread_id)
         session.add(Outbox(
             branch_id=branch_id, thread_id=thread_id, text=text_body, source=src,
