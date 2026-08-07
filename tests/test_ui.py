@@ -98,9 +98,12 @@ def test_thread_list_html_with_row() -> None:
 
     from app.api._ui_html import thread_list_html
     _set_lang("en")
-    row = (42, "Alice Test", "new", datetime.now(UTC).replace(tzinfo=None),
-           "+62812345", "course-a", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
-           "KL", 0, "instagram", None)
+    row = (9, "Alice Test", "new", datetime.now(UTC).replace(tzinfo=None),
+           "+62812345", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
+           "KL", 0, 42, [
+        {"kind": "instagram", "handle": "IG itstep", "ext": "t", "nick": "alicetest",
+         "read_only": False, "tid": 42, "cin": 5, "cout": 3},
+    ])
     html = thread_list_html([row])
     assert "Alice Test" in html
     assert "@alicetest" in html
@@ -118,10 +121,13 @@ def test_thread_list_html_shifts_last_active_to_viewer_local_time() -> None:
     _set_lang("en")
     set_render_tz(7)  # viewer at UTC+7
     last_act = datetime(2026, 1, 1, 20, 0, 0)  # 20:00 UTC
-    row = (42, "Alice Test", "new", last_act,
-           "+62812345", "course-a", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
+    row = (9, "Alice Test", "new", last_act,
+           "+62812345", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
            # branch tz 0 → proves the VIEWER offset (7) drives the shift
-           "KL", 0, "instagram", None)
+           "KL", 0, 42, [
+        {"kind": "instagram", "handle": "IG itstep", "ext": "t", "nick": "alicetest",
+         "read_only": False, "tid": 42, "cin": 5, "cout": 3},
+    ])
     html = thread_list_html([row])
     assert "03:00" in html  # 20:00 UTC + 7h = 03:00 next day, viewer-local
     assert "20:00" not in html

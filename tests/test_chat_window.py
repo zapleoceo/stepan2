@@ -31,11 +31,16 @@ def client() -> TestClient:
 # ─── item 1: active-thread highlight survives the poll ────────────────────────
 
 def _thread_row(tid: int) -> tuple:
-    # Trailing field is the Graph conversation id — the platform badge reads it, because one
-    # meta_business channel now serves both Messenger and Instagram Direct.
-    return (tid, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
-            "+62811", "course-a", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0,
-            "instagram", None)
+    """One LEAD row as the inbox query returns it.
+
+    `tid` is the thread a click opens — the lead's most recently active one. `conns` is the
+    per-connector breakdown the card lists underneath, which is what makes one card able to
+    stand for a person reachable in several places."""
+    conns = [{"kind": "instagram", "handle": "IG itstep", "ext": "t1", "nick": "alice",
+              "read_only": False, "tid": tid, "cin": 1, "cout": 0}]
+    return (tid * 100, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
+            "+62811", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0,
+            tid, conns)
 
 
 def test_thread_list_shows_exact_datetime_not_relative_ago() -> None:
@@ -97,7 +102,7 @@ def test_thread_card_shows_bot_off_indicator() -> None:
     from app.api._ui_html import thread_list_html
     _set_lang("en")
     off = list(_thread_row(5))
-    off[10] = False  # agent_enabled column
+    off[9] = False  # agent_enabled (index shifted — the row is a LEAD now)
     assert "🤖⛔" in thread_list_html([tuple(off)])       # disabled → indicator
     assert "🤖⛔" not in thread_list_html([_thread_row(5)])  # enabled → none
 

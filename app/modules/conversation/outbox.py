@@ -201,6 +201,7 @@ class OutboxSender:
             row.sent_at = now
             row.error = None
             await self.messages.add(self._outgoing(thread, row, result.external_message_id))
+            thread.msg_out += 1
             thread.last_out_at = now  # reply-loop watermark — bot no longer "owes" a reply
             await self._plan_followup(thread, row, cfg, now)
             self.session.add(thread)

@@ -109,6 +109,37 @@ async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | N
     return profile
 
 
+_LEAD_CONNS_Q = (
+    "SELECT ch.kind, ch.handle, ct.external_thread_id, l.ig_username, ch.read_only,"
+    " ct.id, ct.msg_in, ct.msg_out, ct.created_at, ct.last_in_at"
+    " FROM channel_thread ct"
+    " JOIN channel ch ON ch.id = ct.channel_id"
+    " JOIN lead l ON l.id = ct.lead_id"
+    " WHERE ct.lead_id = (SELECT lead_id FROM channel_thread WHERE id = :tid)"
+    # Neither GREATEST nor MAX(a, b): Postgres has only the first, SQLite only the second,
+    # and MAX(a, b) on Postgres is the AGGREGATE — it would parse and then mean something
+    # else. A CASE says the same thing in the dialect both of them speak.
+    " ORDER BY COALESCE(CASE WHEN ct.last_out_at IS NULL"
+    "                          OR ct.last_in_at >= ct.last_out_at"
+    "                        THEN ct.last_in_at ELSE ct.last_out_at END,"
+    "                   ct.created_at) DESC"
+)
+
+
+async def _lead_conns(session, thread_id: int) -> list[dict]:  # noqa: ANN001
+    """Every account this thread's LEAD is reachable on.
+
+    The header used to state one "since" and one "last inbound" for the whole card. On a
+    consolidated lead those are facts about ONE of their chats, printed as if they were
+    facts about the person."""
+    rows = (await session.execute(text(_LEAD_CONNS_Q), {"tid": thread_id})).all()
+    return [
+        {"kind": r[0], "handle": r[1], "ext": r[2], "nick": r[3], "read_only": bool(r[4]),
+         "tid": r[5], "cin": r[6], "cout": r[7], "since": r[8], "last_in": r[9]}
+        for r in rows
+    ]
+
+
 async def _thread_channel_label(session, thread_id: int) -> str:  # noqa: ANN001
     """Which connector this thread lives on — the tag over every bubble in it."""
     row = (await session.execute(
@@ -161,6 +192,7 @@ async def _build_chat_panel(
         needs_pending=needs_pending, events=events, products=products,
         manager_note=manager_note, channel_kind=channel_kind,
         ch_label=await _thread_channel_label(session, thread_id),
+        conns=await _lead_conns(session, thread_id),
     )
 
 

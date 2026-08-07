@@ -212,6 +212,7 @@ class IngestService:
                 branch_id=self.branch_id, message_id=msg.id,
                 kind=inbound.media_kind or "image", url=inbound.media_url,
             ))
+        thread.msg_out += 1  # counted here, not recounted by every inbox poll
         if thread.last_out_at is None or inbound.occurred_at > thread.last_out_at:
             thread.last_out_at = inbound.occurred_at
         # Recorded and visible in the chat log, but NOT an automatic hand-off to MANAGER stage
@@ -311,6 +312,7 @@ class IngestService:
             else:
                 was_off = not lead.agent_enabled  # BEFORE _revive_bot may flip it back on
                 thread.last_in_at = inbound.occurred_at
+                thread.msg_in += 1
                 await self._reset_followup_cycle(thread)
                 self._revive_bot(lead, thread)
                 # Only ping "Bot is OFF" when the bot STAYS off after the revive attempt —

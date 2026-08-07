@@ -147,6 +147,13 @@ class ChannelThread(SQLModel, table=True):
     window_until: datetime | None = Field(default=None, description="окно ответа канала")
     last_in_at: datetime | None = Field(default=None)
     last_out_at: datetime | None = Field(default=None)
+    # Kept by the writer instead of counted by every reader. The inbox recomputed both with
+    # a per-thread LATERAL on every poll — 414 million index lookups against `message`, for
+    # a number that changes only when a row is inserted. Grouping those counts per LEAD, as
+    # the consolidated list does, would have multiplied the same work by the number of
+    # connectors a person is on.
+    msg_in: int = Field(default=0)
+    msg_out: int = Field(default=0)
     lead_seen_at: datetime | None = Field(
         default=None, description="read-receipt лида (IG last_seen_at)")
     next_followup_at: datetime | None = Field(default=None, description="время следующего фолоапа")
