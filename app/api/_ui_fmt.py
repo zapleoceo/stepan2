@@ -82,19 +82,24 @@ def fmt_dt(dt: datetime | None, pattern: str, empty: str = "") -> str:
     return local.strftime(pattern) if local is not None else empty
 
 
-def _fmt_time(dt: datetime | None) -> str:
+def _fmt_time(dt: object) -> str:
     """Viewer-local DD.MM HH:MM:SS — always includes the date, not just time-of-day, so a
-    message/event timestamp is never ambiguous about which day it happened."""
-    if dt is None:
+    message/event timestamp is never ambiguous about which day it happened.
+
+    Coerces its input: raw SQL hands back a datetime on Postgres and an ISO string on
+    SQLite, so a caller passing a row value straight through worked in production and
+    raised in tests — the direction of that asymmetry that hides bugs rather than finding
+    them."""
+    parsed = _as_dt(dt)
+    if parsed is None:
         return ""
-    local = dt + timedelta(hours=_render_tz_h.get())
-    return local.strftime("%d.%m %H:%M:%S")
+    return (parsed + timedelta(hours=_render_tz_h.get())).strftime("%d.%m %H:%M:%S")
 
 
-def _fmt_dt_short(dt: datetime | None) -> str:
+def _fmt_dt_short(dt: object) -> str:
     """Viewer-local DD.MM HH:MM (no seconds) — for the compact sidebar thread list, where
     an explicit last-message date/time replaces the old vague '2h ago' style label."""
-    if dt is None:
+    parsed = _as_dt(dt)
+    if parsed is None:
         return ""
-    local = dt + timedelta(hours=_render_tz_h.get())
-    return local.strftime("%d.%m %H:%M")
+    return (parsed + timedelta(hours=_render_tz_h.get())).strftime("%d.%m %H:%M")

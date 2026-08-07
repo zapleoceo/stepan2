@@ -983,6 +983,14 @@ _TR: dict[str, dict[str, str]] = {
               "Nyalakan lagi setelah blokir hilang — biasanya beberapa jam.",
     },
     "ch.read_only": {"ru": "Только чтение", "en": "Read-only", "id": "Hanya baca"},
+    "chat.read_only_notice": {
+        "ru": "Последнее сообщение пришло на номер менеджера — отсюда отправка не уйдёт. "
+              "Отвечает он со своего телефона.",
+        "en": "The latest message came to a manager's number — nothing sends from here. "
+              "They answer from their own phone.",
+        "id": "Pesan terakhir masuk ke nomor manajer — tidak ada yang terkirim dari sini. "
+              "Dia menjawab dari ponselnya sendiri.",
+    },
     "ch.read_only_hint": {
         "ru": "Номер менеджера: читаем переписку для аналитики и не отправляем ничего. "
               "Настройки отправки для такого канала не действуют.",

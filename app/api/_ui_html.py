@@ -514,11 +514,16 @@ def _bubble(row: object, tid: int, lead_seen_at: datetime | None = None,
             channel_label: str = "") -> str:
     (mid, direction, sent_by, text, ts, llm_info, link_url, preview_url,
      media_id, media_kind, media_ready, media_pending) = row[:12]  # type: ignore[misc]
-    # Optional trailing columns, in _MSG_COLS order: sent_by_name, then the excluded flag.
-    # Positional pops keep older 12-column callers (tests, legacy fixtures) working unchanged.
+    # Optional trailing columns, in _MSG_COLS order: sent_by_name, the excluded flag, then
+    # the account this line came through. Positional pops keep older 12-column callers
+    # (tests, legacy fixtures) working unchanged.
     rest = list(row[12:])  # type: ignore[index]
     sent_by_name = rest.pop(0) if rest else None
     excluded = bool(rest.pop(0)) if rest else False  # greyed, out of Stepan's context
+    # The row's own account wins over the caller's. In a lead's merged feed the answer
+    # differs per bubble, which is the whole reason the tag exists.
+    if rest:
+        channel_label = str(rest.pop(0) or "") or channel_label
     ex = " bb-ex" if excluded else ""
     who_key = f"who.{sent_by}" if sent_by in ("agent", "manager", "lead") else ""
     who = _h.escape(t(who_key) if who_key else str(sent_by or ""))
@@ -1102,6 +1107,23 @@ def chat_panel_html(
         f' oninput="autoGrow(this)" onkeydown="entSend(event)"></textarea>'
         f'<button class="bsn">{send_lbl}</button></form>'
         f'</div>'
+    )
+
+
+def _read_only_notice(conns: list | None) -> str:
+    """Say why the composer will not deliver, when the newest thread is a manager's.
+
+    The feed is the lead's whole correspondence now, so an operator can be reading a
+    WhatsApp exchange the manager is running and type into the box under it. The line would
+    be queued and then refused — silently, from where they are standing. Better to say so
+    before they write it than to explain a message that never arrived."""
+    newest = (conns or [None])[0]
+    if not (isinstance(newest, dict) and newest.get("read_only")):
+        return ""
+    account = _h.escape(str(newest.get("handle") or ""))
+    return (
+        f'<div class="fin-ro">👁 {_h.escape(t("chat.read_only_notice"))}'
+        f'{f" — {account}" if account else ""}</div>'
     )
 
 
