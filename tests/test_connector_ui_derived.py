@@ -174,5 +174,11 @@ def test_awaiting_base_is_derived_at_every_call_not_frozen_at_import(
 
 
 class _FakeField:
-    def __init__(self, key: str) -> None:
+    """Only what _field_for_kind reads: the key, plus the two requirements a real field may
+    place on a connector (a capability it must declare, and whether it writes unprompted)."""
+
+    def __init__(self, key: str, capability: str | None = None,
+                 needs_outreach: bool = False) -> None:
         self.key = key
+        self.capability = capability
+        self.needs_outreach = needs_outreach

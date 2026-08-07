@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import html as _h
 
-from app.connectors.registry import all_specs
+from app.connectors.registry import all_specs, does_proactive_outreach, supports
+from app.connectors.spec import Capability
 from app.modules.settings import schema as S
 
 _INP = (
@@ -238,6 +239,14 @@ def _field_for_kind(f: S.SettingField, kind: str) -> bool:
     key prefix (ConnectorSpec.settings_prefixes) — app_setting is one shared table, so the
     editor has to know whose fields it is showing. Was a hardcoded meta_/fb_ → meta_business
     pair here, which meant a new connector with its own keys had to edit this file."""
+    # What the setting REQUIRES of a connector, asked of the connector's own declarations.
+    # A prefix says whose key it is; these say whether the connector can act on it at all —
+    # comment caps in the WhatsApp editor and follow-up timers on the website channel were
+    # settings whose connector reads nothing.
+    if f.capability and not supports(kind, Capability(f.capability)):
+        return False
+    if f.needs_outreach and not does_proactive_outreach(kind):
+        return False
     owners = [s for s in all_specs()
               if s.settings_prefixes and f.key.startswith(s.settings_prefixes)]
     if not owners:

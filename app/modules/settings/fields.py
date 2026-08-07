@@ -24,6 +24,18 @@ class SettingField:
     # "branch" renders in the branch panel and applies to the whole branch; "channel" renders
     # in the per-connector editor and resolves per channel (falling back to branch → platform).
     scope: str = "branch"
+    # What a channel-scoped setting REQUIRES of a connector to be worth showing.
+    #
+    # Every connector used to show every channel setting: comment caps in the WhatsApp
+    # editor, follow-up timers on the website channel, and an operator with no way to tell
+    # which of them their connector actually reads.
+    #
+    # Deliberately a requirement and not a list of connector names. The connectors already
+    # declare what they are (ConnectorSpec.capabilities, .proactive_outreach), so a setting
+    # that names them would have to be edited every time one is added — the exact `if kind ==`
+    # sprawl the registry exists to end.
+    capability: str | None = None   # Capability value the connector must declare
+    needs_outreach: bool = False    # only where the bot may write to a silent lead
 
 
 @dataclass(frozen=True)
@@ -41,6 +53,7 @@ def setting(
     key: str, kind: str, default: str, label: I18n, *,
     ph: I18n | None = None, help: I18n | None = None, width: str = "120px",
     hidden: bool = False, choices: list[tuple[str, I18n]] | None = None,
-    scope: str = "branch",
+    scope: str = "branch", capability: str | None = None, needs_outreach: bool = False,
 ) -> SettingField:
-    return SettingField(key, kind, default, label, ph, help, width, hidden, choices, scope)
+    return SettingField(key, kind, default, label, ph, help, width, hidden, choices, scope,
+                        capability, needs_outreach)

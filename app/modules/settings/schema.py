@@ -104,10 +104,12 @@ SCHEMA: list[SettingSection] = [
         # (which never actually triggered).
         _f("hourly_cap", "int", "150",
            _l("Сообщений в час", "Messages / hour", "Pesan / jam"),
-           ph=_l("150", "150", "150"), help=_UNLIMITED, width="76px", scope="channel"),
+           ph=_l("150", "150", "150"), help=_UNLIMITED, width="76px", scope="channel",
+           needs_outreach=True),
         _f("daily_cap", "int", "800",
            _l("Сообщений в день", "Messages / day", "Pesan / hari"),
-           ph=_l("800", "800", "800"), help=_UNLIMITED, width="76px", scope="channel"),
+           ph=_l("800", "800", "800"), help=_UNLIMITED, width="76px", scope="channel",
+           needs_outreach=True),
         # Independent from the main bot switch: that one gates scanning incoming + queueing a
         # reply; this one gates the SEND worker draining the queue. Off = keep capturing
         # incoming and queueing replies, but nothing actually goes out — the lever for "the
@@ -124,14 +126,14 @@ SCHEMA: list[SettingSection] = [
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [
         _f("followup_enabled", "bool", "false",
            _l("Включить фолоап", "Enable follow-up", "Aktifkan"), width="130px",
-           scope="channel"),
+           scope="channel", needs_outreach=True),
         _f("followup_schedule_h", "text", "1,4,24,120",
            _l("Расписание (часы)", "Schedule (hours)", "Jadwal (jam)"),
            ph=_l("1,4,24,120", "1,4,24,120", "1,4,24,120"),
            help=_l("Часы после ответа, через запятую. У Meta окно ~24ч — ставьте короче",
                    "Hours after reply, comma-separated. Meta's window is ~24h — use shorter",
                    "Jam setelah balasan, pisah koma. Jendela Meta ~24 jam — pakai lebih pendek"),
-           width="170px", scope="channel"),
+           width="170px", scope="channel", needs_outreach=True),
         _f("reactivation_enabled", "bool", "false",
            _l("Реактивация спящих", "Reactivate dormant", "Aktifkan kembali"), width="150px",
            help=_l("Один персональный заход к уснувшим лидам (3-21 дн.), по их же диалогу",
@@ -150,7 +152,7 @@ SCHEMA: list[SettingSection] = [
                    _l("Комментарии под постами", "Post comments", "Komentar postingan"), [
         _f("comment_replies_enabled", "bool", "false",
            _l("Отвечать на комментарии", "Reply to comments", "Balas komentar"), width="150px",
-           scope="channel",
+           scope="channel", capability="comments",
            help=_l("Раз в час бот собирает новые комментарии под НАШИМИ постами: коротко "
                    "отвечает по делу и уводит тёплых в директ. Публичный ответ строго из базы "
                    "знаний; при сомнении — только приглашение в личку",
@@ -164,17 +166,17 @@ SCHEMA: list[SettingSection] = [
         # viral post (a fast ban signal).
         _f("comment_hourly_cap", "int", "20",
            _l("Ответов в час", "Replies / hour", "Balasan / jam"),
-           ph=_l("20", "20", "20"), width="76px", scope="channel"),
+           ph=_l("20", "20", "20"), width="76px", scope="channel", capability="comments"),
         _f("comment_per_post_cap", "int", "5",
            _l("Ответов на один пост", "Replies / post", "Balasan / post"),
-           ph=_l("5", "5", "5"), width="76px", scope="channel"),
+           ph=_l("5", "5", "5"), width="76px", scope="channel", capability="comments"),
     ]),
     SettingSection("fa-solid fa-hand-sparkles",
                    _l("Комментарии под чужими постами", "Comments on other people's posts",
                       "Komentar di postingan orang lain"), [
         _f("proactive_comments_enabled", "bool", "false",
            _l("Напоминать о себе", "Reach out under their posts", "Sapa di postingan mereka"),
-           width="150px", scope="channel",
+           width="150px", scope="channel", capability="outbound_comment",
            help=_l("Раз в час бот заходит в ленту тех, кто нам УЖЕ писал, и оставляет одну "
                    "человеческую реплику под свежим постом — без продажи, без ссылок, без "
                    "названия курса. Один человек не чаще раза в 30 дней. Это единственное "
@@ -193,7 +195,7 @@ SCHEMA: list[SettingSection] = [
            ph=_l("курсы программирования и дизайна в Джакарте",
                  "coding and design courses in Jakarta",
                  "kursus coding dan desain di Jakarta"),
-           width="320px", scope="channel",
+           width="320px", scope="channel", capability="outbound_comment",
            help=_l("По этой строке ИИ решает, наш это пост или мимо. Пусто — миссия не "
                    "работает",
                    "The AI judges relevance against this line. Empty — the mission does not "
@@ -201,7 +203,7 @@ SCHEMA: list[SettingSection] = [
                    "AI menilai relevansi dari kalimat ini. Kosong — misi tidak berjalan")),
         _f("proactive_comment_daily_cap", "int", "5",
            _l("Комментариев в сутки", "Comments / day", "Komentar / hari"),
-           ph=_l("5", "5", "5"), width="76px", scope="channel"),
+           ph=_l("5", "5", "5"), width="76px", scope="channel", capability="outbound_comment"),
     ]),
     SettingSection("fa-solid fa-bell",
                    _l("Уведомления", "Notifications", "Notifikasi"), [
