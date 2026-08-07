@@ -177,3 +177,27 @@ async def test_a_crm_booking_follows_the_person_not_the_retired_record(db_sessio
     owner = (await db_session.execute(
         text("SELECT lead_id FROM crm_lead_state"))).scalars().all()
     assert owner == [ig.id]
+
+
+async def test_two_crm_rows_for_one_person_do_not_abort_the_merge(db_session) -> None:  # noqa: ANN001
+    """crm_lead_state уникальна по lead_id: когда строка есть у ОБЕИХ записей, перенос
+    падает и роняет всё слияние вместе с собой. Оставляем строку выжившего — она принадлежит
+    записи, за которой идёт воронка, а описывают обе одного человека в одной CRM."""
+    from sqlalchemy import text
+
+    from app.adapters.db.models import CrmLeadState
+
+    bid = await _branch(db_session)
+    ig = await _lead_on(db_session, bid, read_only=False, phone="+628111")
+    wa = await _lead_on(db_session, bid, read_only=True, phone="+628111",
+                        stage=Stage.MANAGER)
+    db_session.add(CrmLeadState(lead_id=ig.id, branch_id=bid))
+    db_session.add(CrmLeadState(lead_id=wa.id, branch_id=bid))
+    await db_session.flush()
+
+    survivor = await consolidate.merge_by_phone(db_session, ig)
+
+    assert survivor.id == ig.id
+    owners = (await db_session.execute(
+        text("SELECT lead_id FROM crm_lead_state"))).scalars().all()
+    assert owners == [ig.id]
