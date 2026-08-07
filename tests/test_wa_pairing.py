@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.adapters.db.models import Message
 from app.connectors.whatsapp_ui import _ch_wa_form, wa_instance_name, wa_qr_panel
 from app.domain.enums import SessionStatus
 
@@ -170,3 +171,49 @@ async def test_a_channel_paired_by_the_old_form_still_works(
 
     assert port.read_only is False  # старая форма про флаг не знала → канал остаётся пишущим
     settings.cache_clear()
+
+
+# ── идентичность приезжает на уже известный тред ──────────────────────────────
+
+
+async def test_a_known_thread_gets_its_name_even_though_dedup_drops_the_message(
+    db_session,  # noqa: ANN001
+) -> None:
+    """Имя и телефон едут на КАЖДОМ опрошенном сообщении, а не только на новых. Раньше
+    идентичность читалась лишь при записи новой строки — тред, заведённый до того, как канал
+    научился отдавать имя, оставался безымянным навсегда: следующий опрос имя привозил,
+    дедуп ронял сообщение, и больше на него никто не смотрел. Живьём: 13 тредов, 0 имён."""
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead
+    from app.domain.enums import ChannelKind
+    from app.modules.leads.ingest import IngestService
+    from app.ports.channel import InboundMessage
+    from datetime import UTC, datetime
+
+    branch = Branch(name="T", lang="id")
+    db_session.add(branch)
+    await db_session.flush()
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, read_only=True)
+    db_session.add(channel)
+    await db_session.flush()
+    lead = Lead(branch_id=branch.id)
+    db_session.add(lead)
+    await db_session.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=channel.id,
+                           external_thread_id="628119720022@s.whatsapp.net")
+    db_session.add(thread)
+    msg = Message(thread_id=thread.id, direction="in", text="halo",
+                  external_id="A", occurred_at=datetime.now(UTC).replace(tzinfo=None))
+    await db_session.flush()
+
+    inbound = InboundMessage(
+        external_thread_id="628119720022@s.whatsapp.net",
+        sender_id="628119720022", text="halo",
+        occurred_at=datetime.now(UTC).replace(tzinfo=None),
+        external_id="A",  # уже сохранено → дедуп уронит его в основном цикле
+        sender_name="Valian", lead_phone="+628119720022",
+    )
+    await IngestService(db_session, branch.id).ingest(channel.id, [inbound])
+
+    refreshed = await db_session.get(Lead, lead.id)
+    assert refreshed.display_name == "Valian"
+    assert refreshed.phone_e164 == "+628119720022"

@@ -57,12 +57,12 @@ class IdentityService:
         if thread is not None:
             lead = await self.leads.get(thread.lead_id)
             if lead is not None:
-                self._backfill(lead, phone, display_name, ig_user_id, ig_username, avatar_url)
+                self.backfill(lead, phone, display_name, ig_user_id, ig_username, avatar_url)
                 return lead
         if phone:
             existing = await self.leads.by_phone(phone)
             if existing is not None:
-                self._backfill(existing, phone, display_name, ig_user_id, ig_username, avatar_url)
+                self.backfill(existing, phone, display_name, ig_user_id, ig_username, avatar_url)
                 return existing
         return await self.leads.add(
             Lead(
@@ -76,7 +76,7 @@ class IdentityService:
         )
 
     @staticmethod
-    def _backfill(
+    def backfill(
         lead: Lead,
         phone: str | None,
         display_name: str | None,

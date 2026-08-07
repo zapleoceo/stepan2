@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.db.models import MediaAsset, Message, StageEvent
+from app.adapters.db.models import Lead, MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.modules.ads import AdMappingService
 from app.modules.conversation.signals import is_auto_reply
@@ -56,6 +56,7 @@ class IngestService:
         cc = (await get_channel_settings(
             self.session, self.branch_id, channel_id)).phone_country_code
         await self._advance_read_receipts(channel_id, messages)
+        await self._refresh_identity(channel_id, messages)
         for inbound in messages:
             external_id = inbound.external_id or _external_id(inbound)
             if await self.messages.by_external(channel_id, external_id) is not None:
@@ -91,6 +92,35 @@ class IngestService:
             if row is not None:
                 created.append(row)
         return created
+
+    async def _refresh_identity(
+        self, channel_id: int, messages: list[InboundMessage]
+    ) -> None:
+        """Backfill name/phone/avatar on KNOWN threads, before dedup drops their messages.
+
+        Identity used to be resolved only while storing a new row, so a thread ingested
+        before the channel could report a name stayed anonymous forever — the next poll
+        carried the name, dedup dropped the message that carried it, and nothing looked at
+        it again. Live: thirteen WhatsApp threads, zero names, one phone.
+
+        Same shape as the read-receipt pass above and for the same reason: a fact that rides
+        on EVERY polled item must not be read only on the items that happen to be new."""
+        seen: set[str] = set()
+        for m in messages:
+            if m.direction == "out" or m.external_thread_id in seen:
+                continue
+            if not (m.lead_phone or m.sender_name or m.sender_avatar):
+                continue
+            seen.add(m.external_thread_id)
+            thread = await self.identity.threads.by_external(
+                channel_id, m.external_thread_id)
+            if thread is None:
+                continue  # brand-new: the storing path resolves it with everything at once
+            lead = await self.session.get(Lead, thread.lead_id)
+            if lead is not None:
+                self.identity.backfill(
+                    lead, m.lead_phone, m.sender_name, None, None, m.sender_avatar)
+                self.session.add(lead)
 
     async def _advance_read_receipts(
         self, channel_id: int, messages: list[InboundMessage]
