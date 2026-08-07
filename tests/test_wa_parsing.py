@@ -132,3 +132,49 @@ def test_the_qr_is_normalised_to_something_an_img_tag_can_show() -> None:
     assert _qr_data_uri({"qrcode": {"base64": "AAA"}}) == "data:image/png;base64,AAA"
     assert _qr_data_uri({"base64": "data:image/png;base64,BBB"}).startswith("data:image/png")
     assert _qr_data_uri({}) == ""
+
+
+# ── как именно спрашиваем ─────────────────────────────────────────────────────
+
+
+async def test_messages_are_requested_by_post_because_get_is_a_404_on_v2() -> None:
+    """v1 отвечал на GET, v2 — только на POST с телом. Разница не абстрактная: канал
+    показывает «активно», телефон показывает связанное устройство, а диалогов ноль, и
+    единственный след — строка в логе воркера. Поймано на живом номере."""
+    from app.adapters.channels.transports import EvolutionTransport
+
+    seen: dict[str, object] = {}
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self) -> None: ...
+        def json(self) -> dict:
+            return {"messages": {"records": [
+                {"key": {"remoteJid": "62811@s", "fromMe": True, "id": "A"},
+                 "message": {"conversation": "baik kak"}}]}}
+
+    class _Client:
+        async def __aenter__(self):  # noqa: ANN204
+            return self
+
+        async def __aexit__(self, *_a) -> bool:
+            return False
+
+        async def post(self, path: str, json: dict) -> _Resp:  # noqa: A002
+            seen["method"], seen["path"], seen["body"] = "POST", path, json
+            return _Resp()
+
+        async def get(self, path: str) -> _Resp:
+            seen["method"] = "GET"
+            return _Resp()
+
+    t = EvolutionTransport(base_url="http://evolution:8080", instance="wa-1", api_key="k")
+    t._client = lambda: _Client()  # noqa: SLF001
+
+    out = await t.fetch_messages()
+
+    assert seen["method"] == "POST"
+    assert seen["path"] == "/chat/findMessages/wa-1"
+    assert seen["body"] == {}
+    assert out[0]["direction"] == "out"  # и половина менеджера доезжает
