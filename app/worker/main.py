@@ -993,6 +993,22 @@ async def backfill_ads_branch(ctx: dict[str, Any], branch_id: int) -> int:
         return 0
 
 
+async def watch_wa_sessions(ctx: dict[str, Any]) -> int:
+    """Probe every linked WhatsApp device; alert on one that stayed down. Every 5 minutes.
+
+    A dropped linked device is indistinguishable from a quiet inbox — nothing raises, and
+    the first sign is a person eventually noticing that a number stopped moving."""
+    return await _fan_out_per_branch(ctx, "watch_wa_sessions_branch")
+
+
+async def watch_wa_sessions_branch(ctx: dict[str, Any], branch_id: int) -> int:
+    from app.modules.channels import wa_watch  # noqa: PLC0415
+
+    async with session_scope() as session:
+        cfg = await get_settings(session, branch_id)
+        return await wa_watch.watch(session, branch_id, notifier=_build_notifier(cfg))
+
+
 async def refresh_profiles(ctx: dict[str, Any]) -> int:
     """Refresh IG follower/following stats for stale active-funnel leads (TTL ~6h).
 
@@ -1199,7 +1215,8 @@ class WorkerSettings:
         ingest_active_channels, ingest_active_conversations, reply_pending, send_outbox,
         schedule_followups, reactivate_dormant, learning_audit, escalate_stale_alerts,
         sync_crm_writeback,
-        process_deletions, sync_crm, refresh_profiles, backfill_media, prune_broker_log,
+        process_deletions, sync_crm, refresh_profiles, watch_wa_sessions, backfill_media,
+        prune_broker_log,
         daily_digest, crm_rescue, ingest_comments, proactive_comments,
         aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
@@ -1211,6 +1228,7 @@ class WorkerSettings:
         sync_crm_writeback_branch,
         escalate_stale_alerts_branch,
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
+        watch_wa_sessions_branch,
         backfill_media_branch, aggregate_needs_branch,
         daily_digest_branch, ingest_comments_branch, proactive_comments_branch,
         sync_ads_branch, backfill_ads_branch,
@@ -1299,6 +1317,9 @@ class WorkerSettings:
              timeout=settings().reply_job_timeout_s, max_tries=1),
         # Profile stats refresh every 30 minutes (heavy, TTL-gated, capped batch)
         cron(refresh_profiles, minute={0, 30}, second=15, run_at_startup=False),
+        # Off the busy seconds: this one talks to Evolution, not to the model.
+        cron(watch_wa_sessions, minute=set(range(0, 60, 5)), second=50,
+             run_at_startup=False),
         # Media backfill every 3 minutes (capped batch; no-op when nothing flagged)
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
         # Broker-log retention: prune old rows daily at 03:30 (broker_log_retention_days)
