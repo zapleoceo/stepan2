@@ -145,3 +145,22 @@ def test_a_hostile_channel_name_cannot_inject_markup() -> None:
 
     row = (4, "in", "lead", "halo", None, None, None, None, None, None, None, None)
     assert "<script>" not in _bubble(row, 7, None, "<script>alert(1)</script>")
+
+
+def test_the_tag_names_the_account_not_the_connector() -> None:
+    """Два номера менеджеров оба читались как «WhatsApp (Evolution API)» — метка не отвечала
+    на единственный вопрос, ради которого стоит: через чей телефон прошла строка. Оператор
+    уже назвал канал, это имя и есть ответ."""
+    from app.api._ui_html import channel_label
+
+    assert channel_label("whatsapp", "WA Maya") == "WA Maya"
+    assert channel_label("whatsapp", "  WA Excel  ") == "WA Excel"
+
+
+def test_an_unnamed_channel_falls_back_to_the_connector() -> None:
+    assert "WhatsApp" in channel_label_import()("whatsapp", "")
+
+
+def channel_label_import():  # noqa: ANN201
+    from app.api._ui_html import channel_label
+    return channel_label

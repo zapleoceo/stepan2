@@ -23,6 +23,11 @@ class InboundMessage:
     sender_username: str | None = None   # IG @handle
     sender_name: str | None = None       # full name from profile
     sender_avatar: str | None = None     # profile_pic_url (CDN, short-lived)
+    # The number the CHANNEL itself knows, not one the lead typed. On WhatsApp the address
+    # IS the phone, so it is identity rather than a guess — and it is the key the whole
+    # consolidation joins on. extract_phone(text) stays the fallback for channels where a
+    # number only ever appears because someone wrote it out.
+    lead_phone: str | None = None
     ad_id: str | None = None             # Meta Ads Manager ID
     ad_media_id: str | None = None       # IG media ID of the ad creative
     ad_preview_url: str | None = None    # creative thumbnail URL
