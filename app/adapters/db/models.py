@@ -51,6 +51,12 @@ class Channel(SQLModel, table=True):
     handle: str | None = Field(default=None, description="username / номер / page handle")
     account_id: str | None = Field(default=None, description="внешний id аккаунта")
     is_active: bool = Field(default=True)
+    # Ingest-only: we hold this session to READ someone else's conversation (a manager's
+    # WhatsApp), and the human on the other end is still working it from their own phone.
+    # A COLUMN, not a key in the encrypted session dump, because the question is asked in
+    # SQL: the reply dispatcher must exclude these threads before it spends a broker call,
+    # and the funnel must exclude their contacts. Encrypted config cannot answer either.
+    read_only: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

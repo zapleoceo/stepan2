@@ -145,3 +145,41 @@ async def test_a_writable_channel_is_untouched(db_session) -> None:
 
     assert row is not None and row.status == "sent"
     assert channel.sent == [("62811@s", "halo")]
+
+
+# ── слой 0: диспетчер вообще не берёт такой тред ──────────────────────────────
+
+
+async def _thread_on(s, *, read_only: bool) -> tuple[int, int]:  # noqa: ANN001
+    from datetime import UTC, datetime
+    now = datetime.now(UTC).replace(tzinfo=None)
+    branch = Branch(name="T", lang="id")
+    s.add(branch)
+    await s.flush()
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, read_only=read_only)
+    s.add(channel)
+    await s.flush()
+    lead = Lead(branch_id=branch.id, stage="qualifying")
+    s.add(lead)
+    await s.flush()
+    thread = ChannelThread(lead_id=lead.id, channel_id=channel.id,
+                           external_thread_id="62811@s", last_in_at=now)
+    s.add(thread)
+    await s.flush()
+    return branch.id, thread.id
+
+
+async def test_a_read_only_thread_is_never_picked_for_a_reply(db_session) -> None:
+    """Гейт на отправке ловил строку ПОСЛЕ генерации: пять сгенерировано, пять снято,
+    ноль отправлено — и пять вызовов брокера в никуда. Отсекать надо здесь, до траты."""
+    from app.worker import wiring
+
+    bid, tid = await _thread_on(db_session, read_only=True)
+    assert await wiring.threads_awaiting_reply(db_session, bid) == []
+
+
+async def test_a_writable_thread_is_still_picked(db_session) -> None:
+    from app.worker import wiring
+
+    bid, tid = await _thread_on(db_session, read_only=False)
+    assert await wiring.threads_awaiting_reply(db_session, bid) == [tid]
