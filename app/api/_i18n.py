@@ -961,16 +961,35 @@ _TR: dict[str, dict[str, str]] = {
     "ch.delete":   {"ru": "Удалить",           "en": "Delete",            "id": "Hapus"},
     "ch.save":     {"ru": "Сохранить",         "en": "Save",              "id": "Simpan"},
     "ch.active":   {"ru": "Канал включён",     "en": "Channel enabled",   "id": "Channel aktif"},
+    # Generic, because it is shown for EVERY connector. The old wording named Instagram and
+    # its 403 action-block, which reads as nonsense in a WhatsApp editor — and worse, tells
+    # the operator to wait out a block that has nothing to do with their channel.
     "ch.active_hint": {
-        "ru": "Выключи, если Instagram блокирует отправку (ошибка 403 / action block) — "
-              "приём и отправка через этот канал остановятся, ничего не потеряется. "
-              "Включи обратно, когда блок снимется (обычно несколько часов).",
-        "en": "Turn off if Instagram is blocking sends (403 / action block) — this pauses "
-              "both receiving and sending on this channel, nothing is lost. Turn back on "
-              "once the block clears (usually a few hours).",
-        "id": "Matikan jika Instagram memblokir pengiriman (403 / action block) — channel "
-              "ini berhenti menerima & mengirim, tidak ada yang hilang. Nyalakan lagi "
-              "setelah blokir hilang (biasanya beberapa jam).",
+        "ru": "Выключи, чтобы канал перестал принимать и отправлять. Ничего не теряется — "
+              "накопится и уйдёт после включения.",
+        "en": "Turn off to stop this channel receiving and sending. Nothing is lost — it "
+              "queues up and goes out when you turn it back on.",
+        "id": "Matikan agar channel ini berhenti menerima dan mengirim. Tidak ada yang "
+              "hilang — akan mengantre dan terkirim setelah dinyalakan lagi.",
+    },
+    # Instagram is the one connector where switching off is a REACTION to something, so the
+    # advice lives with the connector it is about instead of on every editor.
+    "ch.active_hint_ig": {
+        "ru": "Обычно выключают, когда Instagram блокирует отправку (403 / action block). "
+              "Включи обратно, когда блок снимется — как правило, через несколько часов.",
+        "en": "Usually switched off when Instagram blocks sends (403 / action block). Turn "
+              "it back on once the block clears — usually a few hours.",
+        "id": "Biasanya dimatikan saat Instagram memblokir pengiriman (403 / action block). "
+              "Nyalakan lagi setelah blokir hilang — biasanya beberapa jam.",
+    },
+    "ch.read_only": {"ru": "Только чтение", "en": "Read-only", "id": "Hanya baca"},
+    "ch.read_only_hint": {
+        "ru": "Номер менеджера: читаем переписку для аналитики и не отправляем ничего. "
+              "Настройки отправки для такого канала не действуют.",
+        "en": "A manager's number: we read the chats for analytics and send nothing. The "
+              "sending settings do not apply to such a channel.",
+        "id": "Nomor manajer: kami membaca obrolan untuk analitik dan tidak mengirim apa "
+              "pun. Pengaturan pengiriman tidak berlaku untuk channel seperti ini.",
     },
     "ch.verify":   {"ru": "Подтвердить",       "en": "Verify",            "id": "Verifikasi"},
     "ch.ig_login": {"ru": "Войти в Instagram", "en": "Login Instagram",   "id": "Login Instagram"},

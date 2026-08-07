@@ -5,7 +5,8 @@ import html as _h
 import json as _json
 from datetime import UTC, datetime, timedelta
 
-from app.connectors.registry import addable_specs, spec_for
+from app.connectors.registry import addable_specs, does_proactive_outreach, spec_for
+from app.domain.enums import ChannelKind
 
 from ._i18n import current_lang, t
 from ._ui_html import (
@@ -857,10 +858,32 @@ def channel_new_form_html(branch_id: int) -> str:
 
 def channel_edit_form_html(
     ch_id: int, kind: str, handle: str, account_id: str, is_active: bool,
+    read_only: bool = False,
 ) -> str:
-    """Form to edit channel metadata (handle, account_id, active)."""
+    """Form to edit channel metadata (handle, account_id, active, read-only)."""
     checked = "checked" if is_active else ""
+    ro_checked = "checked" if read_only else ""
     save_lbl = _h.escape(t("ch.save"))
+    # The hint about waiting out an Instagram action-block used to be shown on every
+    # connector, which in a WhatsApp editor is advice about somebody else's platform.
+    extra_hint = (
+        f'<div style="font-size:.72rem;color:#8a94a6;margin:-.3rem 0 .6rem">'
+        f'{_h.escape(t("ch.active_hint_ig"))}</div>'
+        if kind == ChannelKind.INSTAGRAM.value else ""
+    )
+    # Read-only is settable AFTER pairing, not only during it: a number linked as writable by
+    # mistake could otherwise only be corrected by unlinking the manager's phone and scanning
+    # a new QR — for a checkbox.
+    ro_block = (
+        f'<div class="frm-grp" style="display:flex;align-items:flex-start;gap:.5rem">'
+        f'<input type="checkbox" name="read_only" id="ch-ro{ch_id}" {ro_checked}'
+        f' style="margin-top:3px">'
+        f'<label class="frm-lbl" for="ch-ro{ch_id}" style="margin:0">'
+        f'<b>{_h.escape(t("ch.read_only"))}</b><br>'
+        f'<span style="font-size:.72rem;color:#8a94a6;font-weight:400">'
+        f'{_h.escape(t("ch.read_only_hint"))}</span></label></div>'
+        if does_proactive_outreach(kind) else ""
+    )
     return (
         f'<div style="font-weight:600;color:#4da6ff;font-size:.8rem;margin-bottom:.55rem">'
         f'{_kind_label(kind)} #{ch_id}</div>'
@@ -878,6 +901,7 @@ def channel_edit_form_html(
         f'{_h.escape(t("ch.active"))}</label></div>'
         f'<div style="font-size:.72rem;color:#8a94a6;margin:-.3rem 0 .6rem">'
         f'{_h.escape(t("ch.active_hint"))}</div>'
+        f'{extra_hint}{ro_block}'
         f'<button type="submit" class="btn-sm btn-p">{save_lbl}</button>'
         f'</form>'
     )

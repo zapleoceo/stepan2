@@ -150,14 +150,16 @@ async def channel_edit(ch_id: int, request: Request) -> HTMLResponse:
         if branch_id is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         row = (await session.execute(
-            text("SELECT id, kind, handle, account_id, is_active FROM channel WHERE id=:id"),
+            text("SELECT id, kind, handle, account_id, is_active, read_only"
+                 " FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
         if not row:
             return not_found()
         values = await SettingRepo(session).load_all(branch_id, ch_id)
         cap_usage = await _channel_cap_usage(session, branch_id, ch_id)
-    body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
+    body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "",
+                                  bool(row[4]), bool(row[5]))
     return HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id, cap_usage))
 
 
@@ -191,6 +193,7 @@ async def channel_save(
     handle: str = Form(default=""),
     account_id: str = Form(default=""),
     is_active: str = Form(default=""),
+    read_only: str = Form(default=""),
 ) -> HTMLResponse:
     lang = apply_lang(request)
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
@@ -200,23 +203,27 @@ async def channel_save(
             return HTMLResponse(_FORBIDDEN, status_code=403)
         await session.execute(
             text(
-                "UPDATE channel SET handle=:h, account_id=:a, is_active=:active WHERE id=:id"
+                "UPDATE channel SET handle=:h, account_id=:a, is_active=:active,"
+                " read_only=:ro WHERE id=:id"
             ),
             {
                 "h": handle.strip() or None,
                 "a": account_id.strip() or None,
                 "active": bool(is_active),
+                "ro": bool(read_only),
                 "id": ch_id,
             },
         )
         row = (await session.execute(
-            text("SELECT id, kind, handle, account_id, is_active FROM channel WHERE id=:id"),
+            text("SELECT id, kind, handle, account_id, is_active, read_only"
+                 " FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
         if not row:
             return not_found()
         values = await SettingRepo(session).load_all(branch_id, ch_id)
-    body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "", bool(row[4]))
+    body = channel_edit_form_html(row[0], row[1], row[2] or "", row[3] or "",
+                                  bool(row[4]), bool(row[5]))
     resp = HTMLResponse(body + channel_settings_html(row[1], values, lang, ch_id))
     # Refresh the channel LIST too (like create/delete/connect do): saving can flip is_active,
     # and without this the row keeps showing the old on/off state — looked like the save didn't
@@ -256,7 +263,8 @@ async def channel_credential(ch_id: int, request: Request) -> HTMLResponse:
         if await _channel_branch(session, ch_id, allowed) is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         row = (await session.execute(
-            text("SELECT id, kind, handle, account_id, is_active FROM channel WHERE id=:id"),
+            text("SELECT id, kind, handle, account_id, is_active, read_only"
+                 " FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
         if not row:

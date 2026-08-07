@@ -363,6 +363,12 @@ class Message(SQLModel, table=True):
     occurred_at: datetime = Field(default_factory=_utcnow)
     llm_info: str | None = Field(default=None)
     tr_text: str | None = Field(default=None, description="кэш перевода (не биллить повторно)")
+    # WHICH language tr_text is in. Without it the cache answered every language with
+    # whatever was asked for first: a bubble translated once for an English admin came back
+    # in English to a Russian one, and looked like a broken translator rather than a stale
+    # cache. One slot per message, replaced when the language differs — a second column
+    # beats a second table on the hottest read in the app.
+    tr_lang: str | None = Field(default=None, description="язык, на который переведён tr_text")
     delete_requested: bool = Field(default=False, index=True, description="ждёт IG-unsend")
     media_pending: bool = Field(default=False, index=True, description="медиа ждёт backfill")
     media_attempts: int = Field(default=0, description="сколько раз backfill уже пробовал")

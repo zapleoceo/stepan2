@@ -1399,23 +1399,35 @@ def app_shell(
         # and reported once at the end, not as one toast per bubble. The button carries the
         # progress and stays disabled meanwhile, so a second click cannot start a second queue
         # over the same bubbles.
+        # Translate-all: a few workers pulling from one queue, NEWEST FIRST.
+        #
+        # It was one request at a time, which on a long chat took minutes; and it was a burst
+        # of parallel calls before that, which the broker answered in part and the rest came
+        # back missing. A bounded pool keeps both ends honest — every reply is still waited
+        # for and retried once, but four are in flight instead of one.
+        #
+        # Newest first because that is where the operator is looking. A chat translated from
+        # the top spends its first minute on messages from three weeks ago while the line
+        # that prompted the click sits untranslated at the bottom.
+        "var _TRPAR=4;"
         "function trAll(tid,btn){"
         "var els=[].slice.call(document.querySelectorAll('[id^=\"bt-\"]'))"
-        ".filter(function(el){return el.dataset.state!=='tr';});"
+        ".filter(function(el){return el.dataset.state!=='tr';}).reverse();"
         "if(!els.length)return;"
         "var lbl=btn?btn.textContent:'';if(btn)btn.disabled=true;"
-        "var i=0,failed=0;"
-        "function done(){if(btn){btn.disabled=false;btn.textContent=lbl;}"
+        "var next=0,done=0,failed=0,total=els.length;"
+        "function finish(){if(btn){btn.disabled=false;btn.textContent=lbl;}"
         "if(failed)toast(_TRERR+' ('+failed+')');}"
-        "function step(){"
-        "if(i>=els.length){done();return;}"
-        "var mid=els[i++].id.slice(3);"
-        "if(btn)btn.textContent=i+'/'+els.length;"
+        "function tick(){done++;if(btn)btn.textContent=done+'/'+total;"
+        "if(done>=total){finish();return;}pump();}"
+        "function pump(){"
+        "if(next>=els.length)return;"
+        "var mid=els[next++].id.slice(3);"
         "trMsg(mid,tid,true).then(function(ok){"
-        "if(ok){step();return;}"
+        "if(ok){tick();return;}"
         "setTimeout(function(){trMsg(mid,tid,true).then(function(ok2){"
-        "if(!ok2)failed++;step();});},700);});}"
-        "step();}"
+        "if(!ok2)failed++;tick();});},700);});}"
+        "for(var w=0;w<_TRPAR&&w<els.length;w++)pump();}"
         # KB editor: translate every section (+title) into the UI language, in place, for
         # READING. Reversible toggle; while translated the fields go read-only and Save is
         # locked so a translation can't be saved over the source. Sequential, not parallel, so

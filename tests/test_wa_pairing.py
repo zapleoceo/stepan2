@@ -262,3 +262,48 @@ async def test_the_phone_counts_from_either_side_of_the_chat(db_session) -> None
     refreshed = await db_session.get(Lead, lead.id)
     assert refreshed.phone_e164 == "+6285156469324"
     assert refreshed.display_name == "Valian"
+
+
+# ── что мы просим у WhatsApp при привязке ─────────────────────────────────────
+
+
+async def test_pairing_asks_for_the_full_history_and_touches_nothing_else() -> None:
+    """Сколько истории отдать, WhatsApp решает ОДИН раз — в момент привязки. Без этого флага
+    чат с месяцами переписки приехал с четырьмя сообщениями, и допросить его потом было
+    нечем: у Evolution их тоже четыре.
+
+    Остальные три — про то, чтобы не сломать работу человека, чей это номер: не отбирать у
+    телефона пуши и не ставить галочки «прочитано» в чужих чатах."""
+    from app.adapters.channels.transports import EvolutionTransport
+
+    sent: dict = {}
+
+    class _Resp:
+        status_code = 200
+
+        def raise_for_status(self) -> None: ...
+        def json(self) -> dict:
+            return {"qrcode": {"base64": "AAA"}}
+
+    class _Client:
+        async def __aenter__(self):  # noqa: ANN204
+            return self
+
+        async def __aexit__(self, *_a) -> bool:
+            return False
+
+        async def post(self, path: str, json: dict) -> _Resp:  # noqa: A002
+            sent.update(json)
+            return _Resp()
+
+        async def get(self, path: str) -> _Resp:
+            return _Resp()
+
+    t = EvolutionTransport(base_url="http://e", instance="wa-1", api_key="k")
+    t._client = lambda: _Client()  # noqa: SLF001
+
+    await t.pair()
+
+    assert sent["syncFullHistory"] is True
+    assert sent["alwaysOnline"] is False
+    assert sent["readMessages"] is False
