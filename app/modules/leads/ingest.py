@@ -105,21 +105,29 @@ class IngestService:
 
         Same shape as the read-receipt pass above and for the same reason: a fact that rides
         on EVERY polled item must not be read only on the items that happen to be new."""
-        seen: set[str] = set()
+        found: dict[str, tuple[str | None, str | None, str | None]] = {}
         for m in messages:
-            if m.direction == "out" or m.external_thread_id in seen:
+            phone, name, avatar = found.get(m.external_thread_id, (None, None, None))
+            # The phone is a property of the CHAT PARTNER, so it counts from either side:
+            # WhatsApp attaches the real address to only some items (15 of 50 on a live
+            # page), and on a manager's number most of those are the manager's own. Taking
+            # it only from inbound items threw away most of what was on offer.
+            phone = phone or m.lead_phone
+            # The NAME cannot be read that way. On our own items pushName is the school's,
+            # and writing it onto leads would rename half the base to "Academy It Step".
+            if m.direction != "out":
+                name, avatar = name or m.sender_name, avatar or m.sender_avatar
+            found[m.external_thread_id] = (phone, name, avatar)
+
+        for ext_id, (phone, name, avatar) in found.items():
+            if not (phone or name or avatar):
                 continue
-            if not (m.lead_phone or m.sender_name or m.sender_avatar):
-                continue
-            seen.add(m.external_thread_id)
-            thread = await self.identity.threads.by_external(
-                channel_id, m.external_thread_id)
+            thread = await self.identity.threads.by_external(channel_id, ext_id)
             if thread is None:
                 continue  # brand-new: the storing path resolves it with everything at once
             lead = await self.session.get(Lead, thread.lead_id)
             if lead is not None:
-                self.identity.backfill(
-                    lead, m.lead_phone, m.sender_name, None, None, m.sender_avatar)
+                self.identity.backfill(lead, phone, name, None, None, avatar)
                 self.session.add(lead)
 
     async def _advance_read_receipts(

@@ -221,3 +221,44 @@ async def test_a_known_thread_gets_its_name_even_though_dedup_drops_the_message(
     refreshed = await db_session.get(Lead, lead.id)
     assert refreshed.display_name == "Valian"
     assert refreshed.phone_e164 == "+628119720022"
+
+
+async def test_the_phone_counts_from_either_side_of_the_chat(db_session) -> None:  # noqa: ANN001
+    """WhatsApp вешает настоящий адрес лишь на часть элементов — 15 из 50 на живой странице,
+    и на номере менеджера большинство из них его собственные. Телефон — свойство собеседника,
+    а не автора реплики, поэтому считается с обеих сторон. Имя — нет: на наших элементах это
+    имя школы."""
+    from datetime import UTC, datetime
+
+    from app.adapters.db.models import Branch, Channel, ChannelThread, Lead
+    from app.domain.enums import ChannelKind
+    from app.modules.leads.ingest import IngestService
+    from app.ports.channel import InboundMessage
+
+    branch = Branch(name="T", lang="id")
+    db_session.add(branch)
+    await db_session.flush()
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, read_only=True)
+    db_session.add(channel)
+    await db_session.flush()
+    lead = Lead(branch_id=branch.id)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=channel.id,
+                                 external_thread_id="60520501653592@lid"))
+    await db_session.flush()
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    base = {"external_thread_id": "60520501653592@lid", "occurred_at": now}
+    await IngestService(db_session, branch.id).ingest(channel.id, [
+        # лид написал: имя есть, адреса нет
+        InboundMessage(sender_id="x", text="halo", external_id="B",
+                       sender_name="Valian", **base),
+        # менеджер ответил: имени лида нет, зато приехал настоящий номер
+        InboundMessage(sender_id="y", text="baik", external_id="C", direction="out",
+                       sender_name="Academy It Step", lead_phone="+6285156469324", **base),
+    ])
+
+    refreshed = await db_session.get(Lead, lead.id)
+    assert refreshed.phone_e164 == "+6285156469324"
+    assert refreshed.display_name == "Valian"
