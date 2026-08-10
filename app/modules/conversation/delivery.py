@@ -329,21 +329,41 @@ class ReplyDelivery:
             )
         return outbox
 
-    def _sync_lead_fields(self, lead: Lead, thread, decision: Decision) -> None:
+    async def _sync_lead_fields(self, lead: Lead, thread, decision: Decision) -> None:
         """Copy this turn's observations onto the lead/thread — product, language, segment,
         and a freshly-typed phone. Pure field sync, no funnel-stage logic (see _apply_decision
         for that) — split out so each responsibility can be read and tested on its own."""
-        # The model may re-qualify a product it inferred on an earlier turn ('model') or one
-        # that was never anchored ('None'), but never overrides an ad-matched product ('ad')
-        # or a manager's manual pick ('manager') — thread 4943: an ad-mapped SMM lead had its
-        # product silently swapped to Vibe Coding by the model's own re-qualification, and the
-        # wrong product's (real, grounded) price got quoted when the lead asked directly. An
-        # ad click is stronger evidence of intent than the model's read of the conversation, so
-        # it must not be overwritten without a human correction.
+        # Модель переопределяет продукт всюду, кроме ручного выбора менеджера ('manager') —
+        # человек всегда старше догадки.
+        #
+        # Реклама ('ad') раньше тоже была под замком: тред 4943, рекламный SMM-лид, модель
+        # увела продукт на Vibe Coding и назвала цену не того курса. Причина того вреда —
+        # knowledge_context(product_slug), сужавший базу знаний до карточки продукта треда:
+        # промахнулся продукт — модель видела чужой прайс. Этой функции в боевом пути больше
+        # нет, промт собирает full_knowledge_context() без продукта (все карточки каждый ход,
+        # ради стабильного префикса кэша), а поверх стоит денежный гейт, сверяющий цифры со
+        # всей базой. Замок стерёг заложенную дверь, а платили за него живые сделки: продукт
+        # треда решает вид события в CRM и цель согласия, и на 2568 тредах из 4750 он был
+        # намертво прибит к тому, что человек кликнул однажды. Тред 3163: клик по рекламе
+        # ивента, четыре месяца разговора о курсе за 13 млн — а согласие всё ещё считалось
+        # согласием на билет за 100 тысяч.
+        #
+        # Атрибуция рекламы не задета: отчёты считают по ct.ad_id/ad_media_id, не по продукту.
+        #
+        # Слаг обязан существовать в каталоге филиала. Экстрактор свой ответ сверяет со
+        # списком (discovery._one_of), но в досье слаг попадает и от продающей модели —
+        # to_legacy берёт merged.product_slug, а тот принимает любую строку. На бою это
+        # уже стоило 28 тредов, привязанных к несуществующему: open_house (20), smm_int,
+        # uiux_design_skillboost — все по пути 'model', где замка никогда не было. И ещё
+        # ~70 рекламных ждали своей очереди с вариантами написания: smm-intensive вместо
+        # smm_intensive, «SMM Intensive Course», vibe-coding. Без сверки такой слаг ломает
+        # вид события в CRM и заклинивает согласие: записали «smm-intensive», следующим
+        # ходом сравнили с «smm_intensive» — не совпало, готовность гасится на каждом ходу.
         if (
             decision.product_slug
             and decision.product_slug != thread.product_slug
-            and thread.product_source in (None, "model")
+            and thread.product_source != "manager"
+            and await self._known_product(decision.product_slug)
         ):
             # Logged with actor="agent" (renders as "Степан" — see who.agent in _i18n.py) so
             # the chat timeline can never again read as a manager having clicked the product
@@ -386,7 +406,7 @@ class ReplyDelivery:
         fresh mute, not an already-exited lead) so the caller appends the matching closing
         line; None otherwise."""
         was_non_target = lead.lead_type == "non_target"
-        self._sync_lead_fields(lead, thread, decision)
+        await self._sync_lead_fields(lead, thread, decision)
         if decision.hard_stop:
             await self._hard_stop(lead, thread)
             return None
@@ -403,9 +423,11 @@ class ReplyDelivery:
         # openhouse-style RSVP (notify team, bot stays on), regardless of what the model
         # guessed — the model only picks the subtype for non-event products.
         ready = self._is_ready(decision)
-        # Цель, о которой идёт разговор ПРЯМО СЕЙЧАС: то, что назвал экстрактор, иначе то, к
-        # чему привязан тред. Согласие сверяется с ней, а не с состоянием лида вообще.
-        target = (decision.product_slug or "").strip() or thread.product_slug
+        # Цель, о которой идёт разговор ПРЯМО СЕЙЧАС. Берём её с треда, а не из Decision:
+        # _sync_lead_fields выше уже перепривязал тред, если модель назвала другой продукт,
+        # и сделал это со сверкой по каталогу. Слаг с треда — единственный, про который
+        # известно, что он существует, а сравнивать согласие можно только с таким.
+        target = thread.product_slug
         if ready and not self._consent_still_valid(lead, target):
             logger.info(
                 "branch=%d lead=%d: согласие было на «%s», сейчас «%s» — готовность сброшена",
@@ -539,6 +561,14 @@ class ReplyDelivery:
                 "branch=%d thread=%d soft-no → snoozed to one final nudge (+%dh)",
                 self.branch_id, thread.id, schedule[-1])
         return True
+
+    async def _known_product(self, slug: str) -> bool:
+        """Слаг есть в каталоге филиала — единственный фильтр между догадкой модели и
+        привязкой треда."""
+        return (await self.session.execute(
+            select(Product.id).where(
+                Product.branch_id == self.branch_id, Product.slug == slug)
+        )).first() is not None
 
     async def _product_kind(self, slug: str) -> str:
         row = (await self.session.execute(

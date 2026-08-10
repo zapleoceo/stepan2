@@ -558,6 +558,9 @@ async def test_manager_stage_not_in_bot_silent() -> None:
 
 async def test_product_slug_attributed_once(db_session) -> None:
     bid, tid, _ = await _world(db_session)
+    # Перепривязка сверяет слаг по каталогу филиала — без карточки догадка не проходит.
+    db_session.add(Product(branch_id=bid, slug="vibe", title="Vibe"))
+    await db_session.flush()
     await _svc(db_session, bid).enqueue_reply(tid, _decision(product_slug="vibe"))
     thread = (await db_session.exec(
         select(ChannelThread).where(ChannelThread.id == tid))).first()

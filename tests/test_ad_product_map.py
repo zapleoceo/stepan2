@@ -14,6 +14,7 @@ from app.adapters.db.models import (
     ChannelThread,
     Lead,
     Message,
+    Product,
 )
 from app.domain.enums import ChannelKind, Stage
 from app.modules.ads import AdMappingService
@@ -227,6 +228,9 @@ def _decision(**over: Any) -> Decision:
 
 async def _thread_with_source(s, source: str | None, slug: str | None):  # noqa: ANN001
     bid, ch = await _branch_channel(s)
+    # Каталог филиала: перепривязка сверяет слаг по нему, иначе догадка модели не проходит.
+    for known in ("smm_intensive", "vibe_coding", "data_analyst"):
+        s.add(Product(branch_id=bid, slug=known, title=known))
     lead = Lead(branch_id=bid, stage=Stage.QUALIFYING)
     s.add(lead)
     await s.flush()
@@ -246,14 +250,18 @@ def _svc(s, bid: int):  # noqa: ANN001, ANN201
                         branch_settings=_parse({}), notifier=None)
 
 
-async def test_model_does_not_override_ad_sourced_product(db_session) -> None:
-    # thread 4943/5019: an ad click is stronger evidence of intent than the model's own
-    # re-qualification — silently overriding it sent a wrong-product price to a live lead.
+async def test_model_rebinds_an_ad_sourced_product(db_session) -> None:
+    # Замок с 'ad' снят 10.08.2026. Ставили его после тредов 4943/5019, где модель увела
+    # рекламный продукт и в живой чат уехала цена не того курса — но вред шёл через
+    # knowledge_context(product_slug), сужавший базу до карточки продукта треда. В боевом пути
+    # этой функции больше нет (full_knowledge_context() без продукта, ради кэша), а цифры
+    # ответа сверяет денежный гейт. Платил за замок тред 3163: клик по рекламе ивента, месяцы
+    # разговора о курсе за 13 млн — и согласие всё ещё числилось за билетом в 100 тысяч.
     bid, tid = await _thread_with_source(db_session, "ad", "smm_intensive")
     await _svc(db_session, bid).enqueue_reply(tid, _decision(product_slug="vibe_coding"))
     thread = (await db_session.exec(select(ChannelThread))).first()
-    assert thread.product_slug == "smm_intensive"  # ad match locked
-    assert thread.product_source == "ad"
+    assert thread.product_slug == "vibe_coding"  # разговор ведёт, клик только начинает
+    assert thread.product_source == "model"
 
 
 async def test_model_does_not_override_manager_product(db_session) -> None:
