@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 from app.domain.clock import as_naive_utc
 from app.domain.enums import ChannelKind, SessionStatus
-from app.ports.channel import READ_ONLY_ERROR, InboundMessage, SendResult
+from app.ports.channel import InboundMessage, SendResult
 
 
 class WhatsAppTransport(Protocol):
@@ -33,27 +33,22 @@ class WhatsAppTransport(Protocol):
 class WhatsAppAdapter:
     """Implements app.ports.channel.ChannelPort for WA follow-up via Evolution API.
 
-    read_only is per-INSTANCE, not per-connector: the follow-up number sends, the managers'
-    numbers are linked only so we can read where a lead goes after Stepan hands over the
-    phone. Same adapter, opposite permission — so it is a constructor argument, and flipping
-    a number to a full channel later is a checkbox, not a code change."""
+    Every linked instance can send, including a manager's own number: whether a line SHOULD
+    leave is a question about the lead (their stage and bot switch), not about the handset,
+    and the adapter is the wrong place to answer it. Whose phone this is stays recorded on
+    the channel (Channel.manager_phone) for ingest, the audit and the chat header."""
 
     kind: ChannelKind = ChannelKind.WHATSAPP
 
-    def __init__(
-        self, transport: WhatsAppTransport, *, instance: str, read_only: bool = False
-    ) -> None:
+    def __init__(self, transport: WhatsAppTransport, *, instance: str) -> None:
         self._t = transport
         self._instance = instance
-        self.read_only = read_only
 
     async def fetch_inbound(self) -> list[InboundMessage]:
         messages = await self._t.fetch_messages()
         return [self._to_inbound(m) for m in messages]
 
     async def send_text(self, external_thread_id: str, text: str) -> SendResult:
-        if self.read_only:
-            return SendResult(ok=False, error=READ_ONLY_ERROR)
         try:
             raw = await self._t.send_message(external_thread_id, text)
         except Exception as exc:  # transport failure → caller decides retry/hand-off
@@ -72,7 +67,7 @@ class WhatsAppAdapter:
             occurred_at=as_naive_utc(msg.get("message_timestamp")),
             product_hint=msg.get("ad_product"),
             # Both sides of the chat, with the side named by the transport where the raw
-            # fromMe flag is. On a read-only number the "out" half IS the subject of study:
+            # fromMe flag is. On a manager's number the "out" half IS the subject of study:
             # it is the manager talking, not us.
             direction=str(msg.get("direction", "in")),
             external_id=msg.get("external_id"),

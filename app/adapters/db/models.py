@@ -56,7 +56,12 @@ class Channel(SQLModel, table=True):
     # A COLUMN, not a key in the encrypted session dump, because the question is asked in
     # SQL: the reply dispatcher must exclude these threads before it spends a broker call,
     # and the funnel must exclude their contacts. Encrypted config cannot answer either.
-    read_only: bool = Field(default=False)
+    # This connector is a person's own phone, not a company line. It is a FACT about whose
+    # handset it is, never a permission: a lead arriving here belongs to that manager (ingest
+    # moves them to MANAGER and mutes the bot), the audit counts these threads apart from
+    # Stepan's funnel, and the chat says whose number it is. What the bot may do is decided
+    # per LEAD, by the stage and the bot switch the manager controls — see domain/funnel.py.
+    manager_phone: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

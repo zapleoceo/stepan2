@@ -70,7 +70,6 @@ class InstagramAdapter:
     """Implements app.ports.channel.ChannelPort for IG follow-up via a private transport."""
 
     kind: ChannelKind = ChannelKind.INSTAGRAM
-    read_only: bool = False
 
     def __init__(self, transport: IGTransport, *, handle: str) -> None:
         self._t = transport

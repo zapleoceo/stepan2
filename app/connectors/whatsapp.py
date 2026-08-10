@@ -29,11 +29,10 @@ async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
         instance=dump["instance"],
         api_key=dump.get("api_key") or cfg.evolution_api_key,
     )
-    # The channel row, not the dump: one source of truth, and the one the reply dispatcher
-    # and the funnel can both read. The dump's copy stays only for rows written before the
-    # column existed and is honoured when the column is still at its default.
-    read_only = bool(getattr(channel, "read_only", False) or dump.get("read_only"))
-    return WhatsAppAdapter(transport, instance=dump["instance"], read_only=read_only)
+    # Whose phone this is lives on the channel row (Channel.manager_phone) and is read by
+    # ingest, the audit and the chat header. The adapter no longer takes it: every linked
+    # instance can send, and whether a line SHOULD leave is decided per lead.
+    return WhatsAppAdapter(transport, instance=dump["instance"])
 
 
 SPEC = ConnectorSpec(

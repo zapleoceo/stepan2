@@ -74,15 +74,12 @@ def awaiting_kind_sql(specs: Iterable[ConnectorSpec]) -> str:
     strings, so it carries no parameters of its own. They are ChannelKind members — a closed
     enum from our own source, never anything a request supplies."""
     excluded = [s.kind.value for s in specs if not s.counts_as_awaiting]
-    # A read-only channel is somebody else's conversation. "Awaiting a reply" there is not a
-    # queue item — the manager is answering from their own phone, and Stepan is forbidden to
-    # write at all — so counting it inflates the badge with work nobody owes.
-    #
-    # A per-CHANNEL flag rather than a per-kind one, unlike the exclusion above: the same
-    # WhatsApp connector runs writable for the follow-up number and read-only for the
-    # managers', so the kind cannot answer this.
-    exists = (" AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
-              "             AND NOT c.read_only")
+    # A manager's number was excluded here too, on the grounds that Stepan could not write
+    # there at all. He can now, when a manager hands the lead back — and then the badge SHOULD
+    # show it, because we do owe that reply. Nothing is lost by dropping the test: the queue
+    # itself (IN_QUEUE_EXTRA) already requires the bot to be on and the lead to sit in a funnel
+    # stage, and a lead a manager is working is in MANAGER with the switch off.
+    exists = (" AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id")
     if not excluded:
         return exists + ")"
     kinds = ", ".join(f"'{k}'" for k in excluded)

@@ -110,7 +110,7 @@ async def _needs_for(session, lead_id: int, needs: str | None, needs_tr: str | N
 
 
 _LEAD_CONNS_Q = (
-    "SELECT ch.kind, ch.handle, ct.external_thread_id, l.ig_username, ch.read_only,"
+    "SELECT ch.kind, ch.handle, ct.external_thread_id, l.ig_username, ch.manager_phone,"
     " ct.id, ct.msg_in, ct.msg_out, ct.created_at, ct.last_in_at"
     " FROM channel_thread ct"
     " JOIN channel ch ON ch.id = ct.channel_id"
@@ -126,15 +126,6 @@ _LEAD_CONNS_Q = (
 )
 
 
-async def _is_read_only(session, thread_id: int) -> bool:  # noqa: ANN001
-    row = (await session.execute(
-        text("SELECT c.read_only FROM channel_thread t JOIN channel c ON c.id = t.channel_id"
-             " WHERE t.id = :tid"),
-        {"tid": thread_id},
-    )).first()
-    return bool(row and row[0])
-
-
 async def _lead_conns(session, thread_id: int) -> list[dict]:  # noqa: ANN001
     """Every account this thread's LEAD is reachable on.
 
@@ -143,7 +134,7 @@ async def _lead_conns(session, thread_id: int) -> list[dict]:  # noqa: ANN001
     facts about the person."""
     rows = (await session.execute(text(_LEAD_CONNS_Q), {"tid": thread_id})).all()
     return [
-        {"kind": r[0], "handle": r[1], "ext": r[2], "nick": r[3], "read_only": bool(r[4]),
+        {"kind": r[0], "handle": r[1], "ext": r[2], "nick": r[3], "manager_phone": bool(r[4]),
          "tid": r[5], "cin": r[6], "cout": r[7], "since": r[8], "last_in": r[9]}
         for r in rows
     ]
@@ -339,11 +330,6 @@ async def chat_send(
     async with session_scope() as session:
         branch_id = await _guarded_branch(session, thread_id, allowed)
         if branch_id is None or not text_body:
-            return await _rerender_feed(session, thread_id)
-        # The banner above the composer says this will not send; the route says it too.
-        # A queued line on a read-only channel is refused later and further away, and the
-        # operator who typed it has already moved on by then.
-        if await _is_read_only(session, thread_id):
             return await _rerender_feed(session, thread_id)
         session.add(Outbox(
             branch_id=branch_id, thread_id=thread_id, text=text_body, source=src,

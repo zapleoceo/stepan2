@@ -34,7 +34,6 @@ class MetaBusinessAdapter:
     """Implements app.ports.channel.ChannelPort over the official Graph API (read path)."""
 
     kind: ChannelKind = ChannelKind.META_BUSINESS
-    read_only: bool = False
 
     def __init__(self, transport: GraphTransport, *, account_id: str) -> None:
         self._t = transport

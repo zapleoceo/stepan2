@@ -60,7 +60,7 @@ class IngestService:
         # Read once per batch, not per message: it decides whether a lead first seen here
         # belongs in the funnel at all.
         channel = await self.session.get(Channel, channel_id)
-        read_only = bool(channel is not None and channel.read_only)
+        manager_phone = bool(channel is not None and channel.manager_phone)
         await self._advance_read_receipts(channel_id, messages)
         await self._refresh_identity(channel_id, messages)
         for inbound in messages:
@@ -95,7 +95,7 @@ class IngestService:
                 avatar_url=inbound.sender_avatar,
                 first_seen=inbound.occurred_at,
             )
-            if read_only and thread_created:
+            if manager_phone and thread_created:
                 await self._claim_for_manager(lead, thread)
             self.session.add(lead)
             row = await self._store(lead, thread, channel_id, external_id, inbound)
@@ -104,15 +104,15 @@ class IngestService:
         return created
 
     async def _claim_for_manager(self, lead, thread) -> None:  # noqa: ANN001
-        """A read-only connector is a manager's own phone. Their first message there means a
-        human already has this person — so the lead moves to MANAGER whatever stage they were
-        in, and the bot goes quiet.
+        """This connector is a manager's own phone. Their first message there means a human
+        already has this person — so the lead moves to MANAGER whatever stage they were in,
+        and the bot goes quiet.
 
         On the FIRST message of that connector, not every one: once a manager decides to hand
         the thread back (any funnel stage re-arms the bot, see domain.funnel.apply_stage), a
-        later message on the same connector must not silently undo that decision. Until they
-        do hand it back, the lead stays silenced anyway — threads_awaiting_reply answers only
-        the thread the person wrote to LAST, and this one is never eligible.
+        later message on the same connector must not silently undo that decision — and that
+        decision is the ONLY thing keeping the bot quiet here, now that the channel no longer
+        refuses sends of its own.
 
         Not a flag alongside the stage: the stage IS the answer, it is already outside every
         funnel-stage list (counters, follow-ups, reactivation, the reply queue), and a manager
@@ -122,10 +122,10 @@ class IngestService:
         self.session.add(StageEvent(
             branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
             from_stage=str(lead.stage), to_stage=str(Stage.MANAGER),
-            actor="system", reason="read-only connector: a manager owns this conversation",
+            actor="system", reason="manager's own phone: a human owns this conversation",
         ))
         apply_stage(lead, Stage.MANAGER)
-        logger.info("branch=%d lead=%s → manager (read-only connector, thread=%s)",
+        logger.info("branch=%d lead=%s → manager (manager phone, thread=%s)",
                     self.branch_id, lead.id, thread.id)
 
     async def _we_composed_this(

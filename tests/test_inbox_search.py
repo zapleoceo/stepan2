@@ -78,7 +78,7 @@ def test_opening_a_chat_keeps_its_own_url() -> None:
     from app.api._ui_html import thread_list_html
     # A LEAD row: the click opens the lead's most recently active thread, which is 452 here.
     conns = [{"kind": "instagram", "handle": "IG", "ext": "t", "nick": "alice",
-              "read_only": False, "tid": 452, "cin": 1, "cout": 0}]
+              "manager_phone": False, "tid": 452, "cin": 1, "cout": 0}]
     row = (9, "Alice", "new", datetime.now(UTC).replace(tzinfo=None), "+62811", "alice",
            None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0, 452, conns)
     row_html = thread_list_html([row], filter_qs="stage=dormant")

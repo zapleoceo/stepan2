@@ -37,7 +37,7 @@ def _thread_row(tid: int) -> tuple:
     per-connector breakdown the card lists underneath, which is what makes one card able to
     stand for a person reachable in several places."""
     conns = [{"kind": "instagram", "handle": "IG itstep", "ext": "t1", "nick": "alice",
-              "read_only": False, "tid": tid, "cin": 1, "cout": 0}]
+              "manager_phone": False, "tid": tid, "cin": 1, "cout": 0}]
     return (tid * 100, "Alice", "new", datetime.now(UTC).replace(tzinfo=None),
             "+62811", "alice", None, 500, 200, True, "Hi", "in", 1, 0, "Jakarta", 0,
             tid, conns)

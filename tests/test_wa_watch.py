@@ -31,12 +31,12 @@ async def _channel(s, *, status: SessionStatus, last_ok: datetime | None):  # no
     s.add(branch)
     await s.flush()
     channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP,
-                      handle="WA Maya", read_only=True)
+                      handle="WA Maya", manager_phone=True)
     s.add(channel)
     await s.flush()
     s.add(ChannelSession(
         channel_id=channel.id, status=status, last_ok_at=last_ok,
-        secret_enc=encrypt(json.dumps({"instance": "wa-1", "read_only": True})),
+        secret_enc=encrypt(json.dumps({"instance": "wa-1", "manager_phone": True})),
     ))
     await s.flush()
     return branch.id, channel.id

@@ -150,7 +150,7 @@ async def channel_edit(ch_id: int, request: Request) -> HTMLResponse:
         if branch_id is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         row = (await session.execute(
-            text("SELECT id, kind, handle, account_id, is_active, read_only"
+            text("SELECT id, kind, handle, account_id, is_active, manager_phone"
                  " FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
@@ -193,7 +193,7 @@ async def channel_save(
     handle: str = Form(default=""),
     account_id: str = Form(default=""),
     is_active: str = Form(default=""),
-    read_only: str = Form(default=""),
+    manager_phone: str = Form(default=""),
 ) -> HTMLResponse:
     lang = apply_lang(request)
     allowed = writable_branch_ids(request)  # write route: enforce WRITE role for the branch
@@ -204,18 +204,18 @@ async def channel_save(
         await session.execute(
             text(
                 "UPDATE channel SET handle=:h, account_id=:a, is_active=:active,"
-                " read_only=:ro WHERE id=:id"
+                " manager_phone=:ro WHERE id=:id"
             ),
             {
                 "h": handle.strip() or None,
                 "a": account_id.strip() or None,
                 "active": bool(is_active),
-                "ro": bool(read_only),
+                "ro": bool(manager_phone),
                 "id": ch_id,
             },
         )
         row = (await session.execute(
-            text("SELECT id, kind, handle, account_id, is_active, read_only"
+            text("SELECT id, kind, handle, account_id, is_active, manager_phone"
                  " FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
@@ -263,7 +263,7 @@ async def channel_credential(ch_id: int, request: Request) -> HTMLResponse:
         if await _channel_branch(session, ch_id, allowed) is None:
             return HTMLResponse(_FORBIDDEN, status_code=403)
         row = (await session.execute(
-            text("SELECT id, kind, handle, account_id, is_active, read_only"
+            text("SELECT id, kind, handle, account_id, is_active, manager_phone"
                  " FROM channel WHERE id=:id"),
             {"id": ch_id},
         )).first()
@@ -625,9 +625,9 @@ async def _wa_store(
         text("DELETE FROM channel_session WHERE channel_id=:id"), {"id": ch_id}
     )
     await session.execute(
-        text("UPDATE channel SET handle=:h, read_only=:ro WHERE id=:id"),
+        text("UPDATE channel SET handle=:h, manager_phone=:ro WHERE id=:id"),
         {"h": dump.get("phone") or dump["instance"],
-         "ro": bool(dump.get("read_only")), "id": ch_id},
+         "ro": bool(dump.get("manager_phone")), "id": ch_id},
     )
     await session.execute(
         text("INSERT INTO channel_session (channel_id, secret_enc, status)"
@@ -649,7 +649,7 @@ async def wa_pair(
     ch_id: int,
     request: Request,
     phone: str = Form(default=""),
-    read_only: str = Form(default=""),
+    manager_phone: str = Form(default=""),
 ) -> HTMLResponse:
     """Create the instance and show its QR. Re-posting with no phone means "the code
     expired, give me another" — the pending row remembers which number we were pairing."""
@@ -665,7 +665,7 @@ async def wa_pair(
         dump = {
             "instance": wa_instance_name(phone),
             "phone": phone.strip(),
-            "read_only": bool(read_only.strip()),
+            "manager_phone": bool(manager_phone.strip()),
         }
     elif pending:
         dump = pending  # QR refresh — keep the number AND the permission already chosen

@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message
 from app.api._query import fetch_messages
-from app.api._ui_html import _bubble, _read_only_notice
+from app.api._ui_html import _bubble, _manager_phone_notice
 from app.domain.enums import ChannelKind
 
 
@@ -21,7 +21,7 @@ async def _lead_on_two_channels(s) -> tuple[int, int]:  # noqa: ANN001
     await s.flush()
     ig = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM, handle="IG itstep")
     wa = Channel(branch_id=b.id, kind=ChannelKind.WHATSAPP, handle="WA Excel",
-                 read_only=True)
+                 manager_phone=True)
     s.add(ig)
     s.add(wa)
     await s.flush()
@@ -82,13 +82,13 @@ async def test_opening_the_other_thread_gives_the_same_feed(db_session) -> None:
 def test_the_composer_warns_when_the_newest_channel_is_a_managers() -> None:
     """Оператор читает переписку менеджера и печатает в поле под ней. Строка встала бы в
     очередь и была бы снята позже и в другом месте — сказать до, а не объяснять после."""
-    notice = _read_only_notice([{"handle": "WA Excel", "read_only": True}])
+    notice = _manager_phone_notice([{"handle": "WA Excel", "manager_phone": True}])
     assert "WA Excel" in notice
 
 
 def test_no_warning_when_we_can_actually_answer() -> None:
-    assert _read_only_notice([{"handle": "IG itstep", "read_only": False}]) == ""
-    assert _read_only_notice([]) == ""
+    assert _manager_phone_notice([{"handle": "IG itstep", "manager_phone": False}]) == ""
+    assert _manager_phone_notice([]) == ""
 
 
 def test_the_panel_actually_renders_the_warning() -> None:
@@ -98,7 +98,7 @@ def test_the_panel_actually_renders_the_warning() -> None:
 
     html = chat_panel_html(
         7, "Valian", "handed_off", [], [],
-        conns=[{"handle": "WA Excel", "read_only": True, "kind": "whatsapp"}],
+        conns=[{"handle": "WA Excel", "manager_phone": True, "kind": "whatsapp"}],
     )
     assert "fin-ro" in html
     assert "WA Excel" in html

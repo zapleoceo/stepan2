@@ -40,11 +40,11 @@ def test_the_form_asks_for_a_phone_and_nothing_technical() -> None:
         assert gone not in html
 
 
-def test_read_only_is_ticked_by_default() -> None:
+def test_manager_phone_is_ticked_by_default() -> None:
     """Первый номер — менеджерский, и цена ошибки несимметрична: лишняя галка ничего не
     ломает, забытая означает, что бот может написать клиенту от имени человека."""
     html = _ch_wa_form(7)
-    assert 'name="read_only"' in html
+    assert 'name="manager_phone"' in html
     assert "checked" in html
 
 
@@ -125,14 +125,17 @@ async def test_a_paired_channel_builds_its_port_from_the_environment(
     db_session.add(ChannelSession(
         channel_id=channel.id,
         secret_enc=encrypt(json.dumps(
-            {"instance": "wa-628119720022", "phone": "+628119720022", "read_only": True})),
+            {"instance": "wa-628119720022", "phone": "+628119720022", "manager_phone": True})),
         status=SessionStatus.ACTIVE,
     ))
     await db_session.flush()
 
     port = await build_port(db_session, channel)
 
-    assert port.read_only is True
+    # Раньше здесь проверялся флаг на порту. Его там больше нет: порт умеет отправлять и не
+    # хранит разрешений — чей это телефон, знает строка канала, а можно ли писать, решает лид.
+    assert port._instance == "wa-628119720022"  # noqa: SLF001
+    assert not hasattr(port, "manager_phone")
     settings.cache_clear()
 
 
@@ -169,7 +172,7 @@ async def test_a_channel_paired_by_the_old_form_still_works(
 
     port = await build_port(db_session, channel)
 
-    assert port.read_only is False  # старая форма про флаг не знала → канал остаётся пишущим
+    assert port._instance == "legacy"  # noqa: SLF001 — свои адрес и ключ из старой строки
     settings.cache_clear()
 
 
@@ -193,7 +196,7 @@ async def test_a_known_thread_gets_its_name_even_though_dedup_drops_the_message(
     branch = Branch(name="T", lang="id")
     db_session.add(branch)
     await db_session.flush()
-    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, read_only=True)
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, manager_phone=True)
     db_session.add(channel)
     await db_session.flush()
     lead = Lead(branch_id=branch.id)
@@ -238,7 +241,7 @@ async def test_the_phone_counts_from_either_side_of_the_chat(db_session) -> None
     branch = Branch(name="T", lang="id")
     db_session.add(branch)
     await db_session.flush()
-    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, read_only=True)
+    channel = Channel(branch_id=branch.id, kind=ChannelKind.WHATSAPP, manager_phone=True)
     db_session.add(channel)
     await db_session.flush()
     lead = Lead(branch_id=branch.id)
