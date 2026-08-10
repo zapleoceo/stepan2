@@ -51,6 +51,59 @@ _CHECKS = (
 )
 
 
+# SQL lives here as named constants, not inline in run(): nothing in the test suite executes
+# it (the audit is Postgres-only — FILTER, ~), so a dangling comma before FROM shipped once and
+# only surfaced on the live database. test_learning_audit checks these strings for that class.
+_Q_MESSAGES = (
+    "SELECT m.text, m.occurred_at FROM message m WHERE m.branch_id=:bid"
+    " AND m.direction='out' AND m.sent_by='agent' AND m.occurred_at > :cutoff"
+)
+
+# A read-only connector is a manager's own phone: its threads are conversations we WATCH, not
+# leads Stepan worked. Counting them made 305 of last week's "511 new leads" someone else's
+# WhatsApp, and every rate below was divided by that number. Stepan's funnel or nothing.
+_Q_FUNNEL = (
+    "WITH t AS (SELECT ct.id tid,"
+    "  (SELECT min(m2.id) FROM message m2 WHERE m2.thread_id=ct.id"
+    "     AND m2.direction='out') fo"
+    " FROM channel_thread ct JOIN lead l ON l.id=ct.lead_id"
+    "   JOIN channel c ON c.id=ct.channel_id"
+    " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND NOT c.read_only)"
+    " SELECT count(*),"
+    "  count(*) FILTER (WHERE fo IS NOT NULL AND EXISTS (SELECT 1 FROM message m3"
+    "    WHERE m3.thread_id=tid AND m3.direction='in' AND m3.id>fo))"
+    " FROM t"
+)
+
+# Phones are an EVENT, not a property of this week's cohort. Counting leads created in the
+# window who happen to carry a number credited Stepan for numbers the WhatsApp connector hands
+# over for free, and gave him nothing for a number typed today by a lead who arrived in June.
+_Q_PHONES = (
+    "SELECT count(DISTINCT ct.lead_id) FROM message m"
+    " JOIN channel_thread ct ON ct.id=m.thread_id"
+    " JOIN channel c ON c.id=ct.channel_id"
+    " WHERE m.branch_id=:bid AND m.direction='in' AND m.occurred_at > :cutoff"
+    "   AND NOT c.read_only"
+    r"   AND m.text ~ '(\+?62|0)[ .\-]?8[1-9][0-9 ().\-]{6,}'"
+)
+
+# Attempts and suppressions have to nest. Filtering attempts on to_stage='nurturing' put every
+# nurturing→nurturing row in BOTH counters, so "356 attempts, 75 suppressed" described 396 rows.
+_Q_REACTIVATION = (
+    "SELECT count(*), count(*) FILTER (WHERE from_stage=to_stage)"
+    " FROM stage_event WHERE branch_id=:bid AND reason='reactivation'"
+    " AND created_at > :cutoff"
+)
+
+_Q_WATCHED = (
+    "SELECT count(*) FROM channel_thread ct JOIN lead l ON l.id=ct.lead_id"
+    " JOIN channel c ON c.id=ct.channel_id"
+    " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND c.read_only"
+)
+
+QUERIES = (_Q_MESSAGES, _Q_FUNNEL, _Q_PHONES, _Q_REACTIVATION, _Q_WATCHED)
+
+
 class LearningAudit:
     def __init__(self, session: AsyncSession, branch_id: int,
                  notifier: NotifierPort | None) -> None:
@@ -65,58 +118,18 @@ class LearningAudit:
         """Build the weekly report text (and send it if a notifier is wired)."""
         from datetime import UTC, datetime, timedelta  # noqa: PLC0415
         cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
-        out_msgs = await self._rows(
-            "SELECT m.text, m.occurred_at FROM message m WHERE m.branch_id=:bid"
-            " AND m.direction='out' AND m.sent_by='agent' AND m.occurred_at > :cutoff",
-            cutoff=cutoff)
+        out_msgs = await self._rows(_Q_MESSAGES, cutoff=cutoff)
         flag_counts: dict[str, int] = {}
         for t, sent_on in out_msgs:
             for name, fn in _CHECKS:
                 if fn(t or "", sent_on.date()):
                     flag_counts[name] = flag_counts.get(name, 0) + 1
-        # A read-only connector is a manager's own phone: its threads are conversations we
-        # WATCH, not leads Stepan worked. Counting them made 305 of last week's "511 new
-        # leads" someone else's WhatsApp, and every rate below was divided by that number —
-        # including the phones, which arrive free with the connector rather than being asked
-        # for. The funnel is Stepan's funnel or it measures nothing.
-        funnel = await self._rows(
-            "WITH t AS (SELECT ct.id tid, l.phone_e164,"
-            "  (SELECT min(m2.id) FROM message m2 WHERE m2.thread_id=ct.id"
-            "     AND m2.direction='out') fo"
-            " FROM channel_thread ct JOIN lead l ON l.id=ct.lead_id"
-            "   JOIN channel c ON c.id=ct.channel_id"
-            " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND NOT c.read_only)"
-            " SELECT count(*),"
-            "  count(*) FILTER (WHERE fo IS NOT NULL AND EXISTS (SELECT 1 FROM message m3"
-            "    WHERE m3.thread_id=tid AND m3.direction='in' AND m3.id>fo)),"
-            " FROM t", cutoff=cutoff)
+        funnel = await self._rows(_Q_FUNNEL, cutoff=cutoff)
         new_threads, replied = (funnel[0] if funnel else (0, 0))
-        # Phones are an EVENT, not a property of this week's cohort. Counting leads created in
-        # the window who happen to carry a number credited Stepan for numbers the WhatsApp
-        # connector hands over for free, and gave him nothing for a number typed today by a
-        # lead who arrived in June. Count the typing: an inbound this week, on a channel we
-        # write to, that carries an Indonesian mobile.
-        phones = (await self._rows(
-            "SELECT count(DISTINCT ct.lead_id) FROM message m"
-            " JOIN channel_thread ct ON ct.id=m.thread_id"
-            " JOIN channel c ON c.id=ct.channel_id"
-            " WHERE m.branch_id=:bid AND m.direction='in' AND m.occurred_at > :cutoff"
-            "   AND NOT c.read_only"
-            r"   AND m.text ~ '(\+?62|0)[ .\-]?8[1-9][0-9 ().\-]{6,}'",
-            cutoff=cutoff))[0][0]
-        # Attempts and suppressions have to nest. Filtering attempts on to_stage='nurturing'
-        # put every nurturing→nurturing row in BOTH counters, so "356 attempts, 75 suppressed"
-        # described 396 rows: 35 of the suppressed sat inside the 356 and 40 outside it.
-        react = await self._rows(
-            "SELECT count(*), count(*) FILTER (WHERE from_stage=to_stage)"
-            " FROM stage_event WHERE branch_id=:bid AND reason='reactivation'"
-            " AND created_at > :cutoff", cutoff=cutoff)
+        phones = (await self._rows(_Q_PHONES, cutoff=cutoff))[0][0]
+        react = await self._rows(_Q_REACTIVATION, cutoff=cutoff)
         r_sent, r_suppressed = (react[0] if react else (0, 0))
-        watched = (await self._rows(
-            "SELECT count(*) FROM channel_thread ct JOIN lead l ON l.id=ct.lead_id"
-            " JOIN channel c ON c.id=ct.channel_id"
-            " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND c.read_only",
-            cutoff=cutoff))[0][0]
+        watched = (await self._rows(_Q_WATCHED, cutoff=cutoff))[0][0]
         reply_rate = round(100 * replied / new_threads) if new_threads else 0
         lines = [
             f"📚 Обучение Степана — аудит за {days} дн.",

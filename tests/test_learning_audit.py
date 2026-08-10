@@ -14,11 +14,19 @@ from cryptography.fernet import Fernet  # noqa: E402
 
 os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
+import re  # noqa: E402
 from datetime import date, timedelta  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.modules.learning.audit import _CHECKS, _real_questions  # noqa: E402
+from app.modules.learning.audit import (  # noqa: E402
+    _CHECKS,
+    _Q_FUNNEL,
+    _Q_PHONES,
+    _Q_WATCHED,
+    QUERIES,
+    _real_questions,
+)
 
 _DATE_CHECK = next(fn for name, fn in _CHECKS if name == "протухшая дата")
 _QUESTION_CHECK = next(fn for name, fn in _CHECKS if name == "2+ вопроса")
@@ -53,3 +61,20 @@ def test_two_things_asked_at_once_still_counts() -> None:
             "atau siang?")
     assert _real_questions(body) == 2
     assert _QUESTION_CHECK(body, date.today())
+
+
+@pytest.mark.parametrize("sql", QUERIES)
+def test_every_query_is_syntactically_whole(sql: str) -> None:
+    """Nothing in the suite EXECUTES this SQL — the audit is Postgres-only (FILTER, ~) and the
+    tests run on SQLite. A dangling comma before FROM therefore shipped to production and only
+    showed up when the weekly job ran. These two shapes are what string-concatenated SQL breaks
+    into when a column is removed from a SELECT list."""
+    assert sql.count("(") == sql.count(")"), "unbalanced parentheses"
+    assert not re.search(r",\s*(FROM|WHERE|GROUP|ORDER|\))", sql), "dangling comma"
+
+
+def test_the_funnel_never_counts_a_read_only_thread() -> None:
+    """The whole point of the funnel fix: a manager's own WhatsApp is watched, not worked."""
+    for sql in (_Q_FUNNEL, _Q_PHONES):
+        assert "NOT c.read_only" in sql
+    assert "c.read_only" in _Q_WATCHED and "NOT c.read_only" not in _Q_WATCHED
