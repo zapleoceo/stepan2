@@ -68,6 +68,27 @@ PUSHED_HANDOFF_REASON = "crm_pushed_handoff"
 # a sweep. Kept apart from PUSHED_HANDOFF_REASON because we did NOT push anything: calling it
 # a push would claim our funnel event landed when all we know is that the contact exists.
 VERIFIED_PRESENT_REASON = "crm_verified_present"
+# Переход, о котором стоит сказать человеку. Не всякая смена стадии подходит.
+#
+# actor='crm' — это НАША ЖЕ реакция на ответ CRM: gate._stand_down переводит лида в manager,
+# когда CRM говорит «сделка выиграна» или «менеджер уже звонил». Такой переход удовлетворял
+# условию окна, и команда «отойдите» возвращалась в CRM как «перезвоните этому человеку».
+# Замер 10.08.2026: 39 из первых 84 отправок хендоффа открыты собственным стенд-дауном
+# (27 «deal won», 12 «manager called»), и 28 лидов с уже выигранной сделкой уехали как
+# wait_call. Менеджеры видели это как «Степан шлёт одного и того же по кругу» — так и было.
+_HANDOFF_TRANSITION = (
+    " AND se.to_stage IN ('ready','manager','handed_off')"
+    " AND se.from_stage <> se.to_stage"
+    " AND coalesce(se.actor, '') <> 'crm'"
+)
+# Сделка уже закрыта — говорить о ней нечего, чем бы ни двигалась стадия. Второй слой поверх
+# предыдущего: холд может прийти не только через actor='crm' (ручной перевод менеджера после
+# звонка выглядит так же), а выигранная сделка остаётся выигранной.
+_NOT_WON = (
+    " AND NOT EXISTS (SELECT 1 FROM crm_lead_state cs"
+    "   WHERE cs.lead_id = l.id AND cs.deal_won = true)"
+)
+
 DRAIN_BATCH = 25
 # How far back the hand-off sweep looks. Anything older is deliberately left alone (managers
 # have worked it by hand by then) — but _log_window_drops counts what that costs each run.
@@ -236,7 +257,7 @@ async def fetch_leads_with_phone(
         " WHERE l.branch_id=:bid AND l.stage NOT IN ('ready','manager','handed_off')"
         "   AND l.is_blocked = false"  # спам/бан — Степан игнорит его целиком, включая CRM
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
-        + not_pushed +
+        + not_pushed + _NOT_WON +
         " ORDER BY l.created_at DESC LIMIT :lim"),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_REASON})).all()
     out = []
@@ -367,7 +388,7 @@ async def fetch_unpushed_handoffs(
     as "everything is handled"."""
     now = now or datetime.now(UTC).replace(tzinfo=None)
     rows = (await session.execute(text(
-        "SELECT l.id, l.phone_e164,"
+        "SELECT l.id, l.phone_e164,"  # noqa: S608 — фрагменты фиксированные, значения связаны
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
         " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.lead_type,"
         " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
@@ -383,10 +404,11 @@ async def fetch_unpushed_handoffs(
         # and the next cron would have announced 23 long-closed leads to managers as "contact
         # immediately". Only a real transition (a stage actually changing) opens the window.
         "   AND EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
-        "     AND se.to_stage IN ('ready','manager','handed_off')"
-        "     AND se.from_stage <> se.to_stage AND se.created_at >= :since)"
+        + _HANDOFF_TRANSITION +
+        "     AND se.created_at >= :since)"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
+        + _NOT_WON +
         " ORDER BY l.last_active_at DESC NULLS LAST LIMIT :lim"),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_HANDOFF_REASON,
          "verified": VERIFIED_PRESENT_REASON,
@@ -426,15 +448,17 @@ async def _log_window_drops(
     a lead confirmed present is stamped VERIFIED_PRESENT_REASON and leaves the count; what
     remains is leads with a phone that neither a sweep nor a manager will ever get to."""
     n = (await session.execute(text(
-        "SELECT count(DISTINCT l.id) FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
+        "SELECT count(DISTINCT l.id)"  # noqa: S608 — фрагменты фиксированные, значения связаны
+        " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
         "   AND l.is_blocked = false"  # см. fetch_leads_with_phone
         "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
-        "     AND se.to_stage IN ('ready','manager','handed_off')"
-        "     AND se.from_stage <> se.to_stage AND se.created_at >= :since)"),
+        + _HANDOFF_TRANSITION +
+        "     AND se.created_at >= :since)"
+        + _NOT_WON),
         {"bid": branch_id, "pushed": PUSHED_HANDOFF_REASON,
          "verified": VERIFIED_PRESENT_REASON,
          "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).scalar() or 0
