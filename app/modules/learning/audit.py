@@ -89,9 +89,21 @@ class LearningAudit:
             " SELECT count(*),"
             "  count(*) FILTER (WHERE fo IS NOT NULL AND EXISTS (SELECT 1 FROM message m3"
             "    WHERE m3.thread_id=tid AND m3.direction='in' AND m3.id>fo)),"
-            "  count(*) FILTER (WHERE phone_e164 IS NOT NULL AND phone_e164<>'')"
             " FROM t", cutoff=cutoff)
-        new_threads, replied, phones = (funnel[0] if funnel else (0, 0, 0))
+        new_threads, replied = (funnel[0] if funnel else (0, 0))
+        # Phones are an EVENT, not a property of this week's cohort. Counting leads created in
+        # the window who happen to carry a number credited Stepan for numbers the WhatsApp
+        # connector hands over for free, and gave him nothing for a number typed today by a
+        # lead who arrived in June. Count the typing: an inbound this week, on a channel we
+        # write to, that carries an Indonesian mobile.
+        phones = (await self._rows(
+            "SELECT count(DISTINCT ct.lead_id) FROM message m"
+            " JOIN channel_thread ct ON ct.id=m.thread_id"
+            " JOIN channel c ON c.id=ct.channel_id"
+            " WHERE m.branch_id=:bid AND m.direction='in' AND m.occurred_at > :cutoff"
+            "   AND NOT c.read_only"
+            r"   AND m.text ~ '(\+?62|0)[ .\-]?8[1-9][0-9 ().\-]{6,}'",
+            cutoff=cutoff))[0][0]
         # Attempts and suppressions have to nest. Filtering attempts on to_stage='nurturing'
         # put every nurturing→nurturing row in BOTH counters, so "356 attempts, 75 suppressed"
         # described 396 rows: 35 of the suppressed sat inside the 356 and 40 outside it.
