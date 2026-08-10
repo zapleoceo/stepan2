@@ -12,6 +12,12 @@ from typing import Protocol
 
 from app.domain.enums import BOT_SILENT_STAGES, Stage
 
+# Кто перевёл лида в MANAGER, потому что он написал на ЛИЧНЫЙ ТЕЛЕФОН человека. Это не
+# передача лида менеджеру, а констатация: разговор с самого начала идёт у него в руках, и
+# в CRM сообщать нечего. Отдельный actor, потому что предикат окна отправки в CRM должен
+# уметь отличить это от настоящего хендоффа (см. crm/push_mcp._HANDOFF_TRANSITION).
+MANAGER_PHONE_ACTOR = "manager_phone"
+
 
 class StageOwner(Protocol):
     """The three fields a stage move touches. Lead satisfies it; so does a test double."""

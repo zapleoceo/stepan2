@@ -79,8 +79,12 @@ VERIFIED_PRESENT_REASON = "crm_verified_present"
 _HANDOFF_TRANSITION = (
     " AND se.to_stage IN ('ready','manager','handed_off')"
     " AND se.from_stage <> se.to_stage"
-    " AND coalesce(se.actor, '') <> 'crm'"
+    " AND coalesce(se.actor, '') NOT IN ('crm', 'manager_phone')"
 )
+# 'manager_phone' — тот же класс, что и 'crm': лид написал на личный телефон человека, ingest
+# перевёл его в MANAGER, и это НЕ передача лида. Миграция mgrstage01 записала такой переход
+# сразу 302 лидам 10.08.2026 — из них 22 с телефоном мгновенно встали в очередь на отправку
+# как «hand-off, hubungi segera», хотя менеджер и так ведёт их у себя в WhatsApp.
 # Сделка уже закрыта — говорить о ней нечего, чем бы ни двигалась стадия. Второй слой поверх
 # предыдущего: холд может прийти не только через actor='crm' (ручной перевод менеджера после
 # звонка выглядит так же), а выигранная сделка остаётся выигранной.

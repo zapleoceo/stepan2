@@ -14,7 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Channel, Lead, MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
-from app.domain.funnel import apply_stage
+from app.domain.funnel import MANAGER_PHONE_ACTOR, apply_stage
 from app.modules.ads import AdMappingService
 from app.modules.conversation.signals import is_auto_reply
 from app.modules.notifications.alerts import AlertService
@@ -122,7 +122,8 @@ class IngestService:
         self.session.add(StageEvent(
             branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
             from_stage=str(lead.stage), to_stage=str(Stage.MANAGER),
-            actor="system", reason="manager's own phone: a human owns this conversation",
+            actor=MANAGER_PHONE_ACTOR,
+            reason="manager's own phone: a human owns this conversation",
         ))
         apply_stage(lead, Stage.MANAGER)
         logger.info("branch=%d lead=%s → manager (manager phone, thread=%s)",

@@ -74,7 +74,7 @@ async def test_the_handover_is_journalled_with_the_stage_it_came_from(db_session
     events = (await db_session.execute(StageEvent.__table__.select())).mappings().all()
     handover = [e for e in events if e["to_stage"] == str(Stage.MANAGER)]
     assert len(handover) == 1
-    assert handover[0]["actor"] == "system"
+    assert handover[0]["actor"] == "manager_phone"  # свой actor: это не хендофф для CRM
     assert "manager" in handover[0]["reason"]
 
 

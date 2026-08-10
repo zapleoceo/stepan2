@@ -99,3 +99,19 @@ async def test_a_won_deal_is_not_in_the_warm_drain_either(db_session) -> None:  
     await db_session.flush()
 
     assert await fetch_leads_with_phone(db_session, bid, now=NOW) == []
+
+
+async def test_a_manager_phone_claim_is_not_a_handoff(db_session) -> None:  # noqa: ANN001
+    """Лид написал на личный телефон человека — ingest перевёл его в MANAGER. Это не
+    передача лида: менеджер и так ведёт его у себя, и сообщать в CRM нечего.
+
+    Миграция mgrstage01 сделала ровно такой перевод сразу 302 лидам, и 22 из них с телефоном
+    встали в очередь на «hand-off, hubungi segera» — тот самый повтор, на который жалуются."""
+    from app.domain.funnel import MANAGER_PHONE_ACTOR
+
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, stage=Stage.MANAGER, phone="+628555555555")
+    await _moved(db_session, lead, actor=MANAGER_PHONE_ACTOR,
+                 reason="manager's own phone: a human owns this conversation")
+
+    assert await fetch_unpushed_handoffs(db_session, bid, now=NOW) == []
