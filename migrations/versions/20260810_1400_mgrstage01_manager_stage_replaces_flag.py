@@ -19,7 +19,7 @@ whatever stage they were in — that is the same rule ingest now applies on firs
 previous stage is journalled to stage_event so a manager can see what it was.
 
 Revision ID: mgrstage01
-Revises: mgronly001
+Revises: mgrphone01
 Create Date: 2026-08-10 14:00:00
 """
 from __future__ import annotations
@@ -28,13 +28,13 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "mgrstage01"
-down_revision = "mgronly001"
+down_revision = "mgrphone01"
 branch_labels = None
 depends_on = None
 
 _HAS_READ_ONLY_THREAD = (
     "EXISTS (SELECT 1 FROM channel_thread ct JOIN channel c ON c.id = ct.channel_id"
-    "        WHERE ct.lead_id = lead.id AND c.read_only)"
+    "        WHERE ct.lead_id = lead.id AND c.manager_phone)"
 )
 
 
@@ -68,5 +68,5 @@ def downgrade() -> None:
         " EXISTS (SELECT 1 FROM channel_thread ct WHERE ct.lead_id = lead.id)"
         " AND NOT EXISTS (SELECT 1 FROM channel_thread ct"
         "                 JOIN channel c ON c.id = ct.channel_id"
-        "                 WHERE ct.lead_id = lead.id AND NOT c.read_only)"
+        "                 WHERE ct.lead_id = lead.id AND NOT c.manager_phone)"
     )
