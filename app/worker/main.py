@@ -1089,6 +1089,26 @@ async def backfill_media_branch(ctx: dict[str, Any], branch_id: int) -> int:
 _BROKER_LOG_RETENTION_DAYS = settings().broker_log_retention_days
 
 
+async def nightly_sales_sim(ctx: dict[str, Any]) -> int:  # noqa: ARG001
+    """Ночной круг проверки продаж на филиале 8 — регрессия качества диалога.
+
+    03:00 по Джакарте: лиды спят, брокер свободен, и утренний отчёт лежит готовым. Судья
+    не зовётся — он стоит дороже самого прогона, а для «что-то поехало» хватает счётчика;
+    судью гоняют руками через скилл sales-sim, когда есть что чинить.
+
+    Падение здесь не должно ронять воркер: это наблюдение, а не работа с лидами."""
+    from app.modules.quality.sim_suite import DEFAULT_KEYS, report, run_round  # noqa: PLC0415
+
+    stamp = datetime.now(UTC).strftime("nightly-%Y%m%d")
+    try:
+        result = await run_round(stamp, DEFAULT_KEYS, turns=5, judge=False)
+    except Exception:
+        logger.exception("ночной прогон продаж упал")
+        return 0
+    logger.info("ночной прогон продаж %s\n%s", stamp, report(result, None))
+    return result.get("metrics", {}).get("chats", 0)
+
+
 async def prune_broker_log(ctx: dict[str, Any]) -> int:
     """Drop broker_log rows older than the retention window (keeps the table bounded)."""
     from datetime import timedelta  # noqa: PLC0415
@@ -1341,6 +1361,9 @@ class WorkerSettings:
         cron(backfill_media, minute=set(range(0, 60, 3)), second=25, run_at_startup=False),
         # Broker-log retention: prune old rows daily at 03:30 (broker_log_retention_days)
         cron(prune_broker_log, hour={3}, minute={30}, second=0, run_at_startup=False),
+        # Круг проверки продаж — 20:00 UTC = 03:00 по Джакарте, самый тихий час: лиды спят,
+        # брокер свободен, отчёт лежит к утру. Только филиал 8, боевых тредов не касается.
+        cron(nightly_sales_sim, hour={20}, minute={0}, second=0, run_at_startup=False),
         # Needs-cloud aggregation hourly (minute={42}, offset from the other hourly jobs).
         # It used to run once at midnight Jakarta, which made the short panel ranges (12h, 24h)
         # structurally empty: a lead who arrived this morning had no tags until the small hours.
