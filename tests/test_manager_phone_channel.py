@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from app.adapters.channels.whatsapp import WhatsAppAdapter
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Outbox
+from app.adapters.db.models import AppSetting, Branch, Channel, ChannelThread, Lead, Outbox
 from app.domain.enums import ChannelKind, Stage
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.settings.service import invalidate
@@ -95,6 +95,11 @@ async def _queued(s, *, source: str = "agent") -> tuple[int, int]:  # noqa: ANN0
         branch_id=branch.id, thread_id=thread.id, text="halo", source=source,
         status="pending", scheduled_at=now - timedelta(seconds=5),
     ))
+    # Тихие часы гасим явно. Фолоапы ночью не уходят (outbox.py: source == 'followup' and
+    # cfg.is_quiet_hour()), а тест брал время со стены — днём по Джакарте он проходил, ночью
+    # падал. CI впервые попал в 01:12 WIB 11.08.2026 и уронил деплой на ровном месте.
+    s.add(AppSetting(branch_id=branch.id, key="quiet_start", value="0"))
+    s.add(AppSetting(branch_id=branch.id, key="quiet_end", value="0"))
     await s.flush()
     invalidate(branch.id)
     return branch.id, thread.id
