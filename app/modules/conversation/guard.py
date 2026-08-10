@@ -322,6 +322,20 @@ _ID_DATE_RE = re.compile(
     r"\b(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|"
     r"oktober|november|desember)\b",
     re.IGNORECASE)
+# Карточки в базе написаны по-английски, и дата в них стоит месяцем вперёд: демо-ивент нёс
+# «Next Event: Saturday (Sabtu), August 8, 2026» ещё 10 августа. Индонезийская регулярка такую
+# строчку не видит вовсе, так что ответ, скопировавший её дословно, уходил лиду без единой
+# проверки — приглашением на позавчера. Ловится и «8 August», и «August 8»: карточки пишут
+# люди, и обе формы там встречаются.
+_EN_MONTHS = {
+    "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7,
+    "august": 8, "september": 9, "october": 10, "november": 11, "december": 12,
+}
+_EN_NAMES = "|".join(_EN_MONTHS)
+_EN_DATE_RE = re.compile(
+    rf"\b(?:(?P<day_first>\d{{1,2}})\s+(?P<month_first>{_EN_NAMES})"
+    rf"|(?P<month_second>{_EN_NAMES})\s+(?P<day_second>\d{{1,2}}))\b",
+    re.IGNORECASE)
 # A KB card's date outlives the date. Cards carry no year, so a bare "11 Juli" is read as
 # this year — except when that reading puts it far in the past, which almost always means
 # next year's intake (a December reply naming "5 Januari").
@@ -338,15 +352,26 @@ def stale_dates(reply: str, today: date | None = None) -> list[str]:
     needs a clock, not a proofreader."""
     now = today or datetime.now(UTC).date()
     out = []
-    for m in _ID_DATE_RE.finditer(reply or ""):
+    for text, month, day in _dates_in(reply or ""):
         try:
-            when = date(now.year, _ID_MONTHS[m.group(2).lower()], int(m.group(1)))
+            when = date(now.year, month, day)
         except ValueError:
             continue  # 31 Februari and friends — not a date, not our problem
         gone = (now - when).days
         if 0 < gone <= _NEXT_INTAKE_HORIZON_DAYS:
-            out.append(f"date already past: {m.group(0)} (was {gone}d ago)")
+            out.append(f"date already past: {text} (was {gone}d ago)")
     return out
+
+
+def _dates_in(reply: str) -> list[tuple[str, int, int]]:
+    """Каждая найденная дата как (как написана, месяц, день) — на двух языках."""
+    found = [(m.group(0), _ID_MONTHS[m.group(2).lower()], int(m.group(1)))
+             for m in _ID_DATE_RE.finditer(reply)]
+    for m in _EN_DATE_RE.finditer(reply):
+        name = m.group("month_first") or m.group("month_second")
+        day = m.group("day_first") or m.group("day_second")
+        found.append((m.group(0), _EN_MONTHS[name.lower()], int(day)))
+    return found
 
 
 # Every Skill Booster is a 1-day (5-hour) taster. Thread 2864: the model invented a "Python

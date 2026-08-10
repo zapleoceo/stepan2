@@ -332,6 +332,25 @@ def test_ordinary_payment_and_schedule_talk_is_not_a_start_promise() -> None:
     assert money_issues("Kelasnya 2x seminggu di malam hari", _KB) == []
 
 
+def test_an_english_date_that_has_passed_is_caught_too() -> None:
+    """Карточки в базе написаны по-английски и ставят месяц вперёд. Карточка демо-ивента несла
+    «Next Event: Saturday (Sabtu), August 8, 2026» ещё 10 августа, а индонезийская регулярка
+    такую строку не видит вовсе — ответ, скопировавший её дословно, уходил лиду без единой
+    проверки, приглашением на позавчера. Обе формы записи, потому что карточки пишут люди."""
+    from datetime import date, timedelta  # noqa: PLC0415
+
+    from app.modules.conversation.guard import stale_dates  # noqa: PLC0415
+
+    today = date(2026, 8, 10)
+    assert stale_dates("Next Event: Saturday (Sabtu), August 8, 2026", today) != []
+    assert stale_dates("The demo event is on 8 August", today) != []
+    # Ещё не наступила — молчим, иначе гейт съест каждое живое приглашение.
+    soon = today + timedelta(days=14)
+    assert stale_dates(f"See you on August {soon.day}", today) == []
+    # Далеко в прошлом — это набор следующего года, а не протухшая карточка.
+    assert stale_dates("Classes started January 5", today) == []
+
+
 def test_a_real_date_still_passes() -> None:
     """The fix is not 'never mention a start' — a day from the knowledge base is the point.
 
