@@ -17,9 +17,9 @@ external_id in message (ON CONFLICT DO NOTHING).
 """
 from __future__ import annotations
 
+import logging
 import os
 import sys
-import logging
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ def main() -> None:
         _migrate(s1, s2)
 
 
-def _migrate(s1: "psycopg.Connection", s2: "psycopg.Connection") -> None:
+def _migrate(s1: psycopg.Connection, s2: psycopg.Connection) -> None:
     # ── load all chats from Stepan-1 ─────────────────────────────────────────
     log.info("Reading chats from Stepan-1...")
     chats = s1.execute("""

@@ -10,7 +10,7 @@
 колбеком, а восстанавливать его из истории неоткуда.
 
 Revision ID: sndusr0001
-Revises: mgronly001
+Revises: alertmsg01
 Create Date: 2026-08-10 12:00:00
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "sndusr0001"
-down_revision = "mgronly001"
+down_revision = "alertmsg01"
 branch_labels = None
 depends_on = None
 
