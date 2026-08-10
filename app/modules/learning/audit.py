@@ -7,6 +7,7 @@ Enabled per branch via learning_audit_enabled (default off)."""
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from sqlalchemy import text
@@ -19,18 +20,34 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# A sentence-final ya/iya/kan/bukan softens a statement, it does not ask for an answer:
+# "Kakak tanya soal biaya ya?" is one turn confirming context, not a second question. Counting
+# raw '?' put 235 messages in the worst class when 184 of them earn it — a 28% inflation on the
+# one number the report tells the owner to act on.
+_SOFTENER = re.compile(r"\b(?:ya|iya|kan|bukan)\s*[!.,]*\s*$", re.IGNORECASE)
+
+
+def _real_questions(text: str) -> int:
+    return sum(1 for m in re.finditer(r"\?", text)
+               if not _SOFTENER.search(text[max(0, m.start() - 16):m.start()]))
+
+
+# Every check takes (text, sent_on). Only the date check reads the second argument, and it is
+# the whole point of passing it: stale_dates defaults to TODAY, so a week-old message that
+# correctly announced "9 Agustus" on the 3rd was counted as stale on the 10th. All 85 flags in
+# the first report were that — zero were wrong when they shipped.
 _CHECKS = (
-    ("порядок цены", lambda t: guard.price_order_wrong(t)),
-    ("выдуманный доход", lambda t: guard.fabricated_income_figure(t)),
-    ("ложная доставка", lambda t: guard.false_delivery_claims(t)),
-    ("невозможный оффер", lambda t: guard.impossible_capability_offers(t)),
-    ("не тот канал", lambda t: guard.wrong_channel_claims(t)),
-    ("WA-доставка", lambda t: guard.whatsapp_delivery_offers(t)),
-    ("длительность Booster", lambda t: guard.booster_wrong_duration(t)),
-    ("протухшая дата", lambda t: guard.stale_dates(t)),
-    ("2+ вопроса", lambda t: ["x"] if t.count("?") >= 2 else []),
-    ("стаб-хендофф", lambda t: ["x"] if "pastikan dulu ke tim" in t else []),
-    ("меню-заглушка", lambda t: ["x"] if "Biar nggak muter-muter" in t else []),
+    ("порядок цены", lambda t, _d: guard.price_order_wrong(t)),
+    ("выдуманный доход", lambda t, _d: guard.fabricated_income_figure(t)),
+    ("ложная доставка", lambda t, _d: guard.false_delivery_claims(t)),
+    ("невозможный оффер", lambda t, _d: guard.impossible_capability_offers(t)),
+    ("не тот канал", lambda t, _d: guard.wrong_channel_claims(t)),
+    ("WA-доставка", lambda t, _d: guard.whatsapp_delivery_offers(t)),
+    ("длительность Booster", lambda t, _d: guard.booster_wrong_duration(t)),
+    ("протухшая дата", lambda t, d: guard.stale_dates(t, today=d)),
+    ("2+ вопроса", lambda t, _d: ["x"] if _real_questions(t) >= 2 else []),
+    ("стаб-хендофф", lambda t, _d: ["x"] if "pastikan dulu ke tim" in t else []),
+    ("меню-заглушка", lambda t, _d: ["x"] if "Biar nggak muter-muter" in t else []),
 )
 
 
@@ -49,12 +66,13 @@ class LearningAudit:
         from datetime import UTC, datetime, timedelta  # noqa: PLC0415
         cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
         out_msgs = await self._rows(
-            "SELECT m.text FROM message m WHERE m.branch_id=:bid AND m.direction='out'"
-            " AND m.sent_by='agent' AND m.occurred_at > :cutoff", cutoff=cutoff)
+            "SELECT m.text, m.occurred_at FROM message m WHERE m.branch_id=:bid"
+            " AND m.direction='out' AND m.sent_by='agent' AND m.occurred_at > :cutoff",
+            cutoff=cutoff)
         flag_counts: dict[str, int] = {}
-        for (t,) in out_msgs:
+        for t, sent_on in out_msgs:
             for name, fn in _CHECKS:
-                if fn(t or ""):
+                if fn(t or "", sent_on.date()):
                     flag_counts[name] = flag_counts.get(name, 0) + 1
         funnel = await self._rows(
             "WITH t AS (SELECT ct.id tid, l.phone_e164,"
@@ -68,9 +86,11 @@ class LearningAudit:
             "  count(*) FILTER (WHERE phone_e164 IS NOT NULL AND phone_e164<>'')"
             " FROM t", cutoff=cutoff)
         new_threads, replied, phones = (funnel[0] if funnel else (0, 0, 0))
+        # Attempts and suppressions have to nest. Filtering attempts on to_stage='nurturing'
+        # put every nurturing→nurturing row in BOTH counters, so "356 attempts, 75 suppressed"
+        # described 396 rows: 35 of the suppressed sat inside the 356 and 40 outside it.
         react = await self._rows(
-            "SELECT count(*) FILTER (WHERE to_stage='nurturing'),"
-            "  count(*) FILTER (WHERE from_stage=to_stage)"
+            "SELECT count(*), count(*) FILTER (WHERE from_stage=to_stage)"
             " FROM stage_event WHERE branch_id=:bid AND reason='reactivation'"
             " AND created_at > :cutoff", cutoff=cutoff)
         r_sent, r_suppressed = (react[0] if react else (0, 0))
