@@ -120,6 +120,15 @@ class Lead(SQLModel, table=True):
     # were re-pointed at the survivor; the row stays so an id that was handed out, logged or
     # linked never dangles, and so a wrong merge can be read back rather than guessed at.
     is_merged_into: int | None = Field(default=None, foreign_key="lead.id", index=True)
+    # НА ЧТО именно человек согласился, зафиксированное в момент первого «готов».
+    #
+    # Без этого «готов» — булево про лида, не помнящее собственной цели, и оно переживает
+    # смену цели. Тред 3163: согласие на демо-ивент за 100 тыс. 28.07 через две недели было
+    # прочитано как согласие на курс за 13 млн, и лид уехал в CRM как оформляющийся.
+    # Цена хранится строкой ровно как её назвали — сравнивать надо порядок величины, а не
+    # копейки, и переводить валюту тут незачем.
+    agreed_product_slug: str | None = Field(default=None)
+    agreed_price: str | None = Field(default=None)
     handed_off_at: datetime | None = Field(default=None)
     follower_count: int | None = Field(default=None)
     following_count: int | None = Field(default=None)

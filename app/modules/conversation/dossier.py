@@ -140,6 +140,13 @@ def parse_dossier(raw: str | None) -> LeadDossier:
     return _from_json(raw) or LeadDossier()
 
 
+def _target_changed(delta: LeadDossier, stored: LeadDossier) -> bool:
+    """Разговор перешёл на другой продукт. Оба слага должны быть непустыми: ход, в котором
+    экстрактор просто не назвал продукт, — это не смена цели, а отсутствие сведений."""
+    new, old = delta.product_slug.strip(), stored.product_slug.strip()
+    return bool(new and old and new != old)
+
+
 def merge_dossier(stored: LeadDossier, delta: LeadDossier) -> LeadDossier:
     """Fold this turn's findings into what is already known.
 
@@ -154,7 +161,15 @@ def merge_dossier(stored: LeadDossier, delta: LeadDossier) -> LeadDossier:
         pains=_union(stored.pains, delta.pains),
         desired_state=_union(stored.desired_state, delta.desired_state),
         decides_with=_pick(delta.decides_with, stored.decides_with, DECIDES_WITH),
-        readiness=_pick(delta.readiness, stored.readiness, READINESS),
+        # Готовность принадлежит ЦЕЛИ, а не человеку: заговорили о другом продукте — прежнее
+        # «готов» больше ни к чему не относится и должно быть заработано заново.
+        #
+        # Тред 3163, 10.08.2026: лид согласился на демо-ивент за 100 тыс. 28 июля, в досье
+        # осталось readiness='ready'. Через две недели разговор ушёл на курс за 13 млн, лид
+        # сказал только «хочу учить AI для карьеры в 3D» — а модель прочла в своей же памяти
+        # «готов», подтвердила это, и в чат ушло «передаю вашу заявку команде». Заявки не было.
+        readiness=("" if _target_changed(delta, stored)
+                   else _pick(delta.readiness, stored.readiness, READINESS)),
         product_slug=delta.product_slug.strip() or stored.product_slug,
         prices_quoted=_union(stored.prices_quoted, delta.prices_quoted),
         payment_preference=delta.payment_preference.strip() or stored.payment_preference,

@@ -4,6 +4,7 @@ LLM stays behind LLMPort (injected, so tests use a fake) and all DB access goes 
 BranchScoped repos. No branch_id filtering by hand; no sending here — only enqueue."""
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
@@ -64,6 +65,18 @@ _WHATS_NEXT_RE = re.compile(
 def _says_what_happens_next(reply: str) -> bool:
     """True when the reply already promises the follow-up contact — see the call site."""
     return bool(_WHATS_NEXT_RE.search(reply or ""))
+
+
+def _last_price(dossier_json: str | None) -> str | None:
+    """Последняя цена, названная в разговоре. Decision её не несёт, а экстрактор уже сложил
+    разобранные суммы в досье — брать оттуда дешевле, чем разбирать текст заново."""
+    if not dossier_json:
+        return None
+    try:
+        quoted = json.loads(dossier_json).get("prices_quoted") or []
+    except (ValueError, AttributeError):
+        return None
+    return str(quoted[-1]) if quoted else None
 
 
 def _script_lang(text: str) -> str | None:
@@ -390,12 +403,28 @@ class ReplyDelivery:
         # openhouse-style RSVP (notify team, bot stays on), regardless of what the model
         # guessed — the model only picks the subtype for non-event products.
         ready = self._is_ready(decision)
+        # Цель, о которой идёт разговор ПРЯМО СЕЙЧАС: то, что назвал экстрактор, иначе то, к
+        # чему привязан тред. Согласие сверяется с ней, а не с состоянием лида вообще.
+        target = (decision.product_slug or "").strip() or thread.product_slug
+        if ready and not self._consent_still_valid(lead, target):
+            logger.info(
+                "branch=%d lead=%d: согласие было на «%s», сейчас «%s» — готовность сброшена",
+                self.branch_id, lead.id, lead.agreed_product_slug, target)
+            ready = False
         eff_subtype = decision.ready_subtype
         if ready and thread.product_slug \
                 and await self._product_kind(thread.product_slug) == "event":
             eff_subtype = "openhouse"
         if ready and eff_subtype == "openhouse":
             await self._handoff_openhouse(lead, thread)
+        if ready and target and not lead.agreed_product_slug:
+            # Момент, когда «да» впервые прозвучало: записываем, ЧЕМУ оно сказано, чтобы
+            # следующая смена цели могла его отменить. Цена — последняя названная в разговоре.
+            lead.agreed_product_slug = target
+            # Цена берётся из досье лида: Decision её не несёт, а прайс в разговоре уже
+            # разобран экстрактором и лежит в prices_quoted.
+            lead.agreed_price = _last_price(lead.dossier)
+            self.session.add(lead)
         inbound = await self.messages.inbound_count(thread.id)
         soft_no = await self._snooze_on_soft_no(lead, thread)
         new_stage = self._stage_for(decision, lead, inbound, eff_subtype, soft_no=soft_no)
@@ -561,6 +590,19 @@ class ReplyDelivery:
         Both must go through the same phone gate — otherwise a model that writes stage='ready'
         hands a lead to a manager with no contact (the exact defect on lead 1561)."""
         return decision.ready or decision.stage == Stage.READY
+
+    @staticmethod
+    def _consent_still_valid(lead: Lead, target: str | None) -> bool:
+        """Относится ли прежнее «да» к тому, о чём говорим сейчас.
+
+        Согласие — факт о паре «человек + цель», а не о человеке. Пока цель та же, оно живёт;
+        сменилась — его надо заработать заново, потому что «да» билету за 100 тысяч ничего не
+        говорит о курсе за 13 миллионов.
+
+        Первое согласие проходит всегда: цели ещё не записано, сравнивать не с чем."""
+        agreed = (lead.agreed_product_slug or "").strip()
+        now = (target or "").strip()
+        return not agreed or not now or agreed == now
 
     def _stage_for(self, decision: Decision, lead: Lead, inbound_count: int = 0,
                    ready_subtype: str | None = None, soft_no: bool = False) -> Stage:
