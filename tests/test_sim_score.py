@@ -115,3 +115,16 @@ def test_a_round_summary_adds_up_across_chats() -> None:
 
 def test_an_empty_round_summarizes_to_nothing_rather_than_crashing() -> None:
     assert summarize([]) == {}
+
+
+def test_one_message_and_one_turn_are_measured_apart() -> None:
+    """В раунде r2 ход вырос с 205 до 259 знаков, а сообщение осталось прежним: модель просто
+    начала делить ответ надвое. Человек читает пузырь, а не ход, так что путать эти величины
+    дорого — половину правки r2 тогда выписали по артефакту измерения."""
+    one_long = score_chat("a", _run("x" * 300))
+    two_short = score_chat("b", _run("x" * 150 + "|||" + "y" * 150))
+
+    assert one_long.avg_chars == 300.0
+    assert two_short.avg_chars == 301.0  # разделитель склеивается пробелом
+    assert one_long.avg_msg_chars == 300.0
+    assert two_short.avg_msg_chars == 150.5

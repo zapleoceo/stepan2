@@ -139,7 +139,8 @@ def report(result: dict, previous: dict | None) -> str:
         lines += [f"⚠️ не отработали: {', '.join(result['failed'])}", ""]
     lines += [
         "## Стиль",
-        f"- средняя длина ответа: {m.get('avg_chars')}{arrow('avg_chars')}",
+        f"- длина ОДНОГО сообщения: {m.get('avg_msg_chars')}{arrow('avg_msg_chars')}",
+        f"- длина всего хода: {m.get('avg_chars')}{arrow('avg_chars')}",
         f"- медиана: {m.get('median_chars')}{arrow('median_chars')}",
         f"- длиннее 400 знаков: {_pct(m.get('long_share'))}{arrow('long_share')}",
         f"- пузырей на ход: {m.get('avg_bubbles')}",

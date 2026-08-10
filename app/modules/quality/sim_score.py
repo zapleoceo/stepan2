@@ -72,8 +72,12 @@ class ChatScore:
     product: str | None
     ready: bool
     needs_manager: bool
-    # стиль
+    # стиль. Две разные величины, и путать их дорого: avg_chars — весь ход, avg_msg_chars —
+    # ОДИН пузырь, то есть ровно то, что падает человеку в уведомление. В раунде r2 ход
+    # вырос с 205 до 259, а сообщение осталось теми же 215 знаками: модель просто начала
+    # делить ответ надвое. Правку тогда выписали наполовину по артефакту измерения.
     avg_chars: float
+    avg_msg_chars: float
     median_chars: float
     max_chars: int
     long_share: float
@@ -123,6 +127,7 @@ def score_chat(persona: str, run: dict) -> ChatScore:
         ready=bool(run.get("ready")),
         needs_manager=bool(run.get("needs_manager")),
         avg_chars=round(sum(lens) / n, 1),
+        avg_msg_chars=round(sum(lens) / max(1, sum(t.bubbles for t in turns)), 1),
         median_chars=float(lens[len(lens) // 2]),
         max_chars=max(lens),
         long_share=round(sum(1 for x in lens if x > _LONG) / n, 3),
@@ -164,6 +169,7 @@ def summarize(scores: list[ChatScore]) -> dict:
         "chats": n,
         "turns_total": sum(s.turns for s in scores),
         "avg_chars": round(sum(s.avg_chars for s in scores) / n, 1),
+        "avg_msg_chars": round(sum(s.avg_msg_chars for s in scores) / n, 1),
         "median_chars": round(sum(s.median_chars for s in scores) / n, 1),
         "max_chars": max(s.max_chars for s in scores),
         "long_share": round(sum(s.long_share for s in scores) / n, 3),

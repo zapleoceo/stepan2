@@ -133,6 +133,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    # Отчёты круга проверки продаж (app/modules/quality) — том, а не слой контейнера: деплой
+    # пересоздаёт контейнер, и раунды r1–r3 так и потерялись вместе с папкой. Расшифровки
+    # переживают выкат в базе, а вот замеры и вердикты судьи считаются заново и стоят денег.
+    volumes:
+      - stepan2_simruns:/app/sim_runs
     restart: unless-stopped
 
   # Воркер на старте ВЫКЛЮЧЕН: только `docker compose --profile worker up` запустит его.
@@ -155,10 +160,14 @@ services:
       STEPAN2_PUBLIC_URL: ${PUBLIC_URL:-}
       STEPAN2_EVOLUTION_URL: ${EVOLUTION_URL:-http://evolution:8080}
       STEPAN2_EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+    volumes:
+      - stepan2_simruns:/app/sim_runs
     restart: unless-stopped
 
 volumes:
   stepan2_pgdata:
     driver: local
   stepan2_evolution:
+    driver: local
+  stepan2_simruns:
     driver: local
