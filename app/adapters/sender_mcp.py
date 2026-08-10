@@ -70,19 +70,22 @@ def _ref_of(payload: object) -> str | None:
 class SenderMcp:
     """Клиент sender. Ничего не решает — только зовёт и разбирает."""
 
-    def __init__(self, url: str, token: str, *, timeout_s: float = 30.0) -> None:
+    def __init__(self, url: str, token: str = "", *, timeout_s: float = 30.0) -> None:
         self.url = url
         self.token = token
         self.timeout_s = timeout_s
 
     @property
     def configured(self) -> bool:
-        return bool(self.url.strip() and self.token.strip())
+        return bool(self.url.strip())
 
     def _target(self) -> str:
-        """Токен уезжает в заголовок Authorization — этим занят mcp_client, ему нужен URL с
-        токеном в query. Так же устроен доступ к CRM, и делать здесь второй способ значило бы
-        держать два места, где секрет может утечь в текст ошибки."""
+        """URL уже несёт токен в query — так его выдаёт CRM и так он хранится в настройках
+        филиала. mcp_client переносит токен в заголовок Authorization и вычищает его из
+        текста ошибок; повторять эту работу здесь значило бы завести второе место, где
+        секрет может утечь в лог."""
+        if not self.token:
+            return self.url
         joiner = "&" if "?" in self.url else "?"
         return f"{self.url}{joiner}token={self.token}"
 

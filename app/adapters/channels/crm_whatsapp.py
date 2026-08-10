@@ -40,12 +40,11 @@ class CrmWhatsAppAdapter:
 
     kind: ChannelKind = ChannelKind.CRM_WHATSAPP
 
-    def __init__(self, session: AsyncSession, mcp: SenderMcp, tenant: SenderTenant, *,
-                 read_only: bool = False) -> None:
+    def __init__(self, session: AsyncSession, mcp: SenderMcp,
+                 tenant: SenderTenant) -> None:
         self.session = session
         self.mcp = mcp
         self.tenant = tenant
-        self.read_only = read_only
 
     async def fetch_inbound(self) -> list[InboundMessage]:
         """Необработанные входящие из своей таблицы, помеченные как разобранные.
@@ -96,15 +95,14 @@ class CrmWhatsAppAdapter:
     async def send_text(self, external_thread_id: str, text: str) -> SendResult:
         """Ответить в тот же разговор.
 
+        Разрешения канал не объявляет: уйдёт ли строка — вопрос про ЛИДА, и ответ у него
+        уже есть в стадии и тумблере бота (domain/funnel.py). Здесь только «умею ли я».
+
         Их инструмент адресует сообщение не одним идентификатором, а набором: `id` (chat_id),
         `conversationId`, проект, филиал и опциональный `userId`. Все они приходили в колбеке,
         поэтому берём их из последней сохранённой строки этого разговора — так адрес ответа
         всегда тот, по которому лид действительно писал.
         """
-        if self.read_only:
-            from app.ports.channel import READ_ONLY_ERROR  # noqa: PLC0415
-
-            return SendResult(ok=False, error=READ_ONLY_ERROR)
         if not (self.mcp.configured and self.tenant.configured):
             return SendResult(ok=False, error=NOT_CONFIGURED)
 

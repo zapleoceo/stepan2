@@ -55,6 +55,11 @@ class BranchSettings:
     # tenant resolved the first client's CRM as its own. When crm_state_url is empty and
     # this is set, the read-gate sources lead state from the CRM MCP, not the REST contract.
     crm_mcp_url: str = ""
+    sender_enabled: bool = False
+    sender_mcp_url: str = ""
+    sender_project: str = ""
+    sender_project_id: str = ""
+    sender_branch_id: str = ""
     crm_mcp_city_alias: str = ""
     # Rescue of CRM missed-call leads (Stepan DMs leads the phone couldn't reach) — off
     # until a branch explicitly opts in.
@@ -223,6 +228,11 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         crm_state_url=raw.get("crm_state_url", ""),
         crm_read_secret=raw.get("crm_read_secret", ""),
         crm_mcp_url=raw.get("crm_mcp_url", ""),
+        sender_enabled=str(raw.get("sender_enabled", "")).lower() == "true",
+        sender_mcp_url=raw.get("sender_mcp_url", ""),
+        sender_project=raw.get("sender_project", ""),
+        sender_project_id=raw.get("sender_project_id", ""),
+        sender_branch_id=raw.get("sender_branch_id", ""),
         crm_mcp_city_alias=raw.get("crm_mcp_city_alias", ""),
         crm_rescue_enabled=_b(raw, "crm_rescue_enabled"),
         crm_writeback_enabled=_b(raw, "crm_writeback_enabled"),

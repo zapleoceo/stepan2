@@ -19,7 +19,8 @@ from app.adapters.db.models import Channel
 from app.adapters.sender_mcp import SenderMcp
 from app.config import settings
 from app.domain.enums import ChannelKind
-from app.modules.sender.tenant import from_settings
+from app.modules.sender.tenant import SenderTenant
+from app.modules.settings.service import get_settings
 from app.ports.channel import ChannelPort
 
 from .crm_whatsapp_ui import _ch_crm_wa_form
@@ -31,14 +32,19 @@ DORMANT_REASON = "24-часовое окно WhatsApp закрыто"
 
 
 async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
-    """Порт для канала. Адрес и токен — глобальные (сервер один), проект и филиал — из
-    настроек канала: серверов sender не бывает по одному на филиал, а арендаторов в нём
-    несколько."""
-    cfg = settings()
-    mcp = SenderMcp(cfg.sender_mcp_url, cfg.sender_mcp_token,
-                    timeout_s=cfg.sender_mcp_timeout_s)
-    tenant = from_settings(getattr(channel, "setting", None))
-    return CrmWhatsAppAdapter(session, mcp, tenant, read_only=bool(channel.read_only))
+    """Порт для канала — целиком из настроек ФИЛИАЛА.
+
+    Ни один ключ не берётся из настроек CRM, хотя адрес может совпадать с точностью до
+    символа. Это две разные связи: одна про учёт, другая про сам разговор, и отключение
+    учёта не должно затыкать переписку с лидом. Совпадение значений — допустимое совпадение,
+    не общая настройка.
+    """
+    cfg = await get_settings(session, channel.branch_id)
+    mcp = SenderMcp(cfg.sender_mcp_url, "", timeout_s=settings().sender_mcp_timeout_s)
+    tenant = SenderTenant(project=cfg.sender_project,
+                          project_id=cfg.sender_project_id,
+                          branch_id=cfg.sender_branch_id)
+    return CrmWhatsAppAdapter(session, mcp, tenant)
 
 
 SPEC = ConnectorSpec(

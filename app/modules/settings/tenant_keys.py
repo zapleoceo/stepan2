@@ -15,5 +15,9 @@ TENANT_ONLY_KEYS: frozenset[str] = frozenset({
     "crm_enabled", "crm_webhook_url",
     "crm_read_enabled", "crm_state_url", "crm_read_secret",
     "crm_mcp_url", "crm_mcp_city_alias",
+    # Связь для ОТВЕТОВ лиду. Отдельно от crm_mcp_url намеренно: тот про учёт, этот про
+    # сам разговор, и общий адрес означал бы, что отключение учёта затыкает переписку.
+    "sender_mcp_url", "sender_project", "sender_project_id", "sender_branch_id",
+    "sender_enabled",
     "crm_rescue_enabled", "crm_writeback_enabled",
 })

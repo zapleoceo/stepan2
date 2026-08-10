@@ -26,7 +26,6 @@ from app.adapters.db.models import SenderInbound  # noqa: E402
 from app.adapters.sender_mcp import SendOutcome  # noqa: E402
 from app.domain.enums import SessionStatus  # noqa: E402
 from app.modules.sender.tenant import SenderTenant  # noqa: E402
-from app.ports.channel import READ_ONLY_ERROR  # noqa: E402
 
 TENANT = SenderTenant(project="crm", project_id="6", branch_id="435")
 
@@ -129,15 +128,6 @@ async def test_without_a_token_the_connector_refuses_rather_than_guesses(db_sess
     assert not res.ok
     assert res.error == NOT_CONFIGURED
     assert await a.session_status() == SessionStatus.PENDING
-
-
-async def test_a_read_only_channel_never_writes(db_session) -> None:  # noqa: ANN001
-    a = CrmWhatsAppAdapter(db_session, _Mcp(), TENANT, read_only=True)
-
-    res = await a.send_text("6281234567890", "halo")
-
-    assert not res.ok
-    assert res.error == READ_ONLY_ERROR
 
 
 async def test_a_transport_failure_is_reported_not_swallowed(db_session) -> None:  # noqa: ANN001

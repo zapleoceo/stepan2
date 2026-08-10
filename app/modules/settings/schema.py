@@ -10,6 +10,7 @@ from .fields import I18n, SettingField, SettingSection
 from .fields import i18n as _l
 from .fields import setting as _f
 from .schema_crm import CRM_SECTION
+from .schema_sender import SENDER_SECTION
 
 __all__ = ["I18n", "SettingField", "SettingSection"]
 
@@ -274,6 +275,7 @@ SCHEMA: list[SettingSection] = [
            ph=_l("1234567890", "1234567890", "1234567890"), width="220px", scope="channel"),
     ]),
     CRM_SECTION,
+    SENDER_SECTION,
 ]
 
 
