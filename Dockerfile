@@ -13,8 +13,12 @@ COPY alembic.ini ./
 
 # Run as a non-root user: with docker.sock exposed on this host for the deploy path, an RCE in
 # a dependency parsing untrusted IG payloads must not be root-in-container. App state lives in
-# Postgres, not the filesystem, so no writable app dirs are needed.
-RUN adduser --disabled-password --gecos "" --uid 10001 app && chown -R app /app
+# Postgres, not the filesystem — единственное исключение sim_runs, отчёты круга проверки
+# продаж. Каталог создаётся ЗДЕСЬ, а не в рантайме: docker наследует владельца из образа
+# только когда каталог в образе есть. Без этой строки том stepan2_simruns рождается от root,
+# и приложение под app получает PermissionError ровно в конце раунда, когда отчёт уже готов.
+RUN adduser --disabled-password --gecos "" --uid 10001 app \
+    && mkdir -p /app/sim_runs && chown -R app /app
 USER app
 
 EXPOSE 8000
