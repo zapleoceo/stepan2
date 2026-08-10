@@ -24,6 +24,9 @@ PANEL_FIELDS = (
     "lead_source", "ad_id", "ad_media_id", "ad_preview_url", "agent_enabled", "is_blocked",
     "follower_count", "following_count", "last_active_at", "lead_seen_at", "tz_offset_h",
     "needs", "needs_tr", "manager_note", "channel_kind",
+    # На что человек согласился. Стадия говорит «готов», но не говорит «к чему»,
+    # и менеджеру в чате нужно именно второе.
+    "agreed_product_slug", "agreed_price",
 )
 _PANEL_COLUMNS = (
     "ct.id, l.display_name, l.stage, l.id AS lead_id, l.branch_id, ct.product_slug,"
@@ -32,7 +35,8 @@ _PANEL_COLUMNS = (
     " ct.lead_source, ct.ad_id, ct.ad_media_id, ct.ad_preview_url,"
     " l.agent_enabled, l.is_blocked,"
     " l.follower_count, l.following_count, l.last_active_at, ct.lead_seen_at, b.tz_offset_h,"
-    " l.dossier AS needs, l.needs_tr, l.manager_note, ch.kind AS channel_kind"
+    " l.dossier AS needs, l.needs_tr, l.manager_note, ch.kind AS channel_kind,"
+    " l.agreed_product_slug, l.agreed_price"
 )
 _PANEL_FROM = (
     " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"

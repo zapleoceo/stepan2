@@ -982,6 +982,14 @@ _TR: dict[str, dict[str, str]] = {
         "id": "Biasanya dimatikan saat Instagram memblokir pengiriman (403 / action block). "
               "Nyalakan lagi setelah blokir hilang — biasanya beberapa jam.",
     },
+    "chat.agreed_to": {"ru": "Согласие получено на:", "en": "Agreed to:",
+                       "id": "Sudah setuju untuk:"},
+    "chat.consent_reset": {
+        "ru": "Цель разговора сменилась — прежнее согласие больше не действует, "
+              "нужно получить новое",
+        "en": "The target changed — the earlier consent no longer applies, a new one is needed",
+        "id": "Tujuan percakapan berubah — persetujuan sebelumnya tidak berlaku lagi",
+    },
     "ch.manager_phone": {"ru": "Личный номер менеджера", "en": "A manager's own phone",
                          "id": "Nomor pribadi manajer"},
     "chat.manager_phone_notice": {

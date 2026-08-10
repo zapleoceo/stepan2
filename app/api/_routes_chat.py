@@ -177,7 +177,8 @@ async def _build_chat_panel(
      ig_username, avatar_url,
      lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
      follower_count, following_count, last_active_at, lead_seen_at, _tz, needs,
-     needs_tr, manager_note, channel_kind) = info
+     needs_tr, manager_note, channel_kind,
+     agreed_product_slug, agreed_price) = info
     needs_profile, needs_pending = cached_needs(parse_needs(needs), needs_tr, current_lang())
     return chat_panel_html(
         thread_id, str(name or "Lead"), str(stage or "new"), msgs, pending,
@@ -191,6 +192,7 @@ async def _build_chat_panel(
         last_active_at=last_active_at, lead_seen_at=lead_seen_at, needs=needs_profile,
         needs_pending=needs_pending, events=events, products=products,
         manager_note=manager_note, channel_kind=channel_kind,
+        agreed_product=agreed_product_slug, agreed_price=agreed_price,
         ch_label=await _thread_channel_label(session, thread_id),
         conns=await _lead_conns(session, thread_id),
     )
@@ -480,7 +482,8 @@ async def chat_stage(
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _seen, _tz, needs, needs_tr,
-         manager_note, channel_kind) = info
+         manager_note, channel_kind,
+         agreed_product_slug, agreed_price) = info
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         changed = stage != str(old_stage)
         if changed:
@@ -549,7 +552,8 @@ async def chat_product(
          ig_username, avatar_url,
          lead_source, ad_id, ad_media_id, ad_preview_url, agent_enabled, is_blocked,
          follower_count, following_count, last_active_at, _seen, _tz, needs,
-         needs_tr, manager_note, channel_kind) = info
+         needs_tr, manager_note, channel_kind,
+         agreed_product_slug, agreed_price) = info
         products = [(pr.slug, pr.title) for pr in await ProductRepo(session, branch_id).active()]
         if new_slug is not None and new_slug not in {sl for sl, _ in products}:
             new_slug = old_slug  # ignore a slug that isn't an active product of this branch

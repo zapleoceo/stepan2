@@ -588,6 +588,7 @@ _LOG_KIND_KEY = {"context_cleared": "chat.cleared", "context_loaded": "chat.load
                  "manager_note_set": "chat.manager_note_set",
                  "manager_note_cleared": "chat.manager_note_cleared",
                  "stage_reason": "chat.stage_reason",
+                 "consent_reset": "chat.consent_reset",
                  "crm_pushed": "chat.crm_pushed",
                  "crm_push_failed": "chat.crm_push_failed"}
 
@@ -1061,6 +1062,8 @@ def chat_panel_html(
     channel_kind: str | None = None,
     ch_label: str = "",
     conns: list | None = None,
+    agreed_product: str | None = None,
+    agreed_price: str | None = None,
 ) -> str:
     ph = _h.escape(t("chat.ph"))
     send_lbl = _h.escape(t("chat.send"))
@@ -1087,6 +1090,7 @@ def chat_panel_html(
         f'</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
+        f'{_consent_notice(agreed_product, agreed_price)}'
         f'{_manager_phone_notice(conns)}'
         f'<div class="fin">'
         f'<div class="fin-tools">'
@@ -1109,6 +1113,19 @@ def chat_panel_html(
         f'<button class="bsn">{send_lbl}</button></form>'
         f'</div>'
     )
+
+
+def _consent_notice(product: str | None, price: str | None) -> str:
+    """На ЧТО человек согласился. Стадия говорит «готов», но не говорит «к чему», и до
+    10.08.2026 этого не знал никто: согласие на билет за 100 тысяч читалось как согласие на
+    курс за 13 миллионов, потому что хранилось одно булево (тред 3163).
+
+    Пусто, пока согласия не было, — строка появляется в тот момент, когда есть что показать."""
+    if not (product or "").strip():
+        return ""
+    tail = f" · {_h.escape(price.strip())}" if (price or "").strip() else ""
+    return (f'<div class="fin-ro">✅ {_h.escape(t("chat.agreed_to"))} '
+            f'<b>{_h.escape(product.strip())}</b>{tail}</div>')
 
 
 def _manager_phone_notice(conns: list | None) -> str:

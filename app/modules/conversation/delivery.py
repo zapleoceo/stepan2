@@ -410,6 +410,11 @@ class ReplyDelivery:
             logger.info(
                 "branch=%d lead=%d: согласие было на «%s», сейчас «%s» — готовность сброшена",
                 self.branch_id, lead.id, lead.agreed_product_slug, target)
+            # В ленту чата, а не только в лог сервера: менеджер работает здесь, и сброс
+            # согласия — это его задача (получить новое), а не служебная подробность.
+            self.session.add(ThreadLog(
+                branch_id=self.branch_id, thread_id=thread.id, kind="consent_reset",
+                detail=f"{lead.agreed_product_slug} → {target}", actor="system"))
             ready = False
         eff_subtype = decision.ready_subtype
         if ready and thread.product_slug \
