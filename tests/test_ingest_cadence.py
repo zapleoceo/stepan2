@@ -50,11 +50,18 @@ def test_a_connector_that_is_never_polled_does_not_claim_a_cadence() -> None:
     assert not spec.polls_every_minute
 
 
-def test_the_default_is_the_safe_one() -> None:
+def test_only_connectors_whose_poll_is_cheap_opt_into_per_minute() -> None:
     """A connector added later gets the conservative cadence unless it says otherwise —
-    the wrong default here is an account ban, not a slow reply."""
-    fast = [s.kind for s in all_specs() if s.polls_every_minute]
-    assert fast == [ChannelKind.META_BUSINESS], (
-        "only the official Graph connector should opt into per-minute polling; "
-        f"got {fast}"
+    the wrong default here is an account ban, not a slow reply.
+
+    The criterion is what a poll COSTS, not whose API it is. Meta Business qualifies because
+    one authenticated Graph request against a published rate limit cannot get a Page banned.
+    CRM WhatsApp qualifies for a stronger reason: its fetch_inbound touches no network at all,
+    it drains a table the callback already filled, so frequency buys latency for free. The
+    private connectors — instagrapi, Evolution — stay slow because there poll frequency IS
+    the ban vector."""
+    fast = {s.kind for s in all_specs() if s.polls_every_minute}
+    assert fast == {ChannelKind.META_BUSINESS, ChannelKind.CRM_WHATSAPP}, (
+        "per-minute polling is for connectors whose poll costs nothing to the platform; "
+        f"got {sorted(k.value for k in fast)}"
     )

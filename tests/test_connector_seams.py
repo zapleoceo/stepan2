@@ -108,17 +108,25 @@ async def test_send_window_gate_follows_the_spec_flag_not_the_kind(
     assert [e.reason for e in parked] == ["WhatsApp window shut"]
 
 
-async def test_meta_window_gate_and_its_spec_agree() -> None:
-    """The one connector that really has a window says so; nobody else does — and it still
-    calls a refused send exactly what it always called it. Every outbox row written since this
-    gate existed carries "meta_window_closed", and the inbox queries and the failed-send bubble
-    match that literal, so it is a stored value and not a label anyone may reword."""
+async def test_the_windowed_connectors_declare_it_and_keep_their_stored_codes() -> None:
+    """Only connectors that really have a reply window say so, and each keeps calling a
+    refused send exactly what it always called it.
+
+    Two now, both for the same platform rule: Meta's 24h and WhatsApp's, the latter reached
+    through the CRM sender. Every outbox row written since this gate existed carries these
+    literals, and the inbox queries and the failed-send bubble match them, so they are stored
+    values and not labels anyone may reword."""
     gated = {k for k, s in REGISTRY.items() if s.send_window is not None}
-    assert gated == {ChannelKind.META_BUSINESS}
+    assert gated == {ChannelKind.META_BUSINESS, ChannelKind.CRM_WHATSAPP}
+
     window = REGISTRY[ChannelKind.META_BUSINESS].send_window
     assert window is not None
     assert window.error_code == "meta_window_closed"
     assert window.dormant_reason == "Meta 24h window closed — paused until lead writes"
+
+    wa = REGISTRY[ChannelKind.CRM_WHATSAPP].send_window
+    assert wa is not None
+    assert wa.error_code == "crm_wa_window_closed"
 
 
 async def test_maintenance_crons_never_build_a_port_for_an_undeclared_capability(

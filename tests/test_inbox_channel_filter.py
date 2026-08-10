@@ -41,9 +41,9 @@ def test_kind_chips_are_independent_toggles_reloading_tl_server_side() -> None:
     assert "toggleKind" not in html                  # the old client-side hide is gone
     # default (no kind param) = every chip ON, none struck off. A LITERAL count, deliberately:
     # deriving it from all_specs() would read the same source the HTML is generated from, so a
-    # duplicated or dropped chip agreed with itself and this test never went red. Four chips
-    # today; a fifth connector edits this number ON PURPOSE.
-    assert html.count('class="chk-kind on"') == 4
+    # duplicated or dropped chip agreed with itself and this test never went red. Five chips
+    # today; a sixth connector edits this number ON PURPOSE.
+    assert html.count('class="chk-kind on"') == 5
     assert 'class="chk-kind off"' not in html
 
 
@@ -52,7 +52,7 @@ def test_kind_chips_reflect_active_subset_and_tl_loader_preserves_filters() -> N
     # only meta_business is ON; every other connector is struck-through OFF (independent
     # toggles, one per registered spec)
     assert html.count('class="chk-kind on"') == 1
-    assert html.count('class="chk-kind off"') == 3
+    assert html.count('class="chk-kind off"') == 4
     # the #tl loader (and its 30s poll, which mirrors the address bar) requests the active
     # subset AND carries the stage filter along
     assert 'hx-get="/ui/threads?stage=qualifying&kind=meta_business"' in html
@@ -61,7 +61,7 @@ def test_kind_chips_reflect_active_subset_and_tl_loader_preserves_filters() -> N
 def test_kind_multi_subset_shows_union() -> None:
     html = app_shell("en", "", active_nav="inbox", kind="instagram,whatsapp")
     assert html.count('class="chk-kind on"') == 2       # IG + WA on
-    assert html.count('class="chk-kind off"') == 2
+    assert html.count('class="chk-kind off"') == 3
     assert 'hx-get="/ui/threads?kind=instagram,whatsapp"' in html
 
 
