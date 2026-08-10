@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 SANDBOX_BRANCH = 8  # ClodeCouch. НИКОГДА не 1 — боевая Индонезия.
 OUT_DIR = Path("sim_runs")
 _CONCURRENCY = 4  # выше брокер начинает отдавать 503 no-provider
+# Потолки по времени: раунд не должен уметь висеть молча. Один ход — это два вызова модели
+# (лид и продавец) по ~60 с, плюс хвосты брокера; семь ходов укладываются в 15 минут с
+# запасом. Персона, вышедшая за потолок, отдаёт то, что успела, и раунд идёт дальше — лучше
+# девять расшифровок и честная пометка, чем зависший процесс без отчёта.
+_PERSONA_TIMEOUT_S = 900.0
+# судья держит свой потолок сам (sim_judge._TIMEOUT_S)
 
 
 def _register_live() -> None:
@@ -38,15 +44,23 @@ def _register_live() -> None:
 async def _one(key: str, round_id: str, turns: int, sem: asyncio.Semaphore) -> tuple[str, dict]:
     session_key = f"suite:{round_id}:{key}"
     async with sem:
+        logger.info("персона %s пошла", key)
         try:
             async with session_scope() as s:
                 await SimService(s, BrokerLLM()).reset(SANDBOX_BRANCH, session_key)
             async with session_scope() as s:
-                run = await run_persona(
-                    s, SANDBOX_BRANCH, key, session_key, BrokerLLM(), max_turns=turns)
+                run = await asyncio.wait_for(
+                    run_persona(s, SANDBOX_BRANCH, key, session_key, BrokerLLM(),
+                                max_turns=turns),
+                    timeout=_PERSONA_TIMEOUT_S)
+        except TimeoutError:
+            # Расшифровка уже в базе — её подберёт --rescore, а раунд не встаёт колом.
+            logger.error("персона %s не уложилась в %.0f с — брошена", key, _PERSONA_TIMEOUT_S)
+            return key, {"ok": False, "detail": "timeout", "transcript": []}
         except Exception as exc:  # noqa: BLE001 — одна упавшая персона не роняет раунд
             logger.exception("персона %s упала", key)
             return key, {"ok": False, "detail": str(exc), "transcript": []}
+    logger.info("персона %s готова: ходов %s", key, run.get("turns_total"))
     return key, run
 
 

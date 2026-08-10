@@ -19,7 +19,7 @@ from app.ports.llm import LLMPort
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_S = 180.0
+_TIMEOUT_S = 300.0  # судья читает всю расшифровку, на длинных разговорах 180 с не хватало
 
 DIMENSIONS: dict[str, str] = {
     "opening": "Первый ход: тёплое приветствие и ОДИН вопрос про цель. 0 — питч, список "
