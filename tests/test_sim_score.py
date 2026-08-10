@@ -11,7 +11,33 @@ from app.modules.quality.sim_score import score_chat, score_turn, summarize
 def test_a_stock_closer_is_caught() -> None:
     """«Kakak tertarik?» — самая частая тупиковая концовка филиала, 124 раза за неделю."""
     t = score_turn("Programnya bagus lho. Kakak tertarik?")
-    assert t.stock == ["kakak_tertarik"]
+    assert t.stock == ["tertarik_dead_end"]
+
+
+def test_a_menu_of_two_programmes_is_a_false_choice() -> None:
+    """Худший ход раунда r1: лид сказал «хочу быть контент-креатором» — то есть направление
+    назвал, — а получил выбор из двух программ. По Биркенбиль это ошибка №2: выбор из наших
+    вариантов вместо разговора о человеке."""
+    t = score_turn("Ada Bootcamp 1 hari atau SMM Intensive 2 minggu. Kakak lebih tertarik "
+                   "yang mana?")
+    assert t.is_false_choice is True
+    assert t.stock == ["tertarik_dead_end"]
+
+
+def test_asking_what_drew_them_in_is_not_a_stock_phrase() -> None:
+    """Тот же корень «tertarik», но это хороший discovery-вопрос. Широкий шаблон считал его
+    ошибкой, и метрика увела бы следующие раунды не туда."""
+    t = score_turn("Kira-kira yang bikin Kakak tertarik waktu lihat iklan kita itu apa?")
+    assert t.stock == []
+    assert t.is_false_choice is False
+
+
+def test_splitting_the_kinds_of_expensive_is_not_a_false_choice() -> None:
+    """«Дорого по сумме или дорого относительно бюджета?» — это разбор возражения, ровно то,
+    чего мы добиваемся. Союз «или» сам по себе не делает вопрос ложной альтернативой."""
+    t = score_turn("Yang bikin belum sanggup ini harga totalnya, atau memang lagi cari yang "
+                   "di bawah budget tertentu?")
+    assert t.is_false_choice is False
 
 
 def test_the_shape_of_a_machine_is_caught() -> None:
@@ -78,13 +104,13 @@ def test_long_share_uses_the_four_hundred_mark() -> None:
 
 
 def test_a_round_summary_adds_up_across_chats() -> None:
-    a = score_chat("a", _run("Kakak tertarik?"))
+    a = score_chat("a", _run("Programnya bagus. Kakak tertarik?"))
     b = score_chat("b", _run("- satu\n- dua"))
     total = summarize([a, b])
     assert total["chats"] == 2
     assert total["stock_hits"] == 1
     assert total["robot_hits"] == 1
-    assert total["stock_kinds"] == ["kakak_tertarik"]
+    assert total["stock_kinds"] == ["tertarik_dead_end"]
 
 
 def test_an_empty_round_summarizes_to_nothing_rather_than_crashing() -> None:

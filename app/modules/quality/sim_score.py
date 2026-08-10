@@ -17,7 +17,11 @@ from dataclasses import asdict, dataclass, field
 # каждый из них закрывает разговор вместо того, чтобы двигать его. «Kakak tertarik?» —
 # 124 раза за неделю, самая частая тупиковая концовка филиала.
 _STOCK = {
-    "kakak_tertarik": re.compile(r"kakak\s+tertarik", re.I),
+    # Именно тупиковая форма: «интересно?» и «который из них?». Раунд r1 показал, что широкий
+    # шаблон на «tertarik» ловит и хорошие ходы — «что вас зацепило в рекламе», «дорого по
+    # сумме или по бюджету». Из шести срабатываний плохим было одно. Метрика, считающая
+    # верные ходы ошибками, увела бы следующие раунды не туда.
+    "tertarik_dead_end": re.compile(r"tertarik\s*\?|tertarik\s+yang\s+mana", re.I),
     "ada_lagi_yang_bisa": re.compile(r"ada\s+(lagi\s+)?yang\s+bisa\s+(saya\s+|aku\s+)?bantu", re.I),
     "jangan_ragu": re.compile(r"jangan\s+ragu", re.I),
     "apakah_kakak": re.compile(r"\bapakah\s+kakak", re.I),
@@ -38,6 +42,11 @@ _NEXT_STEP = re.compile(
     r"jadwal|datang|ikut|kirim(kan)?\s+(detail|ringkasan|brosur))", re.I)
 _STALL = re.compile(
     r"(cek\s+dulu\s+ke\s+tim|tanya(kan)?\s+dulu\s+ke\s+tim|konfirmasi\s+ke\s+tim)", re.I)
+# Ложная альтернатива: «A или B — что выбираете?». По Биркенбиль это ошибка №2 — выбор из
+# двух наших вариантов вместо открытого вопроса о человеке. В r1 так выглядел худший ход
+# раунда: лид сказал «хочу быть контент-креатором», а получил меню из двух программ.
+_FALSE_CHOICE = re.compile(
+    r"\batau\b[^?]{0,120}(yang\s+mana|lebih\s+(tertarik|cocok|suka)|pilih)[^?]{0,40}\?", re.I)
 _LONG = 400
 _BUBBLE = "|||"
 
@@ -51,6 +60,7 @@ class TurnScore:
     robot: list[str] = field(default_factory=list)
     has_next_step: bool = False
     is_stall: bool = False
+    is_false_choice: bool = False
 
 
 @dataclass
@@ -75,6 +85,7 @@ class ChatScore:
     # ведение
     next_step_share: float
     stall_turns: int
+    false_choice_turns: int
     repeated_questions: int
     multi_question_turns: int
 
@@ -93,6 +104,7 @@ def score_turn(reply: str) -> TurnScore:
         robot=[k for k, rx in _ROBOT_SHAPE.items() if rx.search(text)],
         has_next_step=bool(_NEXT_STEP.search(flat)),
         is_stall=bool(_STALL.search(flat)),
+        is_false_choice=bool(_FALSE_CHOICE.search(flat)),
     )
 
 
@@ -120,6 +132,7 @@ def score_chat(persona: str, run: dict) -> ChatScore:
         stock_kinds=sorted({k for t in turns for k in t.stock}),
         next_step_share=round(sum(1 for t in turns if t.has_next_step) / n, 3),
         stall_turns=sum(1 for t in turns if t.is_stall),
+        false_choice_turns=sum(1 for t in turns if t.is_false_choice),
         repeated_questions=_repeated_questions(replies),
         multi_question_turns=sum(1 for t in turns if t.questions > 1),
     )
@@ -160,6 +173,7 @@ def summarize(scores: list[ChatScore]) -> dict:
         "stock_kinds": sorted({k for s in scores for k in s.stock_kinds}),
         "next_step_share": round(sum(s.next_step_share for s in scores) / n, 3),
         "stall_turns": sum(s.stall_turns for s in scores),
+        "false_choice_turns": sum(s.false_choice_turns for s in scores),
         "repeated_questions": sum(s.repeated_questions for s in scores),
         "multi_question_turns": sum(s.multi_question_turns for s in scores),
         "ready": sum(1 for s in scores if s.ready),

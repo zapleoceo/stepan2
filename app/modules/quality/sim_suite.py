@@ -82,6 +82,48 @@ async def run_round(round_id: str, keys: list[str], turns: int, judge: bool) -> 
     }
 
 
+async def score_existing(round_id: str, judge: bool = False) -> dict:
+    """Пересчитать раунд по расшифровкам, уже лежащим в базе.
+
+    Прогон живёт в контейнере, а деплой контейнер перезапускает — так раунд r1 умер на
+    середине вместе со своим логом. Расшифровки при этом никуда не делись: sim пишет их в
+    обычные треды филиала 8. Значит замер можно повторить когда угодно и бесплатно, а заодно
+    пересчитать старый раунд новым счётчиком, если счётчик поправили."""
+    from sqlalchemy import text as sql  # noqa: PLC0415
+
+    prefix = f"sim:suite:{round_id}:"
+    async with session_scope() as s:
+        rows = (await s.execute(sql(
+            "SELECT ct.external_thread_id, m.direction, m.text FROM message m"
+            " JOIN channel_thread ct ON ct.id = m.thread_id"
+            " WHERE ct.external_thread_id LIKE :p AND m.text <> ''"
+            " ORDER BY ct.external_thread_id, m.occurred_at, m.id"), {"p": f"{prefix}%"})).all()
+    runs: dict[str, dict] = {}
+    for ext, direction, text_ in rows:
+        key = ext[len(prefix):]
+        runs.setdefault(key, {"transcript": []})["transcript"].append(
+            {"who": "stepan" if direction == "out" else "lead", "text": text_})
+
+    scores = [score_chat(k, r) for k, r in runs.items()]
+    judged: list[dict] = []
+    if judge:
+        llm = BrokerLLM()
+        sem = asyncio.Semaphore(_CONCURRENCY)
+
+        async def _j(key: str, run: dict) -> dict:
+            async with sem:
+                out = await judge_chat(llm, key, run["transcript"], SANDBOX_BRANCH)
+            return {"persona": key, **out} if out else {}
+
+        judged = [j for j in await asyncio.gather(*(_j(k, r) for k, r in runs.items())) if j]
+    return {
+        "round": round_id, "personas": sorted(runs), "turns_cap": None,
+        "metrics": summarize(scores), "judge": average_scores(judged) if judged else {},
+        "chats": [s.as_dict() for s in scores], "verdicts": judged,
+        "transcripts": {k: r["transcript"] for k, r in runs.items()}, "failed": [],
+    }
+
+
 def report(result: dict, previous: dict | None) -> str:
     """Отчёт раунда. Со стрелками к прошлому раунду, потому что смотрят именно на разницу."""
     m, prev = result["metrics"], (previous or {}).get("metrics", {})
@@ -152,11 +194,14 @@ async def _main() -> None:
     ap.add_argument("--judge", action="store_true")
     ap.add_argument("--compare", default=None, help="id раунда для сравнения")
     ap.add_argument("--personas", default=None, help="через запятую; по умолчанию живые десять")
+    ap.add_argument("--rescore", action="store_true",
+                    help="не прогонять заново, а пересчитать раунд по расшифровкам из базы")
     args = ap.parse_args()
 
     keys = args.personas.split(",") if args.personas else DEFAULT_KEYS
     previous = _read_previous(args.compare)
-    result = await run_round(args.round, keys, args.turns, args.judge)
+    result = (await score_existing(args.round, args.judge) if args.rescore
+              else await run_round(args.round, keys, args.turns, args.judge))
     text = report(result, previous)
     _write(args.round, result, text)
     print(text)  # noqa: T201 — это CLI, отчёт и есть вывод
