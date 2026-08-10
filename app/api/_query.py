@@ -446,11 +446,13 @@ async def fetch_stage_reach(
 # the counters, the inbox and every report — a lead that shows in the list but not in the
 # total is read as a bug in the total.
 #
-# Two kinds. A record folded into another is the SAME person counted twice. And a contact
-# whose every thread lives on a read-only channel is not Stepan's lead at all: it is someone
-# the manager was already talking to, and counting them measures a human's pipeline as the
-# bot's. Having no thread at all is neither — that lead is simply new, and stays.
-NOT_IN_FUNNEL = "(l.is_merged_into IS NOT NULL OR l.manager_only)"
+# One kind now: a record folded into another is the SAME person counted twice. Someone the
+# manager was already talking to used to need a second term here (lead.manager_only), because
+# they sat at whatever stage they happened to have while a human worked them. They now land
+# in MANAGER on their first message from a read-only connector, and MANAGER is outside every
+# funnel-stage list already — so the stage answers it and the column is gone. The subquery
+# that column replaced does NOT come back: this is one indexed comparison.
+NOT_IN_FUNNEL = "(l.is_merged_into IS NOT NULL)"
 IN_FUNNEL = f"NOT {NOT_IN_FUNNEL}"
 
 _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where

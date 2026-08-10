@@ -6,12 +6,21 @@ contact arrives via a different channel. Isolation lives in the BranchScoped rep
 from __future__ import annotations
 
 from datetime import datetime
+from typing import NamedTuple
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import ChannelThread, Lead
 
 from .repository import LeadRepo, ThreadRepo
+
+
+class Resolved(NamedTuple):
+    """Who this message belongs to, and whether the connector is new to them."""
+
+    lead: Lead
+    thread: ChannelThread
+    thread_created: bool
 
 
 class IdentityService:
@@ -33,8 +42,13 @@ class IdentityService:
         ig_username: str | None = None,
         avatar_url: str | None = None,
         first_seen: datetime | None = None,
-    ) -> tuple[Lead, ChannelThread]:
-        """Return (lead, thread): phone-match → existing thread's lead → new lead.
+    ) -> Resolved:
+        """Return (lead, thread, thread_created): phone-match → existing thread's lead → new.
+
+        `thread_created` is the lead's FIRST message on this connector, and the caller acts
+        on it: a first message arriving on a read-only connector means a manager already owns
+        this person. Only the resolver can answer it without a second lookup — inferring it
+        downstream costs a query per message on a table already scanned half a million times.
 
         `first_seen` is when the MESSAGE happened, and it becomes the lead's created_at.
         Defaulting to "now" was invisible while every message arrived live; a history
@@ -42,11 +56,12 @@ class IdentityService:
         arrival date showed a spike on the day of the import instead of the months the
         conversations actually spanned."""
         thread = await self.threads.by_external(channel_id, external_thread_id)
+        existed = thread is not None
         lead = await self._resolve_lead(
             thread, phone, display_name, ig_user_id, ig_username, avatar_url, first_seen
         )
         thread = await self._upsert_thread(thread, lead, channel_id, external_thread_id)
-        return lead, thread
+        return Resolved(lead, thread, thread_created=not existed)
 
     async def _resolve_lead(
         self,

@@ -64,8 +64,8 @@ async def test_same_phone_two_channels_is_one_lead(db_session) -> None:
     wa = await _channel(s, branch, ChannelKind.WHATSAPP)
     svc = IdentityService(s, branch)
 
-    lead_ig, thread_ig = await svc.resolve_or_create("ig_t1", ig, "Budi", "6281111")
-    lead_wa, thread_wa = await svc.resolve_or_create("wa_t1", wa, "Budi", "6281111")
+    lead_ig, thread_ig, _ = await svc.resolve_or_create("ig_t1", ig, "Budi", "6281111")
+    lead_wa, thread_wa, _ = await svc.resolve_or_create("wa_t1", wa, "Budi", "6281111")
 
     assert lead_ig.id == lead_wa.id  # merged across channels by phone
     assert thread_ig.id != thread_wa.id  # but two distinct threads
@@ -80,8 +80,9 @@ async def test_existing_thread_resolves_without_phone(db_session) -> None:
     ig = await _channel(s, branch, ChannelKind.INSTAGRAM)
     svc = IdentityService(s, branch)
 
-    lead1, t1 = await svc.resolve_or_create("ig_t1", ig, "Budi", None)
-    lead2, t2 = await svc.resolve_or_create("ig_t1", ig, "Budi", None)
+    lead1, t1, created1 = await svc.resolve_or_create("ig_t1", ig, "Budi", None)
+    lead2, t2, created2 = await svc.resolve_or_create("ig_t1", ig, "Budi", None)
+    assert created1 and not created2  # the connector is new to them exactly once
 
     assert lead1.id == lead2.id
     assert t1.id == t2.id  # same thread upserted, not duplicated
@@ -95,10 +96,10 @@ async def test_phone_isolated_across_branches(db_session) -> None:
     ch_a = await _channel(s, branch_a, ChannelKind.WHATSAPP)
     ch_b = await _channel(s, branch_b, ChannelKind.WHATSAPP)
 
-    lead_a, _ = await IdentityService(s, branch_a).resolve_or_create(
+    lead_a, _, _ = await IdentityService(s, branch_a).resolve_or_create(
         "wa_t1", ch_a, "Budi", "6281111"
     )
-    lead_b, _ = await IdentityService(s, branch_b).resolve_or_create(
+    lead_b, _, _ = await IdentityService(s, branch_b).resolve_or_create(
         "wa_t9", ch_b, "Nguyen", "6281111"
     )
 
