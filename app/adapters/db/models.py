@@ -531,6 +531,9 @@ class SenderInbound(SQLModel, table=True):
     conversation_id: str | None = Field(default=None, index=True)
     chat_id: str | None = Field(default=None)
     sender_message_id: str | None = Field(default=None, description="id в самом sender")
+    # id пользователя-клиента на их стороне. Нужен на ОТПРАВКЕ (`userId`), а не на приёме:
+    # колбек его присылает, и без сохранения ответить было бы нечем.
+    sender_user_id: str | None = Field(default=None)
     phone: str | None = Field(default=None, index=True, description="wa-id как прислали")
     from_name: str | None = Field(default=None)
     text: str | None = Field(default=None)

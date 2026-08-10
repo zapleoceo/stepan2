@@ -9,6 +9,11 @@ class ChannelKind(StrEnum):
     INSTAGRAM = "instagram"          # фолоап (instagrapi, приватный)
     WHATSAPP = "whatsapp"            # фолоап (Evolution API, приватный)
     WEBSITE = "website"              # чат на сайте: синхронный HTTP, обратного канала нет
+    # WhatsApp клиента, доступный ТОЛЬКО через sender CRM: входящие приносит колбек, ответ
+    # уходит их инструментом. Отдельный вид, а не режим WHATSAPP: тот работает через
+    # Evolution API на нашем сервере, здесь же чужой транспорт, чужие идентификаторы и
+    # отправка, которая не подтверждает доставку.
+    CRM_WHATSAPP = "crm_whatsapp"
 
 
 class Role(StrEnum):

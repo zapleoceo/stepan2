@@ -93,6 +93,14 @@ class Settings(BaseSettings):
     sender_callback_open: bool = Field(
         default=False, description="TEMPORARY: accept unauthenticated callbacks (record-only)")
 
+    # Отправка ответа лиду и добор пропущенных входящих — ОТДЕЛЬНЫЙ MCP-сервер (sender), не
+    # тот, что отдаёт состояние CRM. Один токен покрывает и отправку, и сверку, и шаблоны
+    # (Виктор, 05.08.2026). Пусто — коннектор не отправляет и молчит, а не гадает адрес.
+    sender_mcp_url: str = Field(default="", description="MCP sender: базовый URL")
+    sender_mcp_token: str = Field(default="", description="MCP sender: токен доступа")
+    sender_mcp_timeout_s: float = Field(
+        default=30.0, description="бюджет одного обмена с sender")
+
     # Reading their list back, to recover what the callback never delivered. Their side does
     # not retry a failed callback, so a message arriving while we restart is otherwise lost
     # with nobody the wiser. All four are empty until they hand them over; the sweep does

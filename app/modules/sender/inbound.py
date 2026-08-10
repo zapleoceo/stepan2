@@ -36,6 +36,7 @@ _FIELDS = {
     "branch_id": "branch_ref",
     "conversation_id": "conversation_id",
     "chat_id": "chat_id",
+    "user_id": "sender_user_id",
 }
 
 
