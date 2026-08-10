@@ -38,11 +38,6 @@ logger = logging.getLogger(__name__)
 _MAX_SPLITS = 5
 
 
-def _tenant_args(tenant: SenderTenant, channel: str) -> dict:
-    """Что sender ждёт для выборки: проект буквой, канал и филиал."""
-    return {"project": tenant.project, "channel": channel, "branchId": tenant.branch_id}
-
-
 async def _pull(mcp: SenderMcp, args: dict, since: datetime, until: datetime,
                 depth: int = 0) -> list[dict]:
     """Входящие за окно, при усечении — по половинам."""
@@ -68,7 +63,7 @@ async def sweep(session: AsyncSession, mcp: SenderMcp, tenant: SenderTenant, *,
         return 0
     since = now - timedelta(minutes=lookback_min)
     rescued = 0
-    for payload in await _pull(mcp, _tenant_args(tenant, channel), since, now):
+    for payload in await _pull(mcp, tenant.inbound_args(channel), since, now):
         row = to_row(payload, arrived_via=CATCHUP)
         if row is None:
             continue

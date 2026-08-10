@@ -103,9 +103,11 @@ async def test_the_reply_is_addressed_from_the_conversation_we_stored(db_session
 
     assert res.ok
     assert res.external_message_id == "wamid.OUT"
+    # Числа — числами: их схема объявляет branchId, id и userId целыми и отвергает
+    # весь запрос при строке.
     assert mcp.calls == [{
-        "id": "987", "conversationId": "6281234567890", "project": "crm",
-        "branchId": "435", "text": "halo", "userId": "4521",
+        "project": "crm", "branchId": 435, "text": "halo",
+        "id": 987, "conversationId": "6281234567890", "userId": 4521,
     }]
 
 
@@ -149,3 +151,37 @@ def test_the_connector_declares_that_it_does_not_confirm_delivery() -> None:
 
     assert SPEC.confirms_delivery is False
     assert SPEC.send_window is not None, "вне 24 часов свободный текст запрещён"
+
+
+def test_the_ids_go_out_as_numbers_because_their_schema_says_so() -> None:
+    """Живой sender объявляет branchId, id и userId целыми и отвергает ВЕСЬ запрос при
+    строке: «Property '/branchId': Invalid type. Expected null|integer, but received unknown».
+
+    У нас это поля ввода и поля колбека, то есть строки, и первая версия отправляла их как
+    есть. Заглушка приняла бы что угодно — дефект нашёлся только живым вызовом.
+    """
+    args = TENANT.send_args(chat_id="987", conversation_id="6281234567890",
+                            user_id="4521", text="halo")
+
+    assert args["branchId"] == 435
+    assert args["id"] == 987
+    assert args["userId"] == 4521
+    assert isinstance(args["branchId"], int)
+    assert args["project"] == "crm"
+    assert args["text"] == "halo"
+
+
+def test_a_missing_optional_id_is_omitted_rather_than_sent_as_nothing() -> None:
+    """Схема разрешает пропустить id и userId. Слать выдуманный ноль вместо пропуска
+    значит адресовать сообщение несуществующей записи."""
+    args = TENANT.send_args(chat_id="", conversation_id="62812", user_id=None, text="halo")
+
+    assert "id" not in args
+    assert "userId" not in args
+    assert args["conversationId"] == "62812"
+
+
+def test_the_reconciliation_window_also_numbers_the_branch() -> None:
+    args = TENANT.inbound_args("whats-app")
+
+    assert args == {"project": "crm", "channel": "whats-app", "branchId": 435}

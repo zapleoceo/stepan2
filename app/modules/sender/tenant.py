@@ -48,23 +48,45 @@ class SenderTenant:
         return (str(payload.get("project_id", "")).strip() == self.project_id.strip()
                 and str(payload.get("branch_id", "")).strip() == self.branch_id.strip())
 
+    @staticmethod
+    def _num(value: object) -> int | None:
+        """Текст настройки → число, как требует схема sender.
+
+        Их инструменты объявляют branchId, id и userId целыми, а у нас это поля ввода и
+        поля колбека — то есть строки. Живой вызов отвечает на строку не «неверный тип», а
+        отказом всего запроса, и поймать это на заглушке нельзя: она приняла бы что угодно.
+        Мусор превращаем в None, а не в ноль: пропущенный необязательный параметр честнее
+        выдуманного идентификатора.
+        """
+        text = str(value or "").strip()
+        return int(text) if text.isdigit() else None
+
     def send_args(self, *, chat_id: str, conversation_id: str,
                   user_id: str | None, text: str) -> dict:
-        """Параметры для `sender_conversation_send` по их таблице соответствий.
+        """Параметры для `sender_conversation_send`, в типах их схемы.
 
-        Имена ключей — их, camelCase, и меняются только вместе с их API. `userId` опционален:
-        в колбеке он приходит не всегда, а слать `None` в чужой инструмент — верный способ
-        получить невнятную ошибку валидации вместо отправки.
+        Обязательны только project, branchId и text — остальное адресация, и каждое поле
+        добавляется, лишь когда оно есть: слать null там, где схема допускает пропуск,
+        значит спорить с чужой валидацией без нужды.
         """
-        args = {
-            "id": chat_id,
-            "conversationId": conversation_id,
+        args: dict = {
             "project": self.project,
-            "branchId": self.branch_id,
+            "branchId": self._num(self.branch_id),
             "text": text,
         }
-        if user_id:
-            args["userId"] = user_id
+        if (chat := self._num(chat_id)) is not None:
+            args["id"] = chat
+        if conversation_id:
+            args["conversationId"] = conversation_id
+        if (user := self._num(user_id)) is not None:
+            args["userId"] = user
+        return args
+
+    def inbound_args(self, channel: str) -> dict:
+        """Параметры выборки для `sender_inbound_since` — там branchId тоже целое."""
+        args: dict = {"project": self.project, "channel": channel}
+        if (branch := self._num(self.branch_id)) is not None:
+            args["branchId"] = branch
         return args
 
 
