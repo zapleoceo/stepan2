@@ -982,22 +982,23 @@ _TR: dict[str, dict[str, str]] = {
         "id": "Biasanya dimatikan saat Instagram memblokir pengiriman (403 / action block). "
               "Nyalakan lagi setelah blokir hilang — biasanya beberapa jam.",
     },
-    "ch.read_only": {"ru": "Только чтение", "en": "Read-only", "id": "Hanya baca"},
-    "chat.read_only_notice": {
-        "ru": "Последнее сообщение пришло на номер менеджера — отсюда отправка не уйдёт. "
-              "Отвечает он со своего телефона.",
-        "en": "The latest message came to a manager's number — nothing sends from here. "
-              "They answer from their own phone.",
-        "id": "Pesan terakhir masuk ke nomor manajer — tidak ada yang terkirim dari sini. "
-              "Dia menjawab dari ponselnya sendiri.",
+    "ch.manager_phone": {"ru": "Личный номер менеджера", "en": "A manager's own phone",
+                         "id": "Nomor pribadi manajer"},
+    "chat.manager_phone_notice": {
+        "ru": "Этот разговор ведёт менеджер со своего номера. Отправленное отсюда придёт "
+              "клиенту от его имени.",
+        "en": "A manager is running this conversation from their own number. Anything sent "
+              "from here reaches the client under their name.",
+        "id": "Percakapan ini dipegang manajer dari nomornya sendiri. Yang dikirim dari sini "
+              "sampai ke klien atas nama dia.",
     },
-    "ch.read_only_hint": {
-        "ru": "Номер менеджера: читаем переписку для аналитики и не отправляем ничего. "
-              "Настройки отправки для такого канала не действуют.",
-        "en": "A manager's number: we read the chats for analytics and send nothing. The "
-              "sending settings do not apply to such a channel.",
-        "id": "Nomor manajer: kami membaca obrolan untuk analitik dan tidak mengirim apa "
-              "pun. Pengaturan pengiriman tidak berlaku untuk channel seperti ini.",
+    "ch.manager_phone_hint": {
+        "ru": "Личный телефон человека, а не линия компании. Лид, пришедший сюда, попадает "
+              "в стадию «менеджер» с выключенным Степаном — включить его может менеджер.",
+        "en": "A person's own handset, not a company line. A lead arriving here lands in the "
+              "MANAGER stage with the bot off; the manager decides when to switch it on.",
+        "id": "Ponsel pribadi seseorang, bukan nomor perusahaan. Lead yang masuk ke sini "
+              "otomatis ke tahap manajer dengan bot mati; manajer yang menyalakannya.",
     },
     "ch.verify":   {"ru": "Подтвердить",       "en": "Verify",            "id": "Verifikasi"},
     "ch.ig_login": {"ru": "Войти в Instagram", "en": "Login Instagram",   "id": "Login Instagram"},

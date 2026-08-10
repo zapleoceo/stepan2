@@ -317,8 +317,8 @@ def _conn_meta_row(conn: dict) -> str:
         bits.append(f"📅 с {since}")
     if last_in := conn.get("last_in"):
         bits.append(f"⬇ {_fmt_dt_short(_as_dt(last_in))}")
-    if conn.get("read_only"):
-        bits.append(f'<span class="lc-ro">👁 {_h.escape(t("ch.read_only"))}</span>')
+    if conn.get("manager_phone"):
+        bits.append(f'<span class="lc-ro">👁 {_h.escape(t("ch.manager_phone"))}</span>')
     return f'<div class="ch-meta ch-conn">{"  ·  ".join(bits)}</div>'
 
 
@@ -330,7 +330,7 @@ def _conn_row(conn: dict) -> str:
     account = _h.escape(str(conn.get("handle") or (spec.label if spec else "")))
     addr = _conn_addr(conn)
     addr_html = f'<span class="lc-addr">{_h.escape(addr)}</span>' if addr else ""
-    ro = ' <span class="lc-ro" title="read-only">👁</span>' if conn.get("read_only") else ""
+    ro = ' <span class="lc-ro" title="manager phone">👁</span>' if conn.get("manager_phone") else ""
     return (
         f'<div class="lc-conn">{icon} <span class="lc-acc">{account}</span>{ro}'
         f'{addr_html}'
@@ -1087,7 +1087,7 @@ def chat_panel_html(
         f'</div>'
         f'<div id="sug-{tid}"></div>'
         f'<div id="tr-{tid}"></div>'
-        f'{_read_only_notice(conns)}'
+        f'{_manager_phone_notice(conns)}'
         f'<div class="fin">'
         f'<div class="fin-tools">'
         f'<button class="act-btn"'
@@ -1111,19 +1111,19 @@ def chat_panel_html(
     )
 
 
-def _read_only_notice(conns: list | None) -> str:
-    """Say why the composer will not deliver, when the newest thread is a manager's.
+def _manager_phone_notice(conns: list | None) -> str:
+    """Say WHOSE voice a line sent from here will carry, when the newest thread is on a
+    manager's own number.
 
-    The feed is the lead's whole correspondence now, so an operator can be reading a
-    WhatsApp exchange the manager is running and type into the box under it. The line would
-    be queued and then refused — silently, from where they are standing. Better to say so
-    before they write it than to explain a message that never arrived."""
+    It used to say the composer would not deliver, because it would not. It does now, and the
+    warning has to change with it: the operator is not being stopped, they are being told that
+    the client will read this as the manager writing from their personal phone."""
     newest = (conns or [None])[0]
-    if not (isinstance(newest, dict) and newest.get("read_only")):
+    if not (isinstance(newest, dict) and newest.get("manager_phone")):
         return ""
     account = _h.escape(str(newest.get("handle") or ""))
     return (
-        f'<div class="fin-ro">👁 {_h.escape(t("chat.read_only_notice"))}'
+        f'<div class="fin-ro">👤 {_h.escape(t("chat.manager_phone_notice"))}'
         f'{f" — {account}" if account else ""}</div>'
     )
 

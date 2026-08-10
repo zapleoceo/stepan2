@@ -56,7 +56,12 @@ class Channel(SQLModel, table=True):
     # A COLUMN, not a key in the encrypted session dump, because the question is asked in
     # SQL: the reply dispatcher must exclude these threads before it spends a broker call,
     # and the funnel must exclude their contacts. Encrypted config cannot answer either.
-    read_only: bool = Field(default=False)
+    # This connector is a person's own phone, not a company line. It is a FACT about whose
+    # handset it is, never a permission: a lead arriving here belongs to that manager (ingest
+    # moves them to MANAGER and mutes the bot), the audit counts these threads apart from
+    # Stepan's funnel, and the chat says whose number it is. What the bot may do is decided
+    # per LEAD, by the stage and the bot switch the manager controls — see domain/funnel.py.
+    manager_phone: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -115,15 +120,6 @@ class Lead(SQLModel, table=True):
     # were re-pointed at the survivor; the row stays so an id that was handed out, logged or
     # linked never dangles, and so a wrong merge can be read back rather than guessed at.
     is_merged_into: int | None = Field(default=None, foreign_key="lead.id", index=True)
-    # Not one of Stepan's leads: every thread this person has lives on a read-only channel,
-    # so they are somebody the manager was already talking to.
-    #
-    # A COLUMN because it is asked on every read. It was two correlated subqueries over
-    # channel_thread inside the funnel predicate — `lead` already takes 573k sequential
-    # scans reading two billion rows, and adding per-row subqueries to that is the wrong
-    # direction. The writer knows the answer when it attaches a thread; the reader should
-    # not have to work it out again.
-    manager_only: bool = Field(default=False, index=True)
     handed_off_at: datetime | None = Field(default=None)
     follower_count: int | None = Field(default=None)
     following_count: int | None = Field(default=None)

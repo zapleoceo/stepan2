@@ -22,6 +22,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.adapters.db.models import Branch, Lead, Outbox, StageEvent
 from app.domain.enums import BOT_SILENT_STAGES, HUMAN_LED_STAGES, Stage
+from app.domain.funnel import apply_stage
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +85,7 @@ async def move_lead(
     from_stage = str(lead.stage)
     reason = f"move_lead → {target.value}" + (f": {note}" if note else "")
     await _journal(session, lead, target, reason)
-    lead.stage = target
-    if target == Stage.MANAGER:
-        lead.agent_enabled = False
-    elif target not in BOT_SILENT_STAGES:
-        lead.agent_enabled = True
-        # An explicit move back into the funnel hands the thread to the bot again, so a
-        # manual mute set earlier by the Bot OFF pill is cleared with it.
-        lead.agent_off_manual = False
+    apply_stage(lead, target)
     session.add(lead)
     await session.flush()
     return _result(lead, from_stage, reason)

@@ -122,7 +122,7 @@ _LEAD_TMPL = (
     # channel's own name, their address on it, and the traffic through it.
     "   JSON_AGG(JSON_BUILD_OBJECT("
     "     'kind', ch.kind, 'handle', ch.handle, 'ext', ct.external_thread_id,"
-    "     'nick', l.ig_username, 'read_only', ch.read_only,"
+    "     'nick', l.ig_username, 'manager_phone', ch.manager_phone,"
     "     'tid', ct.id, 'cin', ct.msg_in, 'cout', ct.msg_out)"
     "    ORDER BY COALESCE(GREATEST(ct.last_in_at, ct.last_out_at), ct.created_at) DESC)"
     "    AS conns"

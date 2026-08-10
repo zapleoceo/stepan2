@@ -102,7 +102,7 @@ def test_thread_list_html_with_row() -> None:
            "+62812345", "alicetest", None, 1200, 340, True, "Hello", "in", 5, 3,
            "KL", 0, 42, [
         {"kind": "instagram", "handle": "IG itstep", "ext": "t", "nick": "alicetest",
-         "read_only": False, "tid": 42, "cin": 5, "cout": 3},
+         "manager_phone": False, "tid": 42, "cin": 5, "cout": 3},
     ])
     html = thread_list_html([row])
     assert "Alice Test" in html
@@ -126,7 +126,7 @@ def test_thread_list_html_shifts_last_active_to_viewer_local_time() -> None:
            # branch tz 0 → proves the VIEWER offset (7) drives the shift
            "KL", 0, 42, [
         {"kind": "instagram", "handle": "IG itstep", "ext": "t", "nick": "alicetest",
-         "read_only": False, "tid": 42, "cin": 5, "cout": 3},
+         "manager_phone": False, "tid": 42, "cin": 5, "cout": 3},
     ])
     html = thread_list_html([row])
     assert "03:00" in html  # 20:00 UTC + 7h = 03:00 next day, viewer-local

@@ -74,15 +74,12 @@ def awaiting_kind_sql(specs: Iterable[ConnectorSpec]) -> str:
     strings, so it carries no parameters of its own. They are ChannelKind members — a closed
     enum from our own source, never anything a request supplies."""
     excluded = [s.kind.value for s in specs if not s.counts_as_awaiting]
-    # A read-only channel is somebody else's conversation. "Awaiting a reply" there is not a
-    # queue item — the manager is answering from their own phone, and Stepan is forbidden to
-    # write at all — so counting it inflates the badge with work nobody owes.
-    #
-    # A per-CHANNEL flag rather than a per-kind one, unlike the exclusion above: the same
-    # WhatsApp connector runs writable for the follow-up number and read-only for the
-    # managers', so the kind cannot answer this.
-    exists = (" AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id"
-              "             AND NOT c.read_only")
+    # A manager's number was excluded here too, on the grounds that Stepan could not write
+    # there at all. He can now, when a manager hands the lead back — and then the badge SHOULD
+    # show it, because we do owe that reply. Nothing is lost by dropping the test: the queue
+    # itself (IN_QUEUE_EXTRA) already requires the bot to be on and the lead to sit in a funnel
+    # stage, and a lead a manager is working is in MANAGER with the switch off.
+    exists = (" AND EXISTS (SELECT 1 FROM channel c WHERE c.id = ct.channel_id")
     if not excluded:
         return exists + ")"
     kinds = ", ".join(f"'{k}'" for k in excluded)
@@ -446,11 +443,13 @@ async def fetch_stage_reach(
 # the counters, the inbox and every report — a lead that shows in the list but not in the
 # total is read as a bug in the total.
 #
-# Two kinds. A record folded into another is the SAME person counted twice. And a contact
-# whose every thread lives on a read-only channel is not Stepan's lead at all: it is someone
-# the manager was already talking to, and counting them measures a human's pipeline as the
-# bot's. Having no thread at all is neither — that lead is simply new, and stays.
-NOT_IN_FUNNEL = "(l.is_merged_into IS NOT NULL OR l.manager_only)"
+# One kind now: a record folded into another is the SAME person counted twice. Someone the
+# manager was already talking to used to need a second term here (lead.manager_only), because
+# they sat at whatever stage they happened to have while a human worked them. They now land
+# in MANAGER on their first message from a read-only connector, and MANAGER is outside every
+# funnel-stage list already — so the stage answers it and the column is gone. The subquery
+# that column replaced does NOT come back: this is one indexed comparison.
+NOT_IN_FUNNEL = "(l.is_merged_into IS NOT NULL)"
 IN_FUNNEL = f"NOT {NOT_IN_FUNNEL}"
 
 _STAGE_COUNTS_Q = (  # noqa: S608 — {where} comes only from _branch_where

@@ -73,8 +73,8 @@ def test_every_query_is_syntactically_whole(sql: str) -> None:
     assert not re.search(r",\s*(FROM|WHERE|GROUP|ORDER|\))", sql), "dangling comma"
 
 
-def test_the_funnel_never_counts_a_read_only_thread() -> None:
+def test_the_funnel_never_counts_a_manager_phone_thread() -> None:
     """The whole point of the funnel fix: a manager's own WhatsApp is watched, not worked."""
     for sql in (_Q_FUNNEL, _Q_PHONES):
-        assert "NOT c.read_only" in sql
-    assert "c.read_only" in _Q_WATCHED and "NOT c.read_only" not in _Q_WATCHED
+        assert "NOT c.manager_phone" in sql
+    assert "c.manager_phone" in _Q_WATCHED and "NOT c.manager_phone" not in _Q_WATCHED

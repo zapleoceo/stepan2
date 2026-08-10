@@ -93,12 +93,13 @@ async def threads_awaiting_reply(
         .where(
             Lead.branch_id == branch_id,
             Channel.is_active.is_(True),  # type: ignore[attr-defined]
-            # Same class of waste, one step earlier: a read-only channel is one we linked to
-            # WATCH a manager work. The send gate already refuses these, so every reply
-            # generated for one was written and thrown away — five for five on the first two
-            # live numbers. Their threads are still ingested and read; they are simply not
-            # ours to answer.
-            Channel.read_only.is_(False),  # type: ignore[attr-defined]
+            # A manager's number used to be excluded here as well. It no longer is, and that
+            # is the point: 295 of the 302 leads on those numbers have no other channel, so
+            # the exclusion made "hand the lead back to Stepan" a switch that could never do
+            # anything. What stops the bot there is the lead's own state — ingest moves them
+            # to MANAGER with the switch off the moment the thread appears, and only a manager
+            # turning it back on lets a line out (Lead.agent_enabled, two conditions below).
+            #
             # Answer where the person is ACTUALLY waiting. A consolidated lead has several
             # threads, and replying into an older one answers a conversation they left —
             # while the message they just sent sits unanswered somewhere else.

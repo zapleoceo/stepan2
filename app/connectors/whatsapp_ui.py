@@ -30,7 +30,7 @@ def _ch_wa_form(ch_id: int, error: str = "") -> str:
         f'<input class="frm-inp" name="phone" placeholder="+62 811-1185-8519"'
         f' autocomplete="off"></div>'
         f'<label class="frm-grp" style="display:flex;gap:8px;align-items:flex-start">'
-        f'<input type="checkbox" name="read_only" value="1" checked style="margin-top:3px">'
+        f'<input type="checkbox" name="manager_phone" value="1" checked style="margin-top:3px">'
         f'<span><b>{_h.escape(t("ch.wa_ro"))}</b><br>'
         f'<span class="frm-hint">{_h.escape(t("ch.wa_ro_hint"))}</span></span></label>'
         f'<button type="submit" class="btn-sm btn-p">'

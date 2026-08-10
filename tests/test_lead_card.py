@@ -12,7 +12,7 @@ from app.api._ui_html import _conn_addr, thread_list_html
 
 def _conn(**kw) -> dict:  # noqa: ANN003
     base = {"kind": "instagram", "handle": "IG itstep", "ext": "t1", "nick": "alice",
-            "read_only": False, "tid": 1, "cin": 3, "cout": 2}
+            "manager_phone": False, "tid": 1, "cin": 3, "cout": 2}
     return base | kw
 
 
@@ -49,7 +49,7 @@ def test_every_connector_the_person_is_reachable_on_is_listed() -> None:
     html = thread_list_html([_lead([
         _conn(),
         _conn(kind="whatsapp", handle="WA Maya", ext="628119720022@s.whatsapp.net",
-              tid=2, cin=7, cout=9, read_only=True),
+              tid=2, cin=7, cout=9, manager_phone=True),
     ])])
     assert "IG itstep" in html and "WA Maya" in html
 
@@ -64,9 +64,9 @@ def test_each_connector_shows_its_own_traffic() -> None:
     assert "⬇7 ⬆9" in html
 
 
-def test_a_read_only_account_says_so() -> None:
+def test_a_manager_phone_account_says_so() -> None:
     """Оператор должен видеть, что в этот аккаунт писать нельзя, до того как попробует."""
-    assert "👁" in thread_list_html([_lead([_conn(read_only=True)])])
+    assert "👁" in thread_list_html([_lead([_conn(manager_phone=True)])])
 
 
 # ── адрес на коннекторе ───────────────────────────────────────────────────────

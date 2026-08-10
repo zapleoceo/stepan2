@@ -51,7 +51,7 @@ async def test_branch_admin_confined_to_own_branch(db_session):
     assert not await auth.can_access(uid, other, Action.READ)
 
 
-async def test_branch_viewer_read_only(db_session):
+async def test_branch_viewer_manager_phone(db_session):
     s = db_session
     bid = await _branch(s, "ID")
     uid = await _user_with(s, 3, Role.BRANCH_VIEWER, branch_id=bid)

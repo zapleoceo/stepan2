@@ -1,17 +1,23 @@
-"""Кого воронка считает своим — вопрос, на который отвечает запись, а не каждое чтение.
+"""Кого воронка считает своим — и кто отвечает на этот вопрос.
 
-Раньше это были два коррелированных подзапроса по channel_thread внутри предиката. У `lead`
-и без того 573 тысячи последовательных сканов на два миллиарда строк; добавлять к этому
-подзапрос на строку в счётчиках, инбоксе и каждом отчёте — движение не в ту сторону.
-Ответ меняется только когда к лиду цепляют тред.
+Раньше отвечала колонка `lead.manager_only`: она заменила два коррелированных подзапроса по
+channel_thread внутри предиката воронки, потому что у `lead` и без того 573 тысячи
+последовательных сканов на два миллиарда строк. Ответ был верный, но стоял РЯДОМ со стадией,
+которая говорила другое — 265 из 302 таких лидов висели в стадии `new` с включённым ботом.
+
+Теперь отвечает сама стадия. Первое сообщение с личного номера менеджера переводит лида в
+MANAGER: она вне всех воронковых списков, глушит бота через domain.funnel.apply_stage, и —
+в отличие от флага — менеджер может вернуть её обратно. Подзапросы при этом НЕ вернулись:
+предикат воронки стал одним сравнением по индексу.
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.adapters.db.models import Branch, Channel, Lead
-from app.domain.enums import ChannelKind
+from app.adapters.db.models import Branch, Channel, Lead, StageEvent
+from app.domain.enums import ChannelKind, Stage
 from app.modules.leads.ingest import IngestService
+from app.modules.leads.ops import move_lead
 from app.ports.channel import InboundMessage
 
 
@@ -22,9 +28,9 @@ async def _branch(s) -> int:  # noqa: ANN001
     return b.id
 
 
-async def _channel(s, bid: int, *, read_only: bool) -> int:  # noqa: ANN001
-    ch = Channel(branch_id=bid, kind=ChannelKind.WHATSAPP if read_only
-                 else ChannelKind.INSTAGRAM, read_only=read_only)
+async def _channel(s, bid: int, *, manager_phone: bool) -> int:  # noqa: ANN001
+    ch = Channel(branch_id=bid, kind=ChannelKind.WHATSAPP if manager_phone
+                 else ChannelKind.INSTAGRAM, manager_phone=manager_phone)
     s.add(ch)
     await s.flush()
     return ch.id
@@ -36,57 +42,102 @@ def _msg(ext: str, mid: str) -> InboundMessage:
                           external_id=mid)
 
 
-async def test_a_contact_first_seen_on_a_managers_number_is_not_ours(db_session) -> None:  # noqa: ANN001
+async def _leads(s) -> list:  # noqa: ANN001
+    return (await s.execute(Lead.__table__.select())).mappings().all()
+
+
+async def test_a_first_message_on_a_managers_number_hands_the_lead_over(db_session) -> None:  # noqa: ANN001
+    """Стадия и тумблер бота ставятся вместе — порознь они и расходятся."""
     bid = await _branch(db_session)
-    ch = await _channel(db_session, bid, read_only=True)
+    ch = await _channel(db_session, bid, manager_phone=True)
 
     await IngestService(db_session, bid).ingest(ch, [_msg("wa1", "m1")])
 
-    lead = (await db_session.execute(Lead.__table__.select())).mappings().first()
-    assert lead["manager_only"] is True
+    lead = (await _leads(db_session))[0]
+    assert lead["stage"] == Stage.MANAGER
+    assert lead["agent_enabled"] is False
 
 
-async def test_a_contact_who_wrote_to_us_is_ours(db_session) -> None:  # noqa: ANN001
+async def test_the_handover_is_journalled_with_the_stage_it_came_from(db_session) -> None:  # noqa: ANN001
+    """Менеджер должен видеть, откуда лида забрали, иначе вернуть его некуда."""
     bid = await _branch(db_session)
-    ch = await _channel(db_session, bid, read_only=False)
+    wa = await _channel(db_session, bid, manager_phone=True)
+    lead = Lead(branch_id=bid, stage=Stage.PRESENTING)
+    db_session.add(lead)
+    await db_session.flush()
+    from app.adapters.db.models import ChannelThread
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=wa, external_thread_id="seed"))
+    await db_session.flush()
+
+    await IngestService(db_session, bid).ingest(wa, [_msg("wa_new", "m1")])
+
+    events = (await db_session.execute(StageEvent.__table__.select())).mappings().all()
+    handover = [e for e in events if e["to_stage"] == str(Stage.MANAGER)]
+    assert len(handover) == 1
+    assert handover[0]["actor"] == "system"
+    assert "manager" in handover[0]["reason"]
+
+
+async def test_a_contact_who_wrote_to_us_stays_in_the_funnel(db_session) -> None:  # noqa: ANN001
+    bid = await _branch(db_session)
+    ch = await _channel(db_session, bid, manager_phone=False)
 
     await IngestService(db_session, bid).ingest(ch, [_msg("ig1", "m1")])
 
-    lead = (await db_session.execute(Lead.__table__.select())).mappings().first()
-    assert lead["manager_only"] is False
+    lead = (await _leads(db_session))[0]
+    assert lead["stage"] == Stage.NEW
+    assert lead["agent_enabled"] is True
 
 
-async def test_writing_to_us_later_makes_a_manager_contact_ours(db_session) -> None:  # noqa: ANN001
-    """Человек, однажды написавший НАМ, наш — чем бы он ни был до этого. Обратного перехода
-    нет: иначе один чат у менеджера выкидывал бы живого лида из воронки."""
+async def test_a_later_message_does_not_undo_the_managers_decision(db_session) -> None:  # noqa: ANN001
+    """Ради этого правило и висит на ПЕРВОМ сообщении коннектора, а не на каждом. Менеджер
+    закончил и вернул лида Степану — следующее сообщение на тот же номер не должно молча
+    отменить это решение. Лид всё равно не остаётся без присмотра: отвечаем туда, где человек
+    написал последним, а этот тред для ответа не выбирается никогда."""
     bid = await _branch(db_session)
-    wa = await _channel(db_session, bid, read_only=True)
-    ig = await _channel(db_session, bid, read_only=False)
+    wa = await _channel(db_session, bid, manager_phone=True)
     svc = IngestService(db_session, bid)
 
     await svc.ingest(wa, [_msg("wa1", "m1")])
-    lead_id = (await db_session.execute(Lead.__table__.select())).mappings().first()["id"]
-    # тот же человек пишет нам в инстаграм — отдельный тред, тот же лид только после сшивки,
-    # поэтому здесь достаточно, что НОВЫЙ лид попадает в воронку
-    await svc.ingest(ig, [_msg("ig1", "m2")])
+    lead_row = (await _leads(db_session))[0]
+    lead = await db_session.get(Lead, lead_row["id"])
+    await move_lead(db_session, lead, Stage.QUALIFYING.value, note="менеджер вернул")
 
-    rows = (await db_session.execute(Lead.__table__.select())).mappings().all()
-    assert any(r["manager_only"] is False for r in rows)
-    assert any(r["id"] == lead_id for r in rows)
+    await svc.ingest(wa, [_msg("wa1", "m2")])
+
+    lead = await db_session.get(Lead, lead_row["id"])
+    assert lead.stage == Stage.QUALIFYING
+    assert lead.agent_enabled is True
+
+
+async def test_handing_back_re_arms_the_bot_and_clears_a_manual_mute(db_session) -> None:  # noqa: ANN001
+    """Возврат в воронку — это и есть передача треда боту; оставленная заглушка Bot OFF
+    сделала бы перевод выполненным на вид и молчащим на деле."""
+    bid = await _branch(db_session)
+    wa = await _channel(db_session, bid, manager_phone=True)
+    await IngestService(db_session, bid).ingest(wa, [_msg("wa1", "m1")])
+    lead = await db_session.get(Lead, (await _leads(db_session))[0]["id"])
+    lead.agent_off_manual = True
+
+    await move_lead(db_session, lead, Stage.NURTURING.value)
+
+    assert lead.stage == Stage.NURTURING
+    assert lead.agent_enabled is True
+    assert lead.agent_off_manual is False
 
 
 async def test_the_lead_is_dated_by_its_first_message_not_by_the_import(db_session) -> None:  # noqa: ANN001
     """Бэкфилл истории проставил 306 лидам час своего запуска, и каждый отчёт по дате
     прихода показал всплеск в день импорта вместо месяцев, которые переписка занимала."""
     bid = await _branch(db_session)
-    ch = await _channel(db_session, bid, read_only=True)
+    ch = await _channel(db_session, bid, manager_phone=True)
     old = datetime(2026, 2, 2, 10, 0)
 
     await IngestService(db_session, bid).ingest(ch, [InboundMessage(
         external_thread_id="wa1", sender_id="s", text="halo",
         occurred_at=old, external_id="m1")])
 
-    lead = (await db_session.execute(Lead.__table__.select())).mappings().first()
+    lead = (await _leads(db_session))[0]
     assert lead["created_at"] == old
 
 
@@ -104,7 +155,7 @@ async def test_our_own_line_polled_back_is_not_credited_to_the_manager(db_sessio
     from app.adapters.db.models import ChannelThread, Message, Outbox
 
     bid = await _branch(db_session)
-    ch = await _channel(db_session, bid, read_only=False)
+    ch = await _channel(db_session, bid, manager_phone=False)
     lead = Lead(branch_id=bid)
     db_session.add(lead)
     await db_session.flush()
@@ -130,7 +181,7 @@ async def test_a_line_the_manager_typed_is_still_theirs(db_session) -> None:  # 
     from app.adapters.db.models import ChannelThread, Message
 
     bid = await _branch(db_session)
-    ch = await _channel(db_session, bid, read_only=False)
+    ch = await _channel(db_session, bid, manager_phone=False)
     lead = Lead(branch_id=bid)
     db_session.add(lead)
     await db_session.flush()

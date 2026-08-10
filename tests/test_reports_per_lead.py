@@ -18,7 +18,7 @@ async def _two_threads(s, *, ad_id: str | None, stage: str = "ready",  # noqa: A
     s.add(b)
     await s.flush()
     ig = Channel(branch_id=b.id, kind=ChannelKind.INSTAGRAM)
-    wa = Channel(branch_id=b.id, kind=ChannelKind.WHATSAPP, read_only=True)
+    wa = Channel(branch_id=b.id, kind=ChannelKind.WHATSAPP, manager_phone=True)
     s.add(ig)
     s.add(wa)
     await s.flush()

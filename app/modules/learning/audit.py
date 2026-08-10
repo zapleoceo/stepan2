@@ -68,7 +68,7 @@ _Q_FUNNEL = (
     "     AND m2.direction='out') fo"
     " FROM channel_thread ct JOIN lead l ON l.id=ct.lead_id"
     "   JOIN channel c ON c.id=ct.channel_id"
-    " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND NOT c.read_only)"
+    " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND NOT c.manager_phone)"
     " SELECT count(*),"
     "  count(*) FILTER (WHERE fo IS NOT NULL AND EXISTS (SELECT 1 FROM message m3"
     "    WHERE m3.thread_id=tid AND m3.direction='in' AND m3.id>fo))"
@@ -83,7 +83,7 @@ _Q_PHONES = (
     " JOIN channel_thread ct ON ct.id=m.thread_id"
     " JOIN channel c ON c.id=ct.channel_id"
     " WHERE m.branch_id=:bid AND m.direction='in' AND m.occurred_at > :cutoff"
-    "   AND NOT c.read_only"
+    "   AND NOT c.manager_phone"
     r"   AND m.text ~ '(\+?62|0)[ .\-]?8[1-9][0-9 ().\-]{6,}'"
 )
 
@@ -98,7 +98,7 @@ _Q_REACTIVATION = (
 _Q_WATCHED = (
     "SELECT count(*) FROM channel_thread ct JOIN lead l ON l.id=ct.lead_id"
     " JOIN channel c ON c.id=ct.channel_id"
-    " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND c.read_only"
+    " WHERE l.branch_id=:bid AND ct.created_at > :cutoff AND c.manager_phone"
 )
 
 QUERIES = (_Q_MESSAGES, _Q_FUNNEL, _Q_PHONES, _Q_REACTIVATION, _Q_WATCHED)

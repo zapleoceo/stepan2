@@ -858,11 +858,11 @@ def channel_new_form_html(branch_id: int) -> str:
 
 def channel_edit_form_html(
     ch_id: int, kind: str, handle: str, account_id: str, is_active: bool,
-    read_only: bool = False,
+    manager_phone: bool = False,
 ) -> str:
     """Form to edit channel metadata (handle, account_id, active, read-only)."""
     checked = "checked" if is_active else ""
-    ro_checked = "checked" if read_only else ""
+    ro_checked = "checked" if manager_phone else ""
     save_lbl = _h.escape(t("ch.save"))
     # The hint about waiting out an Instagram action-block used to be shown on every
     # connector, which in a WhatsApp editor is advice about somebody else's platform.
@@ -876,12 +876,12 @@ def channel_edit_form_html(
     # a new QR — for a checkbox.
     ro_block = (
         f'<div class="frm-grp" style="display:flex;align-items:flex-start;gap:.5rem">'
-        f'<input type="checkbox" name="read_only" id="ch-ro{ch_id}" {ro_checked}'
+        f'<input type="checkbox" name="manager_phone" id="ch-ro{ch_id}" {ro_checked}'
         f' style="margin-top:3px">'
         f'<label class="frm-lbl" for="ch-ro{ch_id}" style="margin:0">'
-        f'<b>{_h.escape(t("ch.read_only"))}</b><br>'
+        f'<b>{_h.escape(t("ch.manager_phone"))}</b><br>'
         f'<span style="font-size:.72rem;color:#8a94a6;font-weight:400">'
-        f'{_h.escape(t("ch.read_only_hint"))}</span></label></div>'
+        f'{_h.escape(t("ch.manager_phone_hint"))}</span></label></div>'
         if does_proactive_outreach(kind) else ""
     )
     return (
