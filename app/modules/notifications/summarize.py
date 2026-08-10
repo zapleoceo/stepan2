@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 _MAX_MSGS = 40
 _LANG_NAME = {"ru": "Russian", "en": "English", "id": "Indonesian", "ms": "Malay"}
 
-_SB, _SR, _RB = "[SUMMARY_BRANCH]", "[SUMMARY_RU]", "[REASON_BRANCH]"
+_SB, _SR, _RB, _MR = ("[SUMMARY_BRANCH]", "[SUMMARY_RU]", "[REASON_BRANCH]",
+                      "[LAST_MSG_RU]")
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,11 @@ class AlertBody:
     summary_branch: str
     summary_ru: str
     reason_branch: str
+    # Последняя реплика лида дословно и её перевод. Пересказ отвечает на «что вообще
+    # происходит», а менеджеру для решения нужно ещё и «что человек написал ИМЕННО сейчас» —
+    # раньше за этим приходилось открывать чат, и алерт читался как повод сходить куда-то ещё.
+    last_msg: str = ""
+    last_msg_ru: str = ""
 
 
 def lang_name(code: str) -> str:
@@ -38,11 +44,12 @@ async def build_alert_body(
     """(summary in branch lang, summary in Russian, reason in branch lang). Falls back to
     empty summaries + the English reason when there's no LLM, no dialog, or the call fails."""
     branch_name = lang_name(branch_lang)
+    last_msg = await _last_inbound(session, thread_id) if thread_id is not None else ""
     if llm is None or thread_id is None:
-        return AlertBody("", "", reason_en)
+        return AlertBody("", "", reason_en, last_msg, "")
     convo = await _dialog(session, thread_id)
     if not convo:
-        return AlertBody("", "", reason_en)
+        return AlertBody("", "", reason_en, last_msg, "")
     reason_clean = reason_en.replace("'", "")
     system = (
         "You summarize a sales conversation for a manager and translate a short reason "
@@ -59,11 +66,12 @@ async def build_alert_body(
                                 workflow="alert", thread_id=thread_id, branch_id=branch_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("alert summary LLM failed thread=%s: %s", thread_id, exc)
-        return AlertBody("", "", reason_en)
+        return AlertBody("", "", reason_en, last_msg, "")
     sb = _between(raw, _SB, _SR)
     sr = _between(raw, _SR, _RB)
-    rb = _between(raw, _RB, None)
-    return AlertBody(sb or "", sr or "", rb or reason_en)
+    rb = _between(raw, _RB, _MR)
+    mr = _between(raw, _MR, None)
+    return AlertBody(sb or "", sr or "", rb or reason_en, last_msg, mr or "")
 
 
 async def _dialog(session: AsyncSession, thread_id: int) -> str:
@@ -78,6 +86,15 @@ async def _dialog(session: AsyncSession, thread_id: int) -> str:
         f"{'Lead' if r[0] == 'in' else 'Agent'}: {(r[1] or '').strip()}"
         for r in reversed(rows) if (r[1] or "").strip()
     )[:6000]
+
+
+async def _last_inbound(session: AsyncSession, thread_id: int) -> str:
+    """Что человек написал последним — дословно, на его языке."""
+    row = (await session.execute(
+        text("SELECT text FROM message WHERE thread_id = :tid AND direction = 'in'"
+             " AND text <> '' ORDER BY occurred_at DESC, id DESC LIMIT 1"),
+        {"tid": thread_id})).first()
+    return (row[0] or "").strip()[:600] if row else ""
 
 
 def _between(raw: str, start: str, end: str | None) -> str:

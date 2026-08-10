@@ -549,6 +549,9 @@ class ManagerAlert(SQLModel, table=True):
     summary_ru: str = Field(default="")
     synced_at: datetime | None = Field(default=None)
     reping_at: datetime | None = Field(default=None)  # SLA re-ping to the manager was sent
+    # Telegram-сообщение этой карточки. Нужно, чтобы следующий алерт по тому же лиду мог
+    # переписать её вместо добавления второй, а отработанную — убрать (alert_reuse.plan_alert).
+    tg_message_id: int | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
 
 

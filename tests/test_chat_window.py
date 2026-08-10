@@ -416,12 +416,18 @@ def test_merge_feed_orders_stage_line_after_its_reply() -> None:
 def test_alert_body_includes_header_deep_link_and_lang_blocks() -> None:
     from app.modules.notifications.alerts import AlertService
     svc = AlertService(None, 1, None)  # _compose is pure — no session/notifier touched
-    body = svc._compose(1732, "Budi", "id", "ringkasan", "alasan", "сводка", "причина")
+    body = svc._compose(1732, "Budi", "IG itstep_jakarta", "id",
+                        "ringkasan", "alasan", "сводка", "причина",
+                        "boleh minta harganya?", "можно узнать цену?")
     assert "чат #1732" in body and "Budi" in body       # header line
+    assert "IG itstep_jakarta" in body                  # через какой аккаунт идёт разговор
     assert "Bahasa:" in body and "Ru:" in body          # per-language summary labels
     assert "/ui/chat/1732" in body and "open chat" in body
     # branch-language block precedes the Russian one
     assert body.index("alasan") < body.index("причина")
+    # дословная реплика лида и её перевод — каждая в своём языковом блоке
+    assert body.index("boleh minta harganya?") < body.index("alasan")
+    assert body.index("можно узнать цену?") < body.index("причина")
 
 
 def test_manual_stage_alert_only_for_ready_and_manager() -> None:

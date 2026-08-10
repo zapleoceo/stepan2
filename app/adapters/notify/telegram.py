@@ -61,6 +61,48 @@ class TelegramNotifier:
             return "topic_gone"
         return "failed"
 
+    async def send_returning_id(
+        self, *, text: str, topic_id: int | None = None,
+    ) -> tuple[SendStatus, int | None]:
+        """send(), but hand back the message id so the caller can edit or delete it later.
+
+        Not on NotifierPort: only the alert path needs the id, and widening the port would
+        make every caller and every test fake carry a value they never look at (see the
+        optional-power rule in docs/connector-registry.md)."""
+        payload: dict[str, Any] = {
+            "chat_id": self._chat_id, "text": text,
+            "parse_mode": "HTML", "disable_web_page_preview": True,
+        }
+        if topic_id is not None:
+            payload["message_thread_id"] = topic_id
+        data = await self._call("sendMessage", payload)
+        if data and data.get("ok"):
+            return "ok", int(data["result"]["message_id"])
+        desc = (data or {}).get("description", "").lower() if data else ""
+        if topic_id is not None and any(tok in desc for tok in _TOPIC_GONE):
+            return "topic_gone", None
+        return "failed", None
+
+    async def edit_text(self, *, message_id: int, text: str) -> bool:
+        """Rewrite an alert already on screen. False when Telegram refuses — including the
+        'message is not modified' case, which is not an error worth logging loudly."""
+        data = await self._call("editMessageText", {
+            "chat_id": self._chat_id, "message_id": message_id, "text": text,
+            "parse_mode": "HTML", "disable_web_page_preview": True,
+        })
+        if data and data.get("ok"):
+            return True
+        desc = (data or {}).get("description", "") if data else ""
+        logger.info("telegram edit refused (msg=%s): %s", message_id, desc)
+        return False
+
+    async def delete_message(self, *, message_id: int) -> bool:
+        """Remove an alert the manager has already acted on. Telegram only allows this for
+        ~48h; older messages simply stay, which is why the caller must not depend on it."""
+        data = await self._call("deleteMessage", {
+            "chat_id": self._chat_id, "message_id": message_id})
+        return bool(data and data.get("ok"))
+
     async def send_document(
         self, *, filename: str, content: str, caption: str = "",
         chat_id: int | None = None,
