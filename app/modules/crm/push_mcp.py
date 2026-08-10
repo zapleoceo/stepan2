@@ -93,6 +93,25 @@ _NOT_WON = (
     "   WHERE cs.lead_id = l.id AND cs.deal_won = true)"
 )
 
+# Последняя РЕПЛИКА лида и её время. Обе выборки берут их одинаково, поэтому фрагмент общий.
+#
+# Не `last_active_at`: это поле пишет только синхронизация профиля Instagram (profiles.py) и
+# кладёт туда «когда мы обновили профиль». К активности лида оно отношения не имеет и пусто у
+# 3191 лида из 4751. Из-за него менеджер читал «diam 29 hari» про Farrel Basya (лид 2791),
+# который написал пятнадцатью минутами раньше: молчание считалось от даты создания записи.
+#
+# Карточка номера («📱 Phone number · +62…») приходит отдельным входящим сразу после того, как
+# лид напечатал телефон, и перебивает настоящую реплику. На 37 тредах она и была «последним
+# сообщением» в карточке CRM — то есть ровно у самых горячих, тех, кого и отправляют.
+_LAST_MSG = (
+    " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id"
+    "   AND m.direction='in' AND m.text NOT LIKE '%Phone number%'"
+    "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg,"
+    " (SELECT m.occurred_at FROM message m WHERE m.thread_id=ct.id"
+    "   AND m.direction='in' AND m.text NOT LIKE '%Phone number%'"
+    "   ORDER BY m.occurred_at DESC LIMIT 1) AS last_in_at"
+)
+
 DRAIN_BATCH = 25
 # How far back the hand-off sweep looks. Anything older is deliberately left alone (managers
 # have worked it by hand by then) — but _log_window_drops counts what that costs each run.
@@ -255,8 +274,7 @@ async def fetch_leads_with_phone(
         "SELECT l.id, l.phone_e164,"  # noqa: S608 — not_pushed is a fixed fragment, values bound
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
         " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.lead_type,"
-        " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
-        "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
+        + _LAST_MSG +
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage NOT IN ('ready','manager','handed_off')"
         "   AND l.is_blocked = false"  # спам/бан — Степан игнорит его целиком, включая CRM
@@ -273,9 +291,11 @@ async def fetch_leads_with_phone(
             # for one person. First row wins — created_at DESC puts the newest thread first.
             continue
         seen.add(r[0])
-        created, last_active = _coerce_dt(r[5]), _coerce_dt(r[6])
-        cands = [x for x in (created, last_active) if x is not None]
-        recency = max(cands) if cands else now
+        # Молчание — это «сколько лид ничего не пишет», поэтому отсчёт от последней его
+        # реплики. created_at остаётся запасным вариантом только для тех, кто не написал
+        # ни разу (лид с рекламного клика без единого сообщения).
+        last_in = _coerce_dt(r[10])
+        recency = last_in or _coerce_dt(r[5]) or now
         days_idle = max(0, (now - recency).days)
         dossier = parse_dossier(r[7])
         out.append(LeadToPush(
@@ -395,8 +415,7 @@ async def fetch_unpushed_handoffs(
         "SELECT l.id, l.phone_e164,"  # noqa: S608 — фрагменты фиксированные, значения связаны
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
         " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.lead_type,"
-        " coalesce((SELECT m.text FROM message m WHERE m.thread_id=ct.id AND m.direction='in'"
-        "   ORDER BY m.occurred_at DESC LIMIT 1),'') AS last_msg"
+        + _LAST_MSG +
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
         "   AND l.is_blocked = false"  # см. fetch_leads_with_phone
@@ -413,7 +432,9 @@ async def fetch_unpushed_handoffs(
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
         + _NOT_WON +
-        " ORDER BY l.last_active_at DESC NULLS LAST LIMIT :lim"),
+        # По последней реплике лида, а не по l.last_active_at: то поле пишет синхронизация
+        # профиля IG и пусто у двух третей лидов, так что порядок выходил почти случайным.
+        " ORDER BY last_in_at DESC NULLS LAST LIMIT :lim"),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_HANDOFF_REASON,
          "verified": VERIFIED_PRESENT_REASON,
          "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).all()
@@ -425,9 +446,13 @@ async def fetch_unpushed_handoffs(
             continue
         seen.add(r[0])
         dossier = parse_dossier(r[7])
+        # Хендофф не значит «написал только что»: телефон часто прилетает через день-другой
+        # после эскалации, и sweep подбирает лида уже остывшим. Раньше тут стоял ноль.
+        last_in = _coerce_dt(r[10])
+        days_idle = max(0, (now - last_in).days) if last_in else 0
         out.append(LeadToPush(
             lead_id=r[0], phone=r[1], name=r[2] or None, stage=str(r[3]),
-            product=r[4], days_idle=0, last_msg=r[9] or "", lead_type=r[8],
+            product=r[4], days_idle=days_idle, last_msg=r[9] or "", lead_type=r[8],
             job_to_be_done=dossier.job_to_be_done,
             pains=dossier.pains, desired_state=dossier.desired_state))
     return out

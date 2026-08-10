@@ -115,3 +115,46 @@ async def test_a_manager_phone_claim_is_not_a_handoff(db_session) -> None:  # no
                  reason="manager's own phone: a human owns this conversation")
 
     assert await fetch_unpushed_handoffs(db_session, bid, now=NOW) == []
+
+
+# ── что менеджер читает в карточке CRM ────────────────────────────────────────
+
+
+async def _wrote(s, lead: Lead, text: str, *, ago_d: float) -> None:  # noqa: ANN001
+    from app.adapters.db.models import Message
+    thread = (await s.execute(ChannelThread.__table__.select())).first()
+    s.add(Message(
+        branch_id=lead.branch_id, thread_id=thread.id, channel_id=thread.channel_id,
+        external_id=f"m{text[:6]}{ago_d}", direction="in", sent_by="lead", text=text,
+        occurred_at=NOW - timedelta(days=ago_d)))
+    await s.flush()
+
+
+async def test_silence_is_counted_from_the_leads_last_line(db_session) -> None:  # noqa: ANN001
+    """Лид 2791, 10.08.2026: менеджер прочёл «diam 29 hari» про Farrel Basya, который написал
+    пятнадцатью минутами раньше. Молчание считалось от created_at, потому что last_active_at
+    был пуст — это поле пишет только синхронизация профиля IG, и оно пусто у 3191 лида из 4751.
+    Метрика молчания обязана считаться от последней реплики лида."""
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, stage=Stage.QUALIFYING, phone="+628111111111")
+    lead.created_at = NOW - timedelta(days=30)
+    await _wrote(db_session, lead, "Mau dong kak", ago_d=0)
+
+    got = await fetch_leads_with_phone(db_session, bid, now=NOW)
+
+    assert [g.lead_id for g in got] == [lead.id]
+    assert got[0].days_idle == 0  # написал сегодня, а не «молчит 30 дней»
+
+
+async def test_the_phone_card_is_not_the_leads_last_line(db_session) -> None:  # noqa: ANN001
+    """Instagram присылает «📱 Phone number · +62…» отдельным входящим сразу после того, как
+    лид напечатал номер, и оно перебивает настоящую реплику. На 37 тредах именно эта карточка
+    и стояла в комментарии CRM как «последнее сообщение лида» — то есть у самых горячих."""
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, stage=Stage.QUALIFYING, phone="+628222222222")
+    await _wrote(db_session, lead, "Informasi", ago_d=0.02)
+    await _wrote(db_session, lead, "📱 Phone number · +62 856-9291-7920", ago_d=0.01)
+
+    got = await fetch_leads_with_phone(db_session, bid, now=NOW)
+
+    assert got[0].last_msg == "Informasi"
