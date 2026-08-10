@@ -250,18 +250,16 @@ def _svc(s, bid: int):  # noqa: ANN001, ANN201
                         branch_settings=_parse({}), notifier=None)
 
 
-async def test_model_rebinds_an_ad_sourced_product(db_session) -> None:
-    # Замок с 'ad' снят 10.08.2026. Ставили его после тредов 4943/5019, где модель увела
-    # рекламный продукт и в живой чат уехала цена не того курса — но вред шёл через
-    # knowledge_context(product_slug), сужавший базу до карточки продукта треда. В боевом пути
-    # этой функции больше нет (full_knowledge_context() без продукта, ради кэша), а цифры
-    # ответа сверяет денежный гейт. Платил за замок тред 3163: клик по рекламе ивента, месяцы
-    # разговора о курсе за 13 млн — и согласие всё ещё числилось за билетом в 100 тысяч.
+async def test_model_does_not_override_ad_sourced_product(db_session) -> None:
+    # Тред 4943: рекламный SMM-лид, модель переквалифицировала его в Vibe Coding, и в живой
+    # чат уехала цена не того курса. Замок сняли 10.08.2026 и в тот же день вернули: тред 2791
+    # уехал с верного smm_intensive на social_media_bootcamp через 33 минуты, и менеджер
+    # получил в CRM не то название курса. Клик прав дважды из трёх — он старше догадки.
     bid, tid = await _thread_with_source(db_session, "ad", "smm_intensive")
     await _svc(db_session, bid).enqueue_reply(tid, _decision(product_slug="vibe_coding"))
     thread = (await db_session.exec(select(ChannelThread))).first()
-    assert thread.product_slug == "vibe_coding"  # разговор ведёт, клик только начинает
-    assert thread.product_source == "model"
+    assert thread.product_slug == "smm_intensive"  # ad match locked
+    assert thread.product_source == "ad"
 
 
 async def test_model_does_not_override_manager_product(db_session) -> None:

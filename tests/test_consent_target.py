@@ -67,3 +67,19 @@ def test_readiness_survives_a_turn_that_names_no_product() -> None:
     merged = merge_dossier(stored, LeadDossier())
     assert merged.readiness == "ready"
     assert merged.product_slug == "vibe_coding"
+
+
+# ── цель согласия не привязана к рекламному клику ────────────────────────────
+
+
+async def test_the_consent_target_follows_the_talk_not_the_ad_click() -> None:
+    """Тред 3163 закрывается здесь, а НЕ перепривязкой треда.
+
+    Привязка треда держится за рекламный клик — она отвечает за атрибуцию и за то, о чём
+    менеджер будет звонить. Согласие спрашивают о другом: что лежит на столе прямо сейчас.
+    Клик был по рекламе демо-ивента за 100 тысяч, разговор давно о курсе за 13 млн, и «да»
+    ивенту не может считаться «да» курсу — даже когда тред по-прежнему числится за ивентом."""
+    lead = Lead(branch_id=1, agreed_product_slug="vibe_coding_demo_event")
+
+    assert valid(lead, "vibe_coding") is False  # разговор ушёл — согласие спрашивать заново
+    assert valid(lead, "vibe_coding_demo_event") is True
