@@ -107,3 +107,11 @@ docker exec -e PYTHONPATH=/app -w /app stepan2-api \
 (`пузырей на ход` там всегда 1.0). У r4 вышло 277.7 вживую и 253.4 в пересчёте при 1.09
 пузыря — это одно и то же число, поделённое по-разному. Сравнивать раунды только внутри
 одного режима.
+
+**В пересчёте нет воронки.** `--rescore` читает только сообщения, поэтому `ready`,
+`needs_manager` и `product` пустые у всех, а строка «дошли до готовности» покажет ноль даже
+там, где сделка закрылась. Итоги воронки после пересчёта смотреть в базе:
+
+```bash
+docker exec stepan2-postgres psql -U stepan2 -d stepan2 -c "select ct.external_thread_id, l.stage, ct.product_slug from channel_thread ct join lead l on l.id=ct.lead_id where ct.external_thread_id like 'sim:suite:r5:%'"
+```
