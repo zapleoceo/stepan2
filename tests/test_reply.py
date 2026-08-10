@@ -596,7 +596,10 @@ def test_only_one_rule_claims_the_start_of_the_message() -> None:
     # the model tries to obey rather than an option it may take.
     rules = _FREE_CONTRACT[_FREE_CONTRACT.index("HARD RULES"):]
     allowed = rules[rules.index("ALLOWED TO DO"):]
-    assert "Slow down" in allowed and "whatever length the moment deserves" in allowed
+    # Якорь на «length are all yours», а не на прежнее «whatever length the moment deserves»:
+    # формулировку переписали в раунде r2 (длина получила измеренный потолок), но проверяем мы
+    # не текст, а место — разрешение должно оставаться разрешением.
+    assert "Slow down" in allowed and "length are all yours" in allowed
     assert "Slow down" not in rules[:rules.index("ALLOWED TO DO")]
 
 
