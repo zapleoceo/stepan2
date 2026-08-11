@@ -108,6 +108,13 @@ def awaiting_base() -> str:
 IN_QUEUE_EXTRA = (
     "l.agent_enabled = true"
     " AND l.stage IN ('new', 'nurturing', 'qualifying', 'presenting', 'objection')"
+    # Возрастной порог. awaiting_cutoff() вычислялся и связывался параметром во всех четырёх
+    # запросах (бейдж и три ветки фильтра) — и не встречался НИ В ОДНОМ фрагменте SQL, то есть
+    # не делал ничего. Воркер его применяет (wiring.threads_awaiting_reply: last_in_at >=
+    # cutoff), поэтому список «Степан ответит» показывал треды, которые Степан не возьмёт
+    # никогда. Тред 5047 висел там шесть суток при пороге в трое: разговор закрыт обеими
+    # сторонами 5 августа, последняя реплика лида — «🤝» в ответ на прощание.
+    " AND ct.last_in_at >= :awaiting_cutoff"
 )
 # A third answer the first two can't give: nobody OWES this lead a reply. Thread 3066 sat in
 # "Stepan will reply" for days — stage nurturing, bot on — while the CRM gate had already

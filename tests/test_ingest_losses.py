@@ -99,7 +99,10 @@ async def test_bot_off_new_message_pings_telegram(db_session) -> None:
         _text("SELECT kind, summary_ru FROM manager_alert WHERE lead_id = :i"), {"i": lead.id},
     )).first()
     assert alert is not None and alert[0] == "bot_off_message"
-    assert "masih ada slot" in alert[1]
+    # The reason line no longer carries the message. It is quoted above the reason in BOTH
+    # halves of the card, and pasted here it reached the Russian half untranslated — the one
+    # line the alert exists to deliver was the one line the manager could not read.
+    assert alert[1] == "Бот выключен — лид написал"
     assert len(notifier.sends) == 1
     assert lead.agent_enabled is False  # MANAGER stage — _revive_bot leaves it off
 

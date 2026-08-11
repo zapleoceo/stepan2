@@ -60,3 +60,27 @@ def test_the_badge_click_does_not_fall_through_to_the_parent_link() -> None:
     html = inbox_awaiting_badge_html(1)
     assert "preventDefault" in html
     assert "stopPropagation" in html
+
+
+def test_the_queue_respects_the_age_floor() -> None:
+    """awaiting_cutoff() вычислялся и связывался параметром во всех четырёх запросах — и не
+    встречался ни в одном фрагменте SQL, то есть не делал ничего.
+
+    Воркер порог применяет (wiring.threads_awaiting_reply: last_in_at >= cutoff), поэтому
+    список «Степан ответит» показывал то, что Степан не возьмёт никогда. Тред 5047 висел там
+    шесть суток при пороге в трое: разговор закрыт обеими сторонами 5 августа, последняя
+    реплика лида — «🤝» в ответ на прощание. Ответа он не ждал."""
+    from app.api._query import IN_QUEUE_EXTRA
+    assert ":awaiting_cutoff" in IN_QUEUE_EXTRA
+    assert "ct.last_in_at >=" in IN_QUEUE_EXTRA
+
+
+def test_an_old_thread_falls_into_wont_reply_not_into_the_queue() -> None:
+    """Порог не прячет тред, а переносит его в другую корзину: «Степан не ответит» — это
+    NOT IN_QUEUE_EXTRA, так что старое молчание остаётся видимым, просто перестаёт числиться
+    задачей."""
+    from app.api._query import IN_QUEUE_EXTRA, awaiting_base
+
+    queue = f"({awaiting_base()}) AND ({IN_QUEUE_EXTRA})"
+    wont = f"({awaiting_base()}) AND NOT ({IN_QUEUE_EXTRA})"
+    assert ":awaiting_cutoff" in queue and ":awaiting_cutoff" in wont
