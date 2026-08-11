@@ -44,6 +44,7 @@ TECHNICAL_HANDOFF_REASONS = (MONEY_ESCALATION_REASON, guard.GUARD_HANDOFF_REASON
 
 _BUBBLE_GAP_S = settings().bubble_gap_s  # stagger between split reply bubbles
 _MAX_BUBBLES = settings().max_bubbles
+_BUBBLE_SEP_RE = re.compile(r"\|{2,}")  # контракт просит три пайпа, модель иногда пишет два
 _CYRILLIC_RE = re.compile(r"[а-яёА-ЯЁ]")
 
 # The three hand-off closings and the escalation hold-line live in canned.py — one table, in
@@ -133,9 +134,20 @@ def _strip_chat_template(reply: str) -> str:
 
 
 def _split_bubbles(reply: str, max_parts: int = _MAX_BUBBLES) -> list[str]:
-    """Split the model's reply on '|||' into ≤max_parts non-empty bubbles; overflow is
-    merged into the last one so we never send more than max_parts messages."""
-    parts = [c for p in _strip_chat_template(reply).split("|||") if (c := _clean_bubble(p))]
+    """Split the model's reply into ≤max_parts non-empty bubbles; overflow is merged into the
+    last one so we never send more than max_parts messages.
+
+    Разделителем считается ДВА и больше пайпа, хотя контракт просит ровно три. Модель иногда
+    пишет два, и тогда строгое сравнение не находило разделителя — «||» уезжало лиду прямо в
+    тексте, а весь ход шёл одним куском вместо двух. Тред 4422, 11.08.2026: «Halo Kak, masih
+    ingat MinStep? 👋 || Gimana nih…». С 27.07 так утекло пять сообщений, по одному в
+    несколько дней; ещё 46 ушли 04.07 с правильными тремя пайпами, до того как резку
+    подключили ко всем путям отправки.
+
+    Одиночный пайп разделителем НЕ считается: он встречается в обычном тексте, и превращать
+    его в разрыв значило бы рвать сообщения на ровном месте."""
+    parts = [c for p in _BUBBLE_SEP_RE.split(_strip_chat_template(reply))
+             if (c := _clean_bubble(p))]
     if len(parts) <= max_parts:
         return parts
     return [*parts[: max_parts - 1], " ".join(parts[max_parts - 1:])]

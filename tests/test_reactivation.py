@@ -174,3 +174,69 @@ def test_the_daily_ceiling_is_a_hundred() -> None:
     from app.modules.conversation.reactivation import BATCH_PER_RUN
 
     assert BATCH_PER_RUN == 34
+
+
+# ── лид, который нас не читает ────────────────────────────────────────────────
+
+
+async def _sent(s, bid, chid, tid, *, n: int, after_seen: bool, seen_days_ago: float) -> None:
+    """n исходящих; after_seen=True кладёт их ПОСЛЕ квитанции о прочтении."""
+    from app.adapters.db.models import ChannelThread as _CT
+    from app.adapters.db.models import Message
+    now = _now()
+    seen = now - timedelta(days=seen_days_ago)
+    thread = await s.get(_CT, tid)
+    thread.lead_seen_at = seen
+    s.add(thread)
+    for i in range(n):
+        shift = timedelta(hours=i + 1)
+        s.add(Message(branch_id=bid, thread_id=tid, channel_id=chid, external_id=f"o{tid}-{i}",
+                      direction="out", sent_by="bot", text="halo",
+                      occurred_at=(seen + shift) if after_seen else (seen - shift)))
+    await s.flush()
+
+
+async def test_two_unread_messages_stop_the_touch(db_session) -> None:
+    """Тред 4422: лид последний раз открывал переписку 20 июля, мы написали после этого
+    четырежды и ни разу не получили ответа. Следующее сообщение — уже не касание, а спам.
+    На филиале 1 таких тредов 646 из 2679, подходящих по остальным условиям."""
+    bid, chid = await _setup(db_session)
+    tid, _lid = await _dormant_lead(db_session, bid, chid, days_ago=5)
+    await _sent(db_session, bid, chid, tid, n=2, after_seen=True, seen_days_ago=6)
+
+    assert await _svc(db_session, bid).due(_now()) == []
+
+
+async def test_one_unread_message_still_allows_a_touch(db_session) -> None:
+    """Одно непрочитанное — человек мог просто не открыть приложение. Правило про ДВА."""
+    bid, chid = await _setup(db_session)
+    tid, lid = await _dormant_lead(db_session, bid, chid, days_ago=5)
+    await _sent(db_session, bid, chid, tid, n=1, after_seen=True, seen_days_ago=6)
+
+    assert [r[0] for r in await _svc(db_session, bid).due(_now())] == [tid]
+
+
+async def test_messages_the_lead_did_read_do_not_count(db_session) -> None:
+    """Два сообщения ДО квитанции — прочитанные, и молчание после них это другой разговор."""
+    bid, chid = await _setup(db_session)
+    tid, lid = await _dormant_lead(db_session, bid, chid, days_ago=5)
+    await _sent(db_session, bid, chid, tid, n=2, after_seen=False, seen_days_ago=6)
+
+    assert [r[0] for r in await _svc(db_session, bid).due(_now())] == [tid]
+
+
+async def test_no_receipt_at_all_does_not_block(db_session) -> None:
+    """lead_seen_at заполняет только Instagram, и внутри него он пуст у 1860 тредов из 4220.
+    Трактовать «не знаем» как «не читает» значило бы выключить реактивацию у воцапа и Meta
+    целиком, а у инстаграма на 44%."""
+    bid, chid = await _setup(db_session)
+    tid, lid = await _dormant_lead(db_session, bid, chid, days_ago=5)
+    from app.adapters.db.models import Message
+    now = _now()
+    for i in range(3):  # три исходящих и НИ ОДНОЙ квитанции
+        db_session.add(Message(branch_id=bid, thread_id=tid, channel_id=chid,
+                               external_id=f"n{i}", direction="out", sent_by="bot",
+                               text="halo", occurred_at=now - timedelta(days=4, hours=i)))
+    await db_session.flush()
+
+    assert [r[0] for r in await _svc(db_session, bid).due(_now())] == [tid]
