@@ -83,6 +83,18 @@ def non_outreach_kinds() -> tuple[str, ...]:
     return kinds or ("",)
 
 
+def mute_reply_kinds(cfg: object) -> tuple[str, ...]:
+    """Kind values whose connector is configured NOT to answer on this branch.
+
+    The connector names the setting (ConnectorSpec.replies_setting); the branch's own value
+    decides. Asked before generation, not after: a reply composed for a muted connector is
+    broker spend on text that is guaranteed to be refused at the send."""
+    return tuple(
+        s.kind.value for s in REGISTRY.values()
+        if s.replies_setting and not getattr(cfg, s.replies_setting, False)
+    )
+
+
 def windowed_kinds() -> tuple[str, ...]:
     """Kind values whose connector is REFUSED outside the platform's messaging window.
 

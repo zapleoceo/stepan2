@@ -87,6 +87,15 @@ class ConnectorSpec:
     settings_prefixes: tuple[str, ...] = ()
     # None = sends are never refused for being late (see OutboxSender.send_next).
     send_window: SendWindow | None = None
+    # Имя булевой настройки филиала, без которой коннектор не отвечает. None = отвечает всегда.
+    #
+    # Не «выключить канал»: приём обязан работать, пока ответы молчат — переписка попадает в
+    # общий тред лида задолго до того, как решено, кто в этом канале отвечает. Объявлено здесь,
+    # чтобы отбор тредов на генерацию спросил реестр, а не отрастил `if kind ==`. Ответ,
+    # сочинённый для канала, которому запрещено отвечать, — это оплаченный брокеру текст,
+    # который гарантированно никто не увидит; ровно та причина, по которой отбор уже отсекает
+    # выключенные каналы.
+    replies_setting: str | None = None
     # May this connector write to someone who is NOT writing to us right now?
     #
     # False is not a policy switch an operator flips — it is a fact about the correspondent.

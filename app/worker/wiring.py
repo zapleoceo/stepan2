@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import case, func, select
+from sqlalchemy import True_, case, func, select
 from sqlalchemy.orm import aliased
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -22,7 +22,7 @@ from app.adapters.db.models import (
     Outbox,
 )
 from app.config import settings
-from app.connectors.registry import spec_for
+from app.connectors.registry import mute_reply_kinds, spec_for
 from app.domain.enums import BOT_SILENT_STAGES, SessionStatus
 from app.ports.channel import ChannelPort
 
@@ -84,6 +84,12 @@ async def threads_awaiting_reply(
         .exists()
     )
     cutoff = datetime.now(UTC).replace(tzinfo=None) - _AWAITING_REPLY_MAX_AGE
+    # Коннектор, которому на этом филиале запрещено отвечать, — то же самое, что выключенный
+    # канал строкой ниже, и по той же причине: текст будет сочинён, оплачен брокеру и отвергнут
+    # на отправке. Настройку называет сам коннектор (ConnectorSpec.replies_setting), значение
+    # берётся у филиала — приём при этом продолжает работать, молчат только ответы.
+    from app.modules.settings.service import get_settings  # noqa: PLC0415
+    muted = mute_reply_kinds(await get_settings(session, branch_id))
     rows = await session.exec(
         select(ChannelThread.id)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
@@ -93,6 +99,7 @@ async def threads_awaiting_reply(
         .where(
             Lead.branch_id == branch_id,
             Channel.is_active.is_(True),  # type: ignore[attr-defined]
+            Channel.kind.not_in(muted) if muted else True_(),  # type: ignore[attr-defined]
             # A manager's number used to be excluded here as well. It no longer is, and that
             # is the point: 295 of the 302 leads on those numbers have no other channel, so
             # the exclusion made "hand the lead back to Stepan" a switch that could never do

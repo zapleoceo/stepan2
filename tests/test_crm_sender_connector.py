@@ -330,3 +330,48 @@ def test_the_reconciliation_window_also_numbers_the_branch() -> None:
     args = TENANT.inbound_args("whats-app")
 
     assert args == {"project": "crm", "channel": "whats-app", "branchId": 435}
+
+
+async def test_a_muted_connector_is_not_even_offered_for_generation(db_session) -> None:  # noqa: ANN001
+    """Пока ответы выключены, тред не должен попадать в отбор на генерацию.
+
+    Отказ на отправке — не защита от расхода: текст к тому моменту сочинён и оплачен
+    брокеру. Замерено на проде 11.08: сразу после заведения канала Степан сложил два
+    ответа лидам Джакарты, и оба легли в очередь как failed с этой причиной.
+
+    Отбор уже отсекает выключенные каналы ровно по этой логике — здесь то же самое, но
+    приём при этом обязан продолжать работать.
+    """
+    from app.adapters.db.models import (  # noqa: PLC0415
+        AppSetting,
+        Branch,
+        Channel,
+        ChannelThread,
+        Lead,
+    )
+    from app.domain.enums import Stage  # noqa: PLC0415
+    from app.modules.settings.service import invalidate  # noqa: PLC0415
+    from app.worker.wiring import threads_awaiting_reply  # noqa: PLC0415
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind="crm_sender", is_active=True)
+    db_session.add(ch)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, agent_enabled=True)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(
+        lead_id=lead.id, channel_id=ch.id, external_thread_id="c-1",
+        last_in_at=datetime(2026, 8, 11, 7, 0, 0), last_out_at=None))
+    await db_session.flush()
+    invalidate(b.id)
+
+    assert await threads_awaiting_reply(db_session, b.id) == []
+
+    db_session.add(AppSetting(branch_id=b.id, key="sender_enabled", value="true"))
+    await db_session.flush()
+    invalidate(b.id)
+
+    assert len(await threads_awaiting_reply(db_session, b.id)) == 1
