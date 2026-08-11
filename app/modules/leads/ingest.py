@@ -521,16 +521,38 @@ class IngestService:
             return
         snippet = (text or "").strip()[:200]
         try:
-            await AlertService(self.session, self.branch_id, self._notifier).raise_alert(
+            # With an LLM: without one the alert body degrades to no summary AND no
+            # translation, which is exactly the case a human is being woken up for.
+            await AlertService(
+                self.session, self.branch_id, self._notifier, llm=_alert_llm()
+            ).raise_alert(
                 lead_id=lead.id, kind="bot_off_message", thread_id=thread.id,
                 lead_phone=lead.phone_e164,
-                summary_en=f"Bot is OFF — lead wrote: {snippet}" if snippet
+                # The message itself is NOT pasted into the reason. It is already quoted
+                # above the reason in both halves of the card — and pasted here it went into
+                # the Russian half untranslated, so the one line the manager needed to read
+                # was the one line they could not.
+                summary_en="Bot is OFF — the lead wrote" if snippet
                 else "Bot is OFF — lead wrote (no text/media)",
-                summary_ru=f"Бот выключен — лид написал: {snippet}" if snippet
+                summary_ru="Бот выключен — лид написал" if snippet
                 else "Бот выключен — лид написал (без текста/медиа)",
             )
         except Exception:
             logger.warning("bot-off alert failed lead=%s", lead.id, exc_info=True)
+
+
+def _alert_llm():  # noqa: ANN201 — LLMPort, imported lazily to keep the adapter out of ingest
+    """The broker, for translating an alert. None when it cannot be built.
+
+    Lazy and forgiving on purpose: an alert is best-effort, and a missing translation must
+    cost the manager a translation — never the ping itself."""
+    try:
+        from app.adapters.llm.broker import BrokerLLM  # noqa: PLC0415
+
+        return BrokerLLM()
+    except Exception:  # noqa: BLE001
+        logger.warning("alert LLM unavailable — sending without a translation")
+        return None
 
 
 def _is_contentless(inbound: InboundMessage) -> bool:

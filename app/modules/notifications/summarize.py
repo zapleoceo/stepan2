@@ -49,7 +49,11 @@ async def build_alert_body(
         return AlertBody("", "", reason_en, last_msg, "")
     convo = await _dialog(session, thread_id)
     if not convo:
-        return AlertBody("", "", reason_en, last_msg, "")
+        # No dialog to summarise, but the one line we DO have is the line the manager has to
+        # act on. Translating it is a sentence, not a summary — refusing to do it because the
+        # bigger job is impossible left the Russian half of the alert quoting Indonesian.
+        return AlertBody("", "", reason_en, last_msg,
+                         await _translate_line(llm, last_msg, thread_id, branch_id))
     reason_clean = reason_en.replace("'", "")
     system = (
         "You summarize a sales conversation for a manager and translate a short reason "
@@ -71,7 +75,34 @@ async def build_alert_body(
     sr = _between(raw, _SR, _RB)
     rb = _between(raw, _RB, _MR)
     mr = _between(raw, _MR, None)
+    # The translation is the part a manager cannot do without, so it does not depend on the
+    # model having remembered a marker: a dropped [LAST_MSG_RU] block used to leave the
+    # Russian half quoting Indonesian, which is the one line the alert exists to deliver.
+    if not mr and last_msg:
+        mr = await _translate_line(llm, last_msg, thread_id, branch_id)
     return AlertBody(sb or "", sr or "", rb or reason_en, last_msg, mr or "")
+
+
+async def _translate_line(
+    llm: LLMPort, body: str, thread_id: int | None, branch_id: int | None,
+) -> str:
+    """Russian for one message. Empty on any failure — an alert without a translation is
+    worse than one with, and an alert that never arrives is worse than both."""
+    clean = (body or "").strip()
+    if not clean:
+        return ""
+    try:
+        out, _ = await llm.chat(
+            [{"role": "system",
+              "content": "Translate the user's message into Russian. Output only the "
+                         "translation, no preamble, no quotes."},
+             {"role": "user", "content": clean}],
+            capability="chat:fast", max_tokens=300, workflow="alert",
+            thread_id=thread_id, branch_id=branch_id)
+    except Exception as exc:  # noqa: BLE001 — the ping is best-effort, never blocks
+        logger.warning("alert line translation failed thread=%s: %s", thread_id, exc)
+        return ""
+    return (out or "").strip()
 
 
 async def _dialog(session: AsyncSession, thread_id: int) -> str:
