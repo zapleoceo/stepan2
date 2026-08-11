@@ -15,6 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.adapters.db.models import Channel, Lead, MediaAsset, Message, StageEvent
 from app.domain.enums import HUMAN_LED_STAGES, Stage
 from app.domain.funnel import MANAGER_PHONE_ACTOR, apply_stage
+from app.domain.phone import extract_phone
 from app.modules.ads import AdMappingService
 from app.modules.conversation.signals import is_auto_reply
 from app.modules.notifications.alerts import AlertService
@@ -23,7 +24,6 @@ from app.ports.notify import NotifierPort
 
 from .consolidate import merge_by_phone
 from .identity import IdentityService
-from .phone import extract_phone
 from .repository import MessageRepo
 
 logger = logging.getLogger(__name__)

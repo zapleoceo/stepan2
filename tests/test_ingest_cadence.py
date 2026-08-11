@@ -61,7 +61,7 @@ def test_only_connectors_whose_poll_is_cheap_opt_into_per_minute() -> None:
     private connectors — instagrapi, Evolution — stay slow because there poll frequency IS
     the ban vector."""
     fast = {s.kind for s in all_specs() if s.polls_every_minute}
-    assert fast == {ChannelKind.META_BUSINESS, ChannelKind.CRM_WHATSAPP}, (
+    assert fast == {ChannelKind.META_BUSINESS, ChannelKind.CRM_SENDER}, (
         "per-minute polling is for connectors whose poll costs nothing to the platform; "
         f"got {sorted(k.value for k in fast)}"
     )

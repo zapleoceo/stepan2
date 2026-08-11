@@ -117,14 +117,14 @@ async def test_the_windowed_connectors_declare_it_and_keep_their_stored_codes() 
     literals, and the inbox queries and the failed-send bubble match them, so they are stored
     values and not labels anyone may reword."""
     gated = {k for k, s in REGISTRY.items() if s.send_window is not None}
-    assert gated == {ChannelKind.META_BUSINESS, ChannelKind.CRM_WHATSAPP}
+    assert gated == {ChannelKind.META_BUSINESS, ChannelKind.CRM_SENDER}
 
     window = REGISTRY[ChannelKind.META_BUSINESS].send_window
     assert window is not None
     assert window.error_code == "meta_window_closed"
     assert window.dormant_reason == "Meta 24h window closed — paused until lead writes"
 
-    wa = REGISTRY[ChannelKind.CRM_WHATSAPP].send_window
+    wa = REGISTRY[ChannelKind.CRM_SENDER].send_window
     assert wa is not None
     assert wa.error_code == "crm_wa_window_closed"
 

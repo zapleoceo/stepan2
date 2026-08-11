@@ -1,7 +1,8 @@
 """Leads module — identity resolution, inbound ingest, follow-up channel routing."""
+from app.domain.phone import extract_phone, normalize_phone
+
 from .identity import IdentityService
 from .ingest import IngestService
-from .phone import extract_phone, normalize_phone
 from .profiles import ProfileService
 from .router import FollowupRouter, RoutableThread
 

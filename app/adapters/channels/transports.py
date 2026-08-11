@@ -14,6 +14,7 @@ from typing import Any
 from app.adapters.channels import graph_parse
 from app.config import settings
 from app.domain.clock import as_naive_utc
+from app.domain.phone import from_wa_id
 
 logger = logging.getLogger(__name__)
 
@@ -607,7 +608,9 @@ def _wa_phone(jid: str) -> str | None:
     if domain != "s.whatsapp.net":
         return None
     digits = local.split(":")[0]  # a device suffix rides along on some items
-    return f"+{digits}" if digits.isdigit() and len(digits) >= 8 else None
+    # The jid parsing is this transport's business; the FORM of the key is not — it is shared
+    # with the CRM sender, which delivers the same number bare (leads.phone.from_wa_id).
+    return from_wa_id(digits) if digits.isdigit() else None
 
 
 def _wa_message(raw: dict[str, Any]) -> dict[str, Any]:

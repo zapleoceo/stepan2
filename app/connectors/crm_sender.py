@@ -1,9 +1,13 @@
-"""CRM WhatsApp — переписка лида, идущая через sender CRM.
+"""CRM — переписка лида, идущая через sender CRM, каким бы мессенджером она ни пришла.
 
 Отдельный коннектор, а не режим существующего WhatsApp. Тот работает через Evolution API,
 поднятый у нас, и подключается сканированием QR. Здесь чужой транспорт, чужие идентификаторы
 проекта и филиала, чужой токен — и отправка, которая отвечает «принято», а не «доставлено».
-Общего между ними только название мессенджера.
+
+ОДИН коннектор на все их мессенджеры: у филиала включены whats-app, telegram, viber и
+smsviber, и различает их одно поле в полезной нагрузке. Транспорт, учётные данные, адресация
+ответа и дедупликация — общие. Разбивать по мессенджерам значило бы копировать коннектор
+ради этого поля и заставлять оператора подключать четыре канала там, где связь одна.
 
 Что этот коннектор УМЕЕТ: принимать входящие (их приносит колбек) и отвечать в тот же
 разговор. Чего НЕ умеет: отзывать сообщения, отмечать прочитанным, забирать профиль или
@@ -14,7 +18,7 @@ from __future__ import annotations
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.channels.crm_whatsapp import CrmWhatsAppAdapter
+from app.adapters.channels.crm_sender import CrmSenderAdapter
 from app.adapters.db.models import Channel
 from app.adapters.sender_mcp import SenderMcp
 from app.config import settings
@@ -23,7 +27,7 @@ from app.modules.sender.tenant import SenderTenant
 from app.modules.settings.service import get_settings
 from app.ports.channel import ChannelPort
 
-from .crm_whatsapp_ui import _ch_crm_wa_form
+from .crm_sender_ui import _ch_crm_sender_form
 from .spec import ConnectorSpec, SendWindow
 
 # Пишется в outbox.error и ищется запросами инбокса — переформулировать нельзя.
@@ -44,25 +48,30 @@ async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
     tenant = SenderTenant(project=cfg.sender_project,
                           project_id=cfg.sender_project_id,
                           branch_id=cfg.sender_branch_id)
-    return CrmWhatsAppAdapter(session, mcp, tenant)
+    return CrmSenderAdapter(session, mcp, tenant, replies_enabled=cfg.sender_enabled)
 
 
 SPEC = ConnectorSpec(
-    kind=ChannelKind.CRM_WHATSAPP,
-    label="WhatsApp (CRM)",
-    label_key="ch.kind_crm_wa",
-    icon_class="fa-brands fa-whatsapp",
-    icon_color="#128c7e",
-    adapter=CrmWhatsAppAdapter,
+    kind=ChannelKind.CRM_SENDER,
+    label="CRM",
+    label_key="ch.kind_crm_sender",
+    icon_class="fa-solid fa-headset",
+    icon_color="#2563eb",
+    adapter=CrmSenderAdapter,
     build_port=build_port,
-    credential_panel=_ch_crm_wa_form,
-    settings_prefixes=("sender.",),
+    credential_panel=_ch_crm_sender_form,
+    settings_prefixes=("sender_",),
     # Ни одной. Не «пока нет»: отзыв, отметка о прочтении, профиль и медиа — действия над
-    # аккаунтом WhatsApp, а у нас его нет, мы говорим через чужой сервер.
+    # аккаунтом мессенджера, а у нас его нет, мы говорим через чужой сервер.
     capabilities=frozenset(),
     # WhatsApp запрещает свободный текст позже 24 часов от последнего сообщения лида. Вне окна
     # нужен утверждённый шаблон, а это другой вызов с другими параметрами — поэтому обычная
     # отправка честно отказывается, а не уходит в отказ на стороне Meta.
+    #
+    # Правило объявлено на весь коннектор, хотя строго оно только вотсаповское: у телеграма
+    # такого окна нет. Осознанный перекос в сторону молчания — 99% трафика здесь WhatsApp, а
+    # цена ошибки несимметрична: лишний отказ виден в очереди, отправка вне окна ловится
+    # блокировкой на стороне Meta. Сделать окно пофайловым можно, когда телеграм наберёт вес.
     send_window=SendWindow(error_code=LATE_ERROR, dormant_reason=DORMANT_REASON),
     # Инициировать разговор мы можем — адрес лида известен и живёт в CRM. Ограничение здесь
     # не «некому писать», а «чем писать»: вне окна только шаблоном.

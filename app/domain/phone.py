@@ -4,6 +4,10 @@ from __future__ import annotations
 import re
 
 _MIN_DIGITS = 9
+# A wa-id is an address, not a number mined from prose, so it needs no run-length guard —
+# only a floor that rejects a malformed one. Kept at the value the Evolution transport has
+# always used, so moving that rule here changes nothing about what it accepts.
+_MIN_WA_DIGITS = 8
 _NON_DIGIT = re.compile(r"\D+")
 _RUN = re.compile(r"[\d ()\-+.]{9,}")
 
@@ -43,6 +47,22 @@ def normalize_phone(raw: str) -> str | None:
     run = max(_RUN.findall(raw), key=len, default="")
     digits = _NON_DIGIT.sub("", run)
     return digits if len(digits) >= _MIN_DIGITS else None
+
+
+def from_wa_id(raw: str | None) -> str | None:
+    """WhatsApp address digits → '+<digits>' E.164, or None when it is not a number.
+
+    A wa-id is ALWAYS the full international number without the plus — that is what makes
+    the address the identity on WhatsApp. So it must NOT be country-stamped the way a
+    chat-typed number is: `to_e164('380684592151')` on the Indonesia branch reads the number
+    as local and returns '+62380684592151', inventing a person. Foreign numbers on this
+    branch are normal, not an anomaly (thread 452, a Ukrainian +380 lead).
+
+    Shared by both WhatsApp sources on purpose. Evolution reads the number out of a jid and
+    the CRM sender delivers it bare, but the FORM of the merge key has to be identical or
+    the same person becomes two leads — which is the whole point of the key."""
+    digits = _NON_DIGIT.sub("", str(raw or ""))
+    return f"+{digits}" if len(digits) >= _MIN_WA_DIGITS else None
 
 
 def _canonical(digits: str, cc: str) -> str | None:

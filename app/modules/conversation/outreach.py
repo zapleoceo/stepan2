@@ -19,7 +19,7 @@ from __future__ import annotations
 from sqlalchemy import bindparam
 from sqlalchemy.sql.elements import BindParameter
 
-from app.connectors.registry import non_outreach_kinds
+from app.connectors.registry import non_outreach_kinds, windowed_kinds
 
 # Drops a thread whose channel belongs to a connector that cannot write first. `channel` is
 # joined by id rather than assumed to be in scope, so both harvest queries can paste it in.
@@ -32,3 +32,29 @@ NO_OUTREACH_SQL = (
 def no_outreach_param() -> BindParameter:
     """The expanding bind for NO_OUTREACH_SQL. Bind with `.bindparams(no_outreach_param())`."""
     return bindparam("nokinds", value=list(non_outreach_kinds()), expanding=True)
+
+
+# Drops a thread whose platform has stopped accepting automated sends. The window is a fact of
+# the channel — `window_until` is the lead's last inbound plus 24h, written by ingest for every
+# kind — but only some connectors are REFUSED outside it, and that is their own declaration
+# (ConnectorSpec.send_window).
+#
+# The send path already refused these, so nothing wrong ever went out. What it could not undo
+# was the cost: the nudge had been composed by then. On a windowed connector the default
+# schedule `1,4,24,120` puts two of its four steps beyond the window by construction — hours
+# counted from OUR reply, against a window counted from the LEAD's message — so those two were
+# generated and thrown away every time, per thread, forever.
+#
+# Kept in SQL next to its sibling for the same two reasons: the dormant harvest is LIMITed, so
+# a thread dropped afterwards has eaten a slot a live thread wanted, and a Python filter would
+# re-read the channel table to learn what the registry already knows.
+CLOSED_WINDOW_SQL = (
+    " AND (ct.window_until IS NULL OR ct.window_until > :now"
+    "      OR NOT EXISTS (SELECT 1 FROM channel wch WHERE wch.id = ct.channel_id"
+    "           AND wch.kind IN :windowkinds))"
+)
+
+
+def closed_window_param() -> BindParameter:
+    """The expanding bind for CLOSED_WINDOW_SQL. Needs `:now` already bound by the caller."""
+    return bindparam("windowkinds", value=list(windowed_kinds()), expanding=True)
