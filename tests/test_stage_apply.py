@@ -315,7 +315,7 @@ async def test_first_non_target_classification_does_not_dormant_yet(db_session) 
 
 
 def test_to_e164_canonicalizes_a_typed_phone() -> None:
-    from app.modules.leads.phone import to_e164
+    from app.domain.phone import to_e164
     assert to_e164("0812 3456 7890", "62") == "+6281234567890"   # ID local trunk → +62
     assert to_e164("+62 812-3456-7890") == "+6281234567890"      # explicit international kept
     assert to_e164("0123-456-789", "60") == "+60123456789"       # MY branch stamps +60, not +62

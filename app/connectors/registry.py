@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from app.domain.enums import ChannelKind
 
-from . import crm_whatsapp, instagram, meta_business, website, whatsapp
+from . import crm_sender, instagram, meta_business, website, whatsapp
 from .spec import Capability, ConnectorSpec
 
 # Insertion order IS the display order — the inbox filter chips and the "add channel"
@@ -18,7 +18,7 @@ REGISTRY: dict[ChannelKind, ConnectorSpec] = {
     ChannelKind.INSTAGRAM: instagram.SPEC,
     ChannelKind.META_BUSINESS: meta_business.SPEC,
     ChannelKind.WHATSAPP: whatsapp.SPEC,
-    ChannelKind.CRM_WHATSAPP: crm_whatsapp.SPEC,
+    ChannelKind.CRM_SENDER: crm_sender.SPEC,
     ChannelKind.WEBSITE: website.SPEC,
 }
 

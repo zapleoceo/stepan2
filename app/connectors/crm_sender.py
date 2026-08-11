@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.adapters.channels.crm import CrmAdapter
+from app.adapters.channels.crm_sender import CrmSenderAdapter
 from app.adapters.db.models import Channel
 from app.adapters.sender_mcp import SenderMcp
 from app.config import settings
@@ -27,7 +27,7 @@ from app.modules.sender.tenant import SenderTenant
 from app.modules.settings.service import get_settings
 from app.ports.channel import ChannelPort
 
-from .crm_ui import _ch_crm_form
+from .crm_sender_ui import _ch_crm_sender_form
 from .spec import ConnectorSpec, SendWindow
 
 # Пишется в outbox.error и ищется запросами инбокса — переформулировать нельзя.
@@ -48,19 +48,19 @@ async def build_port(session: AsyncSession, channel: Channel) -> ChannelPort:
     tenant = SenderTenant(project=cfg.sender_project,
                           project_id=cfg.sender_project_id,
                           branch_id=cfg.sender_branch_id)
-    return CrmAdapter(session, mcp, tenant, replies_enabled=cfg.sender_enabled)
+    return CrmSenderAdapter(session, mcp, tenant, replies_enabled=cfg.sender_enabled)
 
 
 SPEC = ConnectorSpec(
-    kind=ChannelKind.CRM,
-    label="CRM (мессенджеры)",
-    label_key="ch.kind_crm",
-    icon_class="fa-solid fa-comments",
-    icon_color="#6366f1",
-    adapter=CrmAdapter,
+    kind=ChannelKind.CRM_SENDER,
+    label="CRM",
+    label_key="ch.kind_crm_sender",
+    icon_class="fa-solid fa-headset",
+    icon_color="#2563eb",
+    adapter=CrmSenderAdapter,
     build_port=build_port,
-    credential_panel=_ch_crm_form,
-    settings_prefixes=("sender.",),
+    credential_panel=_ch_crm_sender_form,
+    settings_prefixes=("sender_",),
     # Ни одной. Не «пока нет»: отзыв, отметка о прочтении, профиль и медиа — действия над
     # аккаунтом мессенджера, а у нас его нет, мы говорим через чужой сервер.
     capabilities=frozenset(),

@@ -68,10 +68,10 @@ def _lead_phone(row: SenderInbound) -> str | None:
     return from_wa_id(row.phone)
 
 
-class CrmAdapter:
+class CrmSenderAdapter:
     """ChannelPort поверх sender CRM — все их мессенджеры одним каналом."""
 
-    kind: ChannelKind = ChannelKind.CRM
+    kind: ChannelKind = ChannelKind.CRM_SENDER
 
     def __init__(self, session: AsyncSession, mcp: SenderMcp,
                  tenant: SenderTenant, replies_enabled: bool = False) -> None:

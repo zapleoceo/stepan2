@@ -497,17 +497,22 @@ _TR: dict[str, dict[str, str]] = {
               "and the close date falls inside the window. An untimed close shows only on "
               "the all-time range — there is no honest way to place it in a window.",
         "id": "Penjualan menurut CRM, ditutup setelah percakapan kami dimulai."},
-    "ch.kind_crm_wa": {"ru": "WhatsApp (CRM)", "en": "WhatsApp (CRM)", "id": "WhatsApp (CRM)"},
-    "ch.crm_wa_hint": {
-        "ru": "Переписка идёт через sender CRM. Адрес сервера и токен — общие, в окружении; "
-              "здесь введите числа вашего филиала, их выдаёт CRM.",
-        "en": "Conversations run through the CRM sender. Server address and token are shared, "
-              "from the environment; enter your branch's ids here — the CRM issues them.",
-        "id": "Percakapan berjalan lewat sender CRM. Alamat server dan token bersifat umum; "
+    "ch.kind_crm_sender": {"ru": "CRM (мессенджеры)", "en": "CRM (messengers)",
+                    "id": "CRM (perpesanan)"},
+    "ch.crm_sender_hint": {
+        "ru": "Переписка идёт через sender CRM — все его мессенджеры сразу (WhatsApp, "
+              "Telegram, Viber). Адрес сервера и токен общие, в окружении; здесь введите "
+              "числа вашего филиала, их выдаёт CRM.",
+        "en": "Conversations run through the CRM sender — all of its messengers at once "
+              "(WhatsApp, Telegram, Viber). Server address and token are shared, from the "
+              "environment; enter your branch's ids here — the CRM issues them.",
+        "id": "Percakapan berjalan lewat sender CRM — semua perpesanannya sekaligus "
+              "(WhatsApp, Telegram, Viber). Alamat server dan token bersifat umum; "
               "masukkan id cabang Anda di sini."},
-    "ch.crm_wa_project": {"ru": "Проект (alias)", "en": "Project (alias)", "id": "Proyek (alias)"},
-    "ch.crm_wa_project_id": {"ru": "Проект (число)", "en": "Project id", "id": "ID proyek"},
-    "ch.crm_wa_branch_id": {"ru": "Филиал (число)", "en": "Branch id", "id": "ID cabang"},
+    "ch.crm_sender_project": {"ru": "Проект (alias)", "en": "Project (alias)",
+                              "id": "Proyek (alias)"},
+    "ch.crm_sender_project_id": {"ru": "Проект (число)", "en": "Project id", "id": "ID proyek"},
+    "ch.crm_sender_branch_id": {"ru": "Филиал (число)", "en": "Branch id", "id": "ID cabang"},
     "rep.event": {"ru": "Запись", "en": "Booked", "id": "Terdaftar"},
     "rep.deal_event": {"ru": "Сделка · Запись", "en": "Deal · Booked",
                        "id": "Deal · Terdaftar"},

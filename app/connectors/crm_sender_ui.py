@@ -1,4 +1,4 @@
-"""Панель CRM WhatsApp — оператор вводит только то, что ему выдали в CRM.
+"""Панель коннектора CRM — оператор вводит только то, что ему выдали в CRM.
 
 Адрес sender и токен здесь не спрашиваются: сервер один на всю установку и живёт в
 окружении, как и Evolution у соседнего коннектора. Оператор отвечает на единственный вопрос,
@@ -27,17 +27,18 @@ def _field(label: str, name: str, value: str, placeholder: str) -> str:
     )
 
 
-def _ch_crm_wa_form(ch_id: int, error: str = "", get: object = None) -> str:
+def _ch_crm_sender_form(ch_id: int, error: str = "", get: object = None) -> str:
     read = get if callable(get) else (lambda k, d="": d)
     return (
         f'{_ch_err(error)}'
-        f'{_ch_hint(t("ch.crm_wa_hint"))}'
+        f'{_ch_hint(t("ch.crm_sender_hint"))}'
         f'<form hx-post="/ui/channels/{ch_id}/save"'
         f' hx-target="#ch-form" hx-swap="innerHTML" style="max-width:360px">'
-        f'{_field(t("ch.crm_wa_project"), KEY_PROJECT, str(read(KEY_PROJECT, "") or ""), "crm")}'
-        f'{_field(t("ch.crm_wa_project_id"), KEY_PROJECT_ID,
+        f'{_field(t("ch.crm_sender_project"), KEY_PROJECT,
+                  str(read(KEY_PROJECT, "") or ""), "crm")}'
+        f'{_field(t("ch.crm_sender_project_id"), KEY_PROJECT_ID,
                   str(read(KEY_PROJECT_ID, "") or ""), "6")}'
-        f'{_field(t("ch.crm_wa_branch_id"), KEY_BRANCH_ID,
+        f'{_field(t("ch.crm_sender_branch_id"), KEY_BRANCH_ID,
                   str(read(KEY_BRANCH_ID, "") or ""), "435")}'
         f'<button type="submit" class="btn-sm btn-p">{_h.escape(t("ch.save"))}</button>'
         f'</form>'

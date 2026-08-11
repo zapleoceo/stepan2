@@ -17,8 +17,8 @@ from app.adapters.db.models import Branch, Lead, Outbox, Product, StageEvent, Th
 from app.adapters.meta_capi import MetaCapi, capi_token
 from app.config import settings
 from app.domain.enums import HUMAN_LED_STAGES, Stage
+from app.domain.phone import to_e164
 from app.modules.knowledge.service import KnowledgeService
-from app.modules.leads.phone import to_e164
 from app.modules.notifications.alerts import AlertService
 from app.modules.settings.service import BranchSettings
 from app.ports.llm import LLMPort

@@ -29,8 +29,8 @@ _CRM_KEYS = ("crm_mcp_url", "crm_mcp_city_alias", "crm_enabled")
 
 _SENDER_SOURCES = (
     "app/adapters/sender_mcp.py",
-    "app/adapters/channels/crm_whatsapp.py",
-    "app/connectors/crm_whatsapp.py",
+    "app/adapters/channels/crm_sender.py",
+    "app/connectors/crm_sender.py",
     "app/modules/sender/tenant.py",
     "app/modules/sender/catchup.py",
     "app/modules/sender/inbound.py",

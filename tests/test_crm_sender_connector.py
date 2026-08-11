@@ -18,11 +18,11 @@ os.environ.setdefault("STEPAN2_SECRET_KEY", Fernet.generate_key().decode())
 
 from sqlalchemy import select  # noqa: E402
 
-from app.adapters.channels.crm import (  # noqa: E402
+from app.adapters.channels.crm_sender import (  # noqa: E402
     NO_CONVERSATION,
     NOT_CONFIGURED,
     REPLIES_OFF,
-    CrmAdapter,
+    CrmSenderAdapter,
 )
 from app.adapters.db.models import SenderInbound  # noqa: E402
 from app.adapters.sender_mcp import SendOutcome  # noqa: E402
@@ -60,7 +60,7 @@ def _row(**kw) -> SenderInbound:
 async def test_a_stored_inbound_becomes_a_message_and_is_marked_done(db_session) -> None:  # noqa: ANN001
     db_session.add(_row(text="berapa harganya?"))
     await db_session.flush()
-    a = CrmAdapter(db_session, _Mcp(), TENANT, replies_enabled=True)
+    a = CrmSenderAdapter(db_session, _Mcp(), TENANT, replies_enabled=True)
 
     first = await a.fetch_inbound()
 
@@ -83,7 +83,7 @@ async def test_the_phone_arrives_in_the_form_the_merge_key_is_stored_in(db_sessi
     db_session.add(_row(phone="6289689515687", conversation_id="6289689515687"))
     await db_session.flush()
 
-    got = await CrmAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
 
     assert got[0].lead_phone == "+6289689515687"
 
@@ -98,7 +98,7 @@ async def test_a_foreign_number_keeps_its_own_country(db_session) -> None:  # no
     db_session.add(_row(phone="380684592151", conversation_id="380684592151"))
     await db_session.flush()
 
-    got = await CrmAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
 
     assert got[0].lead_phone == "+380684592151"
 
@@ -115,7 +115,7 @@ async def test_a_telegram_id_is_never_mistaken_for_a_phone(db_session) -> None: 
                         phone="504412830", conversation_id="504412830"))
     await db_session.flush()
 
-    got = await CrmAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
 
     assert [m.text for m in got] == ["halo"], "телеграм всё равно должен доехать"
     assert got[0].lead_phone is None, "но без выдуманного телефона"
@@ -132,7 +132,7 @@ async def test_another_branch_inbound_is_left_alone(db_session) -> None:  # noqa
                         conversation_id="60123456789", phone="60123456789"))
     await db_session.flush()
 
-    got = await CrmAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
 
     assert [m.external_id for m in got] == ["wamid.OURS"]
     theirs = (await db_session.execute(
@@ -148,7 +148,7 @@ async def test_a_managers_own_message_is_never_served_as_a_lead_turn(db_session)
     db_session.add(_row(external_id="wamid.IN1", direction="in", text="halo kak"))
     await db_session.flush()
 
-    got = await CrmAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
 
     assert [m.text for m in got] == ["halo kak"]
 
@@ -157,7 +157,7 @@ async def test_a_row_without_a_conversation_is_retired_not_looped(db_session) ->
     """Отвечать некуда, но и крутиться вечно строка не должна."""
     db_session.add(_row(external_id="wamid.NOCONV", conversation_id=None))
     await db_session.flush()
-    a = CrmAdapter(db_session, _Mcp(), TENANT, replies_enabled=True)
+    a = CrmSenderAdapter(db_session, _Mcp(), TENANT, replies_enabled=True)
 
     assert await a.fetch_inbound() == []
 
@@ -173,7 +173,7 @@ async def test_the_reply_is_addressed_from_the_conversation_we_stored(db_session
     await db_session.flush()
     mcp = _Mcp()
 
-    a = CrmAdapter(db_session, mcp, TENANT, replies_enabled=True)
+    a = CrmSenderAdapter(db_session, mcp, TENANT, replies_enabled=True)
     res = await a.send_text("6281234567890", "halo")
 
     assert res.ok
@@ -199,7 +199,7 @@ async def test_reading_is_on_long_before_answering_is(db_session) -> None:  # no
     """
     db_session.add(_row())
     await db_session.flush()
-    a = CrmAdapter(db_session, _Mcp(), TENANT, replies_enabled=False)
+    a = CrmSenderAdapter(db_session, _Mcp(), TENANT, replies_enabled=False)
 
     assert [m.text for m in await a.fetch_inbound()] == ["halo"]
 
@@ -209,7 +209,7 @@ async def test_reading_is_on_long_before_answering_is(db_session) -> None:  # no
 
 
 async def test_a_thread_we_never_received_is_refused_clearly(db_session) -> None:  # noqa: ANN001
-    a = CrmAdapter(db_session, _Mcp(), TENANT, replies_enabled=True)
+    a = CrmSenderAdapter(db_session, _Mcp(), TENANT, replies_enabled=True)
     res = await a.send_text("нет-такого", "halo")
 
     assert not res.ok
@@ -222,7 +222,7 @@ async def test_without_a_token_the_connector_refuses_rather_than_guesses(db_sess
     db_session.add(_row())
     await db_session.flush()
 
-    a = CrmAdapter(db_session, _Mcp(configured=False), TENANT, replies_enabled=True)
+    a = CrmSenderAdapter(db_session, _Mcp(configured=False), TENANT, replies_enabled=True)
     res = await a.send_text("6281234567890", "halo")
 
     assert not res.ok
@@ -235,7 +235,7 @@ async def test_a_transport_failure_is_reported_not_swallowed(db_session) -> None
     await db_session.flush()
     mcp = _Mcp(SendOutcome(accepted=False, error="connection reset"))
 
-    a = CrmAdapter(db_session, mcp, TENANT, replies_enabled=True)
+    a = CrmSenderAdapter(db_session, mcp, TENANT, replies_enabled=True)
     res = await a.send_text("6281234567890", "halo")
 
     assert not res.ok
@@ -250,7 +250,7 @@ async def test_the_switch_in_settings_is_the_one_the_port_actually_obeys(db_sess
     зелёным. Здесь проверяется именно проводка.
     """
     from app.adapters.db.models import AppSetting, Branch, Channel  # noqa: PLC0415
-    from app.connectors.crm import build_port  # noqa: PLC0415
+    from app.connectors.crm_sender import build_port  # noqa: PLC0415
     from app.modules.settings.service import invalidate  # noqa: PLC0415
 
     db_session.add(Branch(id=1, name="Indonesia", lang="id", tz_offset_h=7, is_active=True))
@@ -270,11 +270,29 @@ async def test_the_switch_in_settings_is_the_one_the_port_actually_obeys(db_sess
     assert on.replies_enabled is True
 
 
+def test_the_sender_keys_belong_to_this_connector_and_no_other() -> None:
+    """Префикс объявляет, ЧЬИ это ключи, — и должен совпадать с настоящими именами.
+
+    app_setting одна таблица на всех, и редактор канала прячет чужие поля по этому префиксу.
+    Он был объявлен как `sender.` — с точкой, тогда как ключи зовутся `sender_mcp_url` и
+    `sender_enabled`. Не совпав ни с одним ключом, префикс не назначал владельца, и настройки
+    переписки через CRM показывались в редакторе КАЖДОГО канала — инстаграма, вотсапа, сайта.
+    Ошибка молчаливая: лишние поля выглядят как задумка.
+    """
+    from app.connectors.crm_sender import SPEC  # noqa: PLC0415
+    from app.modules.settings.schema_sender import SENDER_SECTION  # noqa: PLC0415
+
+    assert SPEC.settings_prefixes, "без префикса ключи ничьи"
+    orphans = [f.key for f in SENDER_SECTION.fields
+               if not f.key.startswith(SPEC.settings_prefixes)]
+    assert orphans == [], f"эти ключи не попадают под префикс коннектора: {orphans}"
+
+
 def test_the_connector_declares_that_it_does_not_confirm_delivery() -> None:
     """Их conversation/send кладёт в очередь и отвечает сразу. Объяви коннектор обратное —
     outbox записал бы «отправлено» вместо «queued», и передача менеджеру при сбое доставки
     не сработала бы никогда, потому что никто больше не посмотрит."""
-    from app.connectors.crm import SPEC
+    from app.connectors.crm_sender import SPEC
 
     assert SPEC.confirms_delivery is False
     assert SPEC.send_window is not None, "вне 24 часов свободный текст запрещён"
