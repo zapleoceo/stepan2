@@ -142,15 +142,27 @@ async def test_another_branch_inbound_is_left_alone(db_session) -> None:  # noqa
 
 
 async def test_a_managers_own_message_is_never_served_as_a_lead_turn(db_session) -> None:  # noqa: ANN001
-    """Исходящее — это менеджер или эхо его сообщения из приложения. Подать его как реплику
-    лида значит дать Степану повод ответить человеку, который уже ведёт разговор."""
-    db_session.add(_row(external_id="wamid.OUT1", direction="out", text="saya manager"))
-    db_session.add(_row(external_id="wamid.IN1", direction="in", text="halo kak"))
+    """Сообщение менеджера доезжает, но помечено исходящим — репликой лида не станет.
+
+    Направление разбирает ingest: входящее — ход лида, исходящее — `_store_outgoing`,
+    который двигает last_out_at и повода ответить не даёт. Раньше адаптер отсекал
+    исходящие у себя, и получалось хуже: строки оставались в таблице навсегда, а тред
+    выглядел неотвеченным — Степан писал поверх менеджера (11.08, лид 6289689515687:
+    менеджер в 09:27, Степан в 09:29).
+
+    Имя с исходящего на карточку лида не переносится: там менеджер, а не собеседник.
+    """
+    db_session.add(_row(external_id="wamid.OUT1", direction="out", text="saya manager",
+                        from_name="Citra"))
+    db_session.add(_row(external_id="wamid.IN1", direction="in", text="halo kak",
+                        from_name="Juan"))
     await db_session.flush()
 
     got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
 
-    assert [m.text for m in got] == ["halo kak"]
+    assert [(m.direction, m.text) for m in got] == [
+        ("out", "saya manager"), ("in", "halo kak")]
+    assert [m.sender_name for m in got] == [None, "Juan"]
 
 
 async def test_a_row_without_a_conversation_is_retired_not_looped(db_session) -> None:  # noqa: ANN001
