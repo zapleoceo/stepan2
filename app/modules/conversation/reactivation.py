@@ -99,6 +99,18 @@ _DUE_Q = (
     # reactivating it too made two proactive pings land days apart (MIN_DORMANT_DAYS=3 sits
     # inside the 120h final follow-up step).
     "   AND ct.next_followup_at IS NULL"
+    # Два подряд непрочитанных наших сообщения — значит человек нас не читает, и следующее
+    # будет не касанием, а спамом. Тред 4422: лид последний раз открывал переписку 20 июля, а
+    # мы написали после этого четырежды (23-го дважды, 28-го и 11 августа) и ни разу не
+    # получили ответа. На филиале 1 таких тредов 646 из 2679 подходящих по остальным условиям.
+    #
+    # Только когда квитанция ЕСТЬ. lead_seen_at заполняет один Instagram (adapters/channels/
+    # instagram.py), у воцапа и Meta его нет вовсе, а внутри инстаграма он пуст у 1860 тредов
+    # из 4220. Трактовать «не знаем» как «не читает» значило бы выключить реактивацию на
+    # 44% инстаграма и целиком на остальных коннекторах.
+    "   AND NOT (ct.lead_seen_at IS NOT NULL"
+    "        AND (SELECT count(*) FROM message m WHERE m.thread_id = ct.id"
+    "             AND m.direction = 'out' AND m.occurred_at > ct.lead_seen_at) >= 2)"
     "   AND (SELECT count(*) FROM stage_event se WHERE se.lead_id = l.id"
     "        AND se.reason = :reason) < :cap"
     "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"

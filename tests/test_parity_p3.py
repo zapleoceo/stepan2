@@ -322,6 +322,22 @@ def test_split_bubbles() -> None:
     assert _split_bubbles("   |||   ") == []
 
 
+def test_two_pipes_split_too_because_the_model_writes_them() -> None:
+    """Контракт просит три пайпа, модель иногда пишет два — и тогда «||» уезжало лиду прямо
+    в текст, а весь ход шёл одним куском. Тред 4422, 11.08.2026: «Halo Kak muhammadfaqihh,
+    masih ingat MinStep? 👋 || Gimana nih…». С 27.07 так утекло пять сообщений."""
+    from app.modules.conversation.delivery import _split_bubbles
+    assert _split_bubbles("Halo Kak! 👋 || Gimana nih?") == ["Halo Kak! 👋", "Gimana nih?"]
+    assert _split_bubbles("a |||| b") == ["a", "b"]
+
+
+def test_a_single_pipe_is_not_a_separator() -> None:
+    """Одиночный пайп встречается в обычном тексте, и разрывать по нему значило бы рвать
+    сообщения на ровном месте."""
+    from app.modules.conversation.delivery import _split_bubbles
+    assert _split_bubbles("Rp 1.000.000 | tanpa potongan") == ["Rp 1.000.000 | tanpa potongan"]
+
+
 async def test_enqueue_splits_into_staggered_bubbles(db_session) -> None:
     b = Branch(name="T", lang="id")
     db_session.add(b)
