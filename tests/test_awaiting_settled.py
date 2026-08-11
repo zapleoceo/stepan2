@@ -49,3 +49,14 @@ def test_badge_swaps_the_list_instead_of_reloading_the_page() -> None:
     assert 'hx-get="/ui/threads?awaiting=queue"' in html
     assert 'hx-target="#tl"' in html
     assert "location.href" not in html
+
+
+def test_the_badge_click_does_not_fall_through_to_the_parent_link() -> None:
+    """Бейдж лежит ВНУТРИ <a href="/ui/inbox">. stopPropagation гасит только обработчики
+    родителя, а переход по ссылке — не обработчик, а действие браузера по умолчанию: оно
+    срабатывало всё равно, и клик по числу открывал полный список входящих вместо тех самых
+    чатов, которые бейдж и посчитал. Нужен preventDefault."""
+    from app.api._ui_panels import inbox_awaiting_badge_html
+    html = inbox_awaiting_badge_html(1)
+    assert "preventDefault" in html
+    assert "stopPropagation" in html

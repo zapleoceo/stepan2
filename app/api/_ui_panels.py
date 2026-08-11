@@ -101,14 +101,19 @@ def inbox_awaiting_badge_html(in_queue: int) -> str:
     looking for them on purpose; they just no longer ask to be looked at.
 
     Clicking swaps the thread list in place (htmx → #tl) instead of navigating: the badge polls
-    every 15s, and a full page load would throw away the open chat next to it."""
+    every 15s, and a full page load would throw away the open chat next to it.
+
+    preventDefault, не только stopPropagation. Бабл лежит ВНУТРИ <a href="/ui/inbox">, и
+    stopPropagation гасит лишь обработчики родителя — переход по ссылке это не обработчик, а
+    действие браузера по умолчанию, и оно всё равно срабатывало. Клик по числу открывал полный
+    список входящих, то есть ровно не то, что бабл считает."""
     if in_queue <= 0:
         return ""
     return (
         f'<span class="iaw iaw-q" title="{_h.escape(t("inbox.await_queue"))}"'
         ' hx-get="/ui/threads?awaiting=queue" hx-target="#tl" hx-swap="innerHTML"'
         ' hx-push-url="/ui/inbox?awaiting=queue"'
-        ' onclick="event.stopPropagation()">'
+        ' onclick="event.preventDefault();event.stopPropagation()">'
         f"{in_queue}</span>"
     )
 
