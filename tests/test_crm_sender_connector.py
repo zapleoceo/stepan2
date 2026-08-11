@@ -375,3 +375,55 @@ async def test_a_muted_connector_is_not_even_offered_for_generation(db_session) 
     invalidate(b.id)
 
     assert len(await threads_awaiting_reply(db_session, b.id)) == 1
+
+
+async def test_replies_being_off_is_a_configuration_not_a_delivery_failure(db_session) -> None:  # noqa: ANN001
+    """Выключенные ответы не должны усыплять лида.
+
+    11.08 на проде отказ «ответы выключены» дошёл до общей обработки ошибок отправки,
+    та посчитала его неустранимым сбоем доставки и увела ТРИ живых лида Джакарты в
+    dormant с выключенным агентом. Включение ответов их бы уже не разбудило — стадия
+    молчания переживает настройку.
+    """
+    from app.adapters.db.models import (  # noqa: PLC0415
+        AppSetting,
+        Branch,
+        Channel,
+        ChannelThread,
+        Lead,
+        Outbox,
+    )
+    from app.domain.enums import Stage  # noqa: PLC0415
+    from app.modules.conversation.outbox import OutboxSender  # noqa: PLC0415
+    from app.modules.settings.service import invalidate  # noqa: PLC0415
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind="crm_sender", is_active=True)
+    db_session.add(ch)
+    await db_session.flush()
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, agent_enabled=True)
+    db_session.add(lead)
+    await db_session.flush()
+    th = ChannelThread(lead_id=lead.id, channel_id=ch.id, external_thread_id="c-1",
+                       last_in_at=datetime(2026, 8, 11, 7, 0, 0))
+    db_session.add(th)
+    await db_session.flush()
+    db_session.add(Outbox(branch_id=b.id, thread_id=th.id, text="halo",
+                          status="pending", source="agent",
+                          scheduled_at=datetime(2026, 8, 11, 7, 1, 0)))
+    for k, v in {"sender_enabled": "false", "quiet_start": "0", "quiet_end": "0",
+                 "hourly_cap": "0", "daily_cap": "0"}.items():
+        db_session.add(AppSetting(branch_id=b.id, key=k, value=v))
+    await db_session.flush()
+    invalidate(b.id)
+
+    port = CrmSenderAdapter(db_session, _Mcp(), TENANT, replies_enabled=False)
+    row = await OutboxSender(db_session, b.id, port).send_next(th.id)
+
+    assert row is not None
+    assert row.status == "skipped", "не failed: это настройка, а не сбой доставки"
+    refreshed = await db_session.get(Lead, lead.id)
+    assert refreshed.stage == Stage.QUALIFYING, "лида нельзя усыплять за выключённый канал"
+    assert refreshed.agent_enabled is True

@@ -145,6 +145,22 @@ class OutboxSender:
         # name into its own outbox rows and into the reason an operator reads on the thread.
         # window_until is written for every kind by ingest; only the rule was Meta-specific.
         spec = spec_for(getattr(self.channel, "kind", None))
+        # Коннектору запрещено отвечать настройкой филиала — это КОНФИГУРАЦИЯ, а не сбой.
+        #
+        # Разница не косметическая. Отказ, дошедший до общей обработки ошибок ниже, считается
+        # неустранимым сбоем доставки и усыпляет лида с выключением агента — 11.08 так уехали
+        # в dormant три живых лида Джакарты, и включение ответов их бы уже не разбудило:
+        # стадия молчания переживает настройку, которая её вызвала.
+        # Здесь строка просто пропускается: тред не трогаем, стадию не меняем, таймер жив.
+        if (spec is not None and spec.replies_setting and row.source != "manager"
+                and not getattr(cfg, spec.replies_setting, False)):
+            row.status = "skipped"
+            row.error = f"{spec.replies_setting} is off"
+            self.session.add(row)
+            await self.session.flush()
+            logger.info("outbox skip branch=%d thread=%d: %s replies are off",
+                        self.branch_id, thread_id, spec.label)
+            return row
         window = spec.send_window if spec is not None else None
         if (spec is not None and window is not None
                 and row.source != "manager"
