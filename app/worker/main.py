@@ -25,7 +25,7 @@ from app.adapters.notify.telegram import TelegramNotifier
 from app.config import settings
 from app.connectors.registry import spec_for, supports
 from app.connectors.spec import Capability
-from app.domain.enums import SessionStatus
+from app.domain.enums import ChannelKind, SessionStatus
 from app.modules.conversation.followup import FollowupService
 from app.modules.conversation.outbox import OutboxSender
 from app.modules.conversation.reactivation import ReactivationService
@@ -202,14 +202,23 @@ async def _healthy(session: AsyncSession, branch_id: int, channel: Channel, port
         "ACCOUNT CHECKPOINT branch=%d channel=%s status=%s — frozen until re-login",
         branch_id, channel.id, status,
     )
-    if flipped:
+    # Морозим всегда, а вот кричать — не всегда. У WhatsApp есть свой наблюдатель
+    # (wa_watch, раз в 5 минут): он ждёт 15 минут прежде чем звать человека, потому что
+    # отвязка телефона на пару минут — обычное дело, и сам же тихо возвращает сессию, когда
+    # она починилась. Здесь окна ожидания нет, поэтому 11.08.2026 «WA Citra» получил
+    # «требует ре-логина» на моргании: к моменту, когда Дима открыл настройки, коннектор уже
+    # был живой и страница честно показывала «активно». Тревога, которую нельзя сверить с
+    # интерфейсом, учит не верить тревогам.
+    if flipped and channel.kind != ChannelKind.WHATSAPP:
         cfg = await get_settings(session, branch_id)
         notifier = _build_notifier(cfg)
         if notifier is not None:
+            kind = str(getattr(channel.kind, "value", channel.kind)).upper()
+            who = channel.handle or channel.id
             try:
                 await notifier.send(  # channel-level alert → group General, no per-lead topic
-                    text=(f"⚠️ IG channel {channel.handle or channel.id} needs re-login\n"
-                          f"IG-канал {channel.handle or channel.id} требует ре-логина"),
+                    text=(f"⚠️ {kind} channel {who} needs re-login\n"
+                          f"Коннектор {kind} «{who}» требует ре-логина"),
                 )
             except Exception:
                 logger.warning("checkpoint alert failed channel %s", channel.id)

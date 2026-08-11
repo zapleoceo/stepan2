@@ -58,3 +58,74 @@ async def test_adapter_maps_challenge_health() -> None:
         == SessionStatus.CHALLENGE
     assert await InstagramAdapter(_T("ok"), handle="acc").session_status() \
         == SessionStatus.ACTIVE
+
+
+# ── кто имеет право звать человека ────────────────────────────────────────────
+
+
+class _Notifier:
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    async def send(self, text: str, **_kw: object) -> None:
+        self.sent.append(text)
+
+
+class _Port:
+    def __init__(self, status: SessionStatus) -> None:
+        self._s = status
+
+    async def session_status(self) -> SessionStatus:
+        return self._s
+
+
+async def _frozen(db_session, kind: ChannelKind, notifier: _Notifier) -> bool:  # noqa: ANN001
+    import app.worker.main as wm
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=kind, handle="WA Citra" if kind == ChannelKind.WHATSAPP
+                 else "ig_acc")
+    db_session.add(ch)
+    await db_session.flush()
+    db_session.add(ChannelSession(channel_id=ch.id, secret_enc=encrypt('{"x":1}'),
+                                  status=SessionStatus.ACTIVE))
+    await db_session.flush()
+    orig = wm._build_notifier  # noqa: SLF001
+    wm._build_notifier = lambda _cfg: notifier  # noqa: SLF001
+    try:
+        return await wm._healthy(  # noqa: SLF001
+            db_session, b.id, ch, _Port(SessionStatus.EXPIRED))
+    finally:
+        wm._build_notifier = orig  # noqa: SLF001
+
+
+async def test_a_whatsapp_blip_freezes_but_stays_quiet(db_session) -> None:  # noqa: ANN001
+    """11.08.2026: «WA Citra» прислал «требует ре-логина» на моргании сессии. Пока Дима
+    открывал настройки, wa_watch уже вернул коннектор — страница показывала «активно», и
+    сверить тревогу с интерфейсом было нельзя.
+
+    У WhatsApp свой наблюдатель: он ждёт 15 минут прежде чем звать человека и сам тихо
+    возвращает починившуюся сессию. Здесь окна ожидания нет, поэтому здесь и не кричим —
+    но морозим, чтобы не долбиться в мёртвую сессию."""
+    notifier = _Notifier()
+
+    healthy = await _frozen(db_session, ChannelKind.WHATSAPP, notifier)
+
+    assert healthy is False  # заморозка остаётся
+    assert notifier.sent == []  # а тревога — дело wa_watch
+
+
+async def test_instagram_still_shouts_and_names_itself_right(db_session) -> None:  # noqa: ANN001
+    """У Instagram своего наблюдателя нет, значит этот алерт — единственный сигнал. И он
+    обязан называть коннектор своим именем: текст был захардкожен «IG channel» для всех
+    видов сразу, из-за чего воцап-номер представился инстаграмом."""
+    notifier = _Notifier()
+
+    healthy = await _frozen(db_session, ChannelKind.INSTAGRAM, notifier)
+
+    assert healthy is False
+    assert len(notifier.sent) == 1
+    assert "INSTAGRAM" in notifier.sent[0]
+    assert "ig_acc" in notifier.sent[0]
