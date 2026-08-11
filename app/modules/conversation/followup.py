@@ -26,7 +26,12 @@ from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
 from .free_mode import build_messages_free
 from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
-from .outreach import NO_OUTREACH_SQL, no_outreach_param
+from .outreach import (
+    CLOSED_WINDOW_SQL,
+    NO_OUTREACH_SQL,
+    closed_window_param,
+    no_outreach_param,
+)
 from .repository import (
     CoachingNoteRepo,
     DossierRepo,
@@ -115,6 +120,7 @@ _FOLLOWUP_Q = (
     "   AND NOT EXISTS (SELECT 1 FROM outbox o"
     "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
     + NO_OUTREACH_SQL
+    + CLOSED_WINDOW_SQL
 )
 
 
@@ -157,7 +163,7 @@ class FollowupService:
             return []  # branch global OFF: no generation at all
         rows = (
             await self.session.execute(
-                text(_FOLLOWUP_Q).bindparams(no_outreach_param()),
+                text(_FOLLOWUP_Q).bindparams(no_outreach_param(), closed_window_param()),
                 {"bid": self.branch_id, "now": now, "on": True},
             )
         ).all()

@@ -636,3 +636,58 @@ async def test_a_blocked_lead_gets_no_nudge(db_session) -> None:  # noqa: ANN001
     await db_session.flush()
 
     assert await _svc(db_session, bid, FakeLLM()).run() == 0
+
+
+# ─── окно мессенджера на этапе ОТБОРА, а не отправки ──────────────────────────
+
+async def _windowed_world(s, *, kind: ChannelKind, window_open: bool):  # noqa: ANN001, ANN202
+    """Тред с истёкшим или живым окном на заданном коннекторе."""
+    branch = Branch(name="T", lang="id")
+    s.add(branch)
+    await s.flush()
+    for k, v in {"followup_enabled": "true", "quiet_start": "0", "quiet_end": "0",
+                 "hourly_cap": "0", "daily_cap": "0"}.items():
+        s.add(AppSetting(branch_id=branch.id, key=k, value=v))
+    ch = Channel(branch_id=branch.id, kind=kind)
+    s.add(ch)
+    await s.flush()
+    lead = Lead(branch_id=branch.id, stage=Stage.QUALIFYING, agent_enabled=True)
+    s.add(lead)
+    await s.flush()
+    s.add(ChannelThread(
+        lead_id=lead.id, channel_id=ch.id, external_thread_id="t-1",
+        last_out_at=_NOW - timedelta(hours=5), last_in_at=_NOW - timedelta(hours=30),
+        next_followup_at=_NOW - timedelta(minutes=1),
+        window_until=_NOW + timedelta(hours=1) if window_open else _NOW - timedelta(hours=6),
+    ))
+    await s.flush()
+    invalidate(branch.id)
+    return branch.id
+
+
+async def test_a_nudge_is_not_even_composed_once_the_window_shut(db_session) -> None:
+    """Отправка и так отказывала — но текст к тому моменту уже сочинён и оплачен.
+
+    На коннекторе с окном расписание по умолчанию `1,4,24,120` двумя шагами из четырёх
+    выходит за окно by construction: часы считаются от НАШЕГО ответа, а окно — от сообщения
+    ЛИДА. Значит эти два шага генерировались и выбрасывались каждый раз, на каждом треде.
+    """
+    bid = await _windowed_world(db_session, kind=ChannelKind.CRM_SENDER, window_open=False)
+
+    assert await _svc(db_session, bid).due_threads(_NOW) == []
+
+
+async def test_the_same_thread_is_due_while_its_window_is_open(db_session) -> None:
+    """Обратная половина: фильтр не должен вырезать живые треды."""
+    bid = await _windowed_world(db_session, kind=ChannelKind.CRM_SENDER, window_open=True)
+
+    assert len(await _svc(db_session, bid).due_threads(_NOW)) == 1
+
+
+async def test_a_connector_without_a_window_is_untouched_by_the_filter(db_session) -> None:
+    """`window_until` пишется ингестом для ВСЕХ коннекторов, но отказ вне его — свойство
+    площадки, и объявляет его коннектор. Инстаграм не объявляет: закрытое окно там ничего
+    не значит, и фолоап обязан остаться."""
+    bid = await _windowed_world(db_session, kind=ChannelKind.INSTAGRAM, window_open=False)
+
+    assert len(await _svc(db_session, bid).due_threads(_NOW)) == 1

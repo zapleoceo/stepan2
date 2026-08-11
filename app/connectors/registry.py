@@ -81,3 +81,13 @@ def non_outreach_kinds() -> tuple[str, ...]:
     carry, so "every connector does outreach" reads as "exclude nothing"."""
     kinds = tuple(s.kind.value for s in REGISTRY.values() if not s.proactive_outreach)
     return kinds or ("",)
+
+
+def windowed_kinds() -> tuple[str, ...]:
+    """Kind values whose connector is REFUSED outside the platform's messaging window.
+
+    The window itself is written for every kind (thread.window_until); being refused outside it
+    is what differs. Same sentinel rule as above — an empty IN list is a SQL hole, so "nobody
+    has a window" has to read as "match no row"."""
+    kinds = tuple(s.kind.value for s in REGISTRY.values() if s.send_window is not None)
+    return kinds or ("",)
