@@ -439,3 +439,24 @@ async def test_replies_being_off_is_a_configuration_not_a_delivery_failure(db_se
     refreshed = await db_session.get(Lead, lead.id)
     assert refreshed.stage == Stage.QUALIFYING, "лида нельзя усыплять за выключённый канал"
     assert refreshed.agent_enabled is True
+
+
+def test_the_conversation_id_is_never_taken_for_a_message_id() -> None:
+    """Их conversation_send отвечает ресурсом РАЗГОВОРА, а не сообщения.
+
+    Его `id` — это chat_id, который мы сами и послали запросом: одинаковый для всех
+    сообщений чата. Приняв его за ссылку на сообщение, отправитель писал его в
+    message.external_id, и ВТОРОЙ ответ в том же диалоге ложился на уникальный индекс
+    (channel_id, external_id) — падала вся транзакция отправки, а не одна строка.
+    Живой ответ 11.08 по чатам 97830 и 195533.
+    """
+    from app.adapters.sender_mcp import _ref_of  # noqa: PLC0415
+
+    # Ровно то, что вернул живой сервер: разговор, а не сообщение.
+    conversation = {"id": 97830, "conversation_id": "380684592151", "user_id": 59122,
+                    "branch_id": 435, "last_message": "Хелло"}
+    assert _ref_of(conversation) is None, "chat_id — не идентификатор сообщения"
+
+    # Настоящий идентификатор сообщения, если он когда-нибудь появится, берём.
+    assert _ref_of({"external_id": "wamid.ABC", "id": 97830}) == "wamid.ABC"
+    assert _ref_of({"message_id": 55, "id": 97830}) == "55"

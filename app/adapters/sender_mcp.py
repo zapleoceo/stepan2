@@ -53,14 +53,20 @@ def kiev_window(since: datetime, until: datetime) -> tuple[str, str]:
 def _ref_of(payload: object) -> str | None:
     """Идентификатор, по которому потом найдётся отчёт о доставке.
 
-    Их ответ — ресурс разговора; чем именно назван идентификатор сообщения, в документе не
-    сказано, поэтому берём первый из вероятных. Не нашли — не выдумываем: строка останется
-    `queued` без ссылки, и это увидит sweep просроченных, а не тихо превратится в «отправлено».
+    Только поля, которые называют СООБЩЕНИЕ. `id` в список не входит, хотя выглядит
+    подходяще: их `conversation_send` отвечает ресурсом РАЗГОВОРА, и его `id` — это тот самый
+    chat_id, который мы послали запросом. Он одинаков для всех сообщений чата, поэтому второй
+    ответ в том же диалоге ложился на уникальный индекс message(channel_id, external_id) и
+    валил транзакцию отправки целиком (11.08, чаты 97830 и 195533).
+
+    Не нашли — не выдумываем: у отправителя есть свой запасной ключ (`out-<id>` строки
+    очереди), а строка останется `queued` без ссылки, и это увидит sweep просроченных,
+    а не тихо превратится в «отправлено».
     """
     if not isinstance(payload, dict):
         return None
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-    for key in ("external_id", "message_id", "id", "messageId"):
+    for key in ("external_id", "message_id", "messageId"):
         value = data.get(key)
         if value not in (None, ""):
             return str(value)
