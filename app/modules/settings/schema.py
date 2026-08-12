@@ -127,14 +127,14 @@ SCHEMA: list[SettingSection] = [
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [
         _f("followup_enabled", "bool", "false",
            _l("Включить фолоап", "Enable follow-up", "Aktifkan"), width="130px",
-           scope="channel", needs_outreach=True),
+           scope="channel", needs_outreach=True, branch_admin=True),
         _f("followup_schedule_h", "text", "1,4,24,120",
            _l("Расписание (часы)", "Schedule (hours)", "Jadwal (jam)"),
            ph=_l("1,4,24,120", "1,4,24,120", "1,4,24,120"),
            help=_l("Часы после ответа, через запятую. У Meta окно ~24ч — ставьте короче",
                    "Hours after reply, comma-separated. Meta's window is ~24h — use shorter",
                    "Jam setelah balasan, pisah koma. Jendela Meta ~24 jam — pakai lebih pendek"),
-           width="170px", scope="channel", needs_outreach=True),
+           width="170px", scope="channel", needs_outreach=True, branch_admin=True),
         _f("reactivation_enabled", "bool", "false",
            _l("Реактивация спящих", "Reactivate dormant", "Aktifkan kembali"), width="150px",
            help=_l("Один персональный заход к уснувшим лидам (3-21 дн.), по их же диалогу",
@@ -297,12 +297,26 @@ def field_for(key: str) -> SettingField | None:
     return next((f for f in all_fields() if f.key == key), None)
 
 
-def sections_for_scope(scope: str) -> list[SettingSection]:
+def may_edit(field: SettingField, *, is_super: bool) -> bool:
+    """Может ли эта роль менять это поле. Супер-админ — всё; остальным только отмеченное.
+
+    Запрет по умолчанию, а не список запрещённого: на панели лежат системный токен Meta,
+    ключи CRM и sender, дневной бюджет и рубильник бота, и новая настройка не должна
+    открываться менеджеру просто потому, что кто-то забыл про флаг."""
+    return is_super or field.branch_admin
+
+
+def sections_for_scope(scope: str, *, branch_admin_only: bool = False) -> list[SettingSection]:
     """Sections keeping only the fields of the given scope, dropping now-empty sections —
-    lets the branch panel and the per-connector editor render from the same SCHEMA."""
+    lets the branch panel and the per-connector editor render from the same SCHEMA.
+
+    branch_admin_only оставляет ещё и те поля, которые разрешены админу филиала. Остальное на
+    этой панели — не «настройки филиала», а устройство самого Степана: системный токен Meta,
+    ключи CRM и sender, дневной бюджет, антибан-лимиты, рубильник бота."""
     out: list[SettingSection] = []
     for sec in SCHEMA:
-        kept = [f for f in sec.fields if f.scope == scope]
+        kept = [f for f in sec.fields
+                if f.scope == scope and (f.branch_admin or not branch_admin_only)]
         if kept:
             out.append(SettingSection(sec.icon, sec.title, kept))
     return out

@@ -65,7 +65,7 @@ from ._ui_panels import (
     outbox_panel_html,
     reports_panel_html,
 )
-from ._ui_settings import field_html, settings_form_html
+from ._ui_settings import connector_settings_html, field_html, settings_form_html
 
 router = APIRouter()
 
@@ -434,10 +434,25 @@ async def settings_panel(request: Request) -> HTMLResponse:
         # am I looking at?" has to be answerable without leaving the screen.
         named = (await session.execute(
             text("SELECT name FROM branch WHERE id = :b"), {"b": branch_id})).first()
+        # Настройки коннекторов теперь и здесь, а не только в «Филиалах» → канал. Тот пункт
+        # закрыт супер-админом намеренно (заведение филиалов — платформенное действие), и
+        # настройки коннектора попали под тот же замок за компанию: пять админов филиала
+        # Индонезии не могли поменять расписание фолоапов, хотя право на запись у них есть.
+        # Форма подключения сюда не входит — настроить, а не подключить или отключить.
+        chans = [(r[0], r[1], r[2] or "") for r in (await session.execute(
+            text("SELECT id, kind, handle FROM channel"
+                 " WHERE branch_id = :b AND is_active = true ORDER BY id"),
+            {"b": branch_id})).all()]
+        per_channel = {
+            ch_id: await SettingRepo(session).load_all(branch_id, ch_id)
+            for ch_id, _kind, _handle in chans}
+    branch_admin_only = not is_super_admin(request)
     # Anti-ban caps moved to the per-connector editor (with a per-channel live-usage badge),
     # so the branch panel no longer shows or computes them.
     return HTMLResponse(settings_form_html(
-        {k: v for k, v in rows}, lang, branch_name=named[0] if named else ""))
+        {k: v for k, v in rows}, lang, branch_name=named[0] if named else "",
+        connectors_html=connector_settings_html(chans, per_channel, lang, branch_admin_only),
+        branch_admin_only=branch_admin_only))
 
 
 
@@ -479,6 +494,11 @@ async def settings_save_by_key(
     field = settings_schema.field_for(key)
     if field is None:
         return HTMLResponse("", status_code=400)
+    # Скрыть поле в интерфейсе — не право, а оформление: маршрут дёргается напрямую. Всё, что
+    # не отмечено как филиальное, остаётся за супер-админом, потому что на этой же панели
+    # лежат системный токен Meta, ключи CRM и sender, дневной бюджет и рубильник бота.
+    if not settings_schema.may_edit(field, is_super=is_super_admin(request)):
+        return HTMLResponse("", status_code=403)
     # A connector write must target a channel-scope field, and channel_id must belong to a
     # branch the caller can write — reuse the channel-branch ownership guard (blocks IDOR).
     if channel_id is not None and field.scope != "channel":
