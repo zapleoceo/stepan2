@@ -169,6 +169,8 @@ _TR: dict[str, dict[str, str]] = {
     "set.saved":    {"ru": "✓",         "en": "✓",             "id": "✓"},
     "set.autosave": {"ru": "сохраняется автоматически", "en": "saves automatically",
                      "id": "tersimpan otomatis"},
+    "set.connectors": {"ru": "Настройки коннекторов", "en": "Connector settings",
+                       "id": "Pengaturan konektor"},
     "set.cap_reached": {"ru": "лимит исчерпан, отправка на паузе",
                         "en": "cap reached, sends paused", "id": "batas tercapai, jeda kirim"},
     # help overlay

@@ -188,6 +188,8 @@ def settings_form_html(
     values: dict[str, str], lang: str,
     cap_usage: dict[str, tuple[int, int]] | None = None,
     branch_name: str = "",
+    connectors_html: str = "",
+    branch_admin_only: bool = False,
 ) -> str:
     """Full settings panel: every schema section rendered with current values. `cap_usage`
     (e.g. {"hourly_cap": (used, cap)}) shows a live badge under the anti-ban limit fields —
@@ -212,8 +214,14 @@ def settings_form_html(
     ) if branch_name else ""
     # Branch panel shows only branch-scoped settings; connector-scoped ones (follow-ups,
     # anti-ban caps, phone code, Meta) live in the per-channel editor (Филиалы → канал).
+    #
+    # Админу филиала филиальных ключей не показываем вовсе: здесь лежат ключи CRM и sender,
+    # дневной бюджет в долларах, Telegram-группа уведомлений и рубильник бота на весь филиал —
+    # это устройство самого Степана, а не настройки филиала. Скрытие идёт в пару к запрету на
+    # маршруте сохранения (settings_save_by_key): одно оформление без второго — не право.
     body = "".join(
-        _section_html(sec, values, lang, cap_usage) for sec in S.sections_for_scope("branch"))
+        _section_html(sec, values, lang, cap_usage)
+        for sec in S.sections_for_scope("branch", branch_admin_only=branch_admin_only))
     # checkbox group → recompute the comma-list into the hidden input, then fire its autosave
     script = (
         '<script>function multiSave(cb){var g=cb.closest(".multi-grp");'
@@ -230,7 +238,46 @@ def settings_form_html(
         f'· {autosave}</span></div>'
         f'<div class="pnl-body" style="max-width:1400px">'
         f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));'
-        f'gap:.8rem;align-items:start">{body}</div></div>'
+        f'gap:.8rem;align-items:start">{body}</div>{connectors_html}</div>'
+    )
+
+
+def connector_settings_html(
+    channels: list[tuple[int, str, str]], values_by_channel: dict[int, dict[str, str]],
+    lang: str, branch_admin_only: bool,
+) -> str:
+    """Настройки коннекторов прямо в разделе «Настройки», по блоку на коннектор.
+
+    Раньше их можно было открыть только через «Филиалы» → канал, а этот пункт меню закрыт
+    супер-админом намеренно: заведение и правка филиалов — платформенное действие. Настройки
+    коннектора попали туда за компанию, и из-за этого пять админов филиала Индонезии не могли
+    поменять расписание фолоапов, хотя право на запись у них есть и маршрут сохранения его
+    признаёт (проверяет writable_branch_ids и владение каналом).
+
+    Форма ПОДКЛЮЧЕНИЯ (channel_edit_form_html — хэндл, аккаунт, вкл/выкл, спаривание) сюда
+    сознательно не входит: менеджеру нужно настроить коннектор, а не подключить или отключить
+    его."""
+    from app.api._i18n import t  # noqa: PLC0415
+
+    blocks = []
+    for ch_id, kind, handle in channels:
+        inner = channel_settings_html(kind, values_by_channel.get(ch_id, {}), lang, ch_id,
+                                      branch_admin_only=branch_admin_only)
+        if not inner:
+            continue  # коннектор, у которого нечего показывать этой роли
+        name = _h.escape(handle or _h.escape(kind))
+        blocks.append(
+            f'<div style="margin-top:1rem"><div style="font-weight:600;color:#e8eef4;'
+            f'font-size:.82rem;margin-bottom:.35rem">{name}'
+            f'<span style="color:#5f6b78;font-weight:400;margin-left:.4rem">· {kind}</span>'
+            f'</div>{inner}</div>')
+    if not blocks:
+        return ""
+    title = _h.escape(t("set.connectors"))
+    return (
+        f'<div style="margin-top:1.4rem"><div style="font-weight:600;color:#e8eef4;'
+        f'font-size:.9rem;border-top:1px solid #2d3748;padding-top:.9rem">{title}</div>'
+        f'{"".join(blocks)}</div>'
     )
 
 
@@ -257,13 +304,17 @@ def _field_for_kind(f: S.SettingField, kind: str) -> bool:
 def channel_settings_html(
     kind: str, values: dict[str, str], lang: str, channel_id: int,
     cap_usage: dict[str, tuple[int, int]] | None = None,
+    branch_admin_only: bool = False,
 ) -> str:
     """Per-connector settings block for the channel editor: the scope='channel' sections,
     each field autosaving to app_setting(branch_id, channel_id, key). Meta fields are hidden
     on non-Meta connectors. `cap_usage` shows the per-channel live anti-ban usage badge.
-    Reuses the same field renderer as the branch panel (DRY)."""
+    Reuses the same field renderer as the branch panel (DRY).
+
+    branch_admin_only оставляет только разрешённые админу филиала поля — тот же блок служит
+    и редактору коннектора у супер-админа, и разделу «Настройки» у менеджера филиала."""
     cards = []
-    for sec in S.sections_for_scope("channel"):
+    for sec in S.sections_for_scope("channel", branch_admin_only=branch_admin_only):
         kept = S.SettingSection(
             sec.icon, sec.title,
             [f for f in sec.fields if not f.hidden and _field_for_kind(f, kind)])

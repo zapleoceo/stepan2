@@ -36,6 +36,14 @@ class SettingField:
     # sprawl the registry exists to end.
     capability: str | None = None   # Capability value the connector must declare
     needs_outreach: bool = False    # only where the bot may write to a silent lead
+    # Видит и меняет ли это админ филиала. По умолчанию НЕТ, и это осознанный запрет по
+    # умолчанию: на панели лежат системный токен Meta, ключи CRM и sender, дневной бюджет в
+    # долларах, антибан-лимиты и рубильник бота на весь филиал. Новая настройка не должна
+    # становиться доступной менеджеру просто потому, что кто-то забыл про этот флаг.
+    #
+    # Разрешение даётся по одному полю, а не по разделу: в «Фолоапе» соседствуют расписание
+    # касаний (дело филиала) и еженедельный аудит обучения с реактивацией (наши механизмы).
+    branch_admin: bool = False
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,7 @@ def setting(
     ph: I18n | None = None, help: I18n | None = None, width: str = "120px",
     hidden: bool = False, choices: list[tuple[str, I18n]] | None = None,
     scope: str = "branch", capability: str | None = None, needs_outreach: bool = False,
+    branch_admin: bool = False,
 ) -> SettingField:
     return SettingField(key, kind, default, label, ph, help, width, hidden, choices, scope,
-                        capability, needs_outreach)
+                        capability, needs_outreach, branch_admin)
