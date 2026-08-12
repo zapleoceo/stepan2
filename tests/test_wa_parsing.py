@@ -100,11 +100,14 @@ def test_non_text_bubbles_are_recorded_as_media(body: dict, kind: str | None) ->
     assert _wa_media_kind(body) == kind
 
 
-def test_a_voice_note_is_media_even_though_it_has_no_text() -> None:
+def test_a_voice_note_is_media_and_says_so_in_the_text() -> None:
+    """Раньше текст оставался пустым, и расшифровка читалась как молчание — ровно то, на что
+    жаловался комментарий выше. Теперь на месте голосового стоит маркер: файла Evolution всё
+    равно не отдаёт, но видно, что человек что-то прислал."""
     out = _wa_message({"key": {"remoteJid": "62811@s", "fromMe": True},
                        "message": {"audioMessage": {"seconds": 30}}})
     assert out["media_kind"] == "audio"
-    assert out["text"] == ""
+    assert "voice" in out["text"]
     assert out["direction"] == "out"
 
 
@@ -225,3 +228,54 @@ def test_our_own_account_name_is_never_written_onto_the_lead() -> None:
     out = _wa_message({"key": {"remoteJid": "1@lid", "fromMe": True},
                        "pushName": "Academy It Step", "message": {"conversation": "baik"}})
     assert out["sender_name"] is None
+
+
+# ── медиа без подписи ─────────────────────────────────────────────────────────
+
+
+def test_media_without_a_caption_gets_a_marker_not_an_empty_bubble() -> None:
+    """Evolution не умеет отдавать сам файл (download_media есть у Instagram и Meta, у него
+    нет), поэтому запись выходила пустой: ни текста, ни вложения, ни заявки на загрузку. На
+    12.08.2026 таких входящих 107 — 5% личных переписок и 26% групповых, — и в чате на их
+    месте пусто. Тред 6527: десять сообщений из девятнадцати без единого символа."""
+    from app.adapters.channels.transports import _wa_text_or_marker
+
+    assert "voice" in _wa_text_or_marker({"audioMessage": {}})
+    assert "image" in _wa_text_or_marker({"imageMessage": {}})
+    assert "image" in _wa_text_or_marker({"videoMessage": {}})
+
+
+def test_a_caption_wins_over_the_marker() -> None:
+    from app.adapters.channels.transports import _wa_text_or_marker
+
+    assert _wa_text_or_marker({"imageMessage": {"caption": "ini bukti transfer"}}) \
+        == "ini bukti transfer"
+
+
+def test_a_shape_with_no_text_and_no_media_stays_empty() -> None:
+    """Маркер только там, где реально пришло содержимое. Пустое остаётся пустым."""
+    from app.adapters.channels.transports import _wa_text_or_marker
+
+    assert _wa_text_or_marker({"protocolMessage": {}}) == ""
+    assert _wa_text_or_marker({}) == ""
+
+
+def test_the_marker_never_freezes_the_thread() -> None:
+    """reply._awaiting_media держит ход, пока последнее входящее ДОСЛОВНО равно заглушке
+    ожидания. Файла для распознавания здесь не будет никогда, так что совпадение с ними
+    заморозило бы тред навсегда — маркеры обязаны отличаться."""
+    from app.adapters.channels.ig_parse import IMAGE_PENDING_PH, VOICE_PENDING_PH
+    from app.adapters.channels.transports import _WA_MEDIA_UNREADABLE
+
+    assert IMAGE_PENDING_PH not in _WA_MEDIA_UNREADABLE.values()
+    assert VOICE_PENDING_PH not in _WA_MEDIA_UNREADABLE.values()
+
+
+def test_the_wording_matches_what_the_rest_of_the_system_already_says() -> None:
+    """Те же слова, что у медиа, которое не удалось распознать: контракт и интерфейс уже
+    знают эту формулировку, и расхождение развело бы два одинаковых по смыслу состояния."""
+    from app.adapters.channels.transports import _WA_MEDIA_UNREADABLE
+    from app.modules.media.service import _IMAGE_UNAVAILABLE, _VOICE_UNAVAILABLE
+
+    assert _WA_MEDIA_UNREADABLE["audio"] == _VOICE_UNAVAILABLE
+    assert _WA_MEDIA_UNREADABLE["image"] == _IMAGE_UNAVAILABLE

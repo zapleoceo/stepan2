@@ -548,6 +548,24 @@ _WA_TEXT_KEYS: tuple[tuple[str, str], ...] = (
     ("ephemeralMessage", ""),
 )
 
+# Что писать в текст, когда медиа пришло без подписи. Evolution не умеет отдавать сам файл
+# (download_media есть у Instagram и Meta, у него — нет), поэтому запись без маркера выходила
+# пустой: ни текста, ни вложения, ни заявки на загрузку. На 12.08.2026 таких 107 входящих —
+# 5% личных переписок WhatsApp и 26% групповых, — и в чате на их месте пусто. Инстаграм для
+# сравнения: 28 медиа за 30 дней, вложение у всех 28.
+#
+# Формулировки те же, что у медиа, которое не удалось распознать (media/service.py), и это
+# намеренно: система уже знает, что с ними делать — контракт велит честно сказать, что контент
+# не открывается, и попросить описать словами (строка 19 чеклиста). Брать заглушки ОЖИДАНИЯ
+# нельзя: reply._awaiting_media держит ход, пока последнее входящее равно им дословно, а файла
+# для распознавания здесь не будет никогда — тред замёрз бы навсегда.
+_WA_MEDIA_UNREADABLE: dict[str, str] = {
+    "audio": "🎤 (voice — no transcript)",
+    "image": "🖼 (image — tidak bisa dibaca)",
+    "video": "🖼 (image — tidak bisa dibaca)",
+    "document": "🖼 (image — tidak bisa dibaca)",
+}
+
 # Non-text bubbles we must still record. A voice note is where half an Indonesian sales
 # conversation lives; filing it as an empty string would read as silence in the transcript.
 _WA_MEDIA_KINDS: tuple[tuple[str, str], ...] = (
@@ -634,12 +652,22 @@ def _wa_message(raw: dict[str, Any]) -> dict[str, Any]:
         # our account's name, which must never be written onto the lead.
         "sender_name": None if from_me else (raw.get("pushName") or None),
         "sender_id": key.get("participant") or key.get("remoteJid", ""),
-        "text": _wa_text(message),
+        "text": _wa_text_or_marker(message),
         "message_timestamp": raw.get("messageTimestamp"),
         "external_id": key.get("id") or None,
         "direction": "out" if key.get("fromMe") else "in",
         "media_kind": _wa_media_kind(message),
     }
+
+
+def _wa_text_or_marker(message: Any) -> str:
+    """Подпись к медиа, а если её нет — маркер «пришло, прочитать не можем» (см.
+    _WA_MEDIA_UNREADABLE). Пустая строка остаётся только там, где и правда нечего показать."""
+    text = _wa_text(message)
+    if text.strip():
+        return text
+    kind = _wa_media_kind(message)
+    return _WA_MEDIA_UNREADABLE.get(kind or "", "")
 
 
 # Graph 400s the WHOLE request over one subfield it dislikes, and fetch_conversations turns
