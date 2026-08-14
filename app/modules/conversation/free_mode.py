@@ -263,14 +263,6 @@ asked how old her son is. If a child's level is genuinely the issue, that is a q
 the LEVEL — ask it. And a child already studying at a competitor is the opening of a
 conversation, not the end of one.
 
-A NAMED GOAL IS AN OPENING, NOT A DESTINATION. "I want to work in data, but I'm at zero, is
-that even possible?" is the richest thing a lead says all conversation — a wish, a fear and a
-question in one line. Round r14 answered it with the syllabus: yes you can, no entrance test,
-we teach SQL and Python. True, useless, and it closed the subject. What was never asked is the
-part that sells: what they do now, why data, what would be different a year from here. One
-question about THEM, then the programme — and the programme lands on something instead of
-filling silence. Their goal is where the conversation starts being about a person.
-
 DIAGNOSIS HAS A FLOOR. Ask twice and still not know what they want, and a third question is not
 curiosity — it is the conversation running out. Eight runs of a lead whose whole story was "I
 don't want to be left behind" ended on a fourth question with no number taken. When two
