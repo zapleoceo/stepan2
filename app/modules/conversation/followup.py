@@ -100,6 +100,31 @@ def followup_framing(attempt: int, total: int, refusal: str) -> str:
     return FOLLOWUP_FRAMING.format(
         n=attempt, total=total, refusal_note=_REFUSAL_NOTES.get(refusal, ""))
 
+# Одно и то же входящее, пришедшее снова и снова, — это не отклик.
+#
+# Тред 1421: собеседник оказался автоответчиком бизнес-аккаунта и трижды прислал дословно
+# «Terima kasih sudah mengirimi kami pesan. Kami akan menghubungi Anda sesegera mungkin».
+# Каждый раз это считалось откликом, будило спящего лида и запускало следующий нудж — шесть
+# наших сообщений в пустоту. Замер 14.08.2026 по филиалу 1: 47 тредов, 377 наших сообщений.
+#
+# Два порога, потому что повторы бывают двух пород. Свой текст трижды — человек нас не читает
+# либо отвечает робот (8 тредов, 99 сообщений). Повторный клик по рекламной кнопке — всё-таки
+# новый заход, человек нажал ещё раз, поэтому ему дают пять (39 тредов, 278 сообщений).
+# Шаблон узнаётся тем же началом строки, что и в signals.AD_TEMPLATE_RE.
+REPEATED_INBOUND_SQL = (
+    "   AND NOT EXISTS (SELECT 1 FROM message m WHERE m.thread_id = ct.id"
+    "        AND m.direction = 'in' AND length(m.text) > 20"
+    "        GROUP BY m.text"
+    # LIKE, а не регулярка: оператор ~* есть только в Postgres, а тесты идут на SQLite —
+    # на этом уже спотыкались с SET LOCAL lock_timeout. Якорь начала строки теряется, и
+    # это осторожная потеря: ложное совпадение лишь поднимает порог с трёх до пяти.
+    "        HAVING count(*) >= CASE WHEN max(CASE WHEN"
+    "             lower(m.text) LIKE '%ingin tahu detail program%'"
+    "          OR lower(m.text) LIKE '%ceritakan lebih detail tentang program%'"
+    "          OR lower(m.text) LIKE '%tertarik kursus%'"
+    "             THEN 1 ELSE 0 END) = 1 THEN 5 ELSE 3 END)"
+)
+
 # Due threads: bot spoke last (lead silent), timer matured, steps remain, nothing
 # already queued. Whitelist of stages the bot actively works (S1 ACTIVE_STAGES —
 # `new` is excluded: an untouched lead gets a live reply, not a nudge).
@@ -113,6 +138,9 @@ _FOLLOWUP_Q = (
     # reactivation both excluded them; nudges did not, so 57 messages went to blocked people
     # in 7 days — the one population where an unsolicited DM is pure ban risk and zero upside.
     "   AND l.is_blocked = false"
+    # Нецелевой — не сегмент для нуджей: реактивация его исключает с самого начала, а фолоапы
+    # нет, и 18 таких лидов остались в рабочих стадиях, продолжая получать касания.
+    "   AND coalesce(l.lead_type, '') <> 'non_target'"
     "   AND ct.next_followup_at IS NOT NULL"
     "   AND ct.next_followup_at <= :now"
     "   AND ct.last_out_at IS NOT NULL"
@@ -121,6 +149,7 @@ _FOLLOWUP_Q = (
     "        WHERE o.thread_id = ct.id AND o.status = 'pending')"
     + NO_OUTREACH_SQL
     + CLOSED_WINDOW_SQL
+    + REPEATED_INBOUND_SQL
 )
 
 

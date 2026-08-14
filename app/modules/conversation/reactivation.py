@@ -30,6 +30,7 @@ from .decision import generate
 from .delivery import _BUBBLE_GAP_S, _split_bubbles
 from .dossier import merge_dossier
 from .engine import DecisionEngine, _fmt_llm_meta
+from .followup import REPEATED_INBOUND_SQL
 from .free_mode import build_messages_free
 from .money_gate import money_issues
 from .outreach import NO_OUTREACH_SQL, no_outreach_param
@@ -111,6 +112,9 @@ _DUE_Q = (
     "   AND NOT (ct.lead_seen_at IS NOT NULL"
     "        AND (SELECT count(*) FROM message m WHERE m.thread_id = ct.id"
     "             AND m.direction = 'out' AND m.occurred_at > ct.lead_seen_at) >= 2)"
+    # То же, что у фолоапов: одно и то же входящее снова и снова — не отклик, а автоответчик
+    # или человек, который нас не читает. См. followup.REPEATED_INBOUND_SQL.
+    + REPEATED_INBOUND_SQL +
     "   AND (SELECT count(*) FROM stage_event se WHERE se.lead_id = l.id"
     "        AND se.reason = :reason) < :cap"
     "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"

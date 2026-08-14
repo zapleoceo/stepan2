@@ -481,6 +481,16 @@ class IngestService:
         with nothing anywhere recording that a human had intervened at all."""
         if lead.is_blocked or lead.agent_off_manual or lead.stage in HUMAN_LED_STAGES:
             return
+        # Нецелевого закрыли один раз — второй разговор ему не нужен. Он ищет работу, шутит
+        # или пришёл не туда; вежливое закрытие уже сказано, и любой следующий ход это спор с
+        # собственным решением. Замер 14.08.2026 по филиалу 1: 103 нецелевых лида были
+        # припаркованы, и после парковки им ушло ещё 168 сообщений — все через это оживление.
+        #
+        # Тред остаётся видимым и не заблокирован: если человек вдруг окажется целевым,
+        # менеджер включит бота руками, как и в любой другой ручной ситуации.
+        if (lead.lead_type or "") == "non_target":
+            logger.info("branch=%d lead=%d нецелевой — не оживляем", self.branch_id, lead.id)
+            return
         if lead.stage == Stage.DORMANT:
             self.session.add(StageEvent(
                 branch_id=self.branch_id, lead_id=lead.id, thread_id=thread.id,
