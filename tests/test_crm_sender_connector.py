@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 os.environ.setdefault("STEPAN2_DATABASE_URL", "sqlite+aiosqlite://")
 
@@ -374,9 +374,14 @@ async def test_a_muted_connector_is_not_even_offered_for_generation(db_session) 
     lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, agent_enabled=True)
     db_session.add(lead)
     await db_session.flush()
+    # Дата вычисляется, а не пишется буквой: threads_awaiting_reply берёт треды не старше
+    # awaiting_reply_max_age_days (трое суток), и зашитое «11 августа 2026» протухло ровно
+    # через три дня — 14.08 тест начал падать на ровном месте. Тест с истекающим сроком
+    # однажды остановит выкат по причине, к правке отношения не имеющей.
     db_session.add(ChannelThread(
         lead_id=lead.id, channel_id=ch.id, external_thread_id="c-1",
-        last_in_at=datetime(2026, 8, 11, 7, 0, 0), last_out_at=None))
+        last_in_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1),
+        last_out_at=None))
     await db_session.flush()
     invalidate(b.id)
 
