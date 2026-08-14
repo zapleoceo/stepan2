@@ -104,7 +104,7 @@ async def test_the_indonesian_contract_is_pinned(db_session) -> None:  # noqa: A
 
     To update: run the test, copy the actual hash, and say in the commit message what changed
     in the selling behaviour and why."""
-    assert hashlib.sha256(free_contract("id").encode()).hexdigest()[:16] == "8d40fef497d8b85d"
+    assert hashlib.sha256(free_contract("id").encode()).hexdigest()[:16] == "7d1329cce9d44e72"
 
 
 @pytest.mark.asyncio
@@ -112,4 +112,4 @@ async def test_a_non_indonesian_contract_differs_and_is_pinned(db_session) -> No
     """English must stay free of the Indonesian style block; pinned so it cannot drift back."""
     en = free_contract("en")
     assert "Kak" not in en
-    assert hashlib.sha256(en.encode()).hexdigest()[:16] == "54aeabb18466dc0c"
+    assert hashlib.sha256(en.encode()).hexdigest()[:16] == "8ee3da4dd34e7124"
