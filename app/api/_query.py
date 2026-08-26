@@ -100,11 +100,29 @@ _LEAD_SPOKE_LAST = (
 )
 
 
+# Канал переведён в режим чтения (настройка канала `replies_enabled`) — значит отвечать там
+# решили НЕ мы забыли, а мы сами. Бейдж «Степану надо ответить» обязан это учитывать: иначе он
+# просит действий, которых по определению не будет, и растёт молча. 26.08.2026 ровно так и
+# вышло: все 25 в бейдже филиала 1 висели на CRM Jakarta, где Степан только что замолчал.
+#
+# Отдельно от `manager_phone`: та галочка про ЛИДА (пришедший сюда человек — в руках
+# менеджера, стадия + тумблер), и из бейджа такие треды выпадают сами, через стадию. Эта — про
+# КАНАЛ. Отдельно и от `counts_as_awaiting`: та про ВИД коннектора и не зависит от настроек.
+#
+# Отсутствие строки = включено (так же читает _b в настройках), поэтому исключаем только те
+# каналы, где значение есть и оно не истинное.
+READ_ONLY_CHANNEL = (
+    " AND NOT EXISTS (SELECT 1 FROM app_setting s"
+    "      WHERE s.channel_id = ct.channel_id AND s.key = 'replies_enabled'"
+    "        AND lower(s.value) NOT IN ('true', '1', 'yes'))"
+)
+
+
 def awaiting_base() -> str:
     """Built per call rather than snapshotted into a module constant at import: a constant
     froze the registry as it stood when this module first loaded, and no test could then tell
     the derivation apart from a literal re-pasted at the routes that build the SQL."""
-    return _LEAD_SPOKE_LAST + awaiting_kind_sql(all_specs())
+    return _LEAD_SPOKE_LAST + awaiting_kind_sql(all_specs()) + READ_ONLY_CHANNEL
 IN_QUEUE_EXTRA = (
     "l.agent_enabled = true"
     " AND l.stage IN ('new', 'nurturing', 'qualifying', 'presenting', 'objection')"

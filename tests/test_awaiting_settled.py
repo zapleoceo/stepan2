@@ -84,3 +84,61 @@ def test_an_old_thread_falls_into_wont_reply_not_into_the_queue() -> None:
     queue = f"({awaiting_base()}) AND ({IN_QUEUE_EXTRA})"
     wont = f"({awaiting_base()}) AND NOT ({IN_QUEUE_EXTRA})"
     assert ":awaiting_cutoff" in queue and ":awaiting_cutoff" in wont
+
+
+async def _awaiting_badge(db_session, branch_id: int) -> int:  # noqa: ANN001
+    """То же число, что показывает бейдж инбокса."""
+    from sqlalchemy import text as _text  # noqa: PLC0415
+
+    from app.api._query import awaiting_cutoff  # noqa: PLC0415
+
+    row = (await db_session.execute(_text(
+        f"SELECT count(*) FILTER (WHERE NOT {SETTLED_EXTRA} AND {IN_QUEUE_EXTRA})"  # noqa: S608
+        " FROM channel_thread ct JOIN lead l ON l.id = ct.lead_id"
+        f" WHERE l.branch_id = :b AND {awaiting_base()}"),
+        {"b": branch_id, "awaiting_cutoff": awaiting_cutoff()})).first()
+    return int(row[0] or 0)
+
+
+async def test_a_read_only_channel_is_not_counted_as_awaiting(db_session) -> None:  # noqa: ANN001
+    """Канал в режиме чтения не должен просить ответов, которых не будет.
+
+    Бейдж считает «бот включён и стадия рабочая». Для менеджерских вотсапов этого хватает:
+    галочка «личный номер» уводит лида в стадию manager с выключенным тумблером, и тред
+    выпадает сам. Но режим чтения — про КАНАЛ, а не про лида: лид остаётся в рабочей стадии
+    с включённым ботом, и без этого условия бейдж копил бы требования к каналу, где Степан
+    молчит по нашему же решению. 26.08.2026 так и было: все 25 в бейдже филиала 1 висели на
+    CRM Jakarta ровно после перевода его в режим чтения.
+    """
+    from datetime import UTC, datetime, timedelta  # noqa: PLC0415
+
+    from app.adapters.db.models import (  # noqa: PLC0415
+        AppSetting,
+        Branch,
+        Channel,
+        ChannelThread,
+        Lead,
+    )
+    from app.domain.enums import Stage  # noqa: PLC0415
+
+    fresh = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    loud = Channel(branch_id=b.id, kind="instagram", is_active=True)
+    quiet = Channel(branch_id=b.id, kind="crm_sender", is_active=True)
+    db_session.add(loud)
+    db_session.add(quiet)
+    await db_session.flush()
+    db_session.add(AppSetting(branch_id=b.id, key="replies_enabled",
+                              value="false", channel_id=quiet.id))
+    for ch in (loud, quiet):
+        lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, agent_enabled=True)
+        db_session.add(lead)
+        await db_session.flush()
+        db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch.id,
+                                     external_thread_id=f"t-{ch.id}",
+                                     last_in_at=fresh, last_out_at=None))
+    await db_session.flush()
+
+    assert await _awaiting_badge(db_session, b.id) == 1, "считаться должен только живой канал"
