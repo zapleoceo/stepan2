@@ -291,7 +291,7 @@ class Settings(BaseSettings):
                                    "at 8000 the longest threads (12.8k chars in their newest "
                                    "30 messages) still lost their opening")
     free_context_char_budget: int = Field(
-        default=104000, description="char ceiling on the FULL KB surface sent in free reply "
+        default=115000, description="char ceiling on the FULL KB surface sent in free reply "
                                    "mode (persona + all facts docs + the whole objection "
                                    "playbook + every product card). Sized for the strong "
                                    "chat:sales models; the block is a byte-stable prompt "
@@ -301,7 +301,13 @@ class Settings(BaseSettings):
                                    "actually sell — was being dropped whole. The ceiling is a "
                                    "defensive backstop, not a model limit; ~104k chars is "
                                    "~29k tokens, which the sales models take comfortably, and "
-                                   "a cache hit pays for the prefix once")
+                                   "a cache hit pays for the prefix once. Raised again from "
+                                   "104000 on 11.08.2026 for the same reason: the assembled "
+                                   "surface stood at 103.8k with 173 chars to spare, and the "
+                                   "AI Assistant card was about to grow by 5.1k (the Finance "
+                                   "category). Cards are ordered by slug, so the tail that "
+                                   "would have been dropped was vibe_coding — the flagship — "
+                                   "and its demo event")
     knowledge_context_char_budget: int = Field(
         default=28000, description="char ceiling on the assembled KB context (persona + policy/"
                                    "market facts + the full focus card + the facts catalog). "
