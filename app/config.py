@@ -291,7 +291,7 @@ class Settings(BaseSettings):
                                    "at 8000 the longest threads (12.8k chars in their newest "
                                    "30 messages) still lost their opening")
     free_context_char_budget: int = Field(
-        default=115000, description="char ceiling on the FULL KB surface sent in free reply "
+        default=122000, description="char ceiling on the FULL KB surface sent in free reply "
                                    "mode (persona + all facts docs + the whole objection "
                                    "playbook + every product card). Sized for the strong "
                                    "chat:sales models; the block is a byte-stable prompt "
@@ -307,7 +307,14 @@ class Settings(BaseSettings):
                                    "AI Assistant card was about to grow by 5.1k (the Finance "
                                    "category). Cards are ordered by slug, so the tail that "
                                    "would have been dropped was vibe_coding — the flagship — "
-                                   "and its demo event")
+                                   "and its demo event. 115000 turned out to be short: with the "
+                                   "surface at 113.8k the Demo Event card (3.4k) still did not "
+                                   "fit, so it had been silently absent from the free-mode "
+                                   "prompt since well before this change — the very failure the "
+                                   "30.07 raise was meant to end. 122000 leaves ~4.8k of real "
+                                   "headroom. Check with the whole surface, not with the "
+                                   "arithmetic: _fit reports the TRUNCATED length, so a "
+                                   "measurement taken at the ceiling looks like it fits")
     knowledge_context_char_budget: int = Field(
         default=28000, description="char ceiling on the assembled KB context (persona + policy/"
                                    "market facts + the full focus card + the facts catalog). "
