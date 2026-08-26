@@ -122,6 +122,19 @@ SCHEMA: list[SettingSection] = [
                "Off — the queue keeps building but nothing sends (for a ban/checkpoint)",
                "Nonaktif — antrean menumpuk tapi tidak terkirim (saat kena banned/checkpoint)"),
            width="90px", scope="channel"),
+        # Режим чтения. Отдельно от «Отправки» и не дубль её: та ДЕРЖИТ очередь, эта
+        # не даёт её создать. Нужна там, где в чате уже сидит живой человек, а видеть
+        # переписку в карточке лида мы всё равно хотим.
+        _f("replies_enabled", "bool", "true",
+           _l("Отвечать", "Reply", "Balas"),
+           help=_l(
+               "Выкл — режим чтения: переписка видна в карточке лида, но Степан "
+               "молчит, и ответ даже не сочиняется",
+               "Off — read-only: the conversation still reaches the lead card, but "
+               "Stepan stays silent and no reply is even composed",
+               "Nonaktif — hanya baca: percakapan tetap masuk ke kartu lead, tapi "
+               "Stepan diam dan balasan tidak disusun"),
+           width="90px", scope="channel"),
     ]),
     SettingSection("fa-solid fa-clock-rotate-left",
                    _l("Фолоап", "Follow-up", "Tindak lanjut"), [

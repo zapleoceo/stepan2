@@ -152,14 +152,20 @@ class OutboxSender:
         # в dormant три живых лида Джакарты, и включение ответов их бы уже не разбудило:
         # стадия молчания переживает настройку, которая её вызвала.
         # Здесь строка просто пропускается: тред не трогаем, стадию не меняем, таймер жив.
-        if (spec is not None and spec.replies_setting and row.source != "manager"
-                and not getattr(cfg, spec.replies_setting, False)):
+        # Два уровня одного запрета: канал в режиме чтения (replies_enabled, поканально)
+        # и коннектор, которому филиал вообще не разрешил отвечать (spec.replies_setting).
+        muted = ("replies_enabled" if row.source != "manager" and not cfg.replies_enabled
+                 else spec.replies_setting if (
+                     spec is not None and spec.replies_setting and row.source != "manager"
+                     and not getattr(cfg, spec.replies_setting, False))
+                 else None)
+        if muted:
             row.status = "skipped"
-            row.error = f"{spec.replies_setting} is off"
+            row.error = f"{muted} is off"
             self.session.add(row)
             await self.session.flush()
-            logger.info("outbox skip branch=%d thread=%d: %s replies are off",
-                        self.branch_id, thread_id, spec.label)
+            logger.info("outbox skip branch=%d thread=%d: replies off (%s)",
+                        self.branch_id, thread_id, muted)
             return row
         window = spec.send_window if spec is not None else None
         if (spec is not None and window is not None

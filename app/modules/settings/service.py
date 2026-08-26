@@ -94,6 +94,13 @@ class BranchSettings:
     # lever to pull when the channel/account is soft-blocked but you still want to keep
     # capturing incoming while sending is paused. See worker.main.send_outbox.
     sending_enabled: bool = True
+    # Отвечает ли ЭТОТ канал вообще. Выкл = режим чтения: входящие принимаются, лид
+    # попадает в общий тред, история и отчёты живут — но ответ не сочиняется и не
+    # уходит. Отличие от sending_enabled принципиальное: тот КОПИТ очередь (пауза на
+    # время бана), а этот не даёт её создать — иначе брокеру платят за текст, который
+    # заведомо никто не увидит. Отличие от is_active тоже: выключенный канал перестаёт
+    # ЧИТАТЬ, а здесь чтение — единственное, что остаётся.
+    replies_enabled: bool = True
     # Single Meta connector (App ID, Business ID, Ad Account ID, Page ID, Pixel ID) plus one
     # System User token scoped for ads + pixel + page/IG messaging — replaces the older split
     # meta_capi_token/meta_ads_token pair, kept above for backward compatibility.
@@ -240,6 +247,7 @@ def _parse(raw: dict[str, str]) -> BranchSettings:
         meta_capi_token=raw.get("meta_capi_token", ""),
         phone_country_code=raw.get("phone_country_code", "62"),
         sending_enabled=_b(raw, "sending_enabled"),
+        replies_enabled=_b(raw, "replies_enabled"),
         meta_app_id=raw.get("meta_app_id", ""),
         fb_account_id=raw.get("fb_account_id", ""),
         meta_page_id=raw.get("meta_page_id", ""),

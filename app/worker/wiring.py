@@ -88,8 +88,21 @@ async def threads_awaiting_reply(
     # канал строкой ниже, и по той же причине: текст будет сочинён, оплачен брокеру и отвергнут
     # на отправке. Настройку называет сам коннектор (ConnectorSpec.replies_setting), значение
     # берётся у филиала — приём при этом продолжает работать, молчат только ответы.
-    from app.modules.settings.service import get_settings  # noqa: PLC0415
+    from app.modules.settings.service import (  # noqa: PLC0415
+        get_channel_settings,
+        get_settings,
+    )
     muted = mute_reply_kinds(await get_settings(session, branch_id))
+    # …и КАНАЛЫ, переведённые в режим чтения. Тот же довод, но на ступень ниже: у
+    # филиала бывает три вотсапа, и замолчать должен тот, где сидит живой человек, а
+    # не весь вид коннектора. Настройки поканальные и кэшируются на 30 секунд, так что
+    # это несколько попаданий в кэш, а не запрос на тред.
+    silent: list[int] = []
+    for ch in await active_channels(session, branch_id):
+        if ch.id is not None and not (
+            await get_channel_settings(session, branch_id, ch.id)
+        ).replies_enabled:
+            silent.append(ch.id)
     rows = await session.exec(
         select(ChannelThread.id)
         .join(Lead, Lead.id == ChannelThread.lead_id)  # type: ignore[arg-type]
@@ -100,6 +113,7 @@ async def threads_awaiting_reply(
             Lead.branch_id == branch_id,
             Channel.is_active.is_(True),  # type: ignore[attr-defined]
             Channel.kind.not_in(muted) if muted else True_(),  # type: ignore[attr-defined]
+            Channel.id.not_in(silent) if silent else True_(),  # type: ignore[attr-defined]
             # A manager's number used to be excluded here as well. It no longer is, and that
             # is the point: 295 of the 302 leads on those numbers have no other channel, so
             # the exclusion made "hand the lead back to Stepan" a switch that could never do

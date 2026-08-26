@@ -465,3 +465,98 @@ def test_the_conversation_id_is_never_taken_for_a_message_id() -> None:
     # Настоящий идентификатор сообщения, если он когда-нибудь появится, берём.
     assert _ref_of({"external_id": "wamid.ABC", "id": 97830}) == "wamid.ABC"
     assert _ref_of({"message_id": 55, "id": 97830}) == "55"
+
+
+# ─── режим чтения на КАНАЛЕ ────────────────────────────────────────────────────
+
+# Отбор берёт только СВЕЖИЕ треды (граница — трое суток), поэтому дата обязана быть
+# относительной. С фиксированной тест сначала проходит, а через неделю начинает проверять
+# срок давности вместо переключателя — и молча перестаёт ловить регрессию.
+_FRESH = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1)
+
+async def _read_only_world(db_session, kind: str, replies: str):  # noqa: ANN001, ANN202
+    """Филиал с одним активным каналом и ждущим ответа тредом."""
+    from app.adapters.db.models import (  # noqa: PLC0415
+        AppSetting,
+        Branch,
+        Channel,
+        ChannelThread,
+        Lead,
+    )
+    from app.domain.enums import Stage  # noqa: PLC0415
+    from app.modules.settings.service import invalidate  # noqa: PLC0415
+
+    b = Branch(name="T", lang="id")
+    db_session.add(b)
+    await db_session.flush()
+    ch = Channel(branch_id=b.id, kind=kind, is_active=True)
+    db_session.add(ch)
+    await db_session.flush()
+    db_session.add(AppSetting(branch_id=b.id, key="replies_enabled",
+                              value=replies, channel_id=ch.id))
+    lead = Lead(branch_id=b.id, stage=Stage.QUALIFYING, agent_enabled=True)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=ch.id,
+                                 external_thread_id="t-1",
+                                 last_in_at=_FRESH))
+    await db_session.flush()
+    invalidate(b.id)
+    return b.id, ch.id
+
+
+async def test_a_read_only_channel_composes_nothing(db_session) -> None:  # noqa: ANN001
+    """Режим чтения обязан гасить именно ГЕНЕРАЦИЮ, а не только отправку.
+
+    Существующая «Отправка (исходящие)» держит очередь: текст всё равно сочиняется и
+    оплачивается брокеру, просто не уходит. Для «читать, но не отвечать» этого мало —
+    платить за реплики, которые заведомо никто не увидит, незачем.
+    """
+    from app.worker.wiring import threads_awaiting_reply  # noqa: PLC0415
+
+    bid, _ = await _read_only_world(db_session, "instagram", "false")
+
+    assert await threads_awaiting_reply(db_session, bid) == []
+
+
+async def test_the_switch_is_per_channel_not_per_connector_kind(db_session) -> None:  # noqa: ANN001
+    """У филиала три вотсапа, и замолчать должен тот, где сидит живой человек.
+
+    Запрет на уровне ВИДА коннектора гасил бы все три разом — поэтому переключатель
+    поканальный, и соседний канал того же вида продолжает отвечать.
+    """
+    from app.adapters.db.models import Channel, ChannelThread, Lead  # noqa: PLC0415
+    from app.domain.enums import Stage  # noqa: PLC0415
+    from app.worker.wiring import threads_awaiting_reply  # noqa: PLC0415
+
+    bid, muted_id = await _read_only_world(db_session, "whatsapp", "false")
+    loud = Channel(branch_id=bid, kind="whatsapp", is_active=True)
+    db_session.add(loud)
+    await db_session.flush()
+    lead = Lead(branch_id=bid, stage=Stage.QUALIFYING, agent_enabled=True)
+    db_session.add(lead)
+    await db_session.flush()
+    db_session.add(ChannelThread(lead_id=lead.id, channel_id=loud.id,
+                                 external_thread_id="t-2",
+                                 last_in_at=_FRESH))
+    await db_session.flush()
+
+    due = await threads_awaiting_reply(db_session, bid)
+
+    threads = {t.id: t.channel_id for t in (
+        await db_session.execute(select(ChannelThread))).scalars().all()}
+    assert due, "второй канал того же вида обязан продолжать отвечать"
+    assert {threads[t] for t in due} == {loud.id}
+    assert muted_id not in {threads[t] for t in due}
+
+
+async def test_a_read_only_channel_still_reads(db_session) -> None:  # noqa: ANN001
+    """Приём не должен зависеть от того, отвечаем мы или молчим: переписка обязана
+    попадать в карточку лида — ради неё режим и существует."""
+    db_session.add(_row(text="halo kak"))
+    await db_session.flush()
+
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT, replies_enabled=False)\
+        .fetch_inbound()
+
+    assert [m.text for m in got] == ["halo kak"]
