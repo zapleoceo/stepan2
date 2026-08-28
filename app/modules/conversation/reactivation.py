@@ -33,7 +33,7 @@ from .engine import DecisionEngine, _fmt_llm_meta
 from .followup import REPEATED_INBOUND_SQL
 from .free_mode import build_messages_free
 from .money_gate import money_issues
-from .outreach import NO_OUTREACH_SQL, no_outreach_param
+from .outreach import NO_OUTREACH_SQL, no_outreach_param, read_only_channel_sql
 from .prompt import lead_name_hint
 from .repository import DossierRepo, OutboxRepo, ThreadRepo
 from .routing import SALES
@@ -122,7 +122,7 @@ _DUE_Q = (
     "   AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.thread_id = ct.id AND o.status = 'pending')"
     # Before the LIMIT, not after: a thread nobody can be written to still consumed one of the
     # BATCH_PER_RUN slots a reachable lead was waiting for.
-    + NO_OUTREACH_SQL +
+    + NO_OUTREACH_SQL + read_only_channel_sql() +
     # Best first, not newest first. Recency was the only ordering, and with a backlog of ~2700
     # threads draining at a small daily rate that meant the leads worth writing to sat behind
     # hundreds of one-word ad taps purely because those taps happened later. Read across the

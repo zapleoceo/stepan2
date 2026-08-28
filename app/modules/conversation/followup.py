@@ -31,6 +31,7 @@ from .outreach import (
     NO_OUTREACH_SQL,
     closed_window_param,
     no_outreach_param,
+    read_only_channel_sql,
 )
 from .repository import (
     CoachingNoteRepo,
@@ -150,6 +151,7 @@ _FOLLOWUP_Q = (
     + NO_OUTREACH_SQL
     + CLOSED_WINDOW_SQL
     + REPEATED_INBOUND_SQL
+    + read_only_channel_sql()
 )
 
 

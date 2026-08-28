@@ -691,3 +691,22 @@ async def test_a_connector_without_a_window_is_untouched_by_the_filter(db_sessio
     bid = await _windowed_world(db_session, kind=ChannelKind.INSTAGRAM, window_open=False)
 
     assert len(await _svc(db_session, bid).due_threads(_NOW)) == 1
+
+
+async def test_a_read_only_channel_gets_no_followup(db_session) -> None:
+    """Фолоапы — третий производитель строк, и он тоже должен молчать в режиме чтения.
+
+    Правило разъезжалось по одному месту за раз: сначала гейт появился только на основном
+    ответе, потом выяснилось про реактивацию. Теперь условие одно на всех (outreach.py),
+    и этот тест держит за него сборщик фолоапов.
+    """
+    bid, tid, _lead, thread = await _world(db_session, timer_due=True)
+    assert await _svc(db_session, bid).due_threads(_NOW), "контроль: без запрета фолоап есть"
+
+    ch_id = thread.channel_id
+    db_session.add(AppSetting(branch_id=bid, key="replies_enabled",
+                              value="false", channel_id=ch_id))
+    await db_session.flush()
+    invalidate(bid)
+
+    assert await _svc(db_session, bid).due_threads(_NOW) == []

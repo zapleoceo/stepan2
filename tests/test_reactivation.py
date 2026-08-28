@@ -240,3 +240,26 @@ async def test_no_receipt_at_all_does_not_block(db_session) -> None:
     await db_session.flush()
 
     assert [r[0] for r in await _svc(db_session, bid).due(_now())] == [tid]
+
+
+async def test_a_read_only_channel_gets_no_touch(db_session) -> None:
+    """Канал в режиме чтения не должен порождать реактивации.
+
+    Гейт стоял только на основном ответе, а этот сборщик о нём не знал: 26.08.2026 в очереди
+    филиала 1 лежало 68 реактиваций на CRM Jakarta, замолчавшем каналом в тот же день.
+    Отправка их не пропустила бы, но текст к тому моменту уже сочинён и оплачен брокеру.
+
+    Отсекать надо ДО LIMIT: у этой выборки он есть, и тред, выброшенный после, уже съел слот,
+    которого ждал достижимый лид.
+    """
+    from app.adapters.db.models import AppSetting  # noqa: PLC0415
+
+    bid, chid = await _setup(db_session)
+    await _dormant_lead(db_session, bid, chid, days_ago=5)
+    assert await _svc(db_session, bid).due(_now()), "контроль: без запрета касание есть"
+
+    db_session.add(AppSetting(branch_id=bid, key="replies_enabled",
+                              value="false", channel_id=chid))
+    await db_session.flush()
+
+    assert await _svc(db_session, bid).due(_now()) == []
