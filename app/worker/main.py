@@ -1131,56 +1131,6 @@ async def prune_broker_log(ctx: dict[str, Any]) -> int:
     return res.rowcount or 0
 
 
-_DIGEST_THREADS = 300
-
-
-async def daily_digest(ctx: dict[str, Any]) -> int:
-    """Ship the dialogue digest to whoever the branch put in `digest_tg_id`. Read-only
-    analytics (no IG writes) → not kill-switch gated. Runs after aggregate_needs so the
-    needs cloud in the file is the freshly-classified one."""
-    return await _fan_out_per_branch(ctx, "daily_digest_branch")
-
-
-async def daily_digest_branch(ctx: dict[str, Any], branch_id: int) -> int:
-    """One branch's digest → Telegram, as a file (all dialogs blow past sendMessage's 4096).
-    Recipient is a niche per-branch setting read directly, so it stays out of the settings
-    schema/UI (same precedent as _platform_agent_on)."""
-    from sqlalchemy import text  # noqa: PLC0415
-
-    from app.modules.reports.daily_digest import build_digest  # noqa: PLC0415
-
-    async with session_scope() as session:
-        row = (await session.execute(text(
-            "SELECT value FROM app_setting WHERE branch_id = :b AND key = 'digest_tg_id'"),
-            {"b": branch_id})).first()
-        chat_raw = (row[0] or "").strip() if row else ""
-        if not chat_raw:
-            return 0  # not configured for this branch — nothing to do
-        markdown = await build_digest(session, branch_id, limit=_DIGEST_THREADS)
-    token = settings().tg_bot_token
-    if not token:
-        logger.warning("daily_digest: branch=%d no bot token — skipped", branch_id)
-        return 0
-    try:
-        chat_id = int(chat_raw)
-    except ValueError:
-        logger.warning("daily_digest: branch=%d digest_tg_id=%r is not an id", branch_id,
-                       chat_raw)
-        return 0
-    day = datetime.now(UTC).date().isoformat()
-    status = await TelegramNotifier(
-        bot_token=token, group_chat_id=chat_id,
-    ).send_document(
-        filename=f"stepan-dialogs-branch{branch_id}-{day}.md",
-        content=markdown,
-        caption=f"Выгрузка диалогов за {day} — филиал {branch_id}, "
-                f"последние {_DIGEST_THREADS} чатов.",
-        chat_id=chat_id,
-    )
-    logger.info("daily_digest: branch=%d → chat=%s %s", branch_id, chat_id, status)
-    return 1 if status == "ok" else 0
-
-
 async def aggregate_needs(ctx: dict[str, Any]) -> int:
     """Hourly needs-cloud pass for ALL branches: incrementally classify leads whose profile
     changed onto the branch's stable taxonomy, then snapshot the day's aggregates for history
@@ -1262,7 +1212,7 @@ class WorkerSettings:
         sync_crm_writeback,
         process_deletions, sync_crm, refresh_profiles, watch_wa_sessions, backfill_media,
         prune_broker_log, merge_leads,
-        daily_digest, crm_rescue, ingest_comments, proactive_comments,
+        crm_rescue, ingest_comments, proactive_comments,
         aggregate_needs, sync_ads, backfill_ads,
         # Per-branch jobs the dispatchers enqueue — the actual work, one branch each. Each is
         # enqueued with a STABLE _job_id ({job_name}:{branch_id}) so a still-running job dedups
@@ -1275,7 +1225,7 @@ class WorkerSettings:
         process_deletions_branch, sync_crm_branch, refresh_profiles_branch,
         watch_wa_sessions_branch, merge_leads_branch,
         backfill_media_branch, aggregate_needs_branch,
-        daily_digest_branch, ingest_comments_branch, proactive_comments_branch,
+        ingest_comments_branch, proactive_comments_branch,
         sync_ads_branch, backfill_ads_branch,
         # Push, not cron: enqueued by app/api/webhooks.py the moment Meta delivers a message.
         # It MUST be listed here — an unregistered name is accepted by enqueue_job and then
@@ -1379,9 +1329,6 @@ class WorkerSettings:
         # The pass is incremental — it only calls the model for leads whose profile actually
         # changed since last run, batched 40 phrases per call — so hourly costs little.
         cron(aggregate_needs, minute={42}, second=0, run_at_startup=False),
-        # 07:00 Jakarta (WIB = UTC+7) — the owner reads it with morning coffee. The needs
-        # cloud in the file is at most an hour stale (aggregate_needs runs every :42).
-        cron(daily_digest, hour={0}, minute={0}, second=0, run_at_startup=False),
         # Comments under our own posts: once an hour (minute={17}, offset from the other
         # hourly jobs). Opt-in per channel (comment_replies_enabled) and platform-gated —
         # a public reply is higher-stakes than a DM, so the kill switch stops it too. IG
