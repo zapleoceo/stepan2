@@ -742,6 +742,8 @@ _TR: dict[str, dict[str, str]] = {
     "chat.crm_push_failed": {"ru": "В CRM не передан — ошибка",
                              "en": "CRM push failed",
                              "id": "Gagal dikirim ke CRM"},
+    "chat.crm_push_skipped": {"ru": "В CRM не отправлено", "en": "Not pushed to CRM",
+                             "id": "Tidak dikirim ke CRM"},
     "chat.send_stepan": {
         "ru": "Отправить как Стёпан",
         "en": "Send as Stepan",

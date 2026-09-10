@@ -590,7 +590,8 @@ _LOG_KIND_KEY = {"context_cleared": "chat.cleared", "context_loaded": "chat.load
                  "stage_reason": "chat.stage_reason",
                  "consent_reset": "chat.consent_reset",
                  "crm_pushed": "chat.crm_pushed",
-                 "crm_push_failed": "chat.crm_push_failed"}
+                 "crm_push_failed": "chat.crm_push_failed",
+                 "crm_push_skipped": "chat.crm_push_skipped"}
 
 
 def _event_bubble(row: object) -> str:

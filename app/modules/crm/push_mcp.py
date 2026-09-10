@@ -513,8 +513,33 @@ async def drain_writeback(
     event_type=None → выбирается по состоянию лида (event_type_for). Раньше всё уезжало
     как wait_call, и менеджер видел «перезвонить» и на том, кто отказался."""
     leads = await fetch_leads_with_phone(session, branch_id, limit=limit, exclude_pushed=True)
+    await _log_capped_out(session, branch_id)
     return await _drain(session, branch_id, pusher, leads,
                         marker=PUSHED_REASON, event_type=event_type, label="writeback")
+
+
+async def _log_capped_out(session: AsyncSession, branch_id: int) -> int:
+    """Сколько лидов выбыло из авто-отправки навсегда, исчерпав FAILURE_CAP.
+
+    Тот же принцип, что у `_log_window_drops`: предел, который отбрасывает работу, обязан
+    быть видимым. Пауза после провала временная и в счёт не идёт — она пройдёт сама. Предел
+    — нет: такого лида не возьмёт ни один прогон, и без этой строки в логе он растворился
+    бы, оставив только записи в его собственном чате, которые никто не откроет."""
+    n = (await session.execute(text(
+        "SELECT count(*) FROM lead l"  # noqa: S608 — константы и связанные значения
+        " WHERE l.branch_id = :bid AND l.is_blocked = false"
+        "   AND (SELECT count(*) FROM stage_event f WHERE f.lead_id = l.id"
+        "        AND f.reason = :push_failed) >= :failure_cap"
+        "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id = l.id"
+        "        AND se.reason IN (:pushed, :pushed_handoff))"),
+        {"bid": branch_id, "push_failed": PUSH_FAILED_REASON, "failure_cap": FAILURE_CAP,
+         "pushed": PUSHED_REASON, "pushed_handoff": PUSHED_HANDOFF_REASON})).scalar() or 0
+    if n:
+        logger.warning(
+            "crm push branch=%d: %d lead(s) exhausted %d failed attempts and will never be "
+            "pushed automatically — see their chat log (crm_push_failed)",
+            branch_id, n, FAILURE_CAP)
+    return int(n)
 
 
 async def fetch_unpushed_handoffs(

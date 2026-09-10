@@ -198,6 +198,24 @@ async def test_a_lead_that_failed_too_often_leaves_the_queue(db_session) -> None
     assert await push_block_reason(db_session, lid) == "push backing off"
 
 
+async def test_leads_that_exhausted_the_cap_are_counted_not_forgotten(db_session) -> None:  # noqa: ANN001
+    """Предел, который отбрасывает работу, обязан быть видимым — иначе пустая очередь
+    читается как «всё разобрано». Пауза после провала временная и в счёт не идёт."""
+    from app.adapters.db.models import StageEvent  # noqa: PLC0415
+    from app.modules.crm.push_mcp import _log_capped_out  # noqa: PLC0415
+
+    bid, lid, _ = await _seed(db_session, "+62810100000")
+    assert await _log_capped_out(db_session, bid) == 0, "один провал — ещё не предел"
+    for i in range(FAILURE_CAP):
+        db_session.add(StageEvent(
+            branch_id=bid, lead_id=lid, thread_id=None, from_stage="presenting",
+            to_stage="presenting", actor="system", reason=PUSH_FAILED_REASON,
+            created_at=_NOW - timedelta(days=i + 2)))
+    await db_session.flush()
+
+    assert await _log_capped_out(db_session, bid) == 1
+
+
 async def test_a_lead_the_manager_refused_is_never_pushed_back(db_session) -> None:  # noqa: ANN001
     """129 отказников уехали в CRM как «перезвонить» 11–12.08.2026, и мы знали их статус.
     Отказ менеджера — конец истории для отправки, пока он сам не поставит другой результат."""

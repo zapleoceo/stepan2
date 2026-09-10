@@ -50,7 +50,8 @@ def _decision(**over: Any) -> Decision:
     return Decision(**base)
 
 
-async def _world(s, *, phone: str | None, display_name: str | None = None) -> tuple[int, int]:  # noqa: ANN001
+async def _world(s, *, phone: str | None, display_name: str | None = None,  # noqa: ANN001
+                 crm_status: str | None = None) -> tuple[int, int]:
     branch = Branch(name="T", lang="id")
     s.add(branch)
     await s.flush()
@@ -67,6 +68,10 @@ async def _world(s, *, phone: str | None, display_name: str | None = None) -> tu
     s.add(Message(branch_id=branch.id, thread_id=thread.id, channel_id=ch.id,
                   external_id="m1", direction="in", sent_by="lead", text="halo",
                   occurred_at=_NOW))
+    if crm_status is not None:
+        from app.adapters.db.models import CrmLeadState  # noqa: PLC0415
+        s.add(CrmLeadState(lead_id=lead.id, branch_id=branch.id, status=crm_status,
+                           fetched_at=_NOW, verdict="proceed"))
     await s.flush()
     return branch.id, thread.id
 
@@ -168,3 +173,42 @@ async def test_a_successful_push_is_written_into_the_chat_log(db_session, monkey
     assert _LOG_KIND_KEY["crm_pushed"] == "chat.crm_pushed"
     assert _LOG_KIND_KEY["crm_push_failed"] == "chat.crm_push_failed"
     assert ThreadLog.model_fields["kind"].description is not None
+
+
+async def test_push_after_commit_stops_at_a_refused_lead(db_session, monkeypatch) -> None:
+    """Хендофф отказника не должен уезжать в CRM как «перезвонить».
+
+    Условия отправки одни на все пути, но этот путь — не выборка, а один лид, и без
+    собственной проверки он их обходил: до 10.09.2026 он смотрел только на телефон. Тест
+    держит именно проводку в delivery.py — правило само по себе покрыто в test_crm_push.
+    """
+    from sqlmodel import select
+
+    from app.adapters.db.models import StageEvent, ThreadLog
+    from app.modules.crm.push_mcp import PUSHED_HANDOFF_REASON
+
+    pushers: list[_FakePusher] = []
+
+    def _spawn(url: str, city_alias: str, timeout_s: float = 30.0) -> _FakePusher:
+        p = _FakePusher(url, city_alias)
+        pushers.append(p)
+        return p
+
+    monkeypatch.setattr("app.modules.crm.push_mcp.CrmMcpPusher", _spawn)
+    monkeypatch.setattr(
+        "app.adapters.db.session.session_scope", lambda: _SessionScopeStub(db_session))
+    bid, tid = await _world(db_session, phone="+6281234567890", crm_status="result_fail")
+    svc = _svc(db_session, bid)
+    await svc.enqueue_reply(tid, _decision())
+    assert svc.pending_crm_push is not None
+
+    await svc.push_crm_after_commit()
+
+    assert pushers == [] or not pushers[0].calls, "в CRM ничего не уехало"
+    marks = (await db_session.exec(select(StageEvent).where(
+        StageEvent.reason == PUSHED_HANDOFF_REASON))).all()
+    assert marks == []
+    skipped = (await db_session.exec(select(ThreadLog).where(
+        ThreadLog.kind == "crm_push_skipped"))).all()
+    assert [x.detail for x in skipped] == ["refused in CRM"], "причина названа в чате"
+
