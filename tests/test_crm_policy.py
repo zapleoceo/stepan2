@@ -27,9 +27,16 @@ def test_statuses_the_branch_never_uses_have_none() -> None:
     assert policy_for("") is None
 
 
-def test_only_the_three_that_need_a_conversation_let_stepan_speak_first() -> None:
+def test_only_the_two_that_need_a_conversation_let_stepan_speak_first() -> None:
+    """Отказ из этого списка ушёл 10.09.2026: после «нет» человеку бот не пишет первым."""
     speaks = {k for k, v in POLICIES.items() if v.initiates}
-    assert speaks == {"result_think", "result_next_enrollment", "result_fail"}
+    assert speaks == {"result_think", "result_next_enrollment"}
+
+
+def test_a_refusal_never_initiates() -> None:
+    from app.modules.crm.policy import REFUSED_STATUS
+
+    assert POLICIES[REFUSED_STATUS].initiates is False
 
 
 def test_wait_call_never_initiates() -> None:

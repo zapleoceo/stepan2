@@ -29,6 +29,7 @@ from .money_gate import PITCH_CORRECTION, money_issues, uninvited_price
 from .outreach import (
     CLOSED_WINDOW_SQL,
     NO_OUTREACH_SQL,
+    NOT_REFUSED_SQL,
     closed_window_param,
     no_outreach_param,
     read_only_channel_sql,
@@ -152,6 +153,7 @@ _FOLLOWUP_Q = (
     + CLOSED_WINDOW_SQL
     + REPEATED_INBOUND_SQL
     + read_only_channel_sql()
+    + NOT_REFUSED_SQL
 )
 
 

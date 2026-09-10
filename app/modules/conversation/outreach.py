@@ -20,6 +20,7 @@ from sqlalchemy import bindparam
 from sqlalchemy.sql.elements import BindParameter
 
 from app.connectors.registry import non_outreach_kinds, windowed_kinds
+from app.modules.crm.policy import REFUSED_STATUS
 
 # Drops a thread whose channel belongs to a connector that cannot write first. `channel` is
 # joined by id rather than assumed to be in scope, so both harvest queries can paste it in.
@@ -83,3 +84,16 @@ def read_only_channel_sql(thread: str = "ct") -> str:
         f"      WHERE s.channel_id = {thread}.channel_id AND s.key = 'replies_enabled'"
         f"        AND lower(s.value) NOT IN ('true', '1', 'yes'))"
     )
+
+
+# Менеджер поставил ОТКАЗ в CRM — Степан этого человека не трогает вообще (решение владельца,
+# 10.09.2026). Гейт переводит такого лида в «менеджер» с выключенным ботом, но делает это
+# при следующем чтении CRM, а сборщики бегут раз в десять минут: без этого условия фолоап или
+# реактивация успели бы уйти в окно между «менеджер поставил отказ» и «мы его прочитали».
+# Одно условие на фолоапы, реактивацию и отправку в CRM; статус берётся из нашего кэша, и
+# при выключенном чтении CRM условие пустое — ничего не ломается, просто слепнет.
+NOT_REFUSED_SQL = (
+    " AND NOT EXISTS (SELECT 1 FROM crm_lead_state cs"  # noqa: S608 — константа из policy
+    f"   WHERE cs.lead_id = l.id AND cs.status = '{REFUSED_STATUS}')"
+)
+

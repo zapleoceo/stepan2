@@ -24,6 +24,7 @@ from app.adapters.db.models import CrmLeadState, Lead, StageEvent
 from app.config import settings
 from app.domain.clock import naive_utc, utc_now
 from app.domain.enums import Stage
+from app.modules.crm.policy import REFUSED_STATUS
 from app.modules.crm.service import is_safe_webhook_url
 from app.modules.settings.service import get_settings
 
@@ -113,6 +114,16 @@ _HOLD_FLAGS = {
 # is — `wait_call` is 74% of all contacts the branch records.
 _SILENCING_FLAGS = ("deal_won", "contract_signed", "paid")
 _INITIATIVE_FLAGS = ("manager_called", "next_contact_at", "open_task")
+# Отказ менеджера — глушащий холд, как и выигранная сделка: человек сказал «нет» человеку,
+# и бот, который после этого пишет, отвечает или догоняет, спорит с решением, которое не
+# его. Раньше отказ вообще не был сигналом: 216 из 321 известных отказников сидели в рабочих
+# стадиях с включённым ботом, 80 получили от Степана письмо «а почему не подошло», 13 после
+# этого снова уехали в CRM как «перезвонить» (замер 10.09.2026).
+_REFUSED_REASON = "refused by manager"
+
+
+def _refused(raw: dict) -> bool:
+    return str(raw.get("status") or raw.get("last_result") or "").strip() == REFUSED_STATUS
 
 # Outbox sources that ANSWER the lead rather than start something. Kept here rather than
 # imported so the gate has no dependency on the chat routes.
@@ -122,6 +133,8 @@ REPLY_SOURCES = frozenset({"agent", "manager"})
 def hold_kind(raw: dict) -> str:
     """'silence' | 'initiative' | '' — how far a hold reaches. Read from the raw flags, not
     from the joined reason string: the text is for humans and must stay free to change."""
+    if _refused(raw):
+        return "silence"
     if str(raw.get("owner") or "").lower() == "manager":
         return "initiative"
     if any(raw.get(k) for k in _SILENCING_FLAGS):
@@ -139,6 +152,8 @@ def compute_verdict(raw: dict) -> tuple[str, str]:
     if explicit in ("proceed", "hold"):
         return explicit, str(raw.get("reason") or explicit)
     reasons: list[str] = []
+    if _refused(raw):
+        reasons.append(_REFUSED_REASON)
     if str(raw.get("owner") or "").lower() == "manager":
         reasons.append("manager owns")
     reasons += [label for key, label in _HOLD_FLAGS.items() if raw.get(key)]
@@ -311,4 +326,4 @@ def _from_row(row: CrmLeadState) -> CrmState:
     # of falling through to "unknown".
     return CrmState(exists=row.exists_in_crm, verdict=row.verdict, reason=row.reason or "",
                     status=row.status, owner=row.owner, deal_won=row.deal_won,
-                    raw={"owner": row.owner, "deal_won": row.deal_won})
+                    raw={"owner": row.owner, "deal_won": row.deal_won, "status": row.status})

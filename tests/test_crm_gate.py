@@ -170,3 +170,40 @@ async def test_fresh_cache_avoids_refetch(db_session) -> None:
     await gate.allow_send(lead, "agent")   # first call fetches + caches
     await gate.allow_send(lead, "agent")   # second call served from fresh cache
     assert r.calls == 1
+
+
+# ─── отказ менеджера — стоп-сигнал (решение владельца, 10.09.2026) ────────────────
+
+def test_a_refusal_is_a_silencing_hold_by_status_alone() -> None:
+    """Без единого флага: ни сделки, ни владельца — только результат последнего контакта."""
+    from app.modules.crm.gate import hold_kind
+
+    raw = {"exists": True, "last_result": "result_fail"}
+    verdict, reason = compute_verdict(raw)
+    assert verdict == "hold" and "refused" in reason
+    assert hold_kind(raw) == "silence"
+
+
+async def test_a_refused_lead_is_stood_down_and_not_answered(db_session) -> None:
+    """«Если отказ — не трогай лида вообще». Раньше отказ не был сигналом: 216 из 321
+    известных отказников сидели в рабочих стадиях с включённым ботом."""
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, Stage.QUALIFYING)
+    ok, reason = await CrmGate(
+        db_session, bid, _Reader({"exists": True, "last_result": "result_fail"}),
+    ).allow_send(lead, "agent")
+
+    assert ok is False and "refused" in reason
+    assert lead.stage == Stage.MANAGER and lead.agent_enabled is False
+
+
+async def test_a_refusal_from_the_cache_row_alone_still_silences(db_session) -> None:
+    """Кэш без сырого JSON (строка, записанная до этой правки) обязан узнаваться так же —
+    иначе 321 уже известный отказник остался бы невидим для гейта."""
+    from app.modules.crm.gate import _from_row, hold_kind
+
+    row = CrmLeadState(branch_id=1, lead_id=1, exists_in_crm=True, verdict="hold",
+                       status="result_fail", reason="refused by manager")
+    state = _from_row(row)
+    assert hold_kind(state.raw) == "silence"
+

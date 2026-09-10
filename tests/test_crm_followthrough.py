@@ -70,7 +70,7 @@ async def _fixture(session, *, status: str, hour_ok: bool = True) -> tuple[int, 
 
 
 async def test_a_status_that_needs_a_conversation_is_picked_up(db_session, monkeypatch) -> None:
-    bid, lead_id = await _fixture(db_session, status="result_fail")
+    bid, lead_id = await _fixture(db_session, status="result_think")
     seen: list[tuple[int, str, str]] = []
 
     async def _fake(session, lead, status, goal, llm):  # noqa: ANN001, ANN202
@@ -83,8 +83,17 @@ async def test_a_status_that_needs_a_conversation_is_picked_up(db_session, monke
     svc = _Svc(db_session, bid, _LLM())
     monkeypatch.setattr(svc, "_recently_messaged", lambda _l: _false())
     assert await svc.run_followthrough() == 1
-    assert seen and seen[0][1] == "result_fail"
-    assert "почему не подошло" in seen[0][2]
+    assert seen and seen[0][1] == "result_think"
+    assert "сколько времени" in seen[0][2]
+
+
+async def test_a_refusal_is_never_followed_through(db_session, monkeypatch) -> None:
+    """«Если отказ — не трогай лида вообще» (владелец, 10.09.2026). До этого Степан писал
+    отказникам первым — 80 таких сообщений с 30.07, 13 лидов после этого снова уехали в CRM."""
+    bid, _ = await _fixture(db_session, status="result_fail")
+    svc = _Svc(db_session, bid, _LLM())
+    monkeypatch.setattr(svc, "_recently_messaged", lambda _l: _false())
+    assert await svc.run_followthrough() == 0
 
 
 async def test_wait_call_is_never_initiated(db_session, monkeypatch) -> None:
@@ -107,7 +116,9 @@ async def test_the_same_status_is_acted_on_only_once(db_session, monkeypatch) ->
 
 
 async def test_a_blocked_lead_is_never_touched(db_session, monkeypatch) -> None:
-    bid, lead_id = await _fixture(db_session, status="result_fail")
+    # result_think, а не result_fail: отказ теперь и сам даёт ноль, и тест перестал бы
+    # проверять блокировку.
+    bid, lead_id = await _fixture(db_session, status="result_think")
     lead = await db_session.get(Lead, lead_id)
     lead.is_blocked = True
     db_session.add(lead)

@@ -19,6 +19,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.connectors.registry import crm_native_kinds
 from app.modules.conversation.dossier import parse_dossier
+from app.modules.conversation.outreach import NOT_REFUSED_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +106,9 @@ _NOT_WON = (
 # CRM-команда 10.09.2026: 129 отказников уехали как «перезвонить» 11–12.08, и они «снова
 # появлялись», сколько их ни закрывали. Статус берётся из нашего кэша crm_lead_state; когда
 # чтение CRM выключено, статуса нет и условие пустое — отправка не ломается, просто слепнет.
-_NOT_REFUSED = (
-    " AND NOT EXISTS (SELECT 1 FROM crm_lead_state cs"
-    "   WHERE cs.lead_id = l.id AND cs.status = 'result_fail')"
-)
+# Условие общее со сборщиками (outreach.NOT_REFUSED_SQL): «не трогать отказника» — одно
+# правило, у него одно определение.
+_NOT_REFUSED = NOT_REFUSED_SQL
 # Человек УЖЕ в CRM: хотя бы один его тред пришёл с коннектора, который читает переписку из
 # самой CRM (ConnectorSpec.crm_native). Отправка «тёплого лида» отвечает на вопрос «этого
 # человека в CRM ещё нет» — здесь ответ известен заранее. Любой тред, не новейший: карточка в

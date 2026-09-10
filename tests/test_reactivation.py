@@ -263,3 +263,20 @@ async def test_a_read_only_channel_gets_no_touch(db_session) -> None:
     await db_session.flush()
 
     assert await _svc(db_session, bid).due(_now()) == []
+
+
+async def test_a_lead_the_manager_refused_is_not_reactivated(db_session) -> None:
+    """Реактивация целится в спящих с выключенным ботом — ровно туда гейт и кладёт
+    отказников. Без этого условия «не трогать вообще» держалось бы на удаче."""
+    from app.adapters.db.models import CrmLeadState  # noqa: PLC0415
+
+    bid, chid = await _setup(db_session)
+    _, lead_id = await _dormant_lead(db_session, bid, chid, days_ago=5)
+    assert await _svc(db_session, bid).due(_now()), "контроль: без отказа касание есть"
+
+    db_session.add(CrmLeadState(branch_id=bid, lead_id=lead_id, status="result_fail",
+                                exists_in_crm=True))
+    await db_session.flush()
+
+    assert await _svc(db_session, bid).due(_now()) == []
+

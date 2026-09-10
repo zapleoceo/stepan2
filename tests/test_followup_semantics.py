@@ -710,3 +710,19 @@ async def test_a_read_only_channel_gets_no_followup(db_session) -> None:
     invalidate(bid)
 
     assert await _svc(db_session, bid).due_threads(_NOW) == []
+
+
+async def test_a_lead_the_manager_refused_gets_no_followup(db_session) -> None:  # noqa: ANN001
+    """Отказ в CRM — не трогать вообще. Гейт усыпит лида при следующем чтении CRM, но
+    сборщик бежит чаще, чем гейт читает, — условие должно стоять и здесь."""
+    from app.adapters.db.models import CrmLeadState  # noqa: PLC0415
+
+    bid, tid, lead, _ = await _world(db_session, timer_due=True)
+    assert await _svc(db_session, bid).due_threads(_NOW), "контроль: без отказа фолоап есть"
+
+    db_session.add(CrmLeadState(branch_id=bid, lead_id=lead.id, status="result_fail",
+                                exists_in_crm=True))
+    await db_session.flush()
+
+    assert await _svc(db_session, bid).due_threads(_NOW) == []
+
