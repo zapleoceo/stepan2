@@ -177,3 +177,24 @@ async def test_disabled_or_night_does_nothing(monkeypatch, db_session) -> None:
     monkeypatch.setattr(rescue_mod, "branch_now", lambda tz: _Night())
     assert await CrmRescueService(db_session, bid2, llm=None).run() == 0  # night
     assert calls == []
+
+
+async def test_a_refused_lead_is_not_rescued(monkeypatch, db_session) -> None:
+    """«Не трогать вообще» — и недозвон не повод. Гейт остановил бы это на отправке, но
+    текст к тому моменту уже сочинён и оплачен; проверка стоит до генерации, как и у
+    followthrough."""
+    from app.adapters.db.models import CrmLeadState
+
+    bid = await _branch(db_session)
+    refused = await _lead(db_session, bid, "+62831")
+    db_session.add(CrmLeadState(branch_id=bid, lead_id=refused.id, status="result_fail",
+                                exists_in_crm=True))
+    fine = await _lead(db_session, bid, "+62832")
+    await db_session.flush()
+    calls: list = []
+    _patch(monkeypatch, _FakeReader([("62831", "t"), ("62832", "t")]), calls)
+    _in_work_hours(monkeypatch)
+
+    assert await CrmRescueService(db_session, bid, llm=None).run() == 1
+    assert [c[0] for c in calls] == [fine.id]
+

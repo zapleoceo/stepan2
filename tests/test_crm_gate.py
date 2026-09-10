@@ -207,3 +207,32 @@ async def test_a_refusal_from_the_cache_row_alone_still_silences(db_session) -> 
     state = _from_row(row)
     assert hold_kind(state.raw) == "silence"
 
+
+def test_a_refusal_beats_an_explicit_proceed_verdict() -> None:
+    """Ни один читатель сегодня verdict не присылает, но контракт CRM может измениться —
+    и «proceed» рядом с result_fail тихо отменил бы «отказника не трогать вообще»."""
+    verdict, reason = compute_verdict(
+        {"exists": True, "verdict": "proceed", "last_result": "result_fail"})
+    assert verdict == "hold" and "refused" in reason
+
+
+async def test_the_bot_button_does_not_override_a_crm_refusal(db_session) -> None:
+    """Менеджер включает бота кнопкой, CRM всё ещё говорит «отказ» — при следующей отправке
+    лид усыпляется снова. Источник истины про отказ — CRM; вернуть Степана значит сменить
+    результат там, а не здесь. Тест закрепляет это как решение, а не как случайность."""
+    from app.modules.conversation.chat_repo import ChatRepo
+
+    bid = await _branch(db_session)
+    lead = await _lead(db_session, bid, Stage.QUALIFYING)
+    gate = CrmGate(db_session, bid, _Reader({"exists": True, "last_result": "result_fail"}))
+    assert (await gate.allow_send(lead, "agent"))[0] is False
+    assert lead.agent_enabled is False
+
+    await ChatRepo(db_session).set_bot_enabled(lead.id, True)  # кнопка «бот вкл»
+    await db_session.refresh(lead)
+    assert lead.agent_enabled is True, "кнопка сработала локально"
+
+    ok, reason = await gate.allow_send(lead, "agent")
+    assert ok is False and "refused" in reason
+    assert lead.agent_enabled is False, "CRM переиграла кнопку"
+

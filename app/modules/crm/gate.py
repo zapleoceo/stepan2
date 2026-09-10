@@ -148,12 +148,16 @@ def compute_verdict(raw: dict) -> tuple[str, str]:
     """Derive proceed/hold from raw CRM fields. If the CRM already returns a `verdict`,
     trust it; otherwise apply the stand-down rule (any ownership/close/next-step signal
     → hold)."""
+    # Отказ — раньше явного вердикта, а не после. Ни один читатель сегодня `verdict` не
+    # присылает, но контракт CRM может измениться, и «proceed» рядом с result_fail тихо
+    # отменил бы решение владельца «отказника не трогать вообще». Человек сказал «нет»
+    # человеку; поле в чужом ответе это не переигрывает.
+    if _refused(raw):
+        return "hold", _REFUSED_REASON
     explicit = str(raw.get("verdict") or "").lower()
     if explicit in ("proceed", "hold"):
         return explicit, str(raw.get("reason") or explicit)
     reasons: list[str] = []
-    if _refused(raw):
-        reasons.append(_REFUSED_REASON)
     if str(raw.get("owner") or "").lower() == "manager":
         reasons.append("manager owns")
     reasons += [label for key, label in _HOLD_FLAGS.items() if raw.get(key)]

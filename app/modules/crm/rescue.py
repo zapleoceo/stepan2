@@ -139,6 +139,10 @@ class CrmRescueService:
             return False
         if lead is None or lead.is_blocked or not lead.agent_enabled:
             return False  # unknown to Stepan, or a human explicitly owns/stopped it
+        if await self._refused(lead.id):
+            # «Не трогать вообще». Гейт остановил бы это на отправке, но текст к тому
+            # моменту уже сочинён и оплачен; followthrough проверяет то же до генерации.
+            return False
         if await self._recently_rescued(lead.id):
             return False
         if await self._recently_messaged(lead.id):
@@ -146,6 +150,16 @@ class CrmRescueService:
         note = f"{_NOTE_PREFIX} {missed_at[:10]}"
         res = await ops.call_failed(self.session, lead, note, self.llm)
         return bool(res.ok and res.message_queued)
+
+    async def _refused(self, lead_id: int | None) -> bool:
+        """Менеджер поставил отказ (по нашему кэшу CRM) — Степан такого лида не трогает."""
+        from app.modules.crm.policy import REFUSED_STATUS  # noqa: PLC0415
+
+        row = (await self.session.execute(
+            text("SELECT 1 FROM crm_lead_state WHERE lead_id = :l AND status = :s LIMIT 1"),
+            {"l": lead_id, "s": REFUSED_STATUS},
+        )).first()
+        return row is not None
 
     async def _recently_rescued(self, lead_id: int | None) -> bool:
         cutoff = utc_now() - timedelta(days=_COOLDOWN_DAYS)
