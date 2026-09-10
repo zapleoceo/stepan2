@@ -75,6 +75,8 @@ SPEC = ConnectorSpec(
     send_window=SendWindow(error_code=LATE_ERROR, dormant_reason=DORMANT_REASON),
     # Приём включается сразу, ответы — отдельным решением: в этом чате сидит живой менеджер.
     replies_setting="sender_enabled",
+    # Переписка приходит ИЗ CRM — человек там уже есть, обратно его не отправляем.
+    crm_native=True,
     # Инициировать разговор мы можем — адрес лида известен и живёт в CRM. Ограничение здесь
     # не «некому писать», а «чем писать»: вне окна только шаблоном.
     proactive_outreach=True,

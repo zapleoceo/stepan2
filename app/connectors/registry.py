@@ -95,6 +95,15 @@ def mute_reply_kinds(cfg: object) -> tuple[str, ...]:
     )
 
 
+def crm_native_kinds() -> tuple[str, ...]:
+    """Kind values whose conversations already live in the CRM (ConnectorSpec.crm_native).
+
+    Same sentinel rule as its siblings: the CRM sweeps bind this into `kind IN (:kinds)`, and
+    an empty IN list is a SQL hole, so "no connector is CRM-native" must match no row."""
+    kinds = tuple(s.kind.value for s in REGISTRY.values() if s.crm_native)
+    return kinds or ("",)
+
+
 def windowed_kinds() -> tuple[str, ...]:
     """Kind values whose connector is REFUSED outside the platform's messaging window.
 

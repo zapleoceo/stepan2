@@ -13,9 +13,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
+from sqlalchemy.sql.elements import BindParameter
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.connectors.registry import crm_native_kinds
 from app.modules.conversation.dossier import parse_dossier
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,13 @@ PUSHED_HANDOFF_REASON = "crm_pushed_handoff"
 # a sweep. Kept apart from PUSHED_HANDOFF_REASON because we did NOT push anything: calling it
 # a push would claim our funnel event landed when all we know is that the contact exists.
 VERIFIED_PRESENT_REASON = "crm_verified_present"
+# Неудачная отправка ЖУРНАЛИРУЕТСЯ, а не остаётся невидимой. Раньше провал не оставлял следа,
+# и лид пробовался заново каждый час без предела: двухчасовой отказ токена 08.09.2026 дал 708
+# строк ошибок, потому что каждый прогон бился в те же 25 лидов. Теперь после провала лид ждёт
+# FAILURE_BACKOFF_H, а после FAILURE_CAP провалов выбывает из авто-отправки — и это видно.
+PUSH_FAILED_REASON = "crm_push_failed"
+FAILURE_BACKOFF_H = 24
+FAILURE_CAP = 5
 # Переход, о котором стоит сказать человеку. Не всякая смена стадии подходит.
 #
 # actor='crm' — это НАША ЖЕ реакция на ответ CRM: gate._stand_down переводит лида в manager,
@@ -92,6 +101,84 @@ _NOT_WON = (
     " AND NOT EXISTS (SELECT 1 FROM crm_lead_state cs"
     "   WHERE cs.lead_id = l.id AND cs.deal_won = true)"
 )
+# Менеджер уже поставил ОТКАЗ. Возвращать такого в работу — ровно то, на что пожаловалась
+# CRM-команда 10.09.2026: 129 отказников уехали как «перезвонить» 11–12.08, и они «снова
+# появлялись», сколько их ни закрывали. Статус берётся из нашего кэша crm_lead_state; когда
+# чтение CRM выключено, статуса нет и условие пустое — отправка не ломается, просто слепнет.
+_NOT_REFUSED = (
+    " AND NOT EXISTS (SELECT 1 FROM crm_lead_state cs"
+    "   WHERE cs.lead_id = l.id AND cs.status = 'result_fail')"
+)
+# Человек УЖЕ в CRM: хотя бы один его тред пришёл с коннектора, который читает переписку из
+# самой CRM (ConnectorSpec.crm_native). Отправка «тёплого лида» отвечает на вопрос «этого
+# человека в CRM ещё нет» — здесь ответ известен заранее. Любой тред, не новейший: карточка в
+# CRM одна на человека, и менеджер видит её независимо от того, где он писал последним.
+_NOT_CRM_NATIVE = (
+    " AND NOT EXISTS (SELECT 1 FROM channel_thread nt JOIN channel nc ON nc.id = nt.channel_id"
+    "   WHERE nt.lead_id = l.id AND nc.kind IN :crm_native)"
+)
+# Недавний провал — подождать; много провалов — выбыть (см. PUSH_FAILED_REASON).
+_NOT_BACKING_OFF = (
+    " AND NOT EXISTS (SELECT 1 FROM stage_event f WHERE f.lead_id = l.id"
+    "   AND f.reason = :push_failed AND f.created_at > :backoff_since)"
+    " AND (SELECT count(*) FROM stage_event f WHERE f.lead_id = l.id"
+    "   AND f.reason = :push_failed) < :failure_cap"
+)
+
+# ОДНО определение «может ли лид уехать в CRM», на все пути: фоновый сгон тёплых, свип
+# хендоффов, отправка в момент хендоффа и счётчик выпавших из окна. До 10.09.2026 каждый путь
+# держал свой набор условий, и они разъехались: отказ не проверял никто, происхождение
+# разговора — никто, а два маркера идемпотентности не знали друг о друге.
+#
+# Словарь, а не строка: по нему же `push_block_reason` объясняет, ПОЧЕМУ конкретный лид не
+# уехал — иначе отказ в момент хендоффа был бы молчаливым, как и всё, что здесь болело.
+_PUSHABLE: dict[str, str] = {
+    "blocked": " AND l.is_blocked = false",
+    "no phone": " AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> ''"
+                " AND length(l.phone_e164) >= 9",
+    "deal won": _NOT_WON,
+    "refused in CRM": _NOT_REFUSED,
+    "already in CRM": _NOT_CRM_NATIVE,
+    "push backing off": _NOT_BACKING_OFF,
+}
+
+
+def pushable_sql() -> str:
+    """Все условия разом — вклеивается в WHERE запроса с алиасом `l` для lead."""
+    return "".join(_PUSHABLE.values())
+
+
+def pushable_params() -> BindParameter:
+    """Расширяющийся бинд для `:crm_native`. Виды берутся из реестра, не перечисляются здесь."""
+    return bindparam("crm_native", value=list(crm_native_kinds()), expanding=True)
+
+
+def pushable_binds(now: datetime) -> dict[str, Any]:
+    """Скалярные бинды условий — общие для всех запросов, которые их вклеивают."""
+    return {
+        "push_failed": PUSH_FAILED_REASON,
+        "backoff_since": now - timedelta(hours=FAILURE_BACKOFF_H),
+        "failure_cap": FAILURE_CAP,
+    }
+
+
+async def push_block_reason(
+    session: AsyncSession, lead_id: int, now: datetime | None = None,
+) -> str | None:
+    """Почему этот лид НЕ может уехать в CRM, или None, если может.
+
+    Те же условия, что и у выборок, по одному: первое непрошедшее и есть причина. Нужно
+    отправке в момент хендоффа — она работает с одним лидом и должна сказать в лог и в чат,
+    что именно её остановило."""
+    now = now or datetime.now(UTC).replace(tzinfo=None)
+    for reason, fragment in _PUSHABLE.items():
+        stmt = text("SELECT 1 FROM lead l WHERE l.id = :id" + fragment)  # noqa: S608
+        if ":crm_native" in fragment:
+            stmt = stmt.bindparams(pushable_params())
+        row = (await session.execute(stmt, {"id": lead_id, **pushable_binds(now)})).first()
+        if row is None:
+            return reason
+    return None
 
 # Последняя РЕПЛИКА лида и её время. Обе выборки берут их одинаково, поэтому фрагмент общий.
 #
@@ -113,8 +200,13 @@ _LAST_MSG = (
 )
 
 DRAIN_BATCH = 25
-# How far back the hand-off sweep looks. Anything older is deliberately left alone (managers
-# have worked it by hand by then) — but _log_window_drops counts what that costs each run.
+# How far back the CRM sweeps look. Anything older is deliberately left alone (managers have
+# worked it by hand by then) — but _log_window_drops counts what that costs each run.
+#
+# То же окно — для СВЕЖЕСТИ тёплого лида: в CRM уезжает только тот, кто написал нам в эти
+# дни. До 10.09.2026 свежести не было вовсе, и три месяца загруженной истории уехали как
+# «diam N hari, perlu di-follow up» — 535 карточек за двое суток. Новая активность лида —
+# единственное, что должно открывать ему дорогу в CRM; старая переписка ею не является.
 HANDOFF_WINDOW_DAYS = 7
 
 
@@ -159,6 +251,12 @@ class CrmMcpPusher:
                 # 404s (confirmed with itstep CRM devs, 2026-07-23). crm_client_search
                 # first tells us which of the two tools this phone actually needs.
                 known = await self._is_known_client(s, phone)
+                if known is None:
+                    # Поиск УПАЛ, а не «не нашёл». Раньше это сливалось в одно «неизвестен»
+                    # и вело к созданию новой заявки на клиента, который в CRM давно есть —
+                    # 08.09.2026 за два часа отказа токена так было 62 раза подряд. Ошибка
+                    # поиска — повод подождать следующего прогона, а не заводить дубль.
+                    return False, "client search failed — not creating a request blind"
                 if known:
                     return await self._add_event(s, phone, event_type, comment, name)
                 return await self._create_internet_request(s, phone, comment, name)
@@ -166,20 +264,23 @@ class CrmMcpPusher:
             logger.exception("crm push transport error phone=%s", phone)
             return False, str(exc)
 
-    async def _is_known_client(self, s: Any, phone: str) -> bool:
+    async def _is_known_client(self, s: Any, phone: str) -> bool | None:
+        """True — клиент в CRM есть, False — точно нет, None — поиск не удался.
+
+        Три ответа, а не два: раньше «упал» и «нет» были одним False, и «безопасный дефолт»
+        для него был создать заявку. Безопасным он был для лида из Instagram, которого в CRM
+        и правда нет. Для клиента CRM это дубль заявки на каждый сбой поиска."""
         res = await s.call_tool(
             "crm_client_search", {"cityAlias": self.city_alias, "search": phone})
         full = _content_text(res, limit=None)  # count_all can sit past a truncated 300 chars
         if getattr(res, "isError", False):
-            # Search itself failing shouldn't block the push — fall through to the create
-            # path, which is the safer default for a lead we can't confirm exists yet.
             logger.warning("crm client search failed phone=%s: %s", phone, full[:300])
-            return False
+            return None
         try:
             return int(json.loads(full).get("count_all", 0)) > 0
         except (json.JSONDecodeError, TypeError, ValueError):
             logger.warning("crm client search unparseable phone=%s: %s", phone, full[:300])
-            return False  # unparseable → treat as unknown, safer to create than to 404
+            return None
 
     async def _add_event(
         self, s: Any, phone: str, event_type: str, comment: str, name: str | None,
@@ -270,18 +371,26 @@ async def fetch_leads_with_phone(
     not_pushed = (
         " AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "   AND se.reason=:pushed)" if exclude_pushed else "")
+    # Свежесть — по РЕПЛИКЕ ЛИДА, не по дате карточки: «тёплый» значит «написал нам недавно».
+    # Загруженная история хранит настоящие даты сообщений, поэтому это же условие отсекает и
+    # её. Карточка номера исключена так же, как в _LAST_MSG, и по той же причине.
+    fresh = (
+        " AND EXISTS (SELECT 1 FROM message fm JOIN channel_thread ft ON ft.id = fm.thread_id"
+        "   WHERE ft.lead_id = l.id AND fm.direction = 'in'"
+        "     AND fm.text NOT LIKE '%Phone number%' AND fm.occurred_at >= :fresh_since)"
+    )
     rows = (await session.execute(text(
-        "SELECT l.id, l.phone_e164,"  # noqa: S608 — not_pushed is a fixed fragment, values bound
+        "SELECT l.id, l.phone_e164,"  # noqa: S608 — фрагменты фиксированные, значения связаны
         " coalesce(nullif(l.display_name,''), nullif(l.ig_username,''), '') AS nm,"
         " l.stage, ct.product_slug, l.created_at, l.last_active_at, l.dossier, l.lead_type,"
         + _LAST_MSG +
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage NOT IN ('ready','manager','handed_off')"
-        "   AND l.is_blocked = false"  # спам/бан — Степан игнорит его целиком, включая CRM
-        "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
-        + not_pushed + _NOT_WON +
-        " ORDER BY l.created_at DESC LIMIT :lim"),
-        {"bid": branch_id, "lim": limit, "pushed": PUSHED_REASON})).all()
+        + pushable_sql() + fresh + not_pushed +
+        " ORDER BY l.created_at DESC LIMIT :lim").bindparams(pushable_params()),
+        {"bid": branch_id, "lim": limit, "pushed": PUSHED_REASON,
+         "fresh_since": now - timedelta(days=HANDOFF_WINDOW_DAYS),
+         **pushable_binds(now)})).all()
     out = []
     seen: set[int] = set()
     for r in rows:
@@ -306,22 +415,6 @@ async def fetch_leads_with_phone(
     return out
 
 
-async def push_leads(
-    pusher: CrmPusherPort, leads: list[LeadToPush], event_type: str = EVENT_WAIT_CALL,
-) -> dict[str, Any]:
-    """Push each lead as one funnel event with the bot's context. Returns a summary."""
-    pushed, failed, errors = 0, 0, []
-    for lead in leads:
-        ok, detail = await pusher.add_lead_event(
-            lead.phone, event_type, comment=_comment_for(lead), name=lead.name)
-        if ok:
-            pushed += 1
-        else:
-            failed += 1
-            errors.append({"lead_id": lead.lead_id, "phone": lead.phone, "error": detail})
-    return {"pushed": pushed, "failed": failed, "errors": errors}
-
-
 _HANDOFF_TAIL = "Lead SUDAH diserahkan ke tim (hand-off) - hubungi segera."
 
 
@@ -338,46 +431,77 @@ async def _drain(
     Contract, unchanged: a SUCCESS is stamped with `marker` so it is never re-pushed; a
     FAILURE is left unmarked and retried next run, so a broken CRM endpoint just logs and
     auto-drains once fixed."""
-    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
-
     pushed, failed = 0, 0
     for lead in leads:
         kind = event_type or event_type_for(lead)
-        # Дедуп по СОСТОЯНИЮ, а не по факту «когда-то отправляли»: смена состояния — новое
-        # событие для CRM и уехать должна, повтор того же состояния — нет. Проверка здесь, а
-        # не в SQL выборки: тип зависит от лида, и переписывать event_type_for ещё и на SQL
-        # значит завести вторую копию правила, которая разъедется с первой.
-        if await _already_pushed(session, lead.lead_id, pushed_marker(kind)):
-            continue
-        ok, detail = await pusher.add_lead_event(
-            lead.phone, kind, comment=comment_fn(lead), name=lead.name)
-        if not ok:
+        outcome = await push_one(session, branch_id, pusher, lead,
+                                 marker=marker, event_type=kind, comment=comment_fn(lead))
+        if outcome == "failed":
             failed += 1
-            logger.warning("crm %s failed lead=%d: %s", label, lead.lead_id, detail)
-            continue
-        pushed += 1
-        session.add(StageEvent(
-            branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
-            from_stage=lead.stage, to_stage=lead.stage,
-            actor="system", reason=marker))
-        # Второй маркер, с типом внутри — он и обеспечивает дедуп по состоянию. Первый
-        # оставлен как есть: на нём держатся отчёты и выборки, и менять его значение задним
-        # числом значит переписать историю.
-        session.add(StageEvent(
-            branch_id=branch_id, lead_id=lead.lead_id, thread_id=None,
-            from_stage=lead.stage, to_stage=lead.stage,
-            actor="system", reason=pushed_marker(kind)))
-        # …and into the chat, where the person working the thread is looking. A sweep's
-        # StageEvent carries no thread_id (it works from a lead query, not a conversation),
-        # so without this the majority of pushes left no trace in any conversation.
-        thread_id = await _newest_thread(session, lead.lead_id)
-        if thread_id is not None:
-            session.add(ThreadLog(
-                branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
-                detail=lead.phone, actor="system"))
-    if pushed:
+            logger.warning("crm %s failed lead=%d", label, lead.lead_id)
+        elif outcome == "pushed":
+            pushed += 1
+    if pushed or failed:
         await session.flush()
     return {"eligible": len(leads), "pushed": pushed, "failed": failed}
+
+
+async def push_one(
+    session: AsyncSession, branch_id: int, pusher: CrmPusherPort, lead: LeadToPush, *,
+    marker: str, event_type: str, comment: str, thread_id: int | None = None,
+) -> str:
+    """Одна отправка в CRM — единственная процедура на все три пути.
+
+    Возвращает 'pushed' | 'skipped' | 'failed'. До 10.09.2026 отправка в момент хендоффа
+    (delivery.push_crm_after_commit) была своей копией этого цикла: без проверки маркера
+    состояния, со своим журналом, со своими условиями. Так у лида появлялись два пространства
+    идемпотентности, не знавшие друг о друге, и wait_call уезжал дважды.
+
+    Дедуп по СОСТОЯНИЮ, а не по факту «когда-то отправляли»: смена состояния — новое событие
+    для CRM и уехать должна, повтор того же состояния — нет. Проверка здесь, а не в SQL
+    выборки: тип зависит от лида, и переписывать event_type_for ещё и на SQL значит завести
+    вторую копию правила, которая разъедется с первой.
+
+    Неудача журналируется (PUSH_FAILED_REASON) — по этому журналу выборки держат паузу и
+    предел повторов — и остаётся видимой в чате; успех получает два маркера: `marker` для
+    отчётов и выборок, и маркер с типом для дедупа по состоянию."""
+    from app.adapters.db.models import StageEvent, ThreadLog  # noqa: PLC0415
+
+    if await _already_pushed(session, lead.lead_id, pushed_marker(event_type)):
+        return "skipped"
+    if thread_id is None:
+        thread_id = await _newest_thread(session, lead.lead_id)
+    ok, detail = await pusher.add_lead_event(
+        lead.phone, event_type, comment=comment, name=lead.name)
+    if not ok:
+        session.add(StageEvent(
+            branch_id=branch_id, lead_id=lead.lead_id, thread_id=thread_id,
+            from_stage=lead.stage, to_stage=lead.stage,
+            actor="system", reason=PUSH_FAILED_REASON))
+        if thread_id is not None:
+            session.add(ThreadLog(
+                branch_id=branch_id, thread_id=thread_id, kind="crm_push_failed",
+                detail=str(detail)[:300], actor="system"))
+        await session.flush()
+        return "failed"
+    session.add(StageEvent(
+        branch_id=branch_id, lead_id=lead.lead_id, thread_id=thread_id,
+        from_stage=lead.stage, to_stage=lead.stage,
+        actor="system", reason=marker))
+    session.add(StageEvent(
+        branch_id=branch_id, lead_id=lead.lead_id, thread_id=thread_id,
+        from_stage=lead.stage, to_stage=lead.stage,
+        actor="system", reason=pushed_marker(event_type)))
+    # …и в чат, где на это смотрит человек, ведущий тред. Свип работает от выборки лидов,
+    # не от разговора, и без этой строки большинство отправок не оставляло следа нигде.
+    if thread_id is not None:
+        session.add(ThreadLog(
+            branch_id=branch_id, thread_id=thread_id, kind="crm_pushed",
+            detail=lead.phone, actor="system"))
+    # Сброс здесь, а не на совести вызывающего: следующий `_already_pushed` — в этой же
+    # сессии (сгон тёплых и свип хендоффов идут подряд) — обязан увидеть эти маркеры.
+    await session.flush()
+    return "pushed"
 
 
 async def drain_writeback(
@@ -418,8 +542,7 @@ async def fetch_unpushed_handoffs(
         + _LAST_MSG +
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
-        "   AND l.is_blocked = false"  # см. fetch_leads_with_phone
-        "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
+        + pushable_sql() +
         # `se.reason IS NULL` on the window probe deliberately: a bookkeeping row (a push
         # marker, a reconciliation stamp) carries from_stage == to_stage and would otherwise
         # count as a fresh hand-off and pull a months-old lead back into the sweep. Writing the
@@ -431,13 +554,13 @@ async def fetch_unpushed_handoffs(
         "     AND se.created_at >= :since)"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
-        + _NOT_WON +
         # По последней реплике лида, а не по l.last_active_at: то поле пишет синхронизация
         # профиля IG и пусто у двух третей лидов, так что порядок выходил почти случайным.
-        " ORDER BY last_in_at DESC NULLS LAST LIMIT :lim"),
+        " ORDER BY last_in_at DESC NULLS LAST LIMIT :lim").bindparams(pushable_params()),
         {"bid": branch_id, "lim": limit, "pushed": PUSHED_HANDOFF_REASON,
          "verified": VERIFIED_PRESENT_REASON,
-         "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).all()
+         "since": now - timedelta(days=HANDOFF_WINDOW_DAYS),
+         **pushable_binds(now)})).all()
     await _log_window_drops(session, branch_id, now)
     out = []
     seen: set[int] = set()
@@ -480,17 +603,16 @@ async def _log_window_drops(
         "SELECT count(DISTINCT l.id)"  # noqa: S608 — фрагменты фиксированные, значения связаны
         " FROM lead l JOIN channel_thread ct ON ct.lead_id=l.id"
         " WHERE l.branch_id=:bid AND l.stage IN ('ready','manager','handed_off')"
-        "   AND l.is_blocked = false"  # см. fetch_leads_with_phone
-        "   AND l.phone_e164 IS NOT NULL AND l.phone_e164 <> '' AND length(l.phone_e164) >= 9"
+        + pushable_sql() +
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         "     AND se.reason IN (:pushed, :verified))"
         "   AND NOT EXISTS (SELECT 1 FROM stage_event se WHERE se.lead_id=l.id"
         + _HANDOFF_TRANSITION +
-        "     AND se.created_at >= :since)"
-        + _NOT_WON),
+        "     AND se.created_at >= :since)").bindparams(pushable_params()),
         {"bid": branch_id, "pushed": PUSHED_HANDOFF_REASON,
          "verified": VERIFIED_PRESENT_REASON,
-         "since": now - timedelta(days=HANDOFF_WINDOW_DAYS)})).scalar() or 0
+         "since": now - timedelta(days=HANDOFF_WINDOW_DAYS),
+         **pushable_binds(now)})).scalar() or 0
     if n:
         logger.warning(
             "crm handoff sweep branch=%d: %d lead(s) with a phone are older than the %d-day "

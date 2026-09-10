@@ -18,6 +18,7 @@ from app.adapters.db.models import (
     ChannelThread,
     CrmLeadState,
     Lead,
+    Message,
     StageEvent,
 )
 from app.domain.enums import ChannelKind, Stage
@@ -38,8 +39,14 @@ async def _lead(s, bid: int, *, stage: Stage, phone: str) -> Lead:  # noqa: ANN0
         ch_id = c.id
     else:
         ch_id = ch[0]
-    s.add(ChannelThread(lead_id=lead.id, channel_id=ch_id,
-                        external_thread_id=f"t{lead.id}"))
+    th = ChannelThread(lead_id=lead.id, channel_id=ch_id, external_thread_id=f"t{lead.id}",
+                       last_in_at=NOW - timedelta(hours=2))
+    s.add(th)
+    await s.flush()
+    # Тёплый лид — тот, кто написал нам недавно: без реплики сгон его не возьмёт.
+    s.add(Message(branch_id=bid, thread_id=th.id, channel_id=ch_id, external_id=f"m{lead.id}",
+                  direction="in", sent_by="lead", text="halo",
+                  occurred_at=NOW - timedelta(hours=2)))
     await s.flush()
     return lead
 

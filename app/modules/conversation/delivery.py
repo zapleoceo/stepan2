@@ -822,6 +822,9 @@ class ReplyDelivery:
             EVENT_WAIT_CALL,
             PUSHED_HANDOFF_REASON,
             CrmMcpPusher,
+            LeadToPush,
+            push_block_reason,
+            push_one,
         )
         from app.modules.notifications.summarize import build_alert_body  # noqa: PLC0415
         try:
@@ -829,41 +832,40 @@ class ReplyDelivery:
                 lead = await session.get(Lead, lead_id)
                 if lead is None or not lead.phone_e164:
                     return
+                # Те же условия, что у фоновых сгонов, и с названием причины: отказ в CRM,
+                # человек уже в CRM, выигранная сделка, пауза после провала. До 10.09.2026 этот
+                # путь проверял только наличие телефона — и хендофф отказника уезжал в CRM как
+                # «перезвонить», сколько бы раз менеджер его ни закрывал.
+                blocked = await push_block_reason(session, lead_id)
+                if blocked is not None:
+                    logger.info("crm handoff-push skipped lead=%d: %s", lead_id, blocked)
+                    session.add(ThreadLog(
+                        branch_id=self.branch_id, thread_id=thread_id, kind="crm_push_skipped",
+                        detail=blocked, actor="system"))
+                    return
                 branch = await session.get(Branch, self.branch_id)
                 lang = branch.lang if branch is not None else "id"
                 body = await build_alert_body(
                     session, self.llm, thread_id, branch_lang=lang,
                     reason_en=reason, reason_ru=reason, branch_id=self.branch_id)
-                phone, name, stage = lead.phone_e164, lead.display_name, str(lead.stage)
+                to_push = LeadToPush(
+                    lead_id=lead_id, phone=lead.phone_e164,
+                    name=lead.display_name or "Stepan",
+                    stage=str(lead.stage), product=None, days_idle=0, last_msg="")
             pusher = CrmMcpPusher(
                 cfg.crm_mcp_url, cfg.crm_mcp_city_alias,
                 timeout_s=settings().crm_mcp_timeout_s)
-            ok, detail = await pusher.add_lead_event(
-                phone, EVENT_WAIT_CALL, comment=body.summary_branch or reason,
-                name=name or "Stepan")
-            if not ok:
-                # Logged into the chat as well as the file: a manager reading the thread has no
-                # other way to learn the CRM never got this lead, and "it's in the CRM" is
-                # exactly the assumption a silent failure produces. The sweep still retries.
-                logger.warning("crm handoff-push failed lead=%d: %s", lead_id, detail)
-                async with session_scope() as session:
-                    session.add(ThreadLog(
-                        branch_id=self.branch_id, thread_id=thread_id, kind="crm_push_failed",
-                        detail=str(detail)[:300], actor="system"))
-                return  # unmarked → the drain_handoffs sweep retries it next cron run
+            # Одна процедура с фоновыми сгонами: проверка маркера состояния, отправка,
+            # маркеры или журнал провала, след в чате. Раньше здесь была своя копия — без
+            # проверки «уезжал ли уже wait_call», и он уезжал дважды.
             async with session_scope() as session:
-                # Success marker in its own tx — keeps drain_handoffs (the phone-arrived-later
-                # sweep) from double-announcing a hand-off this push already delivered.
-                session.add(StageEvent(
-                    branch_id=self.branch_id, lead_id=lead_id, thread_id=thread_id,
-                    from_stage=stage, to_stage=stage,
-                    actor="system", reason=PUSHED_HANDOFF_REASON))
-                # And into the chat chronology. StageEvent is the funnel journal; the chat
-                # window renders ThreadLog, so until now a hand-off reached the CRM without
-                # leaving a single trace where the person handling the conversation is looking.
-                session.add(ThreadLog(
-                    branch_id=self.branch_id, thread_id=thread_id, kind="crm_pushed",
-                    detail=phone, actor="system"))
+                outcome = await push_one(
+                    session, self.branch_id, pusher, to_push,
+                    marker=PUSHED_HANDOFF_REASON, event_type=EVENT_WAIT_CALL,
+                    comment=body.summary_branch or reason, thread_id=thread_id)
+                if outcome == "failed":
+                    logger.warning("crm handoff-push failed lead=%d (journaled; the sweep "
+                                   "retries after the backoff)", lead_id)
         except Exception:
             logger.warning("crm handoff-push errored lead=%d", lead_id, exc_info=True)
 

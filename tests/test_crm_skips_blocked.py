@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, StageEvent
+from app.adapters.db.models import Branch, Channel, ChannelThread, Lead, Message, StageEvent
 from app.domain.enums import ChannelKind
 from app.modules.crm.push_mcp import (
     _log_window_drops,
@@ -30,8 +30,14 @@ async def _lead(session, bid: int, cid: int, *, stage: str, blocked: bool) -> in
                 is_blocked=blocked)
     session.add(lead)
     await session.flush()
-    session.add(ChannelThread(lead_id=lead.id, channel_id=cid,
-                              external_thread_id=f"t{lead.id}"))
+    th = ChannelThread(lead_id=lead.id, channel_id=cid, external_thread_id=f"t{lead.id}",
+                       last_in_at=_NOW - timedelta(hours=1))
+    session.add(th)
+    await session.flush()
+    # Тёплый лид — тот, кто написал нам недавно: без реплики сгон его не возьмёт.
+    session.add(Message(branch_id=bid, thread_id=th.id, channel_id=cid,
+                        external_id=f"m{lead.id}", direction="in", sent_by="lead",
+                        text="halo", occurred_at=_NOW - timedelta(hours=1)))
     session.add(StageEvent(
         branch_id=bid, lead_id=lead.id, from_stage="qualifying", to_stage=stage,
         actor="bot", created_at=_NOW - timedelta(hours=1)))
