@@ -20,7 +20,9 @@ confirms_delivery=False, и outbox пишет `queued`, а не `sent`.
 """
 from __future__ import annotations
 
+import html
 import logging
+import re
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -53,6 +55,50 @@ _BATCH = 100
 # намеренно: отсутствие ключа склейки — это одна карточка лишняя, ошибочный ключ — две
 # биографии в одной.
 _PHONE_CHANNELS = frozenset({"whats-app", "viber", "smsviber"})
+
+
+# Вёрстка, которую CRM подмешивает в ТЕКСТ сообщения — в обе стороны и на обоих путях
+# (колбек и добор истории). Лид пишет «Source : NYT https://…», а в API приезжает тот же
+# текст плюс ссылка тегом плюс карточка превью с заголовком, описанием и картинкой. Это
+# разметка ИХ интерфейса, а не сообщение: в WhatsApp лид видел обычный текст, а превью
+# рисовал сам мессенджер.
+#
+# Чистим на приёме, а не на показе, по трём причинам. Этот текст идёт в промт Степана — 1223
+# знака HTML вместо 300 знаков сообщения, и он читает разметку как часть разговора. Он же
+# идёт в комментарий менеджеру при отправке лида в CRM. И показывать их HTML в нашей админке
+# нельзя в принципе: это чужая разметка из интеграции, то есть XSS в браузере того, кто
+# открыл чат. Сырое остаётся в sender_inbound — если понадобится разобраться.
+_PREVIEW_CARD = re.compile(
+    r'<a\b[^>]*class="[^"]*preview-block[^"]*"[^>]*>.*?</a>', re.S | re.I)
+_ANCHOR = re.compile(r"<a\b[^>]*>(.*?)</a>", re.S | re.I)
+_BREAK = re.compile(r"<br\s*/?>", re.I)
+_ANY_TAG = re.compile(r"<[^>]+>")
+
+
+def strip_crm_markup(text: str | None) -> str:
+    """Текст сообщения без вёрстки CRM. Для обычного сообщения — тождество.
+
+    Карточка превью выбрасывается целиком: её заголовок и описание сочинил не собеседник, и
+    оставить их значило бы вложить ему в рот чужие слова — Степан прочитал бы «How A.I. Helped
+    One Man…» как реплику лида. Ссылка остаётся текстом: кликабельной её делает наша же
+    разметка чата (_linkify), и делает безопасно.
+
+    Сущности разворачиваются ПОСЛЕ снятия тегов: наоборот — и `&lt;b&gt;`, написанное лидом
+    руками, превратилось бы в тег и было бы съедено.
+    """
+    if not text:
+        return ""
+    out = text
+    if "<" in out:
+        out = _PREVIEW_CARD.sub("", out)
+        out = _ANCHOR.sub(lambda m: m.group(1), out)
+        out = _BREAK.sub("\n", out)
+        out = _ANY_TAG.sub("", out)
+    # Сущности разворачиваются ВСЕГДА, а не только когда были теги: лид, написавший
+    # «3 < 5», приезжает как «3 &lt; 5» и без единого тега — ранний выход показал бы ему
+    # сущность как текст. На обычном сообщении это тождество: одиночный «&» unescape не
+    # трогает.
+    return html.unescape(out).strip()
 
 
 def _lead_phone(row: SenderInbound) -> str | None:
@@ -124,7 +170,7 @@ class CrmSenderAdapter:
             out.append(InboundMessage(
                 external_thread_id=row.conversation_id,
                 sender_id=row.phone or row.conversation_id,
-                text=row.text or "",
+                text=strip_crm_markup(row.text),
                 occurred_at=row.received_at,
                 lead_phone=_lead_phone(row),
                 external_id=row.external_id,

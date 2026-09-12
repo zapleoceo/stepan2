@@ -560,3 +560,63 @@ async def test_a_read_only_channel_still_reads(db_session) -> None:  # noqa: ANN
         .fetch_inbound()
 
     assert [m.text for m in got] == ["halo kak"]
+
+
+# ─── вёрстка CRM в тексте сообщения ───────────────────────────────────────────
+
+_CRM_HTML = (
+    "Source : The New York Times "
+    '<a href="https://share.google/x" target="_blank" rel="noopener noreferrer" '
+    'class="preview-link">https://share.google/x</a><br>'
+    '<a href="https://share.google/x" class="preview-block">'
+    '<div class="preview-title">How A.I. Helped One Man Build a $1.8 Billion Company</div>'
+    '<div class="preview-description">Please enable JS and disable any ad blocker</div>'
+    '<div class="preview-image"><img src="https://static01.nyt.com/x.jpg" alt=""></div></a>'
+)
+
+
+def test_the_crm_sends_its_own_markup_instead_of_the_message_text() -> None:
+    """Лид написал «Source : NYT <ссылка>» — в API приезжает это плюс тег ссылки плюс
+    карточка превью. Разметка их интерфейса, а не сообщение: в WhatsApp превью рисовал сам
+    мессенджер, лид его не писал."""
+    from app.adapters.channels.crm_sender import strip_crm_markup  # noqa: PLC0415
+
+    assert strip_crm_markup(_CRM_HTML) == "Source : The New York Times https://share.google/x"
+
+
+def test_the_preview_card_is_dropped_not_flattened() -> None:
+    """Заголовок и описание карточки сочинил не собеседник. Расплющить их в текст значит
+    вложить ему в рот чужие слова — Степан прочитает «How A.I. Helped One Man…» как реплику
+    лида и ответит на неё."""
+    from app.adapters.channels.crm_sender import strip_crm_markup  # noqa: PLC0415
+
+    out = strip_crm_markup(_CRM_HTML)
+    assert "How A.I." not in out and "ad blocker" not in out and "nyt.com" not in out
+
+
+def test_a_plain_message_is_untouched() -> None:
+    from app.adapters.channels.crm_sender import strip_crm_markup  # noqa: PLC0415
+
+    for plain in ("halo kak, berapa harganya?", "AT&T и P&G", "*tebal* _miring_ 👇"):
+        assert strip_crm_markup(plain) == plain
+
+
+def test_an_entity_is_unescaped_even_without_tags() -> None:
+    """«3 < 5» приезжает как «3 &lt; 5» без единого тега: ранний выход по наличию «<»
+    показал бы лиду сущность как текст."""
+    from app.adapters.channels.crm_sender import strip_crm_markup  # noqa: PLC0415
+
+    assert strip_crm_markup("цена 3 &lt; 5") == "цена 3 < 5"
+
+
+async def test_the_stored_message_reaches_the_pipeline_clean(db_session) -> None:  # noqa: ANN001
+    """Чистим на ПРИЁМЕ: этот текст идёт и в чат, и в промт Степана, и в комментарий
+    менеджеру при отправке лида в CRM. Сырое остаётся в sender_inbound для разбора."""
+    db_session.add(_row(text=_CRM_HTML))
+    await db_session.flush()
+
+    got = await CrmSenderAdapter(db_session, _Mcp(), TENANT).fetch_inbound()
+
+    assert got[0].text == "Source : The New York Times https://share.google/x"
+    raw = (await db_session.execute(select(SenderInbound))).scalars().first()
+    assert "<a href" in (raw.text or ""), "сырое сохраняется как пришло"
