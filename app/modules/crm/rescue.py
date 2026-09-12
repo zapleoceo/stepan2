@@ -101,8 +101,9 @@ class CrmRescueService:
             policy = policy_for(status)
             if policy is None or not policy.initiates:
                 continue
-            if await self._already_acted(lead_id, status) or await self._recently_messaged(
-                    lead_id):
+            if (await self._already_acted(lead_id, status)
+                    or await self._read_only_channel(lead_id)
+                    or await self._recently_messaged(lead_id)):
                 continue
             lead = await self.session.get(Lead, lead_id)
             if lead is None:
@@ -143,6 +144,8 @@ class CrmRescueService:
             # «Не трогать вообще». Гейт остановил бы это на отправке, но текст к тому
             # моменту уже сочинён и оплачен; followthrough проверяет то же до генерации.
             return False
+        if await self._read_only_channel(lead.id):
+            return False  # писать некуда: все треды на каналах, где мы не отвечаем
         if await self._recently_rescued(lead.id):
             return False
         if await self._recently_messaged(lead.id):
@@ -150,6 +153,20 @@ class CrmRescueService:
         note = f"{_NOTE_PREFIX} {missed_at[:10]}"
         res = await ops.call_failed(self.session, lead, note, self.llm)
         return bool(res.ok and res.message_queued)
+
+    async def _read_only_channel(self, lead_id: int | None) -> bool:
+        """Все треды лида — на каналах, где мы не отвечаем. Писать некуда.
+
+        Последний производитель строк, не знавший про режим чтения: 12.09.2026 он насочинял
+        53 строки на CRM Jakarta, и они заморозили отправку всего филиала на трое суток."""
+        from app.modules.conversation.outreach import read_only_channel_sql  # noqa: PLC0415
+
+        row = (await self.session.execute(
+            text("SELECT 1 FROM channel_thread ct WHERE ct.lead_id = :l"  # noqa: S608
+                 + read_only_channel_sql("ct") + " LIMIT 1"),
+            {"l": lead_id},
+        )).first()
+        return row is None
 
     async def _refused(self, lead_id: int | None) -> bool:
         """Менеджер поставил отказ (по нашему кэшу CRM) — Степан такого лида не трогает."""

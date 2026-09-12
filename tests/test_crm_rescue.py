@@ -198,3 +198,33 @@ async def test_a_refused_lead_is_not_rescued(monkeypatch, db_session) -> None:
     assert await CrmRescueService(db_session, bid, llm=None).run() == 1
     assert [c[0] for c in calls] == [fine.id]
 
+
+
+async def test_a_lead_on_a_read_only_channel_is_not_rescued(monkeypatch, db_session) -> None:
+    """Последний производитель строк, не знавший про режим чтения.
+
+    12.09.2026 он насочинял 53 строки на CRM Jakarta. Отправить их было нельзя, зато они
+    оказались самыми старыми в очереди и забрали все слоты партии — филиал не отправил
+    ничего трое суток. Проверка стоит до генерации: писать некуда, значит и сочинять нечего.
+    """
+    from sqlalchemy import select
+
+    from app.adapters.db.models import AppSetting
+    from app.modules.settings.service import invalidate
+
+    bid = await _branch(db_session)
+    quiet = await _lead(db_session, bid, "+62841")
+    fine = await _lead(db_session, bid, "+62842")
+    quiet_ch = (await db_session.execute(
+        select(ChannelThread.channel_id).where(ChannelThread.lead_id == quiet.id)
+    )).scalars().first()
+    db_session.add(AppSetting(branch_id=bid, key="replies_enabled", value="false",
+                              channel_id=quiet_ch))
+    await db_session.flush()
+    invalidate(bid)
+    calls: list = []
+    _patch(monkeypatch, _FakeReader([("62841", "t"), ("62842", "t")]), calls)
+    _in_work_hours(monkeypatch)
+
+    assert await CrmRescueService(db_session, bid, llm=None).run() == 1
+    assert [c[0] for c in calls] == [fine.id]

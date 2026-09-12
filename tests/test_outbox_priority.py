@@ -138,3 +138,78 @@ async def test_sweep_recovers_outbox_rows_orphaned_in_sending(db_session) -> Non
     # retried), so it must not show as a red '✗ retry?' bubble — fetch_pending hides 'canceled'.
     assert stale.status == "canceled" and stale.error
     assert fresh.status == "sending"  # still inside the grace window — never touched
+
+
+# ─── канал, который сейчас не доставит, не должен занимать слоты ────────────────
+
+async def _switch_off(db_session, bid: int, cid: int, key: str) -> None:  # noqa: ANN001
+    """Поканальный переключатель в false — как его ставит оператор в редакторе канала."""
+    from app.adapters.db.models import AppSetting  # noqa: PLC0415
+    from app.modules.settings.service import invalidate  # noqa: PLC0415
+
+    db_session.add(AppSetting(branch_id=bid, key=key, value="false", channel_id=cid))
+    await db_session.flush()
+    invalidate(bid)
+
+
+async def test_a_read_only_channel_does_not_eat_the_batch(db_session) -> None:
+    """12.09.2026: на CRM Jakarta (режим чтения) висели 53 строки от 08–09.09. Они самые
+    старые, а `call_failed`/`crm_followthrough` считаются ОТВЕТОМ и сортируются впереди —
+    они забирали все 15 слотов каждый тик, и филиал не отправил ничего трое суток, включая
+    сообщения менеджера с реквизитами оплаты.
+
+    Тот же отказ, что у выключенного канала в 2026-07-13, только через другую дверь."""
+    bid = await _branch(db_session)
+    quiet = await _channel(db_session, bid)
+    live = await _channel(db_session, bid)
+    await _switch_off(db_session, bid, quiet, "replies_enabled")
+    stuck = await _thread(db_session, bid, quiet, "quiet")
+    fresh = await _thread(db_session, bid, live, "live")
+    # Строка на замолчавшем канале СТАРШЕ и считается ответом — без фильтра она была бы первой
+    db_session.add(Outbox(branch_id=bid, thread_id=stuck, text="old", source="crm_followthrough"))
+    db_session.add(Outbox(branch_id=bid, thread_id=fresh, text="new", source="agent"))
+    await db_session.flush()
+
+    assert await wiring.threads_with_pending_outbox(db_session, bid) == [fresh]
+
+
+async def test_a_paused_channel_does_not_eat_the_batch_either(db_session) -> None:
+    """Пауза отправки (бан/чекпоинт) держит очередь намеренно — но занимать ею слоты
+    живых каналов незачем: send_next для такой строки возвращает None, не расходуя её."""
+    bid = await _branch(db_session)
+    paused = await _channel(db_session, bid)
+    live = await _channel(db_session, bid)
+    await _switch_off(db_session, bid, paused, "sending_enabled")
+    held = await _thread(db_session, bid, paused, "paused")
+    fresh = await _thread(db_session, bid, live, "live")
+    db_session.add(Outbox(branch_id=bid, thread_id=held, text="old", source="agent"))
+    db_session.add(Outbox(branch_id=bid, thread_id=fresh, text="new", source="agent"))
+    await db_session.flush()
+
+    assert await wiring.threads_with_pending_outbox(db_session, bid) == [fresh]
+
+
+async def test_the_read_only_rows_are_retired_but_the_paused_ones_are_kept(db_session) -> None:
+    """Режим чтения — решение «здесь мы не отвечаем», строка мертва. Пауза временная, её
+    очередь обязана дождаться снятия. И сообщение ЧЕЛОВЕКА не стирается ни в каком случае."""
+    from sqlmodel import select  # noqa: PLC0415
+
+    bid = await _branch(db_session)
+    quiet = await _channel(db_session, bid)
+    paused = await _channel(db_session, bid)
+    await _switch_off(db_session, bid, quiet, "replies_enabled")
+    await _switch_off(db_session, bid, paused, "sending_enabled")
+    t_bot = await _thread(db_session, bid, quiet, "bot")
+    t_human = await _thread(db_session, bid, quiet, "human")
+    t_paused = await _thread(db_session, bid, paused, "paused")
+    db_session.add(Outbox(branch_id=bid, thread_id=t_bot, text="a", source="crm_followthrough"))
+    db_session.add(Outbox(branch_id=bid, thread_id=t_human, text="b", source="manager"))
+    db_session.add(Outbox(branch_id=bid, thread_id=t_paused, text="c", source="agent"))
+    await db_session.flush()
+
+    assert await wiring.sweep_undeliverable(db_session, bid) == 1
+
+    rows = {r.thread_id: r.status for r in (await db_session.exec(select(Outbox))).all()}
+    assert rows[t_bot] == "skipped"
+    assert rows[t_human] == "pending", "сообщение человека не стираем"
+    assert rows[t_paused] == "pending", "пауза временная — очередь ждёт"

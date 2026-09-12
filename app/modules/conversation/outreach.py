@@ -78,10 +78,44 @@ def closed_window_param() -> BindParameter:
 def read_only_channel_sql(thread: str = "ct") -> str:
     """Условие «канал этого треда отвечает». Отсутствие настройки = отвечает (так же читает
     `_b` в настройках), поэтому отсекаются только каналы с заданным неистинным значением."""
-    # noqa на f-строке: подставляется только имя таблицы из нашего исходника, не из запроса.
+    return _channel_switch_on_sql("replies_enabled", thread)
+
+
+def sending_paused_sql(thread: str = "ct") -> str:
+    """Условие «на канале этого треда отправка не на паузе» (настройка `sending_enabled`).
+
+    Пауза — НЕ то же самое, что режим чтения, и путать их нельзя. Режим чтения — решение
+    «здесь мы не отвечаем», и строки на таком канале мертвы. Пауза временная (бан, чекпоинт),
+    очередь копится намеренно и уйдёт, когда паузу снимут, — такие строки живые.
+
+    Общее у них одно: сейчас канал не доставит, и место в партии отправки они занимают зря.
+    """
+    return _channel_switch_on_sql("sending_enabled", thread)
+
+
+def read_only_channel_off_sql(thread: str = "ct") -> str:
+    """Обратное к `read_only_channel_sql`: «канал этого треда в режиме чтения».
+
+    Две формы одного правила, а не одна с отрицанием на месте вызова: выборки спрашивают
+    «кому можно», уборка — «чьи строки мертвы», и перепутать их легко (так и вышло при
+    первой правке: условие «канал отвечает» стояло там, где нужно было «не отвечает»).
+    Обе строятся из одного выражения ниже, поэтому разъехаться не могут."""
+    return _switch_off_exists("replies_enabled", thread)
+
+
+def _channel_switch_on_sql(key: str, thread: str) -> str:
+    """«Поканальный булев переключатель включён» — по образцу `_b` в настройках: отсутствие
+    строки значит включено, поэтому отсекается только заданное неистинное значение."""
+    return " AND NOT " + _switch_off_exists(key, thread)
+
+
+def _switch_off_exists(key: str, thread: str) -> str:
+    """«Переключатель задан и он неистинный», как EXISTS-подзапрос.
+
+    Имя ключа и алиас таблицы подставляются из НАШЕГО исходника, не из запроса."""
     return (
-        f" AND NOT EXISTS (SELECT 1 FROM app_setting s"  # noqa: S608
-        f"      WHERE s.channel_id = {thread}.channel_id AND s.key = 'replies_enabled'"
+        f"EXISTS (SELECT 1 FROM app_setting s"  # noqa: S608
+        f"      WHERE s.channel_id = {thread}.channel_id AND s.key = '{key}'"
         f"        AND lower(s.value) NOT IN ('true', '1', 'yes'))"
     )
 

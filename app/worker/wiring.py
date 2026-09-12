@@ -24,7 +24,11 @@ from app.adapters.db.models import (
 from app.config import settings
 from app.connectors.registry import mute_reply_kinds, spec_for
 from app.domain.enums import BOT_SILENT_STAGES, SessionStatus
-from app.modules.conversation.outreach import read_only_channel_sql
+from app.modules.conversation.outreach import (
+    read_only_channel_off_sql,
+    read_only_channel_sql,
+    sending_paused_sql,
+)
 from app.ports.channel import ChannelPort
 
 _log = logging.getLogger(__name__)
@@ -184,6 +188,17 @@ async def threads_with_pending_outbox(session: AsyncSession, branch_id: int) -> 
             Outbox.branch_id == branch_id,
             Outbox.status == "pending",
             Channel.is_active.is_(True),  # type: ignore[attr-defined]
+            # …и каналы, которые сейчас не доставят по НАСТРОЙКЕ, а не по флагу is_active.
+            # Ровно тот же отказ, что в 2026-07-13, только через другую дверь: 12.09.2026 на
+            # CRM Jakarta (режим чтения + пауза отправки) висели 53 строки от 08–09.09. Они
+            # самые старые, а `call_failed`/`crm_followthrough` считаются ОТВЕТОМ и потому
+            # сортируются впереди — они забирали все 15 слотов каждый тик, и филиал не
+            # отправил ничего трое суток, включая сообщения менеджера с реквизитами оплаты.
+            #
+            # Строки при этом НЕ выбрасываются: пауза на то и пауза, очередь копится
+            # намеренно. Мёртвые строки режима чтения убирает sweep_undeliverable.
+            text(read_only_channel_sql("channel_thread").removeprefix(" AND ")),
+            text(sending_paused_sql("channel_thread").removeprefix(" AND ")),
         )
         .group_by(Outbox.thread_id)
         .order_by(has_reply.desc(), earliest)
@@ -246,7 +261,26 @@ async def sweep_undeliverable(session: AsyncSession, branch_id: int) -> int:
         .where(Outbox.branch_id == branch_id, Outbox.status == "pending",
                Outbox.thread_id.in_(inactive))  # type: ignore[attr-defined]
         .values(status="skipped", error="channel switched off — undeliverable, not retried"))
-    return res.rowcount or 0
+    dead = res.rowcount or 0
+    # Режим чтения — то же самое решение, только другой тумблер: «здесь мы не отвечаем».
+    # Строка, сочинённая для такого канала, не уйдёт никогда, и держать её в `pending` значит
+    # показывать живую очередь там, где её нет. Пауза отправки (`sending_enabled`) сюда НЕ
+    # входит: она временная, и очередь под ней копится намеренно.
+    #
+    # Сообщение МЕНЕДЖЕРА не трогаем: его написал человек, и тихо стереть его — не наше
+    # решение. Оно останется в очереди и уйдёт, когда канал вернут к ответам.
+    read_only = (
+        select(ChannelThread.id)
+        .where(text(read_only_channel_off_sql("channel_thread")))
+    )
+    res = await session.execute(
+        update(Outbox)
+        .where(Outbox.branch_id == branch_id, Outbox.status == "pending",
+               Outbox.source != "manager",
+               Outbox.thread_id.in_(read_only))  # type: ignore[attr-defined]
+        .values(status="skipped",
+                error="channel is read-only — undeliverable, not retried"))
+    return dead + (res.rowcount or 0)
 
 
 async def mark_session_status(
