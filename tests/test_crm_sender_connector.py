@@ -620,3 +620,17 @@ async def test_the_stored_message_reaches_the_pipeline_clean(db_session) -> None
     assert got[0].text == "Source : The New York Times https://share.google/x"
     raw = (await db_session.execute(select(SenderInbound))).scalars().first()
     assert "<a href" in (raw.text or ""), "сырое сохраняется как пришло"
+
+
+def test_a_lesson_about_html_tags_survives_the_cleanup() -> None:
+    """Живое сообщение (id 50561, 27.07.2026): Степан учит лида базовым тегам. Подметание
+    всех тегов подряд стёрло бы ровно то, ради чего оно написано.
+
+    Поэтому снимается только то, что добавляет CRM: карточка превью, ссылка-обёртка и
+    перенос строки. Незнакомая разметка останется видимой — это заметят и починят, в
+    отличие от тихой потери содержимого."""
+    from app.adapters.channels.crm_sender import strip_crm_markup  # noqa: PLC0415
+
+    lesson = ("Hai Kak Arrya! Kalau masih penasaran belajar HTML, ini tips singkat: cukup "
+              "kuasai tag dasar kayak `<html>`, `<head>`, `<body>`, `<p>`, `<h1>`, dan `<a>`.")
+    assert strip_crm_markup(lesson) == lesson
